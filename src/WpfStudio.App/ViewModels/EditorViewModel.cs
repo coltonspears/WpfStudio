@@ -90,7 +90,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             var result = await _workspace.UpdateDocumentAsync(new(State.Path, State.Content, version), token);
             if (version != State.Version || token.IsCancellationRequested || !result.Accepted) return;
             Diagnostics.Clear(); foreach (var item in result.Diagnostics) Diagnostics.Add(item);
-            LanguageStatus = $"{Diagnostics.Count} diagnostic(s)";
+            LanguageStatus = ""; // Counts are shown by the status bar's error and warning summary.
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { LanguageStatus = "Language service unavailable"; _report(ex.Message); }

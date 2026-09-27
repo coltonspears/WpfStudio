@@ -11,10 +11,10 @@
   <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewQueryCommand}"/>
  </UserControl.InputBindings>
  <UserControl.Resources>
-  <Style TargetType="Button"><Setter Property="Margin" Value="2"/><Setter Property="Padding" Value="7,3"/></Style>
-  <Style TargetType="TextBox"><Setter Property="Margin" Value="2"/><Setter Property="Padding" Value="4"/></Style>
-  <Style TargetType="ComboBox"><Setter Property="Margin" Value="2"/></Style>
-  <Style TargetType="TreeViewItem">
+  <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Margin" Value="2"/><Setter Property="Padding" Value="10,3"/></Style>
+  <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}"><Setter Property="Margin" Value="2"/></Style>
+  <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}"><Setter Property="Margin" Value="2"/></Style>
+  <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
    <Setter Property="ToolTip" Value="{Binding ErrorMessage}"/>
   </Style>
@@ -22,7 +22,7 @@
    <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Title}"/><TextBlock Text="{Binding Detail}" Margin="8,0,0,0" Opacity="0.6" FontSize="11"/></StackPanel>
   </HierarchicalDataTemplate>
  </UserControl.Resources>
- <Grid Margin="6">
+ <Grid Margin="10,4,10,6" Background="{DynamicResource SurfaceBrush}">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Expander Header="SQL Server connections" IsExpanded="False">
    <StackPanel>
@@ -42,8 +42,8 @@
     <WrapPanel><Button Content="Save connection" Command="{Binding SaveProfileCommand}"/><Button Content="Remove" Command="{Binding DeleteProfileCommand}"/><Button Content="Connect / refresh" Command="{Binding ConnectCommand}"/><Button Content="Cancel" Command="{Binding ConnectCancelCommand}"/></WrapPanel>
    </StackPanel>
   </Expander>
-  <Border Grid.Row="1" Padding="6" Margin="0,4" BorderBrush="#57799A" BorderThickness="1">
-   <StackPanel><TextBlock Text="QUERY TARGET" FontSize="10" Opacity="0.65"/><TextBlock Text="{Binding ActiveTarget}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding ActiveTarget}"/></StackPanel>
+  <Border Grid.Row="1" Padding="10,6" Margin="0,4" BorderBrush="{DynamicResource StrongBorderBrush}" Background="{DynamicResource EditorBrush}" BorderThickness="1" CornerRadius="6">
+   <StackPanel><TextBlock Text="QUERY TARGET" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding ActiveTarget}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding ActiveTarget}"/></StackPanel>
   </Border>
   <Expander Grid.Row="2" Header="Database objects" IsExpanded="False">
    <DockPanel MaxHeight="250">

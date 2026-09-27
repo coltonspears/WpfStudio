@@ -22,7 +22,6 @@
   </WindowChrome.WindowChrome>
   <Window.Resources>
     <c:ScaffoldKindTextConverter x:Key="ScaffoldText" />
-    <c:SeverityGlyphConverter x:Key="Severity" />
 
     <!-- Editor documents: context bar with breadcrumb, related files and MVVM actions. -->
     <Style x:Key="ContextChip" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
@@ -535,7 +534,7 @@
             <layout:LayoutDocumentPane>
               <layout:LayoutDocument Title="Start" ContentId="Welcome" CanClose="False">
                 <ScrollViewer Background="{DynamicResource EditorBrush}" VerticalScrollBarVisibility="Auto">
-                  <Grid MaxWidth="1000" Margin="56,52,56,40" HorizontalAlignment="Center" VerticalAlignment="Top">
+                  <Grid MaxWidth="1000" Margin="48,40,48,32" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <Grid.RowDefinitions>
                       <RowDefinition Height="Auto" />
                       <RowDefinition Height="Auto" />
@@ -550,7 +549,7 @@
                         <TextBlock Text="An IDE for WPF, XAML and MVVM — with the data and tools behind your app." Foreground="{DynamicResource MutedBrush}" FontSize="14" Margin="0,2,0,0" />
                       </StackPanel>
                     </StackPanel>
-                    <Grid Grid.Row="1" Margin="0,40,0,0">
+                    <Grid Grid.Row="1" Margin="0,32,0,0">
                       <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" MinWidth="320" />
                         <ColumnDefinition Width="48" />
@@ -563,7 +562,59 @@
                         <Button Style="{StaticResource StartAction}" c:Ui.Icon="Sample" Content="Explore the sample app" ToolTip="CounterApp — WPF with CommunityToolkit.Mvvm, ready to debug" Command="{Binding OpenSampleCommand}" Visibility="{Binding HasSample, Converter={StaticResource BooleanToVisibility}}" />
                         <Button Style="{StaticResource StartAction}" c:Ui.Icon="NewFile" Content="New WPF item" ToolTip="View + view model, user control, dictionary or converter" Tag="Ctrl+Shift+N" Command="{Binding NewWpfItemCommand}" IsEnabled="{Binding HasWorkspace}" />
 
-                        <TextBlock Text="GET STARTED" Style="{StaticResource SectionLabel}" Margin="10,30,0,12" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="2">
+                        <TextBlock Text="RECENT" Style="{StaticResource SectionLabel}" Margin="10,0,0,10" />
+                        <ScrollViewer MaxHeight="292" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                        <ItemsControl ItemsSource="{Binding RecentWorkspaces}" Focusable="False">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Button Command="{Binding DataContext.OpenRecentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" ToolTip="{Binding}">
+                                <Button.Style>
+                                  <Style TargetType="Button">
+                                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                                    <Setter Property="Margin" Value="0,0,0,4" />
+                                    <Setter Property="Cursor" Value="Hand" />
+                                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                    <Setter Property="Template">
+                                      <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                          <Border x:Name="Chrome" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                            <ContentPresenter />
+                                          </Border>
+                                          <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource RaisedBrush}" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource BorderBrush}" /></Trigger>
+                                          </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                      </Setter.Value>
+                                    </Setter>
+                                  </Style>
+                                </Button.Style>
+                                <Grid>
+                                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                  <Border Width="32" Height="32" CornerRadius="7" Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,12,0">
+                                    <c:StudioIcon Kind="Project" Width="17" Height="17" />
+                                  </Border>
+                                  <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Converter={StaticResource FileStem}}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Converter={StaticResource DirectoryOf}}" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                                  </StackPanel>
+                                  <Border Grid.Column="2" Style="{StaticResource Badge}" Background="{DynamicResource RaisedBrush}" Margin="10,0,0,0">
+                                    <TextBlock Text="{Binding Converter={StaticResource ExtensionLabel}}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" />
+                                  </Border>
+                                </Grid>
+                              </Button>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        </ScrollViewer>
+                        <Border Style="{StaticResource Card}" Background="Transparent" BorderBrush="{DynamicResource BorderBrush}" Padding="16,14" Margin="0,0,0,0" Visibility="{Binding RecentWorkspaces.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+                          <StackPanel>
+                            <TextBlock Text="Nothing here yet" FontWeight="SemiBold" />
+                            <TextBlock Text="Solutions and projects you open appear here for one-click access." Style="{StaticResource Caption}" Margin="0,3,0,0" />
+                          </StackPanel>
+                        </Border>
+                        <TextBlock Text="GET STARTED" Style="{StaticResource SectionLabel}" Margin="10,26,0,12" />
                         <StackPanel Margin="10,0,0,0">
                           <StackPanel.Resources>
                             <Style x:Key="Step" TargetType="Border">
@@ -619,58 +670,8 @@
                           </DockPanel>
                         </StackPanel>
                       </StackPanel>
-                      <StackPanel Grid.Column="2">
-                        <TextBlock Text="RECENT" Style="{StaticResource SectionLabel}" Margin="10,0,0,10" />
-                        <ItemsControl ItemsSource="{Binding RecentWorkspaces}" Focusable="False">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                              <Button Command="{Binding DataContext.OpenRecentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" ToolTip="{Binding}">
-                                <Button.Style>
-                                  <Style TargetType="Button">
-                                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-                                    <Setter Property="Margin" Value="0,0,0,4" />
-                                    <Setter Property="Cursor" Value="Hand" />
-                                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-                                    <Setter Property="Template">
-                                      <Setter.Value>
-                                        <ControlTemplate TargetType="Button">
-                                          <Border x:Name="Chrome" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="8" Padding="10,8">
-                                            <ContentPresenter />
-                                          </Border>
-                                          <ControlTemplate.Triggers>
-                                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource RaisedBrush}" /><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource BorderBrush}" /></Trigger>
-                                          </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                      </Setter.Value>
-                                    </Setter>
-                                  </Style>
-                                </Button.Style>
-                                <Grid>
-                                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                  <Border Width="32" Height="32" CornerRadius="7" Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="0,0,12,0">
-                                    <c:StudioIcon Kind="Project" Width="17" Height="17" />
-                                  </Border>
-                                  <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Converter={StaticResource FileStem}}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Converter={StaticResource DirectoryOf}}" Foreground="{DynamicResource MutedBrush}" FontSize="11.5" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
-                                  </StackPanel>
-                                  <Border Grid.Column="2" Style="{StaticResource Badge}" Background="{DynamicResource RaisedBrush}" Margin="10,0,0,0">
-                                    <TextBlock Text="{Binding Converter={StaticResource ExtensionLabel}}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" />
-                                  </Border>
-                                </Grid>
-                              </Button>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                        <Border Style="{StaticResource Card}" Background="Transparent" BorderBrush="{DynamicResource BorderBrush}" Padding="16,14" Margin="0,0,0,0" Visibility="{Binding RecentWorkspaces.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}">
-                          <StackPanel>
-                            <TextBlock Text="Nothing here yet" FontWeight="SemiBold" />
-                            <TextBlock Text="Solutions and projects you open appear here for one-click access." Style="{StaticResource Caption}" Margin="0,3,0,0" />
-                          </StackPanel>
-                        </Border>
-                      </StackPanel>
                     </Grid>
-                    <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,36,0,0" Padding="10,20,0,0">
+                    <Border Grid.Row="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,28,0,0" Padding="10,18,0,0">
                       <StackPanel>
                         <TextBlock Text="KEYBOARD" Style="{StaticResource SectionLabel}" Margin="0,0,0,12" />
                         <WrapPanel>
@@ -700,7 +701,7 @@
               </layout:LayoutAnchorable>
             </layout:LayoutAnchorablePane>
           </layout:LayoutPanel>
-          <layout:LayoutAnchorablePane DockHeight="250" DockMinHeight="110">
+          <layout:LayoutAnchorablePane DockHeight="230" DockMinHeight="110">
             <layout:LayoutAnchorable Title="Output" ContentId="Output" CanClose="False" CanHide="True" IsSelected="True">
               <DockPanel Background="{DynamicResource SurfaceBrush}">
                 <DockPanel DockPanel.Dock="Top" Margin="12,0,6,4" Height="26">
@@ -717,7 +718,7 @@
                     <DataGridTemplateColumn Header="" Width="34">
                       <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                          <c:Glyph Kind="{Binding Severity, Converter={StaticResource Severity}}" Foreground="{Binding Severity, Converter={StaticResource Severity}, ConverterParameter=Brush}" Width="15" Height="15" ToolTip="{Binding Severity}" />
+                          <c:Glyph Kind="{Binding Severity, Converter={StaticResource SeverityGlyph}}" Foreground="{Binding Severity, Converter={StaticResource SeverityGlyph}, ConverterParameter=Brush}" Width="15" Height="15" ToolTip="{Binding Severity}" />
                         </DataTemplate>
                       </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
@@ -808,13 +809,13 @@
             </Button>
             <TextBlock Style="{StaticResource StatusText}" Text="{Binding ActiveDocument.LanguageStatus}" MaxWidth="260" TextTrimming="CharacterEllipsis" ToolTip="{Binding ActiveDocument.LanguageStatus}" />
             <TextBlock Style="{StaticResource StatusText}" Visibility="{Binding ActiveDocument, Converter={StaticResource Presence}}">
-              <Run Text="Ln" /><Run Text="{Binding ActiveDocument.State.CaretLine, Mode=OneWay}" /><Run Text=", Col" /><Run Text="{Binding ActiveDocument.State.CaretColumn, Mode=OneWay}" />
+              <Run Text="Ln " /><Run Text="{Binding ActiveDocument.State.CaretLine, Mode=OneWay}" /><Run Text=",  Col " /><Run Text="{Binding ActiveDocument.State.CaretColumn, Mode=OneWay}" />
             </TextBlock>
             <TextBlock Style="{StaticResource StatusText}" Text="{Binding ActiveDocument.EncodingLabel}" Visibility="{Binding ActiveDocument, Converter={StaticResource Presence}}" />
             <TextBlock Style="{StaticResource StatusText}" Text="{Binding ActiveDocument.LanguageLabel}" Visibility="{Binding ActiveDocument, Converter={StaticResource Presence}}" />
           </StackPanel>
           <StackPanel Orientation="Horizontal">
-            <Button Style="{StaticResource StatusButton}" Command="{Binding ShowToolCommand}" CommandParameter="Explorer" ToolTip="{Binding WorkspaceSummary}">
+            <Button Style="{StaticResource StatusButton}" Command="{Binding ShowToolCommand}" CommandParameter="Explorer" ToolTip="Show Solution Explorer">
               <StackPanel Orientation="Horizontal">
                 <c:Glyph Kind="Window" Width="13" Height="13" Margin="0,0,6,0" />
                 <TextBlock VerticalAlignment="Center">

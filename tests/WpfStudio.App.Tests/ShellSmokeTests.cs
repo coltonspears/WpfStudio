@@ -170,6 +170,7 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
             databaseView.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(databaseView), Environment.TickCount, Key.F5) { RoutedEvent = Keyboard.KeyDownEvent });
             await Idle();
             Assert.Equal("Enter SQL to execute.", shell.Database.SelectedDocument.Status);
+            Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/sql.png"));
             Assert.False(shell.Debugger.IsActive);
             shell.ShowToolCommand.Execute("Output"); await Idle();
             shell.ActiveDocument = selected;
@@ -186,12 +187,22 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
             await VerifyExpandedToolsAsync(root, window, manager, shell);
             shell.CommandPaletteCommand.Execute(null); await Idle();
             Assert.True(shell.IsPaletteOpen); Assert.NotEmpty(shell.PaletteResults);
+            Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/command-palette.png"));
+            shell.PaletteQuery = ">build"; await Idle();
+            Assert.Equal("Build", shell.PaletteResults.First().Label);
+            shell.QuickOpenCommand.Execute(null); shell.PaletteQuery = "cvm"; await Idle();
+            Assert.False(shell.IsCommandPalette);
+            Assert.Equal("CounterViewModel.cs", shell.PaletteResults.First().Label);
+            Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/quick-open.png"));
             shell.ClosePaletteCommand.Execute(null);
-            shell.NewWpfItemCommand.Execute(null); await Idle(); Assert.True(shell.IsScaffoldOpen); shell.CancelScaffoldCommand.Execute(null);
+            shell.NewWpfItemCommand.Execute(null); await Idle(); Assert.True(shell.IsScaffoldOpen);
+            Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/new-item.png"));
+            shell.CancelScaffoldCommand.Execute(null);
             shell.PreviewChanges.Add(new FileChange("CustomerView.xaml", "<Grid />", "<Grid><TextBlock Text=\"Hello\" /></Grid>", "Add customer view"));
             shell.SelectedPreviewChange = shell.PreviewChanges[0]; shell.IsPreviewOpen = true;
             await Idle();
             Assert.Contains(Descendants<TextBox>(window), box => box.Text == shell.SelectedPreviewChange.After && box.IsVisible);
+            Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/change-preview.png"));
             shell.CancelPreviewCommand.Execute(null);
             var performanceFixture = Path.Combine(root, "artifacts/performance/fixture/Performance.slnx");
             if (File.Exists(performanceFixture))

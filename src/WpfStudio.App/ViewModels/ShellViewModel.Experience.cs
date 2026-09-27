@@ -40,7 +40,7 @@ public sealed partial class ShellViewModel
 
     // ------------------------------------------------------------------ Workspace summary
     public string WorkspaceName => Workspace == null ? "" : Path.GetFileNameWithoutExtension(Workspace.Path);
-    public string WorkspaceSummary => Workspace == null ? "No workspace open" : $"{Workspace.Projects.Count} project{(Workspace.Projects.Count == 1 ? "" : "s")} · .NET SDK {Workspace.SdkVersion}";
+    public string WorkspaceSummary => Workspace == null ? "" : $"{Workspace.Projects.Count} project{(Workspace.Projects.Count == 1 ? "" : "s")} · .NET SDK {Workspace.SdkVersion}";
     public string CommandCenterText => Workspace == null ? "Search files and commands" : WorkspaceName;
     public bool HasDocuments => Documents.Count > 0;
     public int ErrorCount => Diagnostics.Count(d => d.Severity.Equals("Error", IgnoreCase));
@@ -187,20 +187,21 @@ public sealed partial class ShellViewModel
         {
             var commands = CommandEntries().ToList();
             results = query.Length == 0 ? commands : commands
-                .Select(entry => (entry, score: Math.Max(FuzzyScore(entry.Label, query) ?? int.MinValue, (FuzzyScore(entry.Category + " " + entry.Label, query) ?? int.MinValue) - 6)))
-                .Where(x => x.score > int.MinValue).OrderByDescending(x => x.score).Select(x => x.entry);
+                .Select(entry => (entry, score: Best(FuzzyScore(entry.Label, query), FuzzyScore(entry.Category + " " + entry.Label, query) - 6)))
+                .Where(x => x.score != null).OrderByDescending(x => x.score).Select(x => x.entry);
         }
         else
         {
             var files = Documents.Select(d => d.State.Path).Reverse().Concat(_allFiles).Distinct(StringComparer.OrdinalIgnoreCase);
             results = query.Length == 0 ? files.Select(FileEntry) : files
-                .Select(path => (path, score: Math.Max(FuzzyScore(Path.GetFileName(path), query) ?? int.MinValue, (FuzzyScore(Path.GetRelativePath(WorkspaceRoot.Length > 0 ? WorkspaceRoot : Path.GetPathRoot(path) ?? "", path), query) ?? int.MinValue) - 20)))
-                .Where(x => x.score > int.MinValue).OrderByDescending(x => x.score).ThenBy(x => x.path.Length).Select(x => FileEntry(x.path));
+                .Select(path => (path, score: Best(FuzzyScore(Path.GetFileName(path), query), FuzzyScore(Path.GetRelativePath(WorkspaceRoot.Length > 0 ? WorkspaceRoot : Path.GetPathRoot(path) ?? "", path), query) - 20)))
+                .Where(x => x.score != null).OrderByDescending(x => x.score).ThenBy(x => x.path.Length).Select(x => FileEntry(x.path));
         }
         foreach (var entry in results.Take(80)) PaletteResults.Add(entry);
         SelectedPaletteEntry = PaletteResults.FirstOrDefault();
     }
 
+    private static int? Best(int? first, int? second) => first == null ? second : second == null ? first : Math.Max(first.Value, second.Value);
     private PaletteEntry FileEntry(string path) => new(Path.GetFileName(path), RelativeDirectory(path), () => OpenDocumentAsync(path), IconKind: FileIconKindConverter.KindFor(path));
 
     /// <summary>Case-insensitive subsequence match favouring prefixes, word starts and runs; null when absent.</summary>
