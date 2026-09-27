@@ -48,4 +48,15 @@ public sealed record NavigationResult(string Path, int Line, int Column, string 
     public string FileName => System.IO.Path.GetFileName(Path);
     public string Location => $"{FileName}:{Line}";
 }
-public sealed record PaletteEntry(string Label, string Detail, Func<Task> Execute);
+/// <summary>A quick-open file or command-palette entry.</summary>
+public sealed record PaletteEntry(string Label, string Detail, Func<Task> Execute, string Category = "", string Shortcut = "", string Icon = "", string IconKind = "")
+{
+    public bool HasShortcut => Shortcut.Length > 0;
+    public bool IsFile => IconKind.Length > 0;
+}
+/// <summary>A file related to the active document, such as its code-behind or view model.</summary>
+public sealed record RelatedFile(string Role, string Path)
+{
+    public string Name => System.IO.Path.GetFileName(Path);
+    public string IconKind => WpfStudio.App.Controls.FileIconKindConverter.KindFor(Path);
+}

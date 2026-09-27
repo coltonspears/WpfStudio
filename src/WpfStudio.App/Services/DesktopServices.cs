@@ -37,15 +37,16 @@ public sealed class DesktopDialogs : IFileDialogService, IUserDialogService
     {
         // This small presentation-only dialog lives behind the application dialog boundary.
         var input = new TextBox { Text = defaultValue, Margin = new Thickness(0, 12, 0, 16), MinWidth = 380 };
-        var ok = new Button { Content = "Continue", IsDefault = true, MinWidth = 88 };
+        var ok = new Button { Content = "Continue", IsDefault = true, MinWidth = 88, Style = Application.Current.TryFindResource("AccentButton") as Style };
         var cancel = new Button { Content = "Cancel", IsCancel = true, MinWidth = 80, Margin = new Thickness(8, 0, 0, 0) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         buttons.Children.Add(ok); buttons.Children.Add(cancel);
-        var stack = new StackPanel { Margin = new Thickness(24) };
+        var stack = new StackPanel { Margin = new Thickness(24, 20, 24, 20) };
         stack.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxWidth = 540 });
         stack.Children.Add(input); stack.Children.Add(buttons);
         var window = new Window { Title = title, Content = stack, SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = Application.Current.MainWindow, Background = (System.Windows.Media.Brush)Application.Current.FindResource("SurfaceBrush"), Foreground = (System.Windows.Media.Brush)Application.Current.FindResource("TextBrush") };
         ok.Click += (_, _) => window.DialogResult = true;
+        WindowChromeService.Track(window);
         window.ContentRendered += (_, _) => { input.Focus(); input.SelectAll(); };
         return Task.FromResult(window.ShowDialog() == true ? input.Text : null);
     }

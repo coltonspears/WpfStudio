@@ -17,6 +17,8 @@ WpfStudio combines the following packages. Their licenses remain with their resp
 | xterm.js | 6.0.0 | [xtermjs/xterm.js](https://github.com/xtermjs/xterm.js), MIT |
 | xterm fit / search addons | 0.11.0 / 0.16.0 | [terminal notices](src/WpfStudio.Runtime/Assets/Terminal/THIRD-PARTY-NOTICES.md), MIT |
 
+The studio docking templates in `src/WpfStudio.App/Resources/DockStyles.xaml` follow the structure and bindings of AvalonDock's VS2013 theme templates (Ms-PL), and `StudioDockTheme` layers them over that theme at run time. The Ctrl+F find panel template in `StudioTheme.xaml` binds to the same parts and commands as AvalonEdit's default `SearchPanel` template (MIT). The application icon and the vector glyphs in `Controls/Glyph.cs` were drawn for WpfStudio.
+
 The terminal assets carry their original license files next to the bundled JavaScript. The downloaded debugger distribution carries its own license and notices for bundled Roslyn and .NET components. The Microsoft Edge WebView2 runtime is installed separately and is not redistributed in the portable package. The .NET SDK and SQL Server are also separate installations.
 
 Test dependencies such as xUnit, Microsoft.NET.Test.Sdk, and coverlet are development-only and are not included in the published app. This document records component provenance; authoritative terms are the original package license files and metadata shipped with the package.

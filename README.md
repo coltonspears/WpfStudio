@@ -23,11 +23,13 @@ dotnet run --project src/WpfStudio.App -- C:\Work\MyApp\MyApp.sln
 
 `Get-Debugger.ps1` downloads netcoredbg 3.2.0-1092 and verifies the pinned archive checksum. Terminal JavaScript assets are already included; installing Node.js or npm is unnecessary.
 
-The IDE opens `WpfStudio.App.MainWindow`, resolved and shown by `App.OnStartup` in `src/WpfStudio.App/App.xaml.cs`. Its content is defined in `MainWindow.xaml`; Windows draws the native title bar and border. The smoke-test screenshots capture only the WPF content, so they omit that title bar. Theme and docking layout are restored from your local profile. The startup-project selector inside the IDE selects the application to run or debug, rather than the IDE's own window.
+The IDE opens `WpfStudio.App.MainWindow`, resolved and shown by `App.OnStartup` in `src/WpfStudio.App/App.xaml.cs`. Its content is defined in `MainWindow.xaml`. WpfStudio draws its own title bar with `WindowChrome` (menu, command center, and caption buttons); Windows still provides the resize border, rounded corners, and shadow, and the maximize button supports Windows 11 Snap Layouts. Because the title bar is WPF content, the smoke-test screenshots include it. Theme and docking layout are restored from your local profile. The startup-project selector inside the IDE selects the application to run or debug, rather than the IDE's own window.
 
 ## Daily workflow
 
-**Open and navigate.** Open a `.sln`, `.slnx`, or SDK-style `.csproj`. The solution tree uses vector icons for projects, folders, C#, XAML, and other files. Use quick-open for a filename and solution search for text. Right-click a tree item to open its project file, select the startup project, manage packages, reveal its folder, or copy its path. Keep an eye on Output when SDK discovery or restore fails: files remain accessible even if language services cannot fully load the project.
+**Start.** The Start page lists recent workspaces, opens the bundled CounterApp sample in one click, and shows a short getting-started checklist. The command center in the title bar (or **Ctrl+P**) finds files with fuzzy matching; type `>` or press **Ctrl+Shift+P** to run any command, with its shortcut shown beside it.
+
+**Open and navigate.** Open a `.sln`, `.slnx`, or SDK-style `.csproj`. The solution tree uses vector icons for projects, folders, C#, XAML, and other files. Use quick-open for a filename and solution search (**Edit > Find in workspace**) for text. Every editor tab has a context bar showing the file's folder and kind, and the files related to it: a view's code-behind and view model, or the views that declare a view model as their `DataContext`. Press **F7** to jump between them. Right-click a tree item to open its project file, select the startup project, manage packages, reveal its folder, or copy its path. Keep an eye on Output when SDK discovery or restore fails: files remain accessible even if language services cannot fully load the project.
 
 **Edit and refactor.** C# completion, signature assistance, definitions, references, rename, and formatting run through the worker. Right-click in the editor or press **Ctrl+.** to open its actions. Refactor includes symbol rename, organize usings, and switching a local declaration between `var` and an explicit type. These changes are previewed, checked against current document versions, and undoable. Type conversions reject cases that could change meaning; organizing usings avoids moving comments or conditional directives.
 
@@ -37,7 +39,7 @@ The IDE opens `WpfStudio.App.MainWindow`, resolved and shown by `App.OnStartup` 
 
 Create paired view/view-model files, controls, dictionaries, or converters with **New item** and preview the generated files. Related-file navigation connects XAML, code-behind, and conventional view models. Right-click a resource to open its declaration or preview a key rename. Asset tools expose import, build actions, and pack URIs. Refresh the index after editing resource declarations. XAML assistance uses statically known types, resource keys, and DataContext information.
 
-**Manage packages.** Open **Tools > Manage NuGet packages**, choose the target project, and inspect Installed or search Browse. Select a version, optionally include prereleases, then explicitly install, update, or remove a reference. Package output shows restore failures and cancellation. Changes save modified documents first, use the project's `dotnet` SDK and NuGet configuration, and refresh the language workspace afterward. Central package versions are shown with a reminder that an update can affect other projects. Browse supports public NuGet V3 search; local or authenticated feeds can use an exact package ID/version through existing CLI credentials or credential providers. Install/restore respects all configured sources and source mappings. Use the terminal when a feed requires interactive sign-in.
+**Manage packages.** Open **Tools > NuGet packages**, choose the target project, and inspect Installed or search Browse. Select a version, optionally include prereleases, then explicitly install, update, or remove a reference. Package output shows restore failures and cancellation. Changes save modified documents first, use the project's `dotnet` SDK and NuGet configuration, and refresh the language workspace afterward. Central package versions are shown with a reminder that an update can affect other projects. Browse supports public NuGet V3 search; local or authenticated feeds can use an exact package ID/version through existing CLI credentials or credential providers. Install/restore respects all configured sources and source mappings. Use the terminal when a feed requires interactive sign-in.
 
 **Use Git.** Open **Tools > Git changes** to inspect working and staged changes, view diffs, stage or unstage files, and commit the staged snapshot. History shows recent commits and their diffs. Create or switch branches, fetch, pull, or push through explicit commands. Pull is fast-forward only; branch changes and pull require a clean working tree. Save failures stop operations that first need current editor contents. Existing Git credentials are used without an interactive sign-in prompt; authenticate through the terminal if needed. Merge/rebase resolution and advanced repository administration remain terminal workflows.
 
@@ -57,21 +59,27 @@ Closing a modified SQL script prompts to save, discard, or cancel. Saving an ope
 
 | Command | Shortcut |
 | --- | --- |
+| Go to file (command center) | Ctrl+P |
+| Command palette | Ctrl+Shift+P |
 | Open solution or project | Ctrl+Shift+O |
 | Open file | Ctrl+O |
 | Build | Ctrl+Shift+B |
 | Start debugging | F5 |
 | Run without debugging | Ctrl+F5 |
+| Stop debugging | Shift+F5 |
 | Create WPF item | Ctrl+Shift+N |
+| Switch view ⇄ code-behind ⇄ view model | F7 |
 | Completion in an editor | Ctrl+Space |
 | Editor actions / refactoring menu | Ctrl+. |
 | Rename C# symbol | F2 |
 | Toggle C# breakpoint | F9 |
 | Send ColtonGPT message | Ctrl+Enter |
 | Execute SQL when focus is in SQL pane | F5 |
+| Show terminal | Ctrl+` |
+| Settings | Ctrl+, |
 | Search terminal scrollback | Ctrl+Shift+F |
 
-Use the command palette for the remaining commands. Drag document and tool tabs to split, float, or dock them. Auto-hide side tools to increase editing space. Saved layouts can be restored or reset. Light and dark themes are available.
+Use the command palette for the remaining commands (**Help > All commands and shortcuts** lists them). Menus follow the workflow: File, Edit, View, Code, WPF, Build, Debug, Tools, and Help; each command appears once, with its shortcut. The run toolbar holds the startup project, configuration, framework, and launch profile next to Start, Run without debugging, Build, and Test; stepping controls appear while a debug session is active, and the status bar turns orange. Drag document and tool tabs to split, float, or dock them. Auto-hide side tools to increase editing space. Saved layouts can be restored or reset from **View > Layout**. Graphite dark and light themes are available from **View > Theme**, the title-bar toggle, or **Settings**.
 
 ## Verify and package
 

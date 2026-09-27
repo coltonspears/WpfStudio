@@ -27,7 +27,12 @@
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>WpfStudio</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources\WpfStudio.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\WpfStudio.ico" />
+  </ItemGroup>
 
   <Target Name="CopyWorkspaceHost" AfterTargets="Build">
     <ItemGroup>

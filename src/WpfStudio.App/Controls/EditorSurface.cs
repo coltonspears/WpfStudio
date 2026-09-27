@@ -40,7 +40,16 @@ public sealed class EditorSurface : TextEditor
         HorizontalScrollBarVisibility = ScrollBarVisibility.Auto; VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         Options.ConvertTabsToSpaces = true; Options.IndentationSize = 4; Options.HighlightCurrentLine = true;
         Options.EnableHyperlinks = false; Options.EnableEmailHyperlinks = false;
-        Padding = new Thickness(4, 8, 8, 8);
+        Padding = new Thickness(0, 6, 8, 8);
+        // Theme-aware editor chrome: current line, selection and a quiet gutter without the dotted rule.
+        TextArea.TextView.SetResourceReference(ICSharpCode.AvalonEdit.Rendering.TextView.CurrentLineBackgroundProperty, "EditorLineBrush");
+        TextArea.TextView.CurrentLineBorder = new Pen(Brushes.Transparent, 0);
+        TextArea.SetResourceReference(TextArea.SelectionBrushProperty, "EditorSelectionBrush");
+        TextArea.SelectionBorder = null;
+        TextArea.SelectionForeground = null;
+        TextArea.SelectionCornerRadius = 2;
+        foreach (var rule in TextArea.LeftMargins.OfType<System.Windows.Shapes.Line>().ToArray()) rule.Visibility = Visibility.Collapsed;
+        foreach (var numbers in TextArea.LeftMargins.OfType<LineNumberMargin>()) numbers.Margin = new Thickness(6, 0, 14, 0);
         SearchPanel.Install(TextArea);
         _margin = new DebugMargin(this); TextArea.LeftMargins.Insert(0, _margin);
         _diagnostics = new DiagnosticRenderer(this); TextArea.TextView.BackgroundRenderers.Add(_diagnostics);
@@ -288,19 +297,29 @@ public sealed class EditorSurface : TextEditor
         protected override void OnRender(DrawingContext context)
         {
             if (TextView is not { VisualLinesValid: true } view || owner.ViewModel == null) return;
-            context.DrawRectangle(owner.TryFindResource("SurfaceBrush") as Brush ?? Brushes.Transparent, null, new Rect(RenderSize));
+            context.DrawRectangle(owner.TryFindResource("EditorBrush") as Brush ?? Brushes.Transparent, null, new Rect(RenderSize));
+            var danger = owner.TryFindResource("DangerBrush") as Brush ?? Brushes.IndianRed;
+            var muted = owner.TryFindResource("SubtleBrush") as Brush ?? Brushes.SlateGray;
+            var execution = owner.TryFindResource("WarningBrush") as Brush ?? Brushes.Goldenrod;
             foreach (var visual in view.VisualLines)
             {
                 var line = visual.FirstDocumentLine.LineNumber; var y = visual.VisualTop - view.VerticalOffset + visual.Height / 2;
                 var marker = owner.ViewModel.BreakpointMarkers.FirstOrDefault(b => b.Line == line);
                 if (marker != null)
                 {
-                    var brush = marker.Enabled ? Brushes.IndianRed : Brushes.SlateGray;
+                    var brush = marker.Enabled ? danger : muted;
                     context.DrawEllipse(marker.Enabled && marker.Bound ? brush : null, new Pen(brush, 1.8), new Point(10, y), 5.5, 5.5);
                     if (marker.Condition.Length > 0) context.DrawEllipse(brush, null, new Point(10, y), 1.7, 1.7);
                 }
-                else if (owner.ViewModel.BreakpointLines.Contains(line)) context.DrawEllipse(Brushes.IndianRed, null, new Point(10, y), 5.5, 5.5);
-                if (owner.ViewModel.ExecutionLine == line) context.DrawText(new FormattedText("➜", System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 14, Brushes.Goldenrod, VisualTreeHelper.GetDpi(this).PixelsPerDip), new Point(1, y - 10));
+                else if (owner.ViewModel.BreakpointLines.Contains(line)) context.DrawEllipse(danger, null, new Point(10, y), 5.5, 5.5);
+                if (owner.ViewModel.ExecutionLine == line)
+                {
+                    // Current statement: a solid arrow drawn over the breakpoint column.
+                    var arrow = new StreamGeometry();
+                    using (var g = arrow.Open()) { g.BeginFigure(new Point(3, y - 4.5), true, true); g.LineTo(new Point(10, y - 4.5), true, false); g.LineTo(new Point(15, y), true, false); g.LineTo(new Point(10, y + 4.5), true, false); g.LineTo(new Point(3, y + 4.5), true, false); }
+                    arrow.Freeze();
+                    context.DrawGeometry(execution, null, arrow);
+                }
             }
         }
         protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
@@ -337,13 +356,13 @@ public sealed class EditorSurface : TextEditor
             if (vm.ExecutionLine > 0 && vm.ExecutionLine <= owner.Document.LineCount)
             {
                 var line = owner.Document.GetLineByNumber(vm.ExecutionLine);
-                foreach (var rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, line)) context.DrawRectangle(new SolidColorBrush(Color.FromArgb(40, 224, 173, 44)), null, rect);
+                foreach (var rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, line)) context.DrawRectangle(new SolidColorBrush(Color.FromArgb(46, 227, 180, 88)), null, rect);
             }
             foreach (var diagnostic in vm.Diagnostics.Where(d => d.Start >= 0 && d.Start < owner.Document.TextLength))
             {
                 var segment = new TextSegment { StartOffset = diagnostic.Start, Length = Math.Min(Math.Max(1, diagnostic.Length), owner.Document.TextLength - diagnostic.Start) };
                 foreach (var rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, segment))
-                    context.DrawLine(new Pen(diagnostic.Severity == "Error" ? Brushes.IndianRed : Brushes.DarkGoldenrod, 1.5), new Point(rect.Left, rect.Bottom), new Point(rect.Right, rect.Bottom));
+                    context.DrawLine(new Pen((diagnostic.Severity == "Error" ? owner.TryFindResource("DangerBrush") : owner.TryFindResource("WarningBrush")) as Brush ?? Brushes.IndianRed, 1.5), new Point(rect.Left, rect.Bottom), new Point(rect.Right, rect.Bottom));
             }
         }
     }

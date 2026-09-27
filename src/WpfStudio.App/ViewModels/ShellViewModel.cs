@@ -47,6 +47,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger;
         Debugger = debugger; Terminal = terminal; Database = database;
         InitializeFeatures(features);
+        InitializeExperience();
         debugger.SourceRequested += (path, line) => _ = GuardAsync(() => NavigateAsync(path, line, 1, true));
         debugger.Breakpoints.CollectionChanged += (_, _) => ObserveBreakpoints();
         debugger.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DebuggerViewModel.IsStopped) && !debugger.IsStopped) foreach (var doc in Documents) doc.ExecutionLine = -1; };
@@ -109,7 +110,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public string WindowTitle => Workspace == null ? "WpfStudio" : $"{Path.GetFileNameWithoutExtension(Workspace.Path)} — WpfStudio";
     public bool HasWorkspace => Workspace != null;
     public bool IsWelcomeVisible => Documents.Count == 0;
-    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features?.Packages.SetWorkspace(value); }
+    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features?.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); }
     partial void OnWpfFilterChanged(string value) => RefreshWpfItems();
     partial void OnPaletteQueryChanged(string value) => RefreshPalette();
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
@@ -306,6 +307,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
         vm.ContextChanged += () => { if (ReferenceEquals(vm, ActiveDocument)) UpdateAssistantContext(); };
         vm.Diagnostics.CollectionChanged += (_, _) => RefreshEditorDiagnostics();
+        vm.OpenRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
+        RefreshRelated(vm);
         Documents.Add(vm); ActiveDocument = vm; RefreshBreakpointMarkers();
         OnPropertyChanged(nameof(IsWelcomeVisible));
     }
@@ -548,7 +551,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (Workspace == null) return;
         var buffers = _store.Documents.ToDictionary(d => d.Path, d => d.Content, StringComparer.OrdinalIgnoreCase);
         _wpfIndex = await Task.Run(() => _indexer.IndexAsync(Workspace, buffers, _lifetime.Token)); _xaml.Index = _wpfIndex;
-        RefreshWpfItems(); RefreshEditorDiagnostics();
+        RefreshWpfItems(); RefreshEditorDiagnostics(); RefreshAllRelated();
     });
     private void RefreshWpfItems()
     {
@@ -573,29 +576,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (ActiveDocument == null) return;
         var path = ActiveDocument.State.Path;
-        var files = _allFiles.Concat(Documents.Select(d => d.State.Path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var candidates = new List<string>();
-        void AddName(string name)
-        {
-            candidates.Add(Path.Combine(Path.GetDirectoryName(path)!, name));
-            candidates.AddRange(files.Where(f => Path.GetFileName(f).Equals(name, StringComparison.OrdinalIgnoreCase)));
-        }
-        if (path.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase))
-        {
-            var view = Path.GetFileName(path)[..^8];
-            AddName(view + "Model.cs"); AddName(view + "ViewModel.cs"); AddName(view + ".xaml");
-        }
-        else if (path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
-        {
-            var view = Path.GetFileNameWithoutExtension(path);
-            AddName(view + ".xaml.cs"); AddName(view + "Model.cs"); AddName(view + "ViewModel.cs");
-        }
-        else if (path.EndsWith("ViewModel.cs", StringComparison.OrdinalIgnoreCase))
-        {
-            var stem = Path.GetFileName(path)[..^12];
-            AddName(stem + ".xaml"); AddName(stem + "View.xaml");
-        }
-        var next = candidates.FirstOrDefault(p => !p.Equals(path, StringComparison.OrdinalIgnoreCase) && (File.Exists(p) || _store.Find(p) != null));
+        // Conventional names first (view → code-behind → view model), then declared DataContext links.
+        var next = ConventionalRelated(path).FirstOrDefault() ?? DataContextRelated(path).FirstOrDefault();
         if (next != null) await OpenDocumentAsync(next); else Status = "No paired view, code-behind, or view model found";
     });
     [RelayCommand] private void NewWpfItem() { if (StartupProject == null) { Status = "Open a project first"; return; } IsScaffoldOpen = true; }
@@ -681,27 +663,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private void CancelPreview() { IsPreviewOpen = false; _previewCompletion?.TrySetResult(false); }
     private async Task ApplyChangesAsync(IReadOnlyList<FileChange> changes) { await _edits.ApplyAsync(changes); foreach (var change in changes) AddDocument(_store.Find(change.Path)!); }
     [RelayCommand] private void QuickOpen() { IsCommandPalette = false; PaletteQuery = ""; IsPaletteOpen = true; RefreshPalette(); }
-    [RelayCommand] private void CommandPalette() { IsCommandPalette = true; PaletteQuery = ""; IsPaletteOpen = true; RefreshPalette(); }
+    [RelayCommand] private void CommandPalette() { IsCommandPalette = true; PaletteQuery = ">"; IsPaletteOpen = true; RefreshPalette(); }
     [RelayCommand] private void ClosePalette() => IsPaletteOpen = false;
     [RelayCommand] private Task ExecutePaletteAsync() => GuardAsync(async () => { var entry = SelectedPaletteEntry; if (entry == null) return; IsPaletteOpen = false; await entry.Execute(); });
-    private void RefreshPalette()
-    {
-        PaletteResults.Clear();
-        IEnumerable<PaletteEntry> entries = IsCommandPalette
-            ? new PaletteEntry[] { new("Open solution or project", "Ctrl+Shift+O", () => OpenWorkspaceCommand.ExecuteAsync(null)), new("Open file", "Ctrl+O", () => OpenFileCommand.ExecuteAsync(null)), new("Build", "Ctrl+Shift+B", () => BuildCommand.ExecuteAsync(null)), new("Start debugging", "F5", () => DebugCommand.ExecuteAsync(null)), new("Run without debugging", "Ctrl+F5", () => RunCommand.ExecuteAsync(null)), new("Run tests", "", () => TestCommand.ExecuteAsync(null)), new("Create WPF item", "Ctrl+Shift+N", () => { NewWpfItem(); return Task.CompletedTask; }), new("Restart language service", "", () => RestartWorkspaceCommand.ExecuteAsync(null)), new("Refresh WPF resources", "", () => RefreshWpfCommand.ExecuteAsync(null)), new("Toggle light / dark theme", "", () => { ToggleTheme(); return Task.CompletedTask; }), new("Reset docking layout", "", () => { LayoutResetRequested?.Invoke(); return Task.CompletedTask; }) }
-            : _allFiles.Select(path => new PaletteEntry(Path.GetFileName(path), path, () => OpenDocumentAsync(path)));
-        if (IsCommandPalette) entries = entries.Concat(new PaletteEntry[]
-        {
-            new("Manage NuGet packages", "Search, install, update, remove", () => OpenPackagesCommand.ExecuteAsync(null)),
-            new("Git changes", "Stage, commit, branches and history", () => OpenGitCommand.ExecuteAsync(null)),
-            new("ColtonGPT", "Ask a question with optional editor context", () => OpenAssistantCommand.ExecuteAsync(null)),
-            new("Settings", "Appearance and OpenRouter credentials", () => OpenSettingsCommand.ExecuteAsync(null)),
-            new("Show breakpoints", "Conditions, enabled state and binding status", () => { ShowBreakpoints(); return Task.CompletedTask; }),
-            new("Organize C# usings", "Preview import changes", () => RefactorCommand.ExecuteAsync("OrganizeUsings"))
-        });
-        foreach (var entry in entries.Where(e => (e.Label + " " + e.Detail).Contains(PaletteQuery, StringComparison.OrdinalIgnoreCase)).Take(80)) PaletteResults.Add(entry);
-        SelectedPaletteEntry = PaletteResults.FirstOrDefault();
-    }
     [RelayCommand] private void ToggleTheme() { ThemeName = ThemeName == "Dark" ? "Light" : "Dark"; ThemeChanged?.Invoke(ThemeName); }
     [RelayCommand] private void ShowTool(string? name)
     {

@@ -2,10 +2,10 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:local="clr-namespace:WpfStudio.Runtime.Terminal">
- <DockPanel Margin="6">
+ <DockPanel Margin="10,2,10,8" Background="{DynamicResource SurfaceBrush}">
   <StackPanel DockPanel.Dock="Top">
-   <WrapPanel><ComboBox Width="165" ItemsSource="{Binding Shells}" SelectedItem="{Binding SelectedShell}" DisplayMemberPath="Name"/><Button Content="New terminal" Command="{Binding NewSessionCommand}"/><Button Content="Close" Command="{Binding CloseSessionCommand}"/><Button Content="Ctrl+C" Command="{Binding InterruptCommand}"/><TextBlock Text="Ctrl+Shift+F to search" VerticalAlignment="Center" Margin="12,0" Opacity="0.65"/></WrapPanel>
-   <TextBlock Text="{Binding Error}" Foreground="#FFBCA9" TextWrapping="Wrap"/>
+   <WrapPanel><ComboBox Width="165" ItemsSource="{Binding Shells}" SelectedItem="{Binding SelectedShell}" DisplayMemberPath="Name"/><Button Content="New terminal" Command="{Binding NewSessionCommand}"/><Button Content="Close" Command="{Binding CloseSessionCommand}"/><Button Content="Ctrl+C" Command="{Binding InterruptCommand}"/><TextBlock Text="Ctrl+Shift+F searches scrollback" VerticalAlignment="Center" Margin="12,0" Foreground="{DynamicResource SubtleBrush}"/></WrapPanel>
+   <TextBlock Text="{Binding Error}" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap"/>
   </StackPanel>
   <TabControl ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession}">
    <TabControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Title}"/></DataTemplate></TabControl.ItemTemplate>

@@ -83,7 +83,8 @@ public static class DockingBehavior
         private void ApplyTheme(string name)
         {
             ThemeService.Apply(name);
-            manager.Theme = name.Equals("Light", StringComparison.OrdinalIgnoreCase) ? new Vs2013LightTheme() : new Vs2013DarkTheme();
+            var light = name.Equals("Light", StringComparison.OrdinalIgnoreCase);
+            if (manager.Theme is not Controls.StudioDockTheme current || current.IsLight != light) manager.Theme = new Controls.StudioDockTheme(light);
         }
         private void PropertyChanged(object? sender, PropertyChangedEventArgs args)
         {
