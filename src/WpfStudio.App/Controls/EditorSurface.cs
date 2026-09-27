@@ -47,6 +47,11 @@ public sealed class EditorSurface : TextEditor
         TextChanged += OnEditorTextChanged;
         TextArea.Caret.PositionChanged += (_, _) => { if (ViewModel is { } vm && !_syncing) { vm.State.CaretOffset = CaretOffset; vm.State.CaretLine = TextArea.Caret.Line; vm.State.CaretColumn = TextArea.Caret.Column; } };
         TextArea.TextEntered += OnTextEntered;
+        TextArea.SelectionChanged += (_, _) => ViewModel?.UpdateSelection(SelectionStart, SelectionLength);
+        PreviewMouseRightButtonDown += (_, e) =>
+        {
+            if (SelectionLength == 0 && GetPositionFromPoint(e.GetPosition(this)) is { } position) CaretOffset = Document.GetOffset(position.Location);
+        };
         TextArea.TextEntering += OnTextEntering;
         CommandManager.AddPreviewExecutedHandler(TextArea, OnPreviewExecuted);
         PreviewMouseDown += (_, _) => CancelPendingCompletion();
@@ -76,6 +81,7 @@ public sealed class EditorSurface : TextEditor
         IsReadOnly = ViewModel.State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
         ViewModel.State.PropertyChanged += StateChanged; ViewModel.PropertyChanged += ModelChanged;
         ViewModel.NavigationRequested += Navigate; ViewModel.Diagnostics.CollectionChanged += DiagnosticsChanged; ViewModel.BreakpointLines.CollectionChanged += BreakpointsChanged;
+        ViewModel.BreakpointMarkers.CollectionChanged += BreakpointsChanged;
         _syncing = false; Navigate();
     }
     private void Detach()
@@ -86,6 +92,7 @@ public sealed class EditorSurface : TextEditor
         {
             _attached.State.PropertyChanged -= StateChanged; _attached.PropertyChanged -= ModelChanged;
             _attached.NavigationRequested -= Navigate; _attached.Diagnostics.CollectionChanged -= DiagnosticsChanged; _attached.BreakpointLines.CollectionChanged -= BreakpointsChanged;
+            _attached.BreakpointMarkers.CollectionChanged -= BreakpointsChanged;
         }
         _attached = null;
     }
@@ -122,6 +129,7 @@ public sealed class EditorSurface : TextEditor
     {
         if (_pendingCompletion != null && e.Key == Key.Escape) { CancelPendingCompletion(); e.Handled = true; return; }
         if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _ = ShowCompletionAsync(); }
+        else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ContextMenu != null) { ContextMenu.PlacementTarget = this; ContextMenu.IsOpen = true; e.Handled = true; }
         else if (e.Key == Key.Escape) { _completion?.Close(); _signature.IsOpen = false; }
     }
     private void OnTextEntered(object? sender, TextCompositionEventArgs e)
@@ -276,22 +284,40 @@ public sealed class EditorSurface : TextEditor
     }
     private sealed class DebugMargin(EditorSurface owner) : AbstractMargin
     {
-        protected override Size MeasureOverride(Size availableSize) => new(18, 0);
+        protected override Size MeasureOverride(Size availableSize) => new(22, 0);
         protected override void OnRender(DrawingContext context)
         {
             if (TextView is not { VisualLinesValid: true } view || owner.ViewModel == null) return;
+            context.DrawRectangle(owner.TryFindResource("SurfaceBrush") as Brush ?? Brushes.Transparent, null, new Rect(RenderSize));
             foreach (var visual in view.VisualLines)
             {
                 var line = visual.FirstDocumentLine.LineNumber; var y = visual.VisualTop - view.VerticalOffset + visual.Height / 2;
-                if (owner.ViewModel.BreakpointLines.Contains(line)) context.DrawEllipse(Brushes.IndianRed, null, new Point(9, y), 5, 5);
+                var marker = owner.ViewModel.BreakpointMarkers.FirstOrDefault(b => b.Line == line);
+                if (marker != null)
+                {
+                    var brush = marker.Enabled ? Brushes.IndianRed : Brushes.SlateGray;
+                    context.DrawEllipse(marker.Enabled && marker.Bound ? brush : null, new Pen(brush, 1.8), new Point(10, y), 5.5, 5.5);
+                    if (marker.Condition.Length > 0) context.DrawEllipse(brush, null, new Point(10, y), 1.7, 1.7);
+                }
+                else if (owner.ViewModel.BreakpointLines.Contains(line)) context.DrawEllipse(Brushes.IndianRed, null, new Point(10, y), 5.5, 5.5);
                 if (owner.ViewModel.ExecutionLine == line) context.DrawText(new FormattedText("➜", System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 14, Brushes.Goldenrod, VisualTreeHelper.GetDpi(this).PixelsPerDip), new Point(1, y - 10));
             }
         }
         protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
         {
             if (TextView == null || owner.ViewModel == null) return;
-            var position = TextView.GetPosition(e.GetPosition(TextView) + TextView.ScrollOffset);
-            if (position != null) owner.ViewModel.ToggleBreakpoint(position.Value.Line); e.Handled = true;
+            // The gutter's X coordinate is outside the text view. Resolve by Y so
+            // clicking beside a line also works when the editor is scrolled horizontally.
+            var line = TextView.GetVisualLineFromVisualTop(e.GetPosition(TextView).Y + TextView.VerticalOffset)?.FirstDocumentLine.LineNumber;
+            if (line != null && owner.ViewModel.State.Extension == ".cs") owner.ViewModel.ToggleBreakpoint(line.Value);
+            e.Handled = true;
+        }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            var line = TextView?.GetVisualLineFromVisualTop(e.GetPosition(TextView).Y + TextView.VerticalOffset)?.FirstDocumentLine.LineNumber;
+            var marker = owner.ViewModel?.BreakpointMarkers.FirstOrDefault(b => b.Line == line);
+            ToolTip = marker == null ? "Click to add a C# breakpoint (F9)" : $"{(marker.Enabled ? marker.Status : "Disabled")} breakpoint on line {line}" + (marker.Condition.Length > 0 ? $"\nCondition: {marker.Condition}" : "") + "\nClick to remove. Right-click the line for conditions.";
         }
         protected override void OnTextViewChanged(TextView? oldTextView, TextView? newTextView)
         {

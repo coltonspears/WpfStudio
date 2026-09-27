@@ -1,0 +1,33 @@
+<UserControl x:Class="WpfStudio.App.Views.WpfExplorerPane"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls" xmlns:b="clr-namespace:WpfStudio.App.Behaviors">
+ <DockPanel Margin="10" Background="{DynamicResource SurfaceBrush}">
+  <StackPanel DockPanel.Dock="Top">
+   <TextBlock Text="Explore your WPF app" FontSize="16" FontWeight="SemiBold"/>
+   <TextBlock Text="Browse components and shared XAML resources." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,8"/>
+   <WrapPanel><Button Content="New item…" Command="{Binding NewWpfItemCommand}"/><Button Content="Refresh" Command="{Binding RefreshWpfCommand}"/></WrapPanel>
+
+   <ComboBox ItemsSource="{Binding WpfCategories}" SelectedItem="{Binding WpfCategory}"/>
+   <Grid Margin="2,5,2,4"><TextBox Text="{Binding WpfFilter, UpdateSourceTrigger=PropertyChanged}" ToolTip="Search names, resource keys, and file paths"/><TextBlock Text="Search names, keys, files…" Foreground="{DynamicResource MutedBrush}" Margin="8,5" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding WpfFilter}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Grid>
+   <TextBlock Text="{Binding WpfResultSummary}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="2,0,0,8"/>
+  </StackPanel>
+  <TabControl>
+   <TabItem Header="Components"><Grid><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition><RowDefinition.Style><Style TargetType="RowDefinition"><Setter Property="Height" Value="0"/><Style.Triggers><DataTrigger Binding="{Binding HasWpfSelection}" Value="True"><Setter Property="Height" Value="1.4*"/></DataTrigger></Style.Triggers></Style></RowDefinition.Style></RowDefinition></Grid.RowDefinitions>
+    <ListBox ItemsSource="{Binding WpfItems}" SelectedItem="{Binding SelectedWpfItem}" b:Interaction.ActivateCommand="{Binding NavigateWpfCommand}" b:Interaction.SelectOnRightClick="True">
+     <ListBox.ContextMenu><ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"><MenuItem Header="Open source" Command="{Binding NavigateWpfCommand}" CommandParameter="{Binding SelectedWpfItem}"/><MenuItem Header="Rename resource key…" Command="{Binding RenameResourceCommand}" IsEnabled="{Binding CanRenameWpfResource}"/><Separator/><MenuItem Header="New WPF item…" Command="{Binding NewWpfItemCommand}"/><MenuItem Header="Refresh" Command="{Binding RefreshWpfCommand}"/></ContextMenu></ListBox.ContextMenu>
+     <ListBox.ItemTemplate><DataTemplate><Grid Margin="0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="25"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><c:StudioIcon Kind="{Binding Kind}" Width="18" Height="18" VerticalAlignment="Top"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}"/><TextBlock Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0"><Run Text="{Binding TypeLabel, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding FileLabel, Mode=OneWay}"/></TextBlock></StackPanel></Grid></DataTemplate></ListBox.ItemTemplate>
+    </ListBox>
+    <Border Grid.Row="1" Visibility="{Binding HasWpfSelection, Converter={StaticResource BooleanToVisibility}}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,8,0,0"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+     <TextBlock Text="{Binding SelectedWpfItem.Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+     <TextBlock Text="{Binding WpfUsageSummary}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}"/><ListBox ItemsSource="{Binding WpfReferences}" DisplayMemberPath="Location" MaxHeight="95" b:Interaction.ActivateCommand="{Binding NavigateSearchCommand}"/><TextBlock Text="{Binding SelectedWpfDescription}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,7"/>
+     <TextBlock Text="{Binding SelectedWpfItem.Path}" ToolTip="{Binding SelectedWpfItem.Path}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+     <WrapPanel Margin="0,6"><Button Content="Open source" Command="{Binding NavigateWpfCommand}" CommandParameter="{Binding SelectedWpfItem}" IsEnabled="{Binding HasWpfSelection}"/><Button Content="Rename key…" Command="{Binding RenameResourceCommand}" IsEnabled="{Binding CanRenameWpfResource}"/></WrapPanel>
+
+
+     <Expander Header="Asset tools" Margin="0,8,0,0" Visibility="{Binding HasWpfAssetSelection, Converter={StaticResource BooleanToVisibility}}"><StackPanel><Button Content="Import asset…" Command="{Binding ImportAssetCommand}"/><ComboBox ItemsSource="{Binding BuildActions}" SelectedItem="{Binding SelectedBuildAction}"/><WrapPanel><Button Content="Set build action" Command="{Binding SetBuildActionCommand}"/><Button Content="Show pack URI" Command="{Binding ShowPackUriCommand}"/></WrapPanel></StackPanel></Expander>
+    </StackPanel></ScrollViewer></Border>
+   </Grid></TabItem>
+   <TabItem Header="{Binding WpfIssueTitle}"><DockPanel><TextBlock DockPanel.Dock="Top" Text="Errors are definite problems. Informational items need runtime or library context and may be valid." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="5,8"/><ListBox ItemsSource="{Binding WpfIssues}" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}"><ListBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Severity}" FontWeight="SemiBold"/><TextBlock Text="{Binding Message}" TextWrapping="Wrap" Margin="0,4"/><TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" FontSize="11"/></StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel></TabItem>
+  </TabControl>
+ </DockPanel>
+</UserControl>

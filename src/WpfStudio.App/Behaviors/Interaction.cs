@@ -9,6 +9,26 @@ namespace WpfStudio.App.Behaviors;
 /// <summary>Reusable view-only event to command bridges; application decisions stay in view models.</summary>
 public static class Interaction
 {
+    public static readonly DependencyProperty SelectOnRightClickProperty = DependencyProperty.RegisterAttached("SelectOnRightClick", typeof(bool), typeof(Interaction), new PropertyMetadata(false, RightClickChanged));
+    public static void SetSelectOnRightClick(DependencyObject target, bool value) => target.SetValue(SelectOnRightClickProperty, value);
+    public static bool GetSelectOnRightClick(DependencyObject target) => (bool)target.GetValue(SelectOnRightClickProperty);
+    private static void RightClickChanged(DependencyObject target, DependencyPropertyChangedEventArgs args)
+    {
+        if (target is not UIElement element) return;
+        element.PreviewMouseRightButtonDown -= SelectRightClick;
+        if ((bool)args.NewValue) element.PreviewMouseRightButtonDown += SelectRightClick;
+    }
+    private static void SelectRightClick(object sender, MouseButtonEventArgs args)
+    {
+        // Select the row under the pointer before the popup captures focus.
+        for (var item = args.OriginalSource as DependencyObject; item != null; item = item is System.Windows.Media.Visual ? System.Windows.Media.VisualTreeHelper.GetParent(item) : LogicalTreeHelper.GetParent(item))
+        {
+            if (item is TreeViewItem tree) { tree.IsSelected = true; tree.Focus(); break; }
+            if (item is ListBoxItem list) { list.IsSelected = true; list.Focus(); break; }
+            if (item is DataGridRow row) { row.IsSelected = true; row.Focus(); break; }
+            if (ReferenceEquals(item, sender)) break;
+        }
+    }
     private static readonly HashSet<Window> ClosingWindows = [];
     public static readonly DependencyProperty ActivateCommandProperty = DependencyProperty.RegisterAttached("ActivateCommand", typeof(ICommand), typeof(Interaction), new PropertyMetadata(null, ActivateChanged));
     public static void SetActivateCommand(DependencyObject target, ICommand value) => target.SetValue(ActivateCommandProperty, value);

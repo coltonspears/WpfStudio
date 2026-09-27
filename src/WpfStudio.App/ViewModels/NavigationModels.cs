@@ -16,7 +16,13 @@ public sealed partial class ExplorerNode : ObservableObject
     public string Path { get; }
     public string? ProjectPath { get; }
     public bool IsFolder { get; }
-    public string Glyph => IsFolder ? "▸" : System.IO.Path.GetExtension(Path) switch { ".cs" => "C#", ".xaml" => "◇", ".sql" => "▤", _ => "·" };
+    public string IconKind => System.IO.Path.GetExtension(Path).ToLowerInvariant() switch
+    {
+        ".csproj" or ".sln" or ".slnx" => "Project",
+        _ when IsFolder => "Folder",
+        ".cs" => "CSharp", ".xaml" => "Xaml", ".sql" => "Sql",
+        ".png" or ".jpg" or ".jpeg" or ".ico" or ".svg" or ".ttf" or ".otf" => "Asset", _ => "File"
+    };
     public ObservableCollection<ExplorerNode> Children { get; } = [];
     [ObservableProperty] public partial bool IsExpanded { get; set; }
     partial void OnIsExpandedChanged(bool value)

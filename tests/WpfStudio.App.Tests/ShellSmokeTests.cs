@@ -74,7 +74,9 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
         services.AddSingleton<DebugSession>(); services.AddSingleton<DebuggerViewModel>(); services.AddSingleton<TerminalViewModel>();
         services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(data, "connections.json")));
         services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(data, "query-recovery.json")));
-        services.AddDatabaseFeature(); services.AddSingleton<ShellViewModel>();
+        services.AddDatabaseFeature(); services.AddStudioFeatures();
+        services.AddSingleton(new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(data, "assistant")));
+        services.AddSingleton<ShellViewModel>();
         await using var provider = services.BuildServiceProvider();
         var shell = provider.GetRequiredService<ShellViewModel>();
         var bindingErrors = new BindingErrors();
@@ -91,7 +93,7 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
             var startup = clock.Elapsed;
             output.WriteLine($"Shell construction to rendered idle: {startup.TotalMilliseconds:N0} ms");
             Assert.True(startup < TimeSpan.FromSeconds(5), "Shell render exceeded 5-second regression budget");
-            Assert.Equal(8, manager.Layout.Descendents().OfType<LayoutAnchorable>().Count());
+            Assert.Equal(9, manager.Layout.Descendents().OfType<LayoutAnchorable>().Count());
             Assert.Contains(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Welcome");
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/welcome.png"));
             Application.Current.MainWindow = window;
@@ -174,11 +176,14 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
             foreach (var projectNode in shell.Explorer) projectNode.IsExpanded = true;
             await shell.BuildCommand.ExecuteAsync(null);
             await Idle();
+            foreach (var projectNode in shell.Explorer) projectNode.IsExpanded = true;
+            await Idle();
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/studio.png"));
             shell.ToggleThemeCommand.Execute(null); await Idle();
             Assert.Equal(Color.FromRgb(255, 255, 255), ((SolidColorBrush)Application.Current.FindResource("EditorBrush")).Color);
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/studio-light.png"));
             shell.ToggleThemeCommand.Execute(null); await Idle();
+            await VerifyExpandedToolsAsync(root, window, manager, shell);
             shell.CommandPaletteCommand.Execute(null); await Idle();
             Assert.True(shell.IsPaletteOpen); Assert.NotEmpty(shell.PaletteResults);
             shell.ClosePaletteCommand.Execute(null);
@@ -227,6 +232,7 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
                 await File.WriteAllTextAsync(Path.Combine(root, "artifacts/performance/ui-measurements.json"), json);
                 output.WriteLine(json);
             }
+            await VerifyColtonGptViewsAsync(root, shell.ThemeName);
             Assert.Empty(bindingErrors.Messages);
         }
         finally
@@ -235,6 +241,144 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
             if (window is not null) { window.ClearValue(Interaction.CloseGuardProperty); window.Close(); }
             foreach (var message in bindingErrors.Messages) output.WriteLine(message);
         }
+    }
+
+    private static async Task VerifyExpandedToolsAsync(string root, MainWindow window, DockingManager manager, ShellViewModel shell)
+    {
+        shell.WpfCategory = "Keyed resources";
+        Assert.All(shell.WpfItems, item => Assert.NotNull(item.Key));
+        shell.SelectedWpfItem = shell.WpfItems.First();
+        await Idle();
+        Assert.True(shell.CanRenameWpfResource);
+        Assert.Contains("reference", shell.WpfUsageSummary);
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/wpf-resource-details.png"));
+        shell.WpfCategory = "All WPF items";
+        shell.SelectedWpfItem = null;
+        var editor = Descendants<EditorSurface>(window).First(e => e.IsVisible);
+        editor.ContextMenu.PlacementTarget = editor;
+        editor.ContextMenu.IsOpen = true; await Idle();
+        Assert.Contains(editor.ContextMenu.Items.OfType<MenuItem>(), item => Equals(item.Header, "Refactor"));
+        Screenshot(editor.ContextMenu, Path.Combine(root, "artifacts/screenshots/editor-context-menu.png"));
+        editor.ContextMenu.IsOpen = false;
+        var breakpoint = new BreakpointViewModel { Path = shell.ActiveDocument!.State.Path, Line = 16 };
+        shell.Debugger.Breakpoints.Add(breakpoint);
+        Assert.Contains(shell.ActiveDocument.BreakpointMarkers, marker => marker.Line == 16 && !marker.Bound);
+        breakpoint.Status = "Bound"; breakpoint.Condition = "Count > 3";
+        Assert.Contains(shell.ActiveDocument.BreakpointMarkers, marker => marker.Bound && marker.Condition == "Count > 3");
+        breakpoint.Enabled = false;
+        Assert.Contains(shell.ActiveDocument.BreakpointMarkers, marker => !marker.Enabled);
+        shell.ShowBreakpointsCommand.Execute(null); await Idle();
+        Assert.Equal(2, shell.Debugger.SelectedTab);
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/breakpoints.png"));
+        shell.Debugger.Breakpoints.Remove(breakpoint);
+        var sourceDocument = shell.ActiveDocument!;
+        var editorCount = shell.Documents.Count;
+        await shell.OpenPackagesCommand.ExecuteAsync(null); await Idle();
+        var packages = manager.Layout.Descendents().OfType<LayoutDocument>().Single(d => d.ContentId == "Packages");
+        Assert.True(((FrameworkElement)packages.Content).ActualHeight > 300);
+        Assert.NotEmpty(shell.Features!.Packages.Installed);
+        shell.Features.Packages.SelectedInstalled = shell.Features.Packages.Installed.First();
+        await Idle();
+        var packagePane = (FrameworkElement)packages.Content;
+        foreach (var name in new[] { "InstallPackageButton", "RemovePackageButton" })
+        {
+            var action = Assert.IsAssignableFrom<FrameworkElement>(packagePane.FindName(name));
+            Assert.True(action.ActualHeight > 0 && action.ActualWidth > 0, $"{name} must be arranged.");
+            var bounds = action.TransformToAncestor(packagePane).TransformBounds(new Rect(action.RenderSize));
+            Assert.True(bounds.Left >= -0.5 && bounds.Top >= -0.5 && bounds.Right <= packagePane.ActualWidth + 0.5 && bounds.Bottom <= packagePane.ActualHeight + 0.5,
+                $"{name} must be fully visible within the package pane: {bounds}, pane {packagePane.RenderSize}.");
+        }
+        Assert.Null(shell.ActiveDocument);
+        Assert.Equal("Packages", shell.ActiveWorkbench);
+        Assert.False(shell.SaveCommand.CanExecute(null));
+        var originalSource = sourceDocument.State.Content;
+        var savedSource = await File.ReadAllTextAsync(sourceDocument.State.Path);
+        try
+        {
+            sourceDocument.State.Content = originalSource + Environment.NewLine + "// Workbench save command must not save an inactive editor.";
+            await shell.SaveCommand.ExecuteAsync(null);
+            Assert.True(sourceDocument.State.IsDirty);
+            Assert.Equal(savedSource, await File.ReadAllTextAsync(sourceDocument.State.Path));
+        }
+        finally { sourceDocument.State.Content = originalSource; }
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/packages.png"));
+        shell.ToggleThemeCommand.Execute(null); await Idle();
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/packages-light.png"));
+        shell.ToggleThemeCommand.Execute(null); await Idle();
+        await shell.OpenGitCommand.ExecuteAsync(null); await Idle();
+        Assert.True(shell.Features.Git.HasRepository);
+        var git = manager.Layout.Descendents().OfType<LayoutDocument>().Single(d => d.ContentId == "Git");
+        Assert.Null(shell.ActiveDocument);
+        Assert.Equal("Git", shell.ActiveWorkbench);
+        foreach (var tab in new[] { 1, 2, 3, 0 }) { shell.Features.Git.SelectedTab = tab; await Idle(); }
+        shell.SaveLayoutCommand.Execute(null); await Idle();
+        Assert.Same(git.Content, manager.ActiveContent);
+        Assert.True(git.IsSelected);
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git.png"));
+        shell.ToggleThemeCommand.Execute(null); await Idle();
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git-light.png"));
+        shell.ToggleThemeCommand.Execute(null); await Idle();
+        await shell.OpenSettingsCommand.ExecuteAsync(null); await Idle();
+        Assert.True(shell.IsSettingsOpen);
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/settings.png"));
+        shell.CloseSettingsCommand.Execute(null);
+        await shell.CloseActiveCommand.ExecuteAsync(null); await Idle();
+        Assert.DoesNotContain(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Git");
+        Assert.Equal(editorCount, shell.Documents.Count);
+        packages.IsSelected = true; packages.IsActive = true; await Idle();
+        await shell.CloseActiveCommand.ExecuteAsync(null); await Idle();
+        Assert.DoesNotContain(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Packages");
+        Assert.Equal(editorCount, shell.Documents.Count);
+        Assert.Contains(sourceDocument, shell.Documents);
+        shell.ShowToolCommand.Execute("Output");
+        await Idle();
+    }
+
+    private static async Task VerifyColtonGptViewsAsync(string root, string restoreTheme)
+    {
+        using var http = new System.Net.Http.HttpClient();
+        using var client = new WpfStudio.App.Features.ColtonGpt.OpenRouterClient(http);
+        var settings = new WpfStudio.App.Features.ColtonGpt.AssistantSettingsViewModel(
+            new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(Path.GetTempPath(), "ColtonGpt-View-" + Guid.NewGuid().ToString("N"))), client);
+        using var assistant = new WpfStudio.App.Features.ColtonGpt.AssistantViewModel(client, settings);
+        await assistant.InitializeAsync();
+        settings.Models.Add(new("example/wpf-model", "Example coding model", 128_000));
+        settings.ModelId = "example/wpf-model";
+        assistant.SetEditorContext("CounterViewModel.cs", "public partial class CounterViewModel : ObservableObject { }", "[ObservableProperty] public partial int Count { get; set; }");
+        assistant.ContextMode = "Selected text";
+        assistant.Prompt = "Explain when I should use ObservableProperty.";
+        assistant.Messages.Add(new("You", "Why is my binding not updating?") { Detail = "CounterViewModel.cs · selected text" });
+        assistant.Messages.Add(new("ColtonGPT", "Check that your view's DataContext is the intended view model, and that the property raises PropertyChanged. CommunityToolkit's ObservableProperty generator handles the notification for you.") { Detail = "Example response · no network request" });
+        var pane = new WpfStudio.App.Features.ColtonGpt.AssistantPane { DataContext = assistant };
+        var settingsView = new WpfStudio.App.Features.ColtonGpt.AssistantSettingsView { DataContext = settings, Margin = new Thickness(24) };
+        var content = new Grid();
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(440) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.Children.Add(pane); Grid.SetColumn(settingsView, 1); content.Children.Add(settingsView);
+        var window = new Window { Width = 1100, Height = 940, Content = content, ShowInTaskbar = false, ShowActivated = false, Opacity = 0 };
+        try
+        {
+            window.Show(); await Idle();
+            var password = Assert.Single(Descendants<PasswordBox>(settingsView));
+            password.Password = "not-a-real-key";
+            await Idle(); Assert.Equal("not-a-real-key", settings.PendingApiKey);
+            settings.PendingApiKey = "";
+            await Idle(); Assert.Equal("", password.Password);
+            Assert.False(assistant.SendCommand.CanExecute(null));
+            foreach (var theme in new[] { "Dark", "Light" })
+            {
+                ThemeService.Apply(theme); await Idle();
+                Assert.True(pane.ActualWidth >= 280);
+                Assert.True(settingsView.ActualWidth >= 320);
+                foreach (var text in Descendants<TextBox>(content))
+                {
+                    if (text.Foreground is SolidColorBrush foreground && text.Background is SolidColorBrush background && background.Color.A > 0)
+                        Assert.NotEqual(foreground.Color, background.Color);
+                }
+                Screenshot(content, Path.Combine(root, "artifacts/screenshots/coltongpt-" + theme.ToLowerInvariant() + ".png"));
+            }
+        }
+        finally { window.Close(); ThemeService.Apply(restoreTheme); }
     }
 
     private static Task Idle() => Dispatcher.CurrentDispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle).Task;

@@ -87,6 +87,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     [ObservableProperty] public partial BreakpointViewModel? SelectedBreakpoint { get; set; }
     [ObservableProperty] public partial bool IsActive { get; set; }
     [ObservableProperty] public partial bool IsStopped { get; set; }
+    [ObservableProperty] public partial int SelectedTab { get; set; }
     partial void OnSelectedThreadChanged(DebugThread? value) { if (value is not null && IsStopped) { threadId = value.Id; _ = GuardAsync(RefreshFramesAsync); } }
     partial void OnSelectedFrameChanged(DebugFrame? value) { if (value is not null && IsStopped) _ = GuardAsync(() => RefreshFrameAsync(value)); }
     partial void OnBreakOnThrownChanged(bool value) { if (IsActive) _ = GuardAsync(() => session.SetExceptionsAsync(value)); }
@@ -152,6 +153,15 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     {
         if (SelectedBreakpoint is not { } selected) return;
         Breakpoints.Remove(selected); await SaveStateAsync(); if (IsActive) await ApplyFileBreakpointsAsync(selected.Path);
+    });
+    [RelayCommand] private void NavigateBreakpoint() { if (SelectedBreakpoint is { } selected) SourceRequested?.Invoke(selected.Path, selected.Line); }
+    [RelayCommand] private Task EnableAllBreakpointsAsync() => SetAllBreakpointsAsync(true);
+    [RelayCommand] private Task DisableAllBreakpointsAsync() => SetAllBreakpointsAsync(false);
+    private Task SetAllBreakpointsAsync(bool enabled) => GuardAsync(async () =>
+    {
+        foreach (var breakpoint in Breakpoints) breakpoint.Enabled = enabled;
+        await SaveStateAsync();
+        if (IsActive) foreach (var path in Breakpoints.Select(b => b.Path).Distinct(StringComparer.OrdinalIgnoreCase)) await ApplyFileBreakpointsAsync(path);
     });
     [RelayCommand] private Task AddWatchAsync() => GuardAsync(async () =>
     {
@@ -262,7 +272,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new DebugWorkspaceState(Breakpoints.Select(x => x.ToModel()).ToArray(), watchExpressions.ToArray())));
         File.Move(temporary, statePath, true);
     }
-    private void EndSession() { IsActive = false; IsStopped = false; Status = "Session ended"; stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
+    private void EndSession() { IsActive = false; IsStopped = false; Status = "Session ended"; foreach (var breakpoint in Breakpoints) breakpoint.Status = "Pending"; stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
     private void AppendOutput(string value)
     {
         lock (outputGate)

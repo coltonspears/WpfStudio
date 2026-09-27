@@ -67,5 +67,6 @@ public partial class App : Application
         services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(AppPaths.DataDirectory, "sql-connections.json")));
         services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(AppPaths.DataDirectory, "sql-recovery.json")));
         services.AddDatabaseFeature(); services.AddSingleton<ShellViewModel>(); services.AddSingleton<MainWindow>();
+        services.AddStudioFeatures();
     }
 }

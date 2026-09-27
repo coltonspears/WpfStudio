@@ -8,6 +8,9 @@ using WpfStudio.Workspace;
 
 namespace WpfStudio.App.ViewModels;
 
+public enum EditorAction { Definition, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, AskColtonGpt }
+public sealed record BreakpointMarker(int Line, bool Enabled, bool Bound, string Condition, string Status);
+
 public sealed partial class EditorViewModel : ObservableObject, IDisposable
 {
     private readonly WorkspaceClient _workspace;
@@ -18,6 +21,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public EditorViewModel(DocumentState state, WorkspaceClient workspace, XamlCompletionService xaml, IUiDispatcher dispatcher, Action<string> report)
     {
         State = state; _workspace = workspace; _xaml = xaml; _dispatcher = dispatcher; _report = report;
+        ActionCommand = new RelayCommand<EditorAction>(action => ActionRequested?.Invoke(action));
         state.ContentChanged += ContentChanged;
         state.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(DocumentState.Title)) OnPropertyChanged(nameof(Title)); };
         ContentChanged(this, EventArgs.Empty);
@@ -28,6 +32,14 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public bool IsReadOnly => State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
     public ObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
     public ObservableCollection<int> BreakpointLines { get; } = [];
+    public ObservableCollection<BreakpointMarker> BreakpointMarkers { get; } = [];
+    public IRelayCommand<EditorAction> ActionCommand { get; }
+    public event Action<EditorAction>? ActionRequested;
+    public event Action? ContextChanged;
+    public int SelectionStart { get; private set; }
+    public int SelectionLength { get; private set; }
+    public string SelectedText => State.Content.Substring(Math.Clamp(SelectionStart, 0, State.Content.Length), Math.Clamp(SelectionLength, 0, State.Content.Length - Math.Clamp(SelectionStart, 0, State.Content.Length)));
+    public void UpdateSelection(int start, int length) { SelectionStart = start; SelectionLength = length; ContextChanged?.Invoke(); }
     public event Action<int>? BreakpointRequested;
     public event Action? NavigationRequested;
     [ObservableProperty] public partial int ExecutionLine { get; set; } = -1;
@@ -36,6 +48,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public void ToggleBreakpoint(int line) => BreakpointRequested?.Invoke(line);
     private void ContentChanged(object? sender, EventArgs e)
     {
+        ContextChanged?.Invoke();
         _analysis?.Cancel(); _analysis?.Dispose(); _analysis = new();
         _ = AnalyzeAsync(_analysis.Token);
     }

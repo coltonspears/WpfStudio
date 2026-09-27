@@ -1,0 +1,56 @@
+<UserControl x:Class="WpfStudio.App.Features.ColtonGpt.AssistantPane"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:WpfStudio.App.Features.ColtonGpt"
+ MinWidth="280" Background="{DynamicResource SurfaceBrush}">
+ <Grid Margin="12">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <StackPanel>
+   <DockPanel Margin="0,0,0,8">
+    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+     <Button Content="New chat" Command="{Binding ClearCommand}" Style="{DynamicResource QuietButton}" ToolTip="Clear the in-memory conversation"/>
+     <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Style="{DynamicResource QuietButton}"/>
+    </StackPanel>
+    <StackPanel><TextBlock Text="ColtonGPT" FontSize="19" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="{Binding ModelLabel}" FontSize="10" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding ModelLabel}"/></StackPanel>
+   </DockPanel>
+   <Border Background="{DynamicResource EditorBrush}" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+    <TextBlock Text="Your WPF coding companion. Ask a question, review a binding, or work through a refactor." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+   </Border>
+  </StackPanel>
+  <Grid Grid.Row="1">
+   <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10" Visibility="{Binding IsEmpty, Converter={StaticResource BooleanToVisibility}}">
+    <TextBlock Text="Start with a focused question" FontSize="15" FontWeight="SemiBold" TextAlignment="Center"/>
+    <TextBlock Text="“Why is this binding not updating?”&#10;“Help me split this view model.”&#10;“Review this async command.”" Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+   </StackPanel>
+   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" local:AssistantViewBehavior.FollowOutput="True">
+    <ItemsControl ItemsSource="{Binding Messages}" HorizontalContentAlignment="Stretch">
+     <ItemsControl.ItemTemplate><DataTemplate>
+      <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,10,0,12" Margin="0,0,4,0">
+       <StackPanel>
+        <TextBlock Text="{Binding Role}" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,5"/>
+        <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Padding="0" Background="Transparent" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Conversation message"/>
+        <TextBlock Text="{Binding Detail}" FontSize="10" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+       </StackPanel>
+      </Border>
+     </DataTemplate></ItemsControl.ItemTemplate>
+    </ItemsControl>
+   </ScrollViewer>
+  </Grid>
+  <StackPanel Grid.Row="2" Margin="0,10,0,0">
+   <DockPanel><Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshContextCommand}" Style="{DynamicResource QuietButton}" ToolTip="Update the context preview from the active editor"/><ComboBox ItemsSource="{Binding ContextOptions}" SelectedItem="{Binding ContextMode}" AutomationProperties.Name="Editor context to attach"/></DockPanel>
+   <TextBlock Text="{Binding ContextLabel}" FontSize="10" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,4,0,6"/>
+   <Expander Header="Preview exactly what will be sent" Margin="0,0,0,6">
+    <TextBox Text="{Binding RequestPreview, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="200" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Code, Consolas" FontSize="11" AutomationProperties.Name="Full request preview"/>
+   </Expander>
+   <TextBox Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" MaxHeight="180" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Message ColtonGPT" ToolTip="Write a message; use Ctrl+Enter to send">
+    <TextBox.InputBindings><KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SendCommand}"/></TextBox.InputBindings>
+   </TextBox>
+   <DockPanel Margin="0,6,0,0"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Stop" Command="{Binding SendCancelCommand}"/><Button Content="Send" Command="{Binding SendCommand}" Style="{DynamicResource AccentButton}" ToolTip="Send the previewed request to OpenRouter (Ctrl+Enter)"/></StackPanel><TextBlock Text="{Binding PromptCount}" Foreground="{DynamicResource MutedBrush}" FontSize="10" VerticalAlignment="Center"/></DockPanel>
+  </StackPanel>
+  <StackPanel Grid.Row="3" Margin="0,8,0,0">
+   <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
+   <TextBlock Text="{Binding HistorySummary}" TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0"/>
+   <Expander Header="Last request sent" FontSize="10" Margin="0,4,0,0"><TextBox Text="{Binding LastRequestPreview, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="180" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Code, Consolas" FontSize="11"/></Expander>
+  </StackPanel>
+ </Grid>
+</UserControl>

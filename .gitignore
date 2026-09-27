@@ -56,6 +56,8 @@ lcov.info
 
 # NuGet restores and locally produced packages; keep packages.lock.json tracked.
 packages/
+!/src/WpfStudio.App/Features/Packages/
+!/src/WpfStudio.App/Features/Packages/**
 project.lock.json
 project.fragment.lock.json
 *.nupkg

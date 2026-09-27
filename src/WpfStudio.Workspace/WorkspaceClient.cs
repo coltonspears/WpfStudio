@@ -105,6 +105,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.FindReferencesAsync(request, cancellationToken);
     public Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken = default) => Proxy.FormatDocumentAsync(request, cancellationToken);
     public Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken = default) => Proxy.RenameAsync(request, cancellationToken);
+    public Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken = default) => Proxy.RefactorAsync(request, cancellationToken);
 
     private IWorkspaceRpc Proxy => _proxy ?? throw new InvalidOperationException($"Workspace worker is not connected. Reopen or restart the workspace. {_workerError}");
 

@@ -42,12 +42,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, StudioFeatures? features = null)
     {
         _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger;
         Debugger = debugger; Terminal = terminal; Database = database;
+        InitializeFeatures(features);
         debugger.SourceRequested += (path, line) => _ = GuardAsync(() => NavigateAsync(path, line, 1, true));
-        debugger.Breakpoints.CollectionChanged += (_, _) => RefreshBreakpointMarkers();
+        debugger.Breakpoints.CollectionChanged += (_, _) => ObserveBreakpoints();
         debugger.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DebuggerViewModel.IsStopped) && !debugger.IsStopped) foreach (var doc in Documents) doc.ExecutionLine = -1; };
         workspace.WorkerExited += (_, reason) => dispatcher.Post(() => { Status = "Language worker stopped. Use Restart language service to reconnect."; AppendOutput(reason); });
     }
@@ -69,13 +70,15 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public ObservableCollection<string> TargetFrameworks { get; } = [];
     public ObservableCollection<string> LaunchProfiles { get; } = [];
     public event Action<string>? ToolRequested;
+    public event Action<string>? WorkbenchCloseRequested;
     public event Action? LayoutResetRequested;
     public event Action? LayoutSaveRequested;
     public event Action? LayoutRestoreRequested;
     public event Action<string>? ThemeChanged;
 
     [ObservableProperty] public partial WorkspaceSnapshot? Workspace { get; set; }
-    [ObservableProperty] public partial EditorViewModel? ActiveDocument { get; set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SaveCommand))] public partial EditorViewModel? ActiveDocument { get; set; }
+    [ObservableProperty] public partial string? ActiveWorkbench { get; set; }
     [ObservableProperty] public partial WorkspaceProject? StartupProject { get; set; }
     [ObservableProperty] public partial ExplorerNode? SelectedNode { get; set; }
     [ObservableProperty] public partial WpfItem? SelectedWpfItem { get; set; }
@@ -106,7 +109,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public string WindowTitle => Workspace == null ? "WpfStudio" : $"{Path.GetFileNameWithoutExtension(Workspace.Path)} — WpfStudio";
     public bool HasWorkspace => Workspace != null;
     public bool IsWelcomeVisible => Documents.Count == 0;
-    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); }
+    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features?.Packages.SetWorkspace(value); }
     partial void OnWpfFilterChanged(string value) => RefreshWpfItems();
     partial void OnPaletteQueryChanged(string value) => RefreshPalette();
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
@@ -122,6 +125,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public async Task InitializeAsync(string[] arguments)
     {
         var settings = await _settings.LoadAsync();
+        if (Features != null) await Features.Assistant.InitializeAsync();
         ThemeName = settings.Theme; ThemeChanged?.Invoke(ThemeName);
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
@@ -178,6 +182,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             ActiveDocument = null; OnPropertyChanged(nameof(IsWelcomeVisible));
         }
         if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
+        if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(null);
         IsBusy = true; _loading = true; _operation = new();
         var token = _operation.Token;
         try
@@ -204,6 +209,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             foreach (var issue in Workspace.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
             RecentWorkspaces.Remove(path); RecentWorkspaces.Insert(0, path); while (RecentWorkspaces.Count > 10) RecentWorkspaces.RemoveAt(10);
             await Debugger.SetWorkspaceAsync(path);
+            if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(path);
             await RefreshWpfAsync();
             Status = $"{Projects.Count} projects · SDK {Workspace.SdkVersion}";
             await SaveSettingsAsync();
@@ -297,6 +303,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (existing != null) { ActiveDocument = existing; return; }
         var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
+        vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
+        vm.ContextChanged += () => { if (ReferenceEquals(vm, ActiveDocument)) UpdateAssistantContext(); };
         vm.Diagnostics.CollectionChanged += (_, _) => RefreshEditorDiagnostics();
         Documents.Add(vm); ActiveDocument = vm; RefreshBreakpointMarkers();
         OnPropertyChanged(nameof(IsWelcomeVisible));
@@ -313,11 +321,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         document.Dispose(); Documents.Remove(document); _store.Close(document.State);
         if (document.State.Extension == ".cs")
             try { await _workspace.CloseDocumentAsync(document.State.Path); } catch (Exception ex) { AppendOutput("Language document close: " + ex.Message); }
-        ActiveDocument = Documents.LastOrDefault(); OnPropertyChanged(nameof(IsWelcomeVisible));
+        if (ReferenceEquals(ActiveDocument, document)) ActiveDocument = Documents.LastOrDefault();
+        UpdateAssistantContext(); OnPropertyChanged(nameof(IsWelcomeVisible));
         return true;
     }
-    [RelayCommand] private Task CloseActiveAsync() => GuardAsync(async () => { if (ActiveDocument != null) await CloseDocumentAsync(ActiveDocument); });
-    [RelayCommand] private Task SaveAsync() => GuardAsync(async () => { if (ActiveDocument != null) await SaveDocumentAsync(ActiveDocument); });
+    [RelayCommand] private Task CloseActiveAsync() => GuardAsync(async () => { if (ActiveWorkbench is { } workbench) WorkbenchCloseRequested?.Invoke(workbench); else if (ActiveDocument != null) await CloseDocumentAsync(ActiveDocument); });
+    private bool CanSaveActiveDocument() => ActiveDocument != null;
+    [RelayCommand(CanExecute = nameof(CanSaveActiveDocument))] private Task SaveAsync() => GuardAsync(async () => { if (ActiveDocument != null) await SaveDocumentAsync(ActiveDocument); });
     [RelayCommand] private Task SaveAllAsync() => GuardAsync(async () => await SaveAllDocumentsAsync());
     private async Task<bool> SaveDocumentAsync(EditorViewModel doc)
     {
@@ -413,8 +423,19 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         AppendOutput(string.Join(Environment.NewLine, batch.Select(e => e.Text)));
         foreach (var entry in batch.Where(e => e.Diagnostic != null)) { if (Diagnostics.Count >= 2000) Diagnostics.RemoveAt(0); Diagnostics.Add(entry.Diagnostic!); }
     });
-    [RelayCommand] private Task ToggleBreakpointAsync() => ActiveDocument == null ? Task.CompletedTask : GuardAsync(() => Debugger.ToggleBreakpointAsync(ActiveDocument.State.Path, ActiveDocument.State.CaretLine));
-    private void RefreshBreakpointMarkers() { foreach (var doc in Documents) { doc.BreakpointLines.Clear(); foreach (var bp in Debugger.Breakpoints.Where(b => b.Path.Equals(doc.State.Path, StringComparison.OrdinalIgnoreCase) && b.Enabled)) doc.BreakpointLines.Add(bp.Line); } }
+    [RelayCommand] private Task ToggleBreakpointAsync() => ActiveDocument?.State.Extension != ".cs" ? Task.CompletedTask : GuardAsync(() => Debugger.ToggleBreakpointAsync(ActiveDocument.State.Path, ActiveDocument.State.CaretLine));
+    private void RefreshBreakpointMarkers()
+    {
+        foreach (var doc in Documents)
+        {
+            doc.BreakpointLines.Clear(); doc.BreakpointMarkers.Clear();
+            foreach (var bp in Debugger.Breakpoints.Where(b => b.Path.Equals(doc.State.Path, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (bp.Enabled) doc.BreakpointLines.Add(bp.Line);
+                doc.BreakpointMarkers.Add(new(bp.Line, bp.Enabled, bp.Status == "Bound", bp.Condition, bp.Status));
+            }
+        }
+    }
     private void RefreshEditorDiagnostics()
     {
         Diagnostics.Clear(); foreach (var item in Documents.SelectMany(d => d.Diagnostics).Concat(_wpfIndex?.Diagnostics ?? [])) Diagnostics.Add(item);
@@ -438,7 +459,16 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task FindReferencesAsync() => GuardAsync(async () =>
     {
         var document = ActiveDocument;
-        if (document == null) return; await document.SyncAsync(); var state = document.State;
+        if (document == null) return;
+        if (document.State.Extension == ".xaml")
+        {
+            var declaration = ResourceAtCaret(); SearchResults.Clear();
+            if (declaration == null) { Status = "Place the caret on a resource key or a resolved resource reference"; return; }
+            foreach (var usage in _wpfIndex!.Usages.Where(u => u.ResolvedPath == declaration.Path && u.ResolvedDeclarationStart == declaration.ValueStart))
+                SearchResults.Add(new(usage.Path, usage.Line, 1, (usage.IsDynamic ? "DynamicResource " : "StaticResource ") + usage.Key));
+            ToolRequested?.Invoke("Search"); Status = $"{SearchResults.Count} resolved XAML reference(s); runtime and code references are not indexed"; return;
+        }
+        await document.SyncAsync(); var state = document.State;
         var results = await _workspace.FindReferencesAsync(new(state.Path, state.CaretOffset, state.Version)); SearchResults.Clear();
         foreach (var result in results) SearchResults.Add(new(result.Path, result.Line, result.Column, result.DisplayText ?? "Reference", result.Start));
         ToolRequested?.Invoke("Search"); Status = $"{results.Count} reference(s)";
@@ -446,7 +476,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task FormatAsync() => GuardAsync(async () =>
     {
         var document = ActiveDocument;
-        if (document == null || document.IsReadOnly) return; await document.SyncAsync(); var state = document.State;
+        if (document == null || document.IsReadOnly) return;
+        if (document.State.Extension != ".cs") { Status = "Roslyn formatting is available for C# documents"; return; }
+        await document.SyncAsync(); var state = document.State;
         var result = await _workspace.FormatDocumentAsync(new(state.Path, state.Version));
         var changes = await _edits.PrepareAsync(result); await ApplyChangesAsync(changes);
     });
@@ -454,6 +486,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         var document = ActiveDocument;
         if (document == null || document.IsReadOnly) return;
+        if (document.State.Extension == ".xaml")
+        {
+            var declaration = ResourceAtCaret();
+            if (declaration == null) { Status = "Place the caret on a resource key or a resolved resource reference"; return; }
+            SelectedWpfItem = _wpfIndex!.Items.FirstOrDefault(i => i.Path == declaration.Path && i.Line == declaration.Line && i.Key == declaration.Key);
+            await RenameResourceCommand.ExecuteAsync(null); return;
+        }
         var name = await _dialogs.PromptAsync("Rename symbol", "New C# symbol name:"); if (string.IsNullOrWhiteSpace(name)) return;
         foreach (var doc in Documents.ToArray()) await doc.SyncAsync(); var state = document.State;
         var result = await _workspace.RenameAsync(new(state.Path, state.CaretOffset, state.Version, name));
@@ -497,7 +536,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task NavigateWpfAsync(WpfItem? item) => item == null ? Task.CompletedTask : GuardAsync(() => NavigateAsync(item.Path, item.Line, 1));
     public async Task NavigateAsync(string path, int line, int column, bool execution = false)
     {
-        await OpenDocumentAsync(path); var doc = ActiveDocument!; var text = doc.State.Content; var offset = 0;
+        await OpenDocumentAsync(path);
+        if (ActiveDocument is not { } doc || !doc.State.Path.Equals(path, StringComparison.OrdinalIgnoreCase)) return;
+        var text = doc.State.Content; var offset = 0;
         for (var i = 1; i < line; i++) { var next = text.IndexOf('\n', offset); if (next < 0) break; offset = next + 1; }
         doc.Navigate(Math.Min(text.Length, offset + Math.Max(0, column - 1)));
         if (execution) { foreach (var other in Documents) other.ExecutionLine = -1; doc.ExecutionLine = line; }
@@ -509,7 +550,17 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         _wpfIndex = await Task.Run(() => _indexer.IndexAsync(Workspace, buffers, _lifetime.Token)); _xaml.Index = _wpfIndex;
         RefreshWpfItems(); RefreshEditorDiagnostics();
     });
-    private void RefreshWpfItems() { WpfItems.Clear(); if (_wpfIndex == null) return; foreach (var item in _wpfIndex.Items.Where(i => (i.Name + " " + i.Kind).Contains(WpfFilter, StringComparison.OrdinalIgnoreCase))) WpfItems.Add(item); }
+    private void RefreshWpfItems()
+    {
+        var selected = SelectedWpfItem;
+        WpfItems.Clear();
+        if (_wpfIndex != null)
+            foreach (var item in _wpfIndex.Items.Where(i => MatchesWpfCategory(i) && (i.Name + " " + i.Kind + " " + i.Path).Contains(WpfFilter, StringComparison.OrdinalIgnoreCase))) WpfItems.Add(item);
+        SelectedWpfItem = WpfItems.FirstOrDefault(i => i == selected);
+        WpfIssues.Clear(); foreach (var issue in _wpfIndex?.Diagnostics ?? []) WpfIssues.Add(issue);
+        OnPropertyChanged(nameof(WpfSummary)); OnPropertyChanged(nameof(WpfResultSummary)); OnPropertyChanged(nameof(WpfIssueTitle));
+        RefreshWpfSelection();
+    }
     [RelayCommand] private Task RenameResourceAsync() => GuardAsync(async () =>
     {
         if (_wpfIndex == null || SelectedWpfItem?.Key == null) { Status = "Select a keyed resource in WPF Explorer"; return; }
@@ -639,11 +690,26 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         IEnumerable<PaletteEntry> entries = IsCommandPalette
             ? new PaletteEntry[] { new("Open solution or project", "Ctrl+Shift+O", () => OpenWorkspaceCommand.ExecuteAsync(null)), new("Open file", "Ctrl+O", () => OpenFileCommand.ExecuteAsync(null)), new("Build", "Ctrl+Shift+B", () => BuildCommand.ExecuteAsync(null)), new("Start debugging", "F5", () => DebugCommand.ExecuteAsync(null)), new("Run without debugging", "Ctrl+F5", () => RunCommand.ExecuteAsync(null)), new("Run tests", "", () => TestCommand.ExecuteAsync(null)), new("Create WPF item", "Ctrl+Shift+N", () => { NewWpfItem(); return Task.CompletedTask; }), new("Restart language service", "", () => RestartWorkspaceCommand.ExecuteAsync(null)), new("Refresh WPF resources", "", () => RefreshWpfCommand.ExecuteAsync(null)), new("Toggle light / dark theme", "", () => { ToggleTheme(); return Task.CompletedTask; }), new("Reset docking layout", "", () => { LayoutResetRequested?.Invoke(); return Task.CompletedTask; }) }
             : _allFiles.Select(path => new PaletteEntry(Path.GetFileName(path), path, () => OpenDocumentAsync(path)));
+        if (IsCommandPalette) entries = entries.Concat(new PaletteEntry[]
+        {
+            new("Manage NuGet packages", "Search, install, update, remove", () => OpenPackagesCommand.ExecuteAsync(null)),
+            new("Git changes", "Stage, commit, branches and history", () => OpenGitCommand.ExecuteAsync(null)),
+            new("ColtonGPT", "Ask a question with optional editor context", () => OpenAssistantCommand.ExecuteAsync(null)),
+            new("Settings", "Appearance and OpenRouter credentials", () => OpenSettingsCommand.ExecuteAsync(null)),
+            new("Show breakpoints", "Conditions, enabled state and binding status", () => { ShowBreakpoints(); return Task.CompletedTask; }),
+            new("Organize C# usings", "Preview import changes", () => RefactorCommand.ExecuteAsync("OrganizeUsings"))
+        });
         foreach (var entry in entries.Where(e => (e.Label + " " + e.Detail).Contains(PaletteQuery, StringComparison.OrdinalIgnoreCase)).Take(80)) PaletteResults.Add(entry);
         SelectedPaletteEntry = PaletteResults.FirstOrDefault();
     }
     [RelayCommand] private void ToggleTheme() { ThemeName = ThemeName == "Dark" ? "Light" : "Dark"; ThemeChanged?.Invoke(ThemeName); }
-    [RelayCommand] private void ShowTool(string? name) { if (name != null) ToolRequested?.Invoke(name); }
+    [RelayCommand] private void ShowTool(string? name)
+    {
+        if (name == "Packages") _ = OpenPackagesCommand.ExecuteAsync(null);
+        else if (name == "Git") _ = OpenGitCommand.ExecuteAsync(null);
+        else if (name == "ColtonGPT") _ = OpenAssistantCommand.ExecuteAsync(null);
+        else if (name != null) ToolRequested?.Invoke(name);
+    }
     [RelayCommand] private void SaveLayout() { LayoutSaveRequested?.Invoke(); Status = "Layout saved"; }
     [RelayCommand] private void ResetLayout() => LayoutResetRequested?.Invoke();
     [RelayCommand] private void ClearOutput() => Output = "";
@@ -679,6 +745,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
+        foreach (var breakpoint in _observedBreakpoints) breakpoint.PropertyChanged -= BreakpointChanged;
+        Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
         foreach (var document in Documents) document.Dispose();
         await _workspace.DisposeAsync(); _operation?.Dispose(); _lifetime.Dispose();

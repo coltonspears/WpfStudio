@@ -9,6 +9,8 @@ namespace WpfStudio.Core.Wpf;
 public sealed record WpfItem(string Kind, string Name, string Path, int Line, string? Key = null)
 {
     public string Display => $"{Kind}  ·  {Name}";
+    public string TypeLabel => Kind switch { "ViewModel" => "View model", "UserControl" => "User control", "ResourceDictionary" => "Resource dictionary", "DataTemplate" => "Data template", "ControlTemplate" => "Control template", _ => Kind };
+    public string FileLabel => $"{System.IO.Path.GetFileName(Path)} : {Line}";
 }
 public sealed record ResourceDeclaration(string Key, string Path, int Line, int ValueStart, int ValueLength, string Scope);
 public sealed record ResourceUsage(string Key, string Path, int Line, int Start, int Length, bool IsDynamic, string? ResolvedPath, int? ResolvedDeclarationStart);

@@ -53,6 +53,7 @@ public static class DockingBehavior
             shell.PropertyChanged += PropertyChanged;
             shell.Documents.CollectionChanged += DocumentsChanged;
             shell.ToolRequested += ShowTool;
+            shell.WorkbenchCloseRequested += CloseWorkbench;
             shell.LayoutSaveRequested += Save;
             shell.LayoutRestoreRequested += Restore;
             shell.LayoutResetRequested += Reset;
@@ -63,6 +64,11 @@ public static class DockingBehavior
         private void Capture()
         {
             if (defaultLayout is not null) return;
+            // Package and Git workbenches need document-sized space. Retain their
+            // views here so closing/reopening tabs preserves feature state.
+            staticContent["Packages"] = new Features.Packages.PackagesPane { DataContext = shell.Features?.Packages };
+            staticContent["Git"] = new Features.Git.GitPane { DataContext = shell.Features?.Git };
+            staticTitles["Packages"] = "NuGet packages"; staticTitles["Git"] = "Git changes";
             foreach (var content in manager.Layout.Descendents().OfType<LayoutContent>().Where(x => x.Content is not EditorViewModel && !string.IsNullOrEmpty(x.ContentId)))
             {
                 if (content.Content is null) continue;
@@ -85,7 +91,13 @@ public static class DockingBehavior
         }
         private void ActiveChanged(object? sender, EventArgs args)
         {
-            if (manager.ActiveContent is EditorViewModel editor && !ReferenceEquals(shell.ActiveDocument, editor)) shell.ActiveDocument = editor;
+            if (restoring) return;
+            if (manager.ActiveContent is EditorViewModel editor)
+            {
+                if (!ReferenceEquals(shell.ActiveDocument, editor)) shell.ActiveDocument = editor;
+            }
+            else if (manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => ReferenceEquals(d.Content, manager.ActiveContent)) is { } document)
+                shell.ActivateWorkbench(document.ContentId is "Packages" or "Git" ? document.ContentId : null);
         }
         private void DocumentsChanged(object? sender, NotifyCollectionChangedEventArgs args) => manager.Dispatcher.BeginInvoke(SynchronizeDocuments);
         private void SynchronizeDocuments()
@@ -101,25 +113,69 @@ public static class DockingBehavior
             }
             var pane = manager.Layout.Descendents().OfType<LayoutDocumentPane>().FirstOrDefault();
             if (pane is null) return;
+            var requestedEditor = shell.ActiveDocument;
+            var activateNewEditor = false;
             foreach (var editor in shell.Documents.Where(editor => !manager.Layout.Descendents().OfType<LayoutDocument>().Any(x => ReferenceEquals(x.Content, editor))))
+            {
                 pane.Children.Add(new LayoutDocument { Content = editor, ContentId = editor.ContentId, Title = editor.Title });
+                activateNewEditor |= ReferenceEquals(requestedEditor, editor);
+            }
             var welcome = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(x => x.ContentId == "Welcome");
             if (shell.Documents.Count > 0 && welcome is not null) welcome.Parent?.RemoveChild(welcome);
             else if (shell.Documents.Count == 0 && welcome is null && welcomeContent is not null) pane.Children.Add(new LayoutDocument { Content = welcomeContent, ContentId = "Welcome", Title = "Start", CanClose = false });
-            if (shell.ActiveDocument is not null) manager.ActiveContent = shell.ActiveDocument;
+            if (requestedEditor is not null && (activateNewEditor || manager.ActiveContent is null)) manager.ActiveContent = requestedEditor;
         }
         private async void DocumentClosing(object? sender, DocumentClosingEventArgs args)
         {
-            if (args.Document.Content is not EditorViewModel document) return;
+            if (args.Document.Content is not EditorViewModel document)
+            {
+                if (args.Document.ContentId is "Packages" or "Git")
+                {
+                    var workbench = args.Document;
+                    var pane = workbench.Parent as LayoutDocumentPane;
+                    _ = manager.Dispatcher.BeginInvoke(() => UpdateAfterWorkbenchClose(workbench, pane));
+                }
+                return;
+            }
             args.Cancel = true;
             if (!closing.Add(document)) return;
             try { await shell.CloseDocumentAsync(document); }
             catch (Exception ex) { shell.Status = "Could not close document: " + ex.Message; }
             finally { closing.Remove(document); }
         }
+        private void CloseWorkbench(string name)
+        {
+            var document = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.ContentId == name);
+            if (document?.CanClose == true)
+            {
+                var pane = document.Parent as LayoutDocumentPane;
+                document.Close();
+                UpdateAfterWorkbenchClose(document, pane);
+            }
+        }
+        private void UpdateAfterWorkbenchClose(LayoutDocument closed, LayoutDocumentPane? pane)
+        {
+            if (manager.Layout.Descendents().OfType<LayoutDocument>().Contains(closed) || shell.ActiveWorkbench != closed.ContentId) return;
+            var selected = pane?.Children.FirstOrDefault(d => d.IsSelected)
+                ?? manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.IsSelected);
+            if (selected?.Content is EditorViewModel editor) shell.ActiveDocument = editor;
+            else shell.ActivateWorkbench(selected?.ContentId is "Packages" or "Git" ? selected.ContentId : null);
+        }
         private void ShowTool(string name)
         {
             var aliases = name is "WPF" or "Resources" ? "WpfTools" : name is "Database" or "SQL Server" ? "Database" : name;
+            if (aliases is "Packages" or "Git")
+            {
+                Capture();
+                var document = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.ContentId == aliases);
+                if (document == null && manager.Layout.Descendents().OfType<LayoutDocumentPane>().FirstOrDefault() is { } pane)
+                {
+                    document = new LayoutDocument { ContentId = aliases, Title = staticTitles[aliases], Content = staticContent[aliases], CanClose = true };
+                    pane.Children.Add(document);
+                }
+                if (document != null) { document.IsSelected = true; document.IsActive = true; }
+                return;
+            }
             var tool = manager.Layout.Descendents().OfType<LayoutAnchorable>().Concat(manager.Layout.Hidden).FirstOrDefault(x => x.ContentId == aliases);
             if (tool is null && staticContent.TryGetValue(aliases, out var content))
             {
@@ -129,6 +185,8 @@ public static class DockingBehavior
             if (tool is null) return;
             if (tool.IsHidden) tool.Show();
             if (tool.IsAutoHidden) tool.ToggleAutoHide();
+            if (aliases == "Debugger" && tool.Parent is LayoutAnchorablePane debugPane && debugPane.DockHeight.IsAbsolute && debugPane.DockHeight.Value < 320)
+                debugPane.DockHeight = new GridLength(320);
             tool.IsSelected = true; tool.IsActive = true;
         }
         private void Save()
@@ -174,12 +232,13 @@ public static class DockingBehavior
             }
             finally { restoring = false; }
             SynchronizeDocuments();
+            ActiveChanged(manager, EventArgs.Empty);
         }
         public void Dispose()
         {
             manager.Loaded -= Loaded; manager.DocumentClosing -= DocumentClosing; manager.ActiveContentChanged -= ActiveChanged;
             shell.PropertyChanged -= PropertyChanged; shell.Documents.CollectionChanged -= DocumentsChanged;
-            shell.ToolRequested -= ShowTool; shell.LayoutSaveRequested -= Save; shell.LayoutRestoreRequested -= Restore; shell.LayoutResetRequested -= Reset; shell.ThemeChanged -= ApplyTheme;
+            shell.ToolRequested -= ShowTool; shell.WorkbenchCloseRequested -= CloseWorkbench; shell.LayoutSaveRequested -= Save; shell.LayoutRestoreRequested -= Restore; shell.LayoutResetRequested -= Reset; shell.ThemeChanged -= ApplyTheme;
         }
     }
 }

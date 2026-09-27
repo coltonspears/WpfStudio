@@ -262,6 +262,15 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
         return new WorkspaceEditResult(edits.Values.ToArray(), warnings);
     }
 
+    public async Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken)
+    {
+        var document = GetDocument(request.Path, request.Version);
+        var changed = await CSharpRefactorings.ApplyAsync(document, request.Position, request.Action, cancellationToken).ConfigureAwait(false);
+        var changes = await changed.GetTextChangesAsync(document, cancellationToken).ConfigureAwait(false);
+        var before = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        return new([new(document.FilePath!, request.Version, changes.Select(ToEdit).ToArray(), TextHash(before.ToString()))], []);
+    }
+
     private Document GetDocument(string path, long version)
     {
         path = Path.GetFullPath(path);

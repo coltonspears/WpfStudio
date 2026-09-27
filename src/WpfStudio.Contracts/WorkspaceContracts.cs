@@ -21,6 +21,7 @@ public sealed record SignatureEntry(string Label, string? Documentation, IReadOn
 public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures);
 public sealed record SourceLocation(string Path, int Start, int Length, int Line, int Column, string? DisplayText = null);
 public sealed record RenameRequest(string Path, int Position, long Version, string NewName);
+public sealed record RefactorRequest(string Path, int Position, long Version, string Action);
 public sealed record WorkspaceEditResult(IReadOnlyList<DocumentEdits> Documents, IReadOnlyList<string> Warnings);
 
 /// <summary>All offsets are zero-based UTF-16; source lines and columns are one-based.</summary>
@@ -36,6 +37,7 @@ public interface IWorkspaceRpc
     Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken);
+    Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken);
 }
 
 public enum BuildOperation { Restore, Build, Rebuild, Clean, Run, Test }
