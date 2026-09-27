@@ -23,6 +23,8 @@ dotnet run --project src/WpfStudio.App -- C:\Work\MyApp\MyApp.sln
 
 `Get-Debugger.ps1` downloads netcoredbg 3.2.0-1092 and verifies the pinned archive checksum. Terminal JavaScript assets are already included; installing Node.js or npm is unnecessary.
 
+The IDE opens `WpfStudio.App.MainWindow`, resolved and shown by `App.OnStartup` in `src/WpfStudio.App/App.xaml.cs`. Its content is defined in `MainWindow.xaml`; Windows draws the native title bar and border. The smoke-test screenshots capture only the WPF content, so they omit that title bar. Theme and docking layout are restored from your local profile. The startup-project selector inside the IDE selects the application to run or debug, rather than the IDE's own window.
+
 ## Daily workflow
 
 **Open and navigate.** Open a `.sln`, `.slnx`, or SDK-style `.csproj`. Expand the solution tree as needed; use quick-open for a filename and solution search for text. C# completion, signature assistance, definitions, references, rename, and formatting run through the worker. Cross-file edits are previewed and checked against current document versions before applying. Keep an eye on Output when SDK discovery or restore fails: files remain accessible even if language services cannot fully load the project.
