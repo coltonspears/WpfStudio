@@ -22,6 +22,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     {
         State = state; _workspace = workspace; _xaml = xaml; _dispatcher = dispatcher; _report = report;
         ActionCommand = new RelayCommand<EditorAction>(action => ActionRequested?.Invoke(action));
+        OpenRelatedCommand = new RelayCommand<RelatedFile>(file => { if (file != null) OpenRequested?.Invoke(file.Path); });
         state.ContentChanged += ContentChanged;
         state.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(DocumentState.Title)) OnPropertyChanged(nameof(Title)); };
         ContentChanged(this, EventArgs.Empty);
@@ -35,6 +36,33 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public ObservableCollection<BreakpointMarker> BreakpointMarkers { get; } = [];
     public IRelayCommand<EditorAction> ActionCommand { get; }
     public event Action<EditorAction>? ActionRequested;
+    /// <summary>Paired XAML, code-behind and view-model files shown in the editor context bar.</summary>
+    public ObservableCollection<RelatedFile> RelatedFiles { get; } = [];
+    public IRelayCommand<RelatedFile> OpenRelatedCommand { get; }
+    public event Action<string>? OpenRequested;
+    /// <summary>Folder breadcrumb relative to the workspace, e.g. "CounterApp › Views".</summary>
+    [ObservableProperty] public partial string Location { get; set; } = "";
+    public string FileName => State.Name;
+    public bool IsViewModel => State.Name.EndsWith("ViewModel.cs", StringComparison.OrdinalIgnoreCase);
+    public bool IsCSharp => State.Extension == ".cs";
+    public string IconKind => WpfStudio.App.Controls.FileIconKindConverter.KindFor(State.Path);
+    /// <summary>Human-readable document kind for the context bar and status bar.</summary>
+    public string KindLabel => State.Name switch
+    {
+        var name when name.EndsWith(".xaml.cs", StringComparison.OrdinalIgnoreCase) => "Code-behind",
+        var name when name.EndsWith("ViewModel.cs", StringComparison.OrdinalIgnoreCase) => "View model",
+        _ => State.Extension switch
+        {
+            ".cs" => "C#", ".xaml" => "XAML", ".csproj" => "Project file", ".sql" => "SQL", ".json" => "JSON",
+            ".xml" or ".props" or ".targets" or ".resx" => "XML", ".md" => "Markdown", _ => "Plain text"
+        }
+    };
+    public string LanguageLabel => State.Extension switch
+    {
+        ".cs" => "C#", ".xaml" => "XAML", ".sql" => "SQL", ".json" => "JSON",
+        ".xml" or ".csproj" or ".props" or ".targets" or ".resx" => "XML", ".md" => "Markdown", _ => "Plain text"
+    };
+    public string EncodingLabel => State.Encoding.WebName.Equals("utf-8", StringComparison.OrdinalIgnoreCase) ? (State.Encoding.GetPreamble().Length > 0 ? "UTF-8 BOM" : "UTF-8") : State.Encoding.WebName.ToUpperInvariant();
     public event Action? ContextChanged;
     public int SelectionStart { get; private set; }
     public int SelectionLength { get; private set; }

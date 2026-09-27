@@ -65,6 +65,49 @@ public static class Interaction
         finally { window.IsEnabled = true; ClosingWindows.Remove(window); }
     }
     private static async void Activated(object? sender, EventArgs args) { if (sender is Window window && GetCloseGuard(window) is { } vm) await vm.CheckExternalChangesAsync(); }
+    /// <summary>Runs <see cref="ActivateCommandProperty"/> on a single click of a list item (palette-style lists).</summary>
+    public static readonly DependencyProperty ActivateOnClickProperty = DependencyProperty.RegisterAttached("ActivateOnClick", typeof(bool), typeof(Interaction), new PropertyMetadata(false, ActivateOnClickChanged));
+    public static void SetActivateOnClick(DependencyObject target, bool value) => target.SetValue(ActivateOnClickProperty, value);
+    public static bool GetActivateOnClick(DependencyObject target) => (bool)target.GetValue(ActivateOnClickProperty);
+    private static void ActivateOnClickChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not ListBox list) return;
+        list.PreviewMouseLeftButtonUp -= ClickActivate;
+        if ((bool)args.NewValue) list.PreviewMouseLeftButtonUp += ClickActivate;
+    }
+    private static void ClickActivate(object sender, MouseButtonEventArgs args)
+    {
+        if (sender is not ListBox list) return;
+        for (var item = args.OriginalSource as DependencyObject; item != null && !ReferenceEquals(item, list); item = item is System.Windows.Media.Visual ? System.Windows.Media.VisualTreeHelper.GetParent(item) : LogicalTreeHelper.GetParent(item))
+        {
+            if (item is not ListBoxItem container) continue;
+            list.SelectedItem = container.DataContext;
+            if (GetActivateCommand(list) is { } command && command.CanExecute(container.DataContext)) { command.Execute(container.DataContext); args.Handled = true; }
+            return;
+        }
+    }
+    /// <summary>Keeps the selected item of a list visible, e.g. while arrowing through palette results.</summary>
+    public static readonly DependencyProperty FollowSelectionProperty = DependencyProperty.RegisterAttached("FollowSelection", typeof(bool), typeof(Interaction), new PropertyMetadata(false, FollowSelectionChanged));
+    public static void SetFollowSelection(DependencyObject target, bool value) => target.SetValue(FollowSelectionProperty, value);
+    public static bool GetFollowSelection(DependencyObject target) => (bool)target.GetValue(FollowSelectionProperty);
+    private static void FollowSelectionChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not ListBox list) return;
+        list.SelectionChanged -= ScrollSelection;
+        if ((bool)args.NewValue) list.SelectionChanged += ScrollSelection;
+    }
+    private static void ScrollSelection(object sender, SelectionChangedEventArgs args) { if (sender is ListBox { SelectedItem: { } selected } list) list.ScrollIntoView(selected); }
+    /// <summary>Focuses a text box when it becomes visible and places the caret after any prefilled text.</summary>
+    public static readonly DependencyProperty FocusCaretEndProperty = DependencyProperty.RegisterAttached("FocusCaretEnd", typeof(bool), typeof(Interaction), new PropertyMetadata(false, FocusCaretEndChanged));
+    public static void SetFocusCaretEnd(DependencyObject target, bool value) => target.SetValue(FocusCaretEndProperty, value);
+    public static bool GetFocusCaretEnd(DependencyObject target) => (bool)target.GetValue(FocusCaretEndProperty);
+    private static void FocusCaretEndChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not TextBox box || !(bool)args.NewValue) return;
+        box.IsVisibleChanged += (_, _) => { if (box.IsVisible) box.Dispatcher.BeginInvoke(() => { box.Focus(); box.CaretIndex = box.Text.Length; }); };
+        // A prefix such as ">" set while the box is focused must not leave the caret before it.
+        box.TextChanged += (_, _) => { if (box.IsKeyboardFocused && box.CaretIndex == 0 && box.Text.Length == 1 && !char.IsLetterOrDigit(box.Text[0])) box.CaretIndex = 1; };
+    }
     public static readonly DependencyProperty FocusWhenVisibleProperty = DependencyProperty.RegisterAttached("FocusWhenVisible", typeof(bool), typeof(Interaction), new PropertyMetadata(false, FocusChanged));
     public static void SetFocusWhenVisible(DependencyObject target, bool value) => target.SetValue(FocusWhenVisibleProperty, value);
     public static bool GetFocusWhenVisible(DependencyObject target) => (bool)target.GetValue(FocusWhenVisibleProperty);

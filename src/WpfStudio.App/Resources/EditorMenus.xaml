@@ -1,26 +1,28 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="clr-namespace:WpfStudio.App.ViewModels">
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="clr-namespace:WpfStudio.App.ViewModels" xmlns:c="clr-namespace:WpfStudio.App.Controls">
  <ContextMenu x:Key="EditorContextMenu" x:Shared="False" DataContext="{Binding PlacementTarget.ViewModel, RelativeSource={RelativeSource Self}}">
-  <MenuItem Header="Go to definition" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Definition}" InputGestureText="F12"/>
-  <MenuItem Header="Find references" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.References}" InputGestureText="Shift+F12"/>
-  <MenuItem Header="Refactor">
+  <MenuItem Header="Go to definition" c:Ui.Icon="Target" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Definition}" InputGestureText="F12"/>
+  <MenuItem Header="Find references" c:Ui.Icon="Search" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.References}" InputGestureText="Shift+F12"/>
+  <MenuItem Header="Switch view ⇄ view model" c:Ui.Icon="Swap" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.SwitchRelated}" InputGestureText="F7"/>
+  <Separator/>
+  <MenuItem Header="Refactor" c:Ui.Icon="Braces">
    <MenuItem Header="Rename symbol…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Rename}" InputGestureText="F2"/>
    <MenuItem Header="Organize usings…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.OrganizeUsings}"/>
    <MenuItem Header="Use var…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.UseVar}"/>
    <MenuItem Header="Use explicit type…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.UseExplicitType}"/>
    <Separator/><MenuItem Header="Format document" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Format}"/>
   </MenuItem>
-  <MenuItem Header="Breakpoint">
+  <MenuItem Header="MVVM" c:Ui.Icon="Layers">
+   <MenuItem Header="Insert observable property…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertProperty}"/>
+   <MenuItem Header="Insert relay command…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertCommand}"/>
+  </MenuItem>
+  <MenuItem Header="Breakpoint" c:Ui.Icon="Bug">
    <MenuItem Header="Toggle breakpoint" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.ToggleBreakpoint}" InputGestureText="F9"/>
    <MenuItem Header="Condition…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.BreakpointCondition}"/>
    <MenuItem Header="Enable / disable on this line" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.DisableBreakpoint}"/>
    <MenuItem Header="Show all breakpoints" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.ShowBreakpoints}"/>
   </MenuItem>
-  <MenuItem Header="WPF and MVVM">
-   <MenuItem Header="Switch view / view model" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.SwitchRelated}"/>
-   <MenuItem Header="Insert observable property…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertProperty}"/>
-   <MenuItem Header="Insert relay command…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertCommand}"/>
-  </MenuItem>
-  <Separator/><MenuItem Header="Ask ColtonGPT…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.AskColtonGpt}"/>
+  <Separator/>
+  <MenuItem Header="Ask ColtonGPT…" c:Ui.Icon="Chat" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.AskColtonGpt}"/>
   <Separator/>
   <MenuItem Header="Cut" Command="ApplicationCommands.Cut" InputGestureText="Ctrl+X" CommandTarget="{Binding PlacementTarget.TextArea, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
   <MenuItem Header="Copy" Command="ApplicationCommands.Copy" InputGestureText="Ctrl+C" CommandTarget="{Binding PlacementTarget.TextArea, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
