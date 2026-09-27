@@ -451,7 +451,9 @@
                 <Setter Property="c:Ui.Icon" Value="Play" />
                 <Setter Property="Content" Value="Start" />
                 <Setter Property="ToolTip" Value="Start debugging (F5)" />
+                <Setter Property="IsEnabled" Value="{Binding HasWorkspace}" />
                 <Style.Triggers>
+                  <DataTrigger Binding="{Binding Debugger.IsActive}" Value="True"><Setter Property="IsEnabled" Value="True" /></DataTrigger>
                   <DataTrigger Binding="{Binding Debugger.IsStopped}" Value="True">
                     <Setter Property="c:Ui.Icon" Value="Continue" />
                     <Setter Property="Content" Value="Continue" />
@@ -461,9 +463,9 @@
               </Style>
             </Button.Style>
           </Button>
-          <Button Style="{StaticResource IconButton}" c:Ui.Icon="PlayOutline" Command="{Binding RunCommand}" ToolTip="Run without debugging (Ctrl+F5)" />
-          <Button Style="{StaticResource IconButton}" c:Ui.Icon="Build" Command="{Binding BuildCommand}" ToolTip="Build (Ctrl+Shift+B)" />
-          <Button Style="{StaticResource IconButton}" c:Ui.Icon="Flask" Command="{Binding TestCommand}" ToolTip="Run tests" />
+          <Button Style="{StaticResource IconButton}" c:Ui.Icon="PlayOutline" Command="{Binding RunCommand}" IsEnabled="{Binding HasWorkspace}" ToolTip="Run without debugging (Ctrl+F5)" />
+          <Button Style="{StaticResource IconButton}" c:Ui.Icon="Build" Command="{Binding BuildCommand}" IsEnabled="{Binding HasWorkspace}" ToolTip="Build (Ctrl+Shift+B)" />
+          <Button Style="{StaticResource IconButton}" c:Ui.Icon="Flask" Command="{Binding TestCommand}" IsEnabled="{Binding HasWorkspace}" ToolTip="Run tests" />
           <Button Style="{StaticResource IconButton}" c:Ui.Icon="Stop" Command="{Binding CancelOperationCommand}" ToolTip="Cancel the running operation" Foreground="{DynamicResource DangerBrush}" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}" />
           <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrongBorderBrush}" BorderThickness="1" CornerRadius="7" Height="30" Padding="2,0" Margin="8,0,0,0" Visibility="{Binding Debugger.IsActive, Converter={StaticResource BooleanToVisibility}}">
             <StackPanel Orientation="Horizontal">
