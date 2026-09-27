@@ -1,0 +1,18 @@
+'use strict';
+const terminal = new Terminal({fontFamily:'Cascadia Mono, Consolas, monospace',fontSize:13,scrollback:10000,convertEol:false,cursorBlink:true,theme:{background:'#111519',foreground:'#dce4eb',cursor:'#4dd6ae',selectionBackground:'#36516d'},allowProposedApi:false});
+const fit = new FitAddon.FitAddon();
+const search = new SearchAddon.SearchAddon();
+terminal.loadAddon(fit); terminal.loadAddon(search); terminal.open(document.getElementById('terminal'));
+const send = message => window.chrome.webview.postMessage(message);
+terminal.onData(data => send({type:'input',data}));
+terminal.onResize(size => send({type:'resize',cols:size.cols,rows:size.rows}));
+const fitTerminal = () => {if(document.body.clientWidth>20&&document.body.clientHeight>20) fit.fit();};
+new ResizeObserver(fitTerminal).observe(document.getElementById('terminal'));
+const searchBox = document.getElementById('search'), query = document.getElementById('query');
+terminal.attachCustomKeyEventHandler(event => {if(event.type==='keydown'&&event.ctrlKey&&event.shiftKey&&event.code==='KeyF'){searchBox.hidden=false;query.focus();event.preventDefault();return false;}return true;});
+document.getElementById('next').onclick=()=>search.findNext(query.value);
+document.getElementById('previous').onclick=()=>search.findPrevious(query.value);
+document.getElementById('close').onclick=()=>{searchBox.hidden=true;terminal.focus();};
+query.onkeydown=event=>{if(event.key==='Enter'){event.shiftKey?search.findPrevious(query.value):search.findNext(query.value);}if(event.key==='Escape'){searchBox.hidden=true;terminal.focus();}};
+window.chrome.webview.addEventListener('message',event=>{const message=event.data;if(message.type==='output'){const data=Uint8Array.from(atob(message.data),c=>c.charCodeAt(0));terminal.write(data,()=>send({type:'ack'}));}else if(message.type==='fit'){fitTerminal();terminal.focus();}else if(message.type==='ended'){terminal.writeln('\r\n\x1b[90m[Process exited]\x1b[0m');}});
+fitTerminal(); terminal.focus(); send({type:'ready'});

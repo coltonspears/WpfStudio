@@ -1,0 +1,86 @@
+# .NET build outputs and local tool caches (at any project depth)
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+
+# Published builds, benchmarks, screenshots, and isolated SDK installations
+/artifacts/
+
+# Downloaded debugger distribution; tools/Get-Debugger.ps1 restores the pinned version.
+/tools/netcoredbg/
+
+# Visual Studio, Rider, ReSharper, and per-user workspace state
+.vs/
+.idea/
+_ReSharper*/
+*.suo
+*.user
+*.rsuser
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.DotSettings.user
+*.sln.iml
+
+# Test results, coverage, crash dumps, and profiling output
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.trx
+*.VisualState.xml
+TestResult.xml
+nunit-*.xml
+CodeCoverage/
+coverage/
+coverage*.xml
+coverage*.json
+lcov.info
+*.coverage
+*.coveragexml
+*.dmp
+*.dump
+*.diagsession
+*.vsp
+*.vspx
+*.binlog
+
+# NuGet restores and locally produced packages; keep packages.lock.json tracked.
+packages/
+project.lock.json
+project.fragment.lock.json
+*.nupkg
+*.snupkg
+
+# Node tooling is optional; terminal assets under src/ are intentionally bundled.
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# Local secrets, temporary files, and OS metadata
+.env
+.env.*
+!.env.example
+!.env.sample
+*.tmp
+*.temp
+*.log
+~$*
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Keep solution/project files, build configuration, scripts, and third-party notices.
+# Do not ignore .csproj/.sln, global.json, Directory.Build.*, or bundled terminal assets.
