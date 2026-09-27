@@ -21,8 +21,12 @@ public sealed class Glyph : FrameworkElement
 
     public static bool Exists(string? kind) => kind != null && Shapes.ContainsKey(kind);
 
-    /// <summary>Default 16×16; explicit Width/Height take precedence.</summary>
-    protected override Size MeasureOverride(Size availableSize) => new(16, 16);
+    /// <summary>
+    /// Natural size is 16×16, but never more than the space allowed. An explicit smaller Width or
+    /// Height arrives here as the available size; reporting 16 anyway would make layout arrange the
+    /// glyph at 16 and clip its right and bottom edges to the smaller slot.
+    /// </summary>
+    protected override Size MeasureOverride(Size availableSize) => IconMetrics.Fit(availableSize, 16);
 
     protected override void OnRender(DrawingContext drawing)
     {

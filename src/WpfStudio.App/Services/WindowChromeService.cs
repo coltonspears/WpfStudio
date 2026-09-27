@@ -52,7 +52,13 @@ public static class WindowChromeService
 public sealed class TitleBarController
 {
     private const int WmNcHitTest = 0x0084, WmNcMouseMove = 0x00A0, WmNcLButtonDown = 0x00A1, WmNcLButtonUp = 0x00A2, WmNcMouseLeave = 0x02A2, WmMouseMove = 0x0200;
-    private const int HtMaxButton = 9;
+    private const int WmWindowPosChanged = 0x0047, WmDpiChanged = 0x02E0;
+    private const int HtMaxButton = 9, MonitorDefaultToNearest = 2;
+    [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public Rect Monitor; public Rect Work; public int Flags; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hwnd, int flags);
+    [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
     private readonly Window _window;
     private readonly ButtonBase _maximize;
     private readonly FrameworkElement _root;
@@ -82,18 +88,43 @@ public sealed class TitleBarController
 
     private void UpdateBounds()
     {
-        // A maximized WindowChrome window extends past the monitor by the resize frame.
-        // Its side thickness is the resize frame plus padded border; the top has no native caption.
-        var frame = SystemParameters.WindowNonClientFrameThickness;
-        _root.Margin = _window.WindowState == WindowState.Maximized
-            ? new Thickness(frame.Left, frame.Left, frame.Right, frame.Bottom)
-            : new Thickness(0);
+        var margin = _window.WindowState == WindowState.Maximized ? MaximizedInset() : new Thickness(0);
+        if (_root.Margin != margin) _root.Margin = margin;
+    }
+
+    /// <summary>
+    /// A maximized WindowChrome window is sized past the monitor by its invisible resize frame, and that
+    /// overhang depends on the monitor's DPI (and on Windows' rounding), not on the primary monitor's
+    /// metrics. Measure the real overhang against the monitor's work area so content ends exactly at the
+    /// taskbar on every display.
+    /// </summary>
+    private Thickness MaximizedInset()
+    {
+        var hwnd = new WindowInteropHelper(_window).Handle;
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (hwnd == IntPtr.Zero || !GetWindowRect(hwnd, out var window) || !GetMonitorInfo(MonitorFromWindow(hwnd, MonitorDefaultToNearest), ref info))
+        {
+            var frame = SystemParameters.WindowNonClientFrameThickness;
+            return new Thickness(frame.Left, frame.Left, frame.Right, frame.Bottom);
+        }
+        var dpi = VisualTreeHelper.GetDpi(_window);
+        var work = info.Work;
+        return new Thickness(
+            Math.Max(0, work.Left - window.Left) / dpi.DpiScaleX,
+            Math.Max(0, work.Top - window.Top) / dpi.DpiScaleY,
+            Math.Max(0, window.Right - work.Right) / dpi.DpiScaleX,
+            Math.Max(0, window.Bottom - work.Bottom) / dpi.DpiScaleY);
     }
 
     private IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         switch (message)
         {
+            case WmWindowPosChanged:
+            case WmDpiChanged:
+                // Moving a maximized window to another monitor changes its overhang without a state change.
+                if (_window.WindowState == WindowState.Maximized) _window.Dispatcher.BeginInvoke(UpdateBounds);
+                break;
             case WmNcHitTest:
                 if (_maximize.IsVisible && _maximize.IsEnabled && OverMaximize(lParam))
                 {

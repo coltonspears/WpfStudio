@@ -8,7 +8,8 @@ public sealed class StudioIcon : FrameworkElement
 {
     public static readonly DependencyProperty KindProperty = DependencyProperty.Register(nameof(Kind), typeof(string), typeof(StudioIcon), new FrameworkPropertyMetadata("File", FrameworkPropertyMetadataOptions.AffectsRender));
     public string Kind { get => (string)GetValue(KindProperty); set => SetValue(KindProperty, value); }
-    protected override Size MeasureOverride(Size availableSize) => new(18, 18);
+    /// <summary>Natural size is 18×18, shrinking to an explicit smaller Width/Height instead of being clipped.</summary>
+    protected override Size MeasureOverride(Size availableSize) => IconMetrics.Fit(availableSize, 18);
     private static readonly Geometry File = Freeze("M3,1.5 L10,1.5 15,6.5 15,16.5 3,16.5 Z M10,1.5 L10,6.5 15,6.5");
     private static readonly Geometry Folder = Freeze("M1.5,4 L7,4 9,6 16.5,6 16.5,15 1.5,15 Z M1.5,7 L16.5,7");
     private static readonly Geometry Project = Freeze("M9,1.5 L16,5.5 9,9.5 2,5.5 Z M2,5.5 L2,13 9,17 16,13 16,5.5 M9,9.5 L9,17");
@@ -40,5 +41,15 @@ public sealed class StudioIcon : FrameworkElement
             drawing.DrawGeometry(null, pen, kind is "csharp" or "viewmodel" or "converter" ? Braces : kind is "xaml" or "window" or "page" or "usercontrol" or "resourcedictionary" or "style" or "datatemplate" or "controltemplate" ? Markup : kind == "asset" ? Image : Lines);
         }
         drawing.Pop();
+    }
+}
+
+internal static class IconMetrics
+{
+    /// <summary>A square no larger than the natural size or the available space in either direction.</summary>
+    public static Size Fit(Size available, double natural)
+    {
+        var side = Math.Min(natural, Math.Min(available.Width, available.Height));
+        return double.IsNaN(side) || side < 0 ? new Size(0, 0) : new Size(side, side);
     }
 }
