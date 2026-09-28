@@ -1,0 +1,80 @@
+<UserControl x:Class="WpfStudio.App.Features.Appearance.AppearancePanel"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <UserControl.Resources>
+  <BooleanToVisibilityConverter x:Key="AppearanceBoolVisibility"/>
+  <Style x:Key="OptionalAppearanceText" TargetType="TextBlock">
+   <Setter Property="TextWrapping" Value="Wrap"/>
+   <Setter Property="Foreground" Value="{DynamicResource SubtleBrush}"/>
+   <Setter Property="FontSize" Value="11"/>
+   <Style.Triggers>
+    <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+    <Trigger Property="Text" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+   </Style.Triggers>
+  </Style>
+ </UserControl.Resources>
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="10">
+  <StackPanel>
+   <TextBlock Text="{Binding Status}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}" AutomationProperties.Name="Appearance observation status"/>
+   <TextBlock Text="{Binding SelectionContext}" Style="{StaticResource OptionalAppearanceText}" Margin="0,4,0,0"/>
+   <ItemsControl ItemsSource="{Binding KeyFacts}" Margin="0,4">
+    <ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,4" ToolTip="{Binding Explanation}">
+     <Grid.ColumnDefinitions><ColumnDefinition Width="108"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+     <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"/>
+    </Grid></DataTemplate></ItemsControl.ItemTemplate>
+   </ItemsControl>
+   <TextBlock Text="Some appearance details were omitted because the observation limit was reached." TextWrapping="Wrap"
+              Visibility="{Binding Truncated,Converter={StaticResource AppearanceBoolVisibility}}" Margin="0,4" Foreground="{DynamicResource MutedBrush}"/>
+   <Expander Header="Observation details" Margin="0,4">
+    <ItemsControl ItemsSource="{Binding OtherFacts}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,6">
+     <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+     <TextBlock Text="{Binding Value}" TextWrapping="Wrap"/>
+     <TextBlock Text="{Binding Explanation}" Style="{StaticResource OptionalAppearanceText}"/>
+    </StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+   </Expander>
+   <Expander IsExpanded="True" Margin="0,4">
+    <Expander.Header><TextBlock Text="{Binding Declarations.Count,StringFormat=Declaration candidates ({0})}"/></Expander.Header>
+    <StackPanel Margin="0,4">
+     <TextBlock Text="These declarations are candidates. Their presence does not identify an active trigger or the setter supplying this value." TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+     <ItemsControl ItemsSource="{Binding Declarations}"><ItemsControl.ItemTemplate><DataTemplate>
+      <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,6"><StackPanel>
+       <TextBlock Text="{Binding Kind}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding Description}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding TargetName,StringFormat=Target name: {0}}" Style="{StaticResource OptionalAppearanceText}"/>
+       <TextBlock Text="{Binding Source.Uri,StringFormat=Unverified source hint: {0}}" Style="{StaticResource OptionalAppearanceText}"/>
+      </StackPanel></Border>
+     </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+    </StackPanel>
+   </Expander>
+   <Expander Margin="0,4">
+    <Expander.Header><TextBlock Text="{Binding ResourceScopes.Count,StringFormat=Available resource scopes ({0})}"/></Expander.Header>
+    <StackPanel Margin="0,4">
+     <TextBlock Text="Dictionary keys are shown without loading their values. These scopes are not a reconstruction of the lookup order or proof of this property's resource origin." TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+     <ItemsControl ItemsSource="{Binding ResourceScopes}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,8">
+      <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding SourceUri}" Style="{StaticResource OptionalAppearanceText}"/>
+      <ItemsControl ItemsSource="{Binding Keys}"><ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="8,2,0,0"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+      <TextBlock Text="Additional keys were omitted." FontSize="11" Foreground="{DynamicResource MutedBrush}" Visibility="{Binding KeysTruncated,Converter={StaticResource AppearanceBoolVisibility}}"/>
+     </StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+    </StackPanel>
+   </Expander>
+   <Expander Margin="0,4">
+    <Expander.Header><TextBlock Text="{Binding ResourceEvents.Count,StringFormat=Historical resource resolutions ({0})}"/></Expander.Header>
+    <StackPanel Margin="0,4">
+     <TextBlock Text="These earlier WPF resolutions do not establish the property's current resource origin." TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}"/>
+     <ItemsControl ItemsSource="{Binding ResourceEvents}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,8">
+      <TextBlock Text="{Binding Key}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+      <TextBlock TextWrapping="Wrap"><Run Text="{Binding Target}"/><Run Text=" · "/><Run Text="{Binding Property}"/></TextBlock>
+      <TextBlock Text="{Binding Timestamp,StringFormat=Observed: {0:yyyy-MM-dd HH:mm:ss.fff zzz}}" Style="{StaticResource OptionalAppearanceText}"/>
+      <TextBlock Text="{Binding DictionaryUri}" Style="{StaticResource OptionalAppearanceText}"/>
+      <TextBlock Text="{Binding Source.Uri,StringFormat=Unverified source hint: {0}}" Style="{StaticResource OptionalAppearanceText}"/>
+     </StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+    </StackPanel>
+   </Expander>
+   <Expander Margin="0,4">
+    <Expander.Header><TextBlock Text="{Binding Notices.Count,StringFormat=Attribution limits and notes ({0})}"/></Expander.Header>
+    <ItemsControl ItemsSource="{Binding Notices}" Margin="0,4"><ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,5" Foreground="{DynamicResource MutedBrush}"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+   </Expander>
+  </StackPanel>
+ </ScrollViewer>
+</UserControl>

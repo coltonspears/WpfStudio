@@ -13,8 +13,10 @@ public sealed partial class XamlCompletionService
     public WpfIndexSnapshot? Index { get; set; }
     [GeneratedRegex(@"<([\w:]+)([^<>]*)$")]
     private static partial Regex ElementPattern();
-    [GeneratedRegex(@"(?:Path=|\{Binding\s+)([\w.]*)$")]
+    [GeneratedRegex(@"(?:Path\s*=\s*|\{Binding\s+)([\w.]*)$")]
     private static partial Regex BindingPattern();
+    [GeneratedRegex(@"<Binding\b[^<>]*\bPath\s*=\s*[""']([^""']*)$")]
+    private static partial Regex BindingElementPattern();
     [GeneratedRegex(@"(xmlns(?::[\w]+)?)\s*=\s*[""']([^""']*)$")]
     private static partial Regex NamespaceValuePattern();
     public CompletionResult Complete(string path, string text, int position, long version)
@@ -35,12 +37,17 @@ public sealed partial class XamlCompletionService
         }
         else if (lastBrace > lastEndBrace && (prefix[lastBrace..].Contains("StaticResource") || prefix[lastBrace..].Contains("DynamicResource")))
             words = Index?.Resources.Select(r => r.Key) ?? [];
-        else if (BindingPattern().IsMatch(prefix))
+        else if (BindingPattern().IsMatch(prefix) || BindingElementPattern().IsMatch(prefix) || IsWithinBinding(prefix))
         {
             var binding = BindingPattern().Match(prefix).Groups[1];
-            var lastDot = binding.Value.LastIndexOf('.');
-            start = binding.Index + lastDot + 1;
-            words = BindingProperties(prefix, lastDot < 0 ? "" : binding.Value[..lastDot]);
+            if (binding.Success) start = binding.Index + binding.Value.LastIndexOf('.') + 1;
+            else
+            {
+                var value = BindingElementPattern().Match(prefix).Groups[1];
+                if (value.Success) start = value.Index + value.Value.LastIndexOf('.') + 1;
+            }
+            // Binding members require a resolved Roslyn source type from the worker.
+            words = [];
         }
         else
         {
@@ -70,52 +77,16 @@ public sealed partial class XamlCompletionService
                 yield return mapping.Groups[1].Value + ":" + item.Name;
         }
     }
-    private IEnumerable<string> BindingProperties(string xaml, string memberPath)
+    private static bool IsWithinBinding(string prefix)
     {
-        if (Index == null) return [];
-        var context = Regex.Match(xaml, @"d:DataContext\s*=\s*[""']\{d:DesignInstance\s+(?:Type\s*=\s*)?(?<type>(?:\w+:)?\w+)");
-        if (!context.Success)
-            context = Regex.Match(xaml, @"<\w+\.DataContext\s*>\s*<(?<type>\w+:\w+)\b");
-        if (!context.Success) return [];
-        var typeName = context.Groups["type"].Value;
-        var parts = typeName.Split(':');
-        string? sourceNamespace = null;
-        if (parts.Length == 2)
+        var binding = prefix.LastIndexOf("{Binding", StringComparison.Ordinal);
+        if (binding < 0 || (prefix.Length > binding + 8 && !char.IsWhiteSpace(prefix[binding + 8]) && prefix[binding + 8] != '}')) return false;
+        var depth = 0;
+        for (var i = binding; i < prefix.Length; i++)
         {
-            var mapping = Regex.Match(xaml, @"xmlns:" + Regex.Escape(parts[0]) + @"\s*=\s*[""']clr-namespace:([\w.]+)");
-            if (!mapping.Success) return [];
-            sourceNamespace = mapping.Groups[1].Value;
+            if (prefix[i] == '{') depth++;
+            else if (prefix[i] == '}' && --depth == 0) return false;
         }
-        var source = FindType(parts[^1], sourceNamespace);
-        foreach (var segment in memberPath.Split('.', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (source == null) return [];
-            var property = Members(source).FirstOrDefault(m => m.Name == segment);
-            if (property == default) return [];
-            source = FindType(property.Type.TrimEnd('?'), sourceNamespace);
-        }
-        return source == null ? [] : Members(source).Select(m => m.Name);
-    }
-    private string? FindType(string typeName, string? sourceNamespace)
-    {
-        if (Index == null) return null;
-        // Ambiguous names are intentionally omitted rather than guessed across projects.
-        var candidates = Index.Texts.Where(p => p.Key.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-            .Select(p => p.Value).Where(source => Regex.IsMatch(source, @"\b(?:class|record)\s+" + Regex.Escape(typeName) + @"\b")
-                && (sourceNamespace == null || Regex.IsMatch(source, @"\bnamespace\s+" + Regex.Escape(sourceNamespace) + @"\s*[;{]"))).Take(2).ToArray();
-        return candidates.Length == 1 ? candidates[0] : null;
-    }
-    private static IEnumerable<(string Name, string Type)> Members(string source)
-    {
-        foreach (Match property in Regex.Matches(source, @"\bpublic\s+(?:(?:partial|virtual|override|required|new)\s+)*(?<type>[\w.<>?]+)\s+(?<name>\w+)\s*(?:\{|=>)"))
-            yield return (property.Groups["name"].Value, property.Groups["type"].Value);
-        foreach (Match field in Regex.Matches(source, @"\[(?:CommunityToolkit\.Mvvm\.ComponentModel\.)?ObservableProperty(?:Attribute)?(?:\([^\]]*\))?\]\s*(?:private|protected|internal)\s+(?<type>[\w.<>?]+)\s+(?<name>\w+)\s*[;=]"))
-        {
-            var name = field.Groups["name"].Value;
-            name = name.StartsWith("m_", StringComparison.Ordinal) ? name[2..] : name.TrimStart('_');
-            if (name.Length > 0) yield return (char.ToUpperInvariant(name[0]) + name[1..], field.Groups["type"].Value);
-        }
-        foreach (Match command in Regex.Matches(source, @"\[(?:CommunityToolkit\.Mvvm\.Input\.)?RelayCommand(?:Attribute)?[^\]]*\]\s*(?:private|public|protected|internal)\s+(?:async\s+)?[\w.<>]+\s+(?<name>\w+)"))
-            yield return (Regex.Replace(command.Groups["name"].Value, "Async$", "") + "Command", "ICommand");
+        return depth > 0;
     }
 }

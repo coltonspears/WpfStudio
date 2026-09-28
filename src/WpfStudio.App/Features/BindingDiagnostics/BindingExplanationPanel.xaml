@@ -1,0 +1,82 @@
+<UserControl x:Class="WpfStudio.App.Features.BindingDiagnostics.BindingExplanationPanel"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" AutomationProperties.Name="Binding explanation">
+ <UserControl.Resources>
+  <Style x:Key="WhenTrue" TargetType="TextBlock">
+   <Setter Property="Visibility" Value="Collapsed"/>
+   <Style.Triggers><DataTrigger Binding="{Binding RelativeSource={RelativeSource Self},Path=Tag}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+  </Style>
+ </UserControl.Resources>
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Binding explanation details">
+  <StackPanel Margin="8,4,8,8">
+   <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="11" AutomationProperties.Name="Binding observation status"/>
+   <StackPanel Margin="0,6,0,0">
+    <StackPanel.Style><Style TargetType="StackPanel"><Style.Triggers><DataTrigger Binding="{Binding Available}" Value="False"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></StackPanel.Style>
+    <TextBlock Text="{Binding SelectionLabel}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+    <TextBlock TextWrapping="Wrap" Margin="0,4,0,0"><Run Text="{Binding Observation.Status,Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding Observation.Category,Mode=OneWay}"/></TextBlock>
+    <TextBlock Text="{Binding Observation.Explanation}" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding Observation.SourceType,StringFormat=Observed source: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding TargetValue,StringFormat=Property target value: {0}}" TextWrapping="Wrap"/>
+    <TextBlock Text="{Binding PathStatus}" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.Name="Binding path state"/>
+    <Expander Header="Cached path steps" Margin="0,4,0,0" IsExpanded="True">
+     <ItemsControl ItemsSource="{Binding Segments}" Margin="12,4,0,4">
+      <ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,3,0,5">
+       <StackPanel>
+        <TextBlock Text="{Binding Label}" TextWrapping="Wrap"/>
+        <TextBlock Text="{Binding OwnerType,StringFormat=Owner: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+        <TextBlock Text="{Binding ValueType,StringFormat=Declared value type: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+        <TextBlock Text="{Binding AccessorKind,StringFormat=Accessor: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+        <TextBlock Style="{StaticResource WhenTrue}" Tag="{Binding Segment.HasCollectionView}" Text="Uses a collection view." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+       </StackPanel>
+      </Border></DataTemplate></ItemsControl.ItemTemplate>
+     </ItemsControl>
+    </Expander>
+    <Expander Header="Current binding details" Margin="0,4,0,0">
+     <StackPanel Margin="12,4,0,6">
+      <TextBlock Text="{Binding Observation.Details.SourceKind,StringFormat=Source kind: {0}}" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding Observation.Details.Mode,StringFormat=Mode (configured): {0}}" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding Observation.Details.ConverterType,StringFormat=Custom converter: {0},TargetNullValue=(none reported)}" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding Observation.ResolvedSourceType,StringFormat=Resolved owner: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding Observation.ResolvedProperty,StringFormat=Resolved member: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding Observation.Details.PathState.TargetType,StringFormat=Target type: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding ValueSource,StringFormat=Property value source: {0}}" TextWrapping="Wrap"/>
+      <TextBlock Text="{Binding DetailsStatus}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0"/>
+     </StackPanel>
+    </Expander>
+    <Expander Margin="0,4,0,0">
+     <Expander.Header><TextBlock Text="{Binding ValidationErrors.Count,StringFormat=Current validation ({0})}"/></Expander.Header>
+     <StackPanel Margin="12,4,0,6">
+      <ItemsControl ItemsSource="{Binding ValidationErrors}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,0,0,8">
+       <TextBlock Text="{Binding Kind}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+       <TextBlock Text="{Binding Message}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding RuleType,StringFormat=Rule: {0}}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding ValidationStep,StringFormat=Validation step: {0}}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding ExceptionType,StringFormat=Exception type: {0},TargetNullValue=(none)}" TextWrapping="Wrap"/>
+      </StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+      <TextBlock Text="No current validation errors were included." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}">
+       <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding ValidationErrors.Count}" Value="0"/><Condition Binding="{Binding ValidationTruncated}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers></Style></TextBlock.Style>
+      </TextBlock>
+      <TextBlock Style="{StaticResource WhenTrue}" Tag="{Binding ValidationTruncated}" Text="Some validation details were omitted because the diagnostic limit was reached." TextWrapping="Wrap"/>
+     </StackPanel>
+    </Expander>
+    <Expander Margin="0,4,0,0">
+     <Expander.Header><TextBlock Text="{Binding Evidence.Count,StringFormat=Historical WPF evidence ({0})}"/></Expander.Header>
+     <StackPanel Margin="12,4,0,6">
+      <TextBlock Text="Earlier WPF notifications, not a current cause. A matching root source does not prove that nested values are unchanged." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6"/>
+      <ItemsControl ItemsSource="{Binding Evidence}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,0,0,8">
+       <TextBlock TextWrapping="Wrap" FontWeight="SemiBold"><Run Text="{Binding Kind,Mode=OneWay}"/><Run Text=" · WPF code "/><Run Text="{Binding Code,Mode=OneWay}"/></TextBlock>
+       <TextBlock Text="{Binding ObservedAt,StringFormat=Observed: {0:yyyy-MM-dd HH:mm:ss.fff zzz}}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding Message}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding ObservedStatus,StringFormat=Status at notification: {0}}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding BindingPath,StringFormat=Recorded path: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding Member,StringFormat=Reported member: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding OwnerType,StringFormat=Reported owner: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap"/>
+       <TextBlock Text="{Binding SourceType,StringFormat=Recorded root source: {0},TargetNullValue=(unavailable)}" TextWrapping="Wrap"/>
+       <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="Root source differs or its identity is unavailable."/><Style.Triggers><DataTrigger Binding="{Binding SourceMatches}" Value="True"><Setter Property="Text" Value="Root source matches; nested values may have changed."/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+      </StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+      <TextBlock Style="{StaticResource WhenTrue}" Tag="{Binding EvidenceTruncated}" Text="Historical evidence is incomplete because the retention or response limit was reached." TextWrapping="Wrap"/>
+     </StackPanel>
+    </Expander>
+   </StackPanel>
+  </StackPanel>
+ </ScrollViewer>
+</UserControl>

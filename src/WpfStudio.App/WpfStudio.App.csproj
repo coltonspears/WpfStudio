@@ -7,6 +7,9 @@
     <ProjectReference Include="..\WpfStudio.Database\WpfStudio.Database.csproj" />
     <ProjectReference Include="..\WpfStudio.Runtime\WpfStudio.Runtime.csproj" />
     <ProjectReference Include="..\WpfStudio.WorkspaceHost\WpfStudio.WorkspaceHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\WpfStudio.PreviewHost\WpfStudio.PreviewHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\WpfStudio.Inspection.StartupHook\WpfStudio.Inspection.StartupHook.csproj" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
+    <ProjectReference Include="..\WpfStudio.Inspection.Agent\WpfStudio.Inspection.Agent.csproj" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
   </ItemGroup>
 
   <ItemGroup>
@@ -41,4 +44,21 @@
     <Copy SourceFiles="@(WorkspaceHostFiles)" DestinationFiles="@(WorkspaceHostFiles->'$(OutDir)WorkspaceHost\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
+  <Target Name="CopyPreviewHost" AfterTargets="Build">
+    <ItemGroup>
+      <PreviewHostFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.PreviewHost\bin\$(Configuration)\net10.0-windows\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PreviewHostFiles)" DestinationFiles="@(PreviewHostFiles->'$(OutDir)PreviewHost\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyInspectionAgent" AfterTargets="Build">
+    <ItemGroup>
+      <InspectionFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.Inspection.StartupHook\bin\$(Configuration)\net8.0\WpfStudio.Inspection.StartupHook.dll" />
+      <InspectionFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.Inspection.Agent\bin\$(Configuration)\net8.0-windows\WpfStudio.Inspection.Agent.dll" />
+      <InspectionFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.Inspection.Agent\bin\$(Configuration)\net8.0-windows\WpfStudio.Inspection.Protocol.dll" />
+      <InspectionFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.Inspection.Agent\bin\$(Configuration)\net8.0-windows\WpfStudio.Wpf.PropertyEditing.dll" />
+      <InspectionFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.Inspection.Agent\bin\$(Configuration)\net8.0-windows\WpfStudio.Wpf.Diagnostics.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(InspectionFiles)" DestinationFolder="$(OutDir)Inspection" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <Using Include="Xunit" />
+    <ProjectReference Include="../../src/WpfStudio.PreviewHost/WpfStudio.PreviewHost.csproj" />
+    <ProjectReference Include="../../src/WpfStudio.Runtime/WpfStudio.Runtime.csproj" />
+    <ProjectReference Include="../../src/WpfStudio.Core/WpfStudio.Core.csproj" />
+    <ProjectReference Include="Fixtures/Compiled/WpfStudio.PreviewFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../samples/CounterApp/CounterApp.csproj" ReferenceOutputAssembly="false" AdditionalProperties="Configuration=$(Configuration)" />
+    <Compile Remove="Fixtures/**/*.cs" />
+    <Page Remove="Fixtures/**/*.xaml" />
+    <ApplicationDefinition Remove="Fixtures/**/*.xaml" />
+  </ItemGroup>
+  <Target Name="CopyCompiledPreviewFixture" AfterTargets="Build">
+    <ItemGroup>
+      <CompiledFixtureFiles Include="$(MSBuildProjectDirectory)/Fixtures/Compiled/bin/$(Configuration)/net10.0-windows/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CompiledFixtureFiles)" DestinationFiles="@(CompiledFixtureFiles->'$(OutDir)CompiledFixture/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyCounterAppPreviewFixture" AfterTargets="Build">
+    <ItemGroup>
+      <CounterAppOutputFiles Include="$(MSBuildProjectDirectory)/../../samples/CounterApp/bin/$(Configuration)/net10.0-windows/**/*" />
+      <CounterAppAuthoredFiles Include="$(MSBuildProjectDirectory)/../../samples/CounterApp/MainWindow.xaml;$(MSBuildProjectDirectory)/../../samples/CounterApp/wpfstudio.preview.json" />
+      <CounterAppThemeFiles Include="$(MSBuildProjectDirectory)/../../samples/CounterApp/Themes/**/*.xaml" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CounterAppOutputFiles)" DestinationFiles="@(CounterAppOutputFiles->'$(OutDir)CounterAppFixture/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CounterAppAuthoredFiles)" DestinationFiles="@(CounterAppAuthoredFiles->'$(OutDir)CounterAppFixture/%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CounterAppThemeFiles)" DestinationFiles="@(CounterAppThemeFiles->'$(OutDir)CounterAppFixture/Themes/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

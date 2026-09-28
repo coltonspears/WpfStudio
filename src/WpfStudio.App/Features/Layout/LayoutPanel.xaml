@@ -1,0 +1,49 @@
+<UserControl x:Class="WpfStudio.App.Features.Layout.LayoutPanel"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="12">
+  <StackPanel>
+   <TextBlock Text="{Binding Status}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}" AutomationProperties.Name="Layout observation status"/>
+   <CheckBox Content="Show layout overlay" IsChecked="{Binding ShowOverlay}" IsEnabled="{Binding CanShowOverlay}" ToolTip="{Binding OverlayStatus}" Margin="0,8,0,4" AutomationProperties.Name="Show layout overlay"/>
+   <ItemsControl ItemsSource="{Binding KeyFacts}" Margin="0,2,0,4">
+    <ItemsControl.ItemTemplate><DataTemplate>
+     <Grid Margin="0,4" ToolTip="{Binding Detail}">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="94"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+      <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap"/>
+     </Grid>
+    </DataTemplate></ItemsControl.ItemTemplate>
+   </ItemsControl>
+   <Expander Margin="0,6,0,4">
+    <Expander.Header><TextBlock Text="{Binding Notices.Count,StringFormat=Observation notes ({0})}"/></Expander.Header>
+    <ItemsControl ItemsSource="{Binding Notices}" Margin="0,8,0,0">
+     <ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="2,0,0,0" Padding="8,2" Margin="0,0,0,8"><TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/></Border></DataTemplate></ItemsControl.ItemTemplate>
+    </ItemsControl>
+   </Expander>
+   <Expander Header="Overlay legend" Margin="0,6,0,0">
+    <StackPanel Margin="0,8,0,4">
+     <WrapPanel>
+      <StackPanel Orientation="Horizontal" Margin="0,0,14,6"><Rectangle Fill="#38BDF8" Width="11" Height="11" Margin="0,0,5,0"/><TextBlock Text="Layout slot"/></StackPanel>
+      <StackPanel Orientation="Horizontal" Margin="0,0,14,6"><Rectangle Fill="#4ADE80" Width="11" Height="11" Margin="0,0,5,0"/><TextBlock Text="Rendered bounds"/></StackPanel>
+      <StackPanel Orientation="Horizontal" Margin="0,0,14,6"><Rectangle Fill="#FB923C" Width="11" Height="11" Margin="0,0,5,0"/><TextBlock Text="Margin outline"/></StackPanel>
+      <StackPanel Orientation="Horizontal" Margin="0,0,14,6"><Rectangle Fill="#C084FC" Width="11" Height="11" Margin="0,0,5,0"/><TextBlock Text="Clip bounds"/></StackPanel>
+     </WrapPanel>
+     <TextBlock Text="Slot: space assigned by the parent. Render: the element's transformed size. Margin: outer spacing where it can be mapped. Clip bounds approximate a clip; they do not show its exact visible shape." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+     <TextBlock Text="{Binding OverlayStatus}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,6,0,0"/>
+    </StackPanel>
+   </Expander>
+   <ItemsControl ItemsSource="{Binding OtherFacts}">
+    <ItemsControl.ItemTemplate><DataTemplate>
+     <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="0,7,0,9">
+      <StackPanel>
+       <TextBlock Text="{Binding Name}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+       <TextBlock Text="{Binding Value}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+       <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0">
+        <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding Detail}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+       </TextBlock>
+      </StackPanel>
+     </Border>
+    </DataTemplate></ItemsControl.ItemTemplate>
+   </ItemsControl>
+  </StackPanel>
+ </ScrollViewer>
+</UserControl>

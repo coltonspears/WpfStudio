@@ -60,20 +60,50 @@ namespace WpfStudio.PortableSmoke
             }, IntPtr.Zero);
             return result.ToArray();
         }
-        public static bool RequestClose(IntPtr window) => PostMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        public static bool RequestClose(IntPtr window, int processId)
+        {
+            GetWindowThreadProcessId(window, out uint owner);
+            return owner == processId && PostMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        }
     }
 }
 '@
 }
 
-function Get-OwnedDescendants([int]$ParentProcessId) {
-    foreach ($child in @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $ParentProcessId")) {
-        # Keep an actual process handle and creation timestamp to avoid attributing a reused PID later.
+function Test-OwnedProcessIdentity([datetime]$ParentStartedUtc, [datetime]$ObservedChildStartedUtc, [datetime]$ActualChildStartedUtc) {
+    # Win32_Process retains a dead parent's numeric ID. A newer process can inherit
+    # that ID without owning any of its old children. CIM timestamps truncate to
+    # microseconds; compare with the pinned handle at that exact precision.
+    $actualTicks = $ActualChildStartedUtc.ToUniversalTime().Ticks
+    $observedTicks = $ObservedChildStartedUtc.ToUniversalTime().Ticks
+    return $actualTicks -ge $ParentStartedUtc.ToUniversalTime().Ticks -and
+        ($actualTicks - ($actualTicks % 10)) -eq ($observedTicks - ($observedTicks % 10))
+}
+
+function Get-OwnedDescendants([Diagnostics.Process]$ParentProcess, [Collections.Generic.HashSet[int]]$Visited = $null, [int]$Depth = 0) {
+    if ($ParentProcess.HasExited) { return }
+    if (-not $Visited) { $Visited = [Collections.Generic.HashSet[int]]::new() }
+    if (-not $Visited.Add($ParentProcess.Id)) { return }
+    if ($Depth -gt 64 -or $Visited.Count -gt 4096) { throw 'Process ownership discovery exceeded its depth or process limit.' }
+    [void]$ParentProcess.Handle
+    $parentStarted = $ParentProcess.StartTime.ToUniversalTime()
+    $parentId = $ParentProcess.Id
+    foreach ($child in @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $parentId")) {
+        if (-not $child.CreationDate -or $child.CreationDate.ToUniversalTime() -lt $parentStarted) { continue }
+        $ownedProcess = $null
+        $accepted = $false
         try {
             $ownedProcess = [Diagnostics.Process]::GetProcessById([int]$child.ProcessId)
-            [pscustomobject]@{ Process = $ownedProcess; Id = $ownedProcess.Id; Name = $ownedProcess.ProcessName; StartedUtc = $ownedProcess.StartTime.ToUniversalTime() }
-            Get-OwnedDescendants -ParentProcessId $ownedProcess.Id
-        } catch [ArgumentException] { } catch [InvalidOperationException] { }
+            # Pin the process object before checking identity or retaining it for cleanup.
+            [void]$ownedProcess.Handle
+            $started = $ownedProcess.StartTime.ToUniversalTime()
+            if ($ownedProcess.HasExited -or -not (Test-OwnedProcessIdentity $parentStarted $child.CreationDate $started)) { continue }
+            $record = [pscustomobject]@{ Process = $ownedProcess; Id = $ownedProcess.Id; Name = $ownedProcess.ProcessName; StartedUtc = $started }
+            $accepted = $true
+            $record
+            Get-OwnedDescendants -ParentProcess $ownedProcess -Visited $Visited -Depth ($Depth + 1)
+        } catch [ArgumentException] { } catch [InvalidOperationException] { } catch [ComponentModel.Win32Exception] { }
+        finally { if ($ownedProcess -and -not $accepted) { $ownedProcess.Dispose() } }
     }
 }
 
@@ -91,6 +121,7 @@ try {
     $start.Environment['WPFSTUDIO_DATA_DIRECTORY'] = $profileDirectory
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $appProcess = [Diagnostics.Process]::Start($start)
+    [void]$appProcess.Handle
     while ($clock.Elapsed.TotalSeconds -lt $StartupTimeoutSeconds) {
         if ($appProcess.HasExited) { throw "WpfStudio exited during startup with code $($appProcess.ExitCode)." }
         $windows = @([WpfStudio.PortableSmoke.Native]::Windows($appProcess.Id))
@@ -109,9 +140,9 @@ try {
     if (Test-Path -LiteralPath $startupError) { throw (Get-Content -LiteralPath $startupError -Raw) }
     $workingSet = $appProcess.WorkingSet64
     $privateBytes = $appProcess.PrivateMemorySize64
-    $trackedChildren = @(Get-OwnedDescendants -ParentProcessId $appProcess.Id)
+    $trackedChildren = @(Get-OwnedDescendants -ParentProcess $appProcess)
     $shutdown = [Diagnostics.Stopwatch]::StartNew()
-    if (-not [WpfStudio.PortableSmoke.Native]::RequestClose($mainWindow.Handle)) { throw 'Could not request graceful closure of the main window.' }
+    if (-not [WpfStudio.PortableSmoke.Native]::RequestClose($mainWindow.Handle, $appProcess.Id)) { throw 'Could not request graceful closure of the main window.' }
     if (-not $appProcess.WaitForExit($ShutdownTimeoutSeconds * 1000)) { throw "WpfStudio did not close gracefully within $ShutdownTimeoutSeconds seconds." }
     $shutdownMs = [Math]::Round($shutdown.Elapsed.TotalMilliseconds)
     if ($appProcess.ExitCode -ne 0) { throw "WpfStudio exited with code $($appProcess.ExitCode)." }
@@ -148,13 +179,16 @@ try {
     # Cleanup is restricted to this invocation's process handles and randomly named temporary profile.
     if ($appProcess) {
         if (-not $appProcess.HasExited) {
-            foreach ($ownedWindow in [WpfStudio.PortableSmoke.Native]::Windows($appProcess.Id)) { [void][WpfStudio.PortableSmoke.Native]::RequestClose($ownedWindow.Handle) }
-            if (-not $appProcess.WaitForExit(3000)) { $appProcess.Kill($true); [void]$appProcess.WaitForExit(5000) }
+            foreach ($ownedWindow in [WpfStudio.PortableSmoke.Native]::Windows($appProcess.Id)) { [void][WpfStudio.PortableSmoke.Native]::RequestClose($ownedWindow.Handle, $appProcess.Id) }
+            if (-not $appProcess.WaitForExit(3000)) {
+                $trackedChildren += @(Get-OwnedDescendants -ParentProcess $appProcess)
+                $appProcess.Kill(); [void]$appProcess.WaitForExit(5000)
+            }
         }
         $appProcess.Dispose()
     }
     foreach ($child in $trackedChildren) {
-        try { if (-not $child.Process.HasExited) { $child.Process.Kill($true); [void]$child.Process.WaitForExit(5000) } }
+        try { if (-not $child.Process.HasExited) { $child.Process.Kill(); [void]$child.Process.WaitForExit(5000) } }
         finally { $child.Process.Dispose() }
     }
     $resolvedProfile = [IO.Path]::GetFullPath($profileDirectory)

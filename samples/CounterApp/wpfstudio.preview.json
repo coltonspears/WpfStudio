@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "views": [
+    {
+      "path": "MainWindow.xaml",
+      "scenarios": [
+        {
+          "name": "Initial",
+          "dataContextFactory": { "typeName": "CounterApp.CounterPreviewScenarios", "methodName": "Initial" }
+        },
+        {
+          "name": "Counted",
+          "dataContextFactory": { "typeName": "CounterApp.CounterPreviewScenarios", "methodName": "Counted" }
+        },
+        {
+          "name": "Large count",
+          "dataContextFactory": { "typeName": "CounterApp.CounterPreviewScenarios", "methodName": "LargeCount" }
+        }
+      ]
+    }
+  ]
+}

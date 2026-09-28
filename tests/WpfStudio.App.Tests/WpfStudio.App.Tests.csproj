@@ -21,6 +21,23 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\WpfStudio.App\WpfStudio.App.csproj" />
+    <ProjectReference Include="..\WpfStudio.Preview.Tests\Fixtures\Compiled\WpfStudio.PreviewFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\WpfStudio.Inspection.Tests\Fixtures\App\WpfStudio.InspectionFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <Target Name="CopyCompiledPreviewFixture" AfterTargets="Build">
+    <ItemGroup>
+      <CompiledPreviewFixtureFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.Preview.Tests\Fixtures\Compiled\bin\$(Configuration)\net10.0-windows\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CompiledPreviewFixtureFiles)" DestinationFiles="@(CompiledPreviewFixtureFiles->'$(OutDir)CompiledFixture\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyRunningInspectionFixture" AfterTargets="Build">
+    <ItemGroup>
+      <RunningInspectionFixtureFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.Inspection.Tests\Fixtures\App\bin\$(Configuration)\net10.0-windows\**\*" />
+      <RunningInspectionAgentFiles Include="$(MSBuildProjectDirectory)\..\..\src\WpfStudio.App\bin\$(Configuration)\net10.0-windows\Inspection\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RunningInspectionFixtureFiles)" DestinationFiles="@(RunningInspectionFixtureFiles->'$(OutDir)InspectionFixture\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(RunningInspectionAgentFiles)" DestinationFolder="$(OutDir)Inspection" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

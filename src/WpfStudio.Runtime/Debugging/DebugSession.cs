@@ -19,6 +19,7 @@ public sealed class DebugSession : IAsyncDisposable
     private bool ownsDebuggee;
     public string AdapterPath { get; set; } = Path.Combine(AppContext.BaseDirectory, "debugger", "netcoredbg.exe");
     public bool IsActive => transport is not null;
+    public bool CanDetach => IsActive && !ownsDebuggee;
     public int? AdapterProcessId { get { try { return process is { HasExited: false } adapter ? adapter.Id : null; } catch (InvalidOperationException) { return null; } } }
     public JsonElement Capabilities { get; private set; }
     public event Action<DebugEvent>? EventReceived;
@@ -26,13 +27,21 @@ public sealed class DebugSession : IAsyncDisposable
     public event Action<string>? Error;
     private static TaskCompletionSource NewCompletion() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private async Task ConnectAsync(CancellationToken cancellationToken)
+    private async Task ConnectAsync(CancellationToken cancellationToken, bool isolateStartupHooks = false)
     {
         if (IsActive) throw new InvalidOperationException("Stop the active debugging session first.");
         if (!File.Exists(AdapterPath)) throw new FileNotFoundException("netcoredbg is missing. Run tools/Get-Debugger.ps1 and rebuild WpfStudio.", AdapterPath);
         disposing = false;
         initialized = NewCompletion();
         process = new Process { StartInfo = new ProcessStartInfo(AdapterPath, "--interpreter=vscode") { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(AdapterPath)! } };
+        if (isolateStartupHooks)
+        {
+            // netcoredbg appends inherited hooks to launch.env rather than replacing them.
+            // LaunchAsync forwards the effective target value explicitly; the adapter must
+            // inherit none so profile overrides/clears work and hooks are not run twice.
+            foreach (var key in process.StartInfo.Environment.Keys.Where(key => key.Equals("DOTNET_STARTUP_HOOKS", StringComparison.OrdinalIgnoreCase)).ToArray())
+                process.StartInfo.Environment.Remove(key);
+        }
         process.Start();
         var currentProcess = process;
         stderr = Task.Run(async () => { while (await currentProcess.StandardError.ReadLineAsync() is { } line) Output?.Invoke(line + "\n"); });
@@ -49,8 +58,15 @@ public sealed class DebugSession : IAsyncDisposable
         ownsDebuggee = true;
         try
         {
-            await ConnectAsync(cancellationToken).ConfigureAwait(false);
-            var launch = RequestAsync("launch", new { program = Path.GetFullPath(configuration.Program), cwd = configuration.WorkingDirectory, args = configuration.Arguments ?? [], env = configuration.Environment ?? new Dictionary<string, string>(), stopAtEntry = false, justMyCode = true, enableStepFiltering = true }, cancellationToken);
+            var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (configuration.Environment is { } configured)
+                foreach (var pair in configured) environment[pair.Key] = pair.Value;
+            if (!environment.TryGetValue("DOTNET_STARTUP_HOOKS", out var hooks))
+                hooks = Environment.GetEnvironmentVariable("DOTNET_STARTUP_HOOKS");
+            environment.Remove("DOTNET_STARTUP_HOOKS");
+            if (hooks is not null) environment["DOTNET_STARTUP_HOOKS"] = hooks;
+            await ConnectAsync(cancellationToken, isolateStartupHooks: true).ConfigureAwait(false);
+            var launch = RequestAsync("launch", new { program = Path.GetFullPath(configuration.Program), cwd = configuration.WorkingDirectory, args = configuration.Arguments ?? [], env = environment, stopAtEntry = false, justMyCode = true, enableStepFiltering = true }, cancellationToken);
             await ConfigureAsync(breakpoints, breakOnThrown, cancellationToken).ConfigureAwait(false);
             await launch.ConfigureAwait(false);
         }
@@ -94,6 +110,11 @@ public sealed class DebugSession : IAsyncDisposable
     }
     public async Task StopAsync(bool? terminate = null, CancellationToken cancellationToken = default)
     {
+        // The bundled netcoredbg rejects DisconnectDetach for StartLaunch but its DAP
+        // handler still reports success. Closing the adapter afterward terminates the app.
+        // Refuse before sending anything or entering teardown so both remain usable.
+        if (terminate is false && IsActive && ownsDebuggee)
+            throw new NotSupportedException("The bundled debugger cannot detach from an application it launched. The application and debugger remain active. Detach is available for attached processes; Stop ends a launched application.");
         try { if (IsActive) await RequestAsync("disconnect", new { terminateDebuggee = terminate ?? ownsDebuggee }, cancellationToken).ConfigureAwait(false); }
         finally { await TearDownAsync(); }
     }

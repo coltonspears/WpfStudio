@@ -18,7 +18,7 @@ using WorkspaceDiagnostic = WpfStudio.Contracts.WorkspaceDiagnostic;
 namespace WpfStudio.Workspace;
 
 /// <summary>Lives exclusively in WorkspaceHost. User project assemblies are never loaded into the editor process.</summary>
-public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
+public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 {
     private MSBuildWorkspace? _workspace;
     private Solution? _solution;
@@ -27,9 +27,47 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
     private readonly Dictionary<string, string> _syncedTexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, (Document Document, long Version, CompletionItem Item)> _completions = new();
     private long _completionRequest;
+    private int _workspaceLoadsInProgress;
+    private bool _workspaceLoadAttempted;
+    private bool _workspaceInventoryReady;
 
     public async Task<WorkspaceSnapshot> LoadAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
     {
+        lock (_gate)
+        {
+            _workspaceLoadAttempted = true;
+            _workspaceInventoryReady = false;
+            _workspaceLoadsInProgress++;
+        }
+        try
+        {
+            var snapshot = await LoadCoreAsync(request, cancellationToken).ConfigureAwait(false);
+            lock (_gate) _workspaceInventoryReady = _solution is not null;
+            return snapshot;
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _workspaceLoadsInProgress--;
+                // Ownership is populated after the Roslyn solution is loaded. Publish
+                // that completed inventory together with a new semantic generation.
+                _semanticRevision++;
+            }
+        }
+    }
+
+    private async Task<WorkspaceSnapshot> LoadCoreAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            _solution = null;
+            _nameProjectionLoadEpoch++;
+            _nameProjections.Clear();
+            _nameProjectionStatuses.Clear();
+            _semanticRevision++;
+            ResetProjectAnalysis();
+        }
         var path = Path.GetFullPath(request.Path);
         var issues = new ConcurrentQueue<WorkspaceIssue>();
         var paths = ProjectDiscovery.GetProjectPaths(path);
@@ -46,12 +84,12 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
             if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
                 loaded = (await _workspace.OpenProjectAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false)).Solution;
             else loaded = await _workspace.OpenSolutionAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
-            lock (_gate) { _solution = loaded; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); }
+            lock (_gate) { _solution = loaded; _semanticRevision++; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _xamlProjects.Clear(); }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             issues.Enqueue(new WorkspaceIssue($"Language workspace could not load: {ex.Message}. File navigation remains available.", "Error"));
-            lock (_gate) { _solution = null; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); }
+            lock (_gate) { _solution = null; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _xamlProjects.Clear(); }
         }
         var models = new List<WorkspaceProject>();
         var configurations = new HashSet<string>(ProjectDiscovery.GetDeclaredConfigurations(path), StringComparer.OrdinalIgnoreCase);
@@ -63,6 +101,19 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
             ProjectDiscovery.EvaluatedProject? evaluated = null;
             try { evaluated = await ProjectDiscovery.EvaluateAsync(projectPath, request.Configuration, request.TargetFramework, cancellationToken).ConfigureAwait(false); }
             catch (Exception ex) when (ex is not OperationCanceledException) { issues.Enqueue(new WorkspaceIssue(ex.Message)); }
+            lock (_gate)
+                foreach (var context in loadedProjects.Where(p => string.Equals(p.FilePath, projectPath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (evaluated is null) _xamlInventoryUnavailable.Add(context.Id);
+                    else
+                    {
+                        _xamlInventory[context.Id] = evaluated.Files.Where(file => !file.IsGenerated && !IsGenerated(file.Path)
+                            && file.Path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)).Select(file => Path.GetFullPath(file.Path))
+                            .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
+                        _xamlResourceInventory[context.Id] = new(evaluated.XamlResources.Where(file => !IsGenerated(file.Path)).ToArray(),
+                            evaluated.OutputType is "Exe" or "WinExe");
+                    }
+                }
             foreach (var configuration in evaluated?.Configurations.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? ProjectDiscovery.GetDeclaredConfigurations(projectPath)) configurations.Add(configuration);
             var files = (evaluated?.Files ?? ProjectDiscovery.FallbackFiles(projectPath)).ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
             if (project is not null)
@@ -87,6 +138,18 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 evaluated?.TargetFramework, evaluated?.OutputPath ?? project?.OutputFilePath, evaluated?.OutputType is "Exe" or "WinExe",
                 files.Values.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToArray(), evaluated?.AssemblyName));
         }
+        lock (_gate)
+        {
+            CaptureDiskDocuments(loadedProjects);
+            foreach (var model in models)
+            foreach (var project in loadedProjects.Where(p => string.Equals(p.FilePath, model.ProjectPath, StringComparison.OrdinalIgnoreCase)))
+            foreach (var file in model.Files.Where(f => f.Path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)))
+            {
+                var filePath = Path.GetFullPath(file.Path);
+                if (!_xamlProjects.TryGetValue(filePath, out var owners)) _xamlProjects[filePath] = owners = [];
+                owners.Add(project.Id);
+            }
+        }
         if (configurations.Count == 0) { configurations.Add("Debug"); configurations.Add("Release"); }
         return new WorkspaceSnapshot(path, sdk, models, issues.ToArray(), configurations.OrderBy(value => value == "Debug" ? 0 : value == "Release" ? 1 : 2).ThenBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray());
     }
@@ -94,6 +157,8 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
     public async Task<DocumentUpdateResult> UpdateDocumentAsync(UpdateDocumentRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (request.Path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+            return await UpdateXamlProjectionDocumentAsync(request, cancellationToken).ConfigureAwait(false);
         Document document;
         var path = Path.GetFullPath(request.Path);
         lock (_gate)
@@ -110,6 +175,10 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
             {
                 foreach (var id in ids) solution = solution.WithDocumentText(id, SourceText.From(request.Text), PreservationMode.PreserveIdentity);
                 _solution = solution;
+                _semanticRevision++;
+                _xamlBatchCache.Clear();
+                _diskUnavailable.Remove(path);
+                _diskPending.Remove(path);
                 _versions[path] = request.Version;
                 _syncedTexts[path] = request.Text;
                 _completions.Clear(); // Changes in any file can change the semantic context of a completion.
@@ -119,19 +188,41 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
         if (!request.Analyze) return new DocumentUpdateResult(true, request.Version, []);
         var diagnostics = await GetDiagnosticsAsync(document, cancellationToken).ConfigureAwait(false);
         lock (_gate)
-            return _versions.TryGetValue(path, out var latest) && latest == request.Version ? new DocumentUpdateResult(true, request.Version, diagnostics) : new DocumentUpdateResult(false, _versions.GetValueOrDefault(path), []);
+            return _versions.TryGetValue(path, out var latest) && latest == request.Version && ReferenceEquals(document.Project.Solution, _solution) ? new DocumentUpdateResult(true, request.Version, diagnostics) : new DocumentUpdateResult(false, _versions.GetValueOrDefault(path), []);
     }
 
     public async Task CloseDocumentAsync(string path, CancellationToken cancellationToken)
     {
         path = Path.GetFullPath(path);
-        var text = File.Exists(path) ? SourceText.From(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false)) : null;
+        if (path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+        { await CloseXamlProjectionDocumentAsync(path, cancellationToken).ConfigureAwait(false); return; }
+        long? version;
+        string? synchronizedText;
         lock (_gate)
         {
+            version = _versions.TryGetValue(path, out var current) ? current : null;
+            synchronizedText = _syncedTexts.GetValueOrDefault(path);
+        }
+        var read = await ReadBoundedTextAsync(path, DiskDocumentCharacters, cancellationToken).ConfigureAwait(false);
+        lock (_gate)
+        {
+            // A new edit/reopen can arrive while disk I/O is pending. It owns the buffer.
+            if ((_versions.TryGetValue(path, out var current) ? (long?)current : null) != version
+                || _syncedTexts.GetValueOrDefault(path) != synchronizedText) return;
             if (_solution is { } solution)
             {
-                foreach (var id in solution.GetDocumentIdsWithFilePath(path)) solution = text is null ? solution.RemoveDocument(id) : solution.WithDocumentText(id, text);
+                if (read.Text is not null || read.State == "Missing")
+                    foreach (var id in solution.GetDocumentIdsWithFilePath(path))
+                        solution = solution.WithDocumentText(id, SourceText.From(read.Text ?? ""), PreservationMode.PreserveIdentity);
+                if (_diskDocuments.ContainsKey(path))
+                {
+                    if (read.Text is null) _diskUnavailable[path] = read.Status ?? "The model source file is unavailable.";
+                    else _diskUnavailable.Remove(path);
+                    _diskPending.Remove(path);
+                }
                 _solution = solution;
+                _semanticRevision++;
+                _xamlBatchCache.Clear();
             }
             _versions.Remove(path); _syncedTexts.Remove(path);
             _completions.Clear();
@@ -210,17 +301,14 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var symbol = await SymbolFinder.FindSymbolAtPositionAsync(document, request.Position, cancellationToken).ConfigureAwait(false);
         if (symbol is null) return [];
         var source = await SymbolFinder.FindSourceDefinitionAsync(symbol, document.Project.Solution, cancellationToken).ConfigureAwait(false) ?? symbol;
+        if (source is IFieldSymbol field && await GetProjectedNameDefinitionAsync(document.Project, field, cancellationToken).ConfigureAwait(false) is { } projected)
+            return projected;
         return await Task.WhenAll(source.Locations.Where(l => l.IsInSource).Select(l => ToLocationAsync(l, source.ToDisplayString(), cancellationToken))).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken)
     {
-        var document = GetDocument(request.Path, request.Version);
-        var symbol = await SymbolFinder.FindSymbolAtPositionAsync(document, request.Position, cancellationToken).ConfigureAwait(false);
-        if (symbol is null) return [];
-        var references = await SymbolFinder.FindReferencesAsync(symbol, document.Project.Solution, cancellationToken).ConfigureAwait(false);
-        var locations = await Task.WhenAll(references.SelectMany(r => r.Locations).Where(l => l.Location.IsInSource).Select(l => ToLocationAsync(l.Location, symbol.Name, cancellationToken))).ConfigureAwait(false);
-        return locations.Distinct().ToArray();
+        return (await FindSymbolReferencesAsync(new(request.Path, request.Position, request.Version), cancellationToken).ConfigureAwait(false)).Locations;
     }
 
     public async Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken)
@@ -234,32 +322,7 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
 
     public async Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken)
     {
-        if (!SyntaxFacts.IsValidIdentifier(request.NewName)) throw new ArgumentException("The new name must be a valid C# identifier.", nameof(request));
-        var document = GetDocument(request.Path, request.Version);
-        var original = document.Project.Solution;
-        Dictionary<string, long> versions;
-        lock (_gate) versions = new(_versions, StringComparer.OrdinalIgnoreCase);
-        var symbol = await SymbolFinder.FindSymbolAtPositionAsync(document, request.Position, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("No symbol at the caret.");
-        if (symbol.Locations.All(l => !l.IsInSource)) throw new InvalidOperationException("External symbols cannot be renamed.");
-        if (symbol.Locations.Any(l => IsGenerated(l.SourceTree?.FilePath ?? ""))) throw new InvalidOperationException("Rename the source declaration rather than a generated member.");
-        var changed = await Renamer.RenameSymbolAsync(original, symbol, new SymbolRenameOptions(), request.NewName, cancellationToken).ConfigureAwait(false);
-        var edits = new Dictionary<string, DocumentEdits>(StringComparer.OrdinalIgnoreCase);
-        var warnings = new List<string> { "C# references are updated. Review XAML bindings, resource keys, x:Class and reflection/string references before applying this rename." };
-        foreach (var projectChange in changed.GetChanges(original).GetProjectChanges())
-        foreach (var id in projectChange.GetChangedDocuments())
-        {
-            var before = original.GetDocument(id)!;
-            if (before.FilePath is not { } path) continue;
-            if (IsGenerated(path)) { warnings.Add($"Generated document excluded: {path}"); continue; }
-            var changes = await changed.GetDocument(id)!.GetTextChangesAsync(before, cancellationToken).ConfigureAwait(false);
-            var beforeText = await before.GetTextAsync(cancellationToken).ConfigureAwait(false);
-            var result = new DocumentEdits(path, versions.GetValueOrDefault(path), changes.Select(ToEdit).ToArray(), TextHash(beforeText.ToString()));
-            if (edits.TryGetValue(path, out var existing) && !existing.Edits.SequenceEqual(result.Edits)) throw new InvalidOperationException($"Linked project contexts produce conflicting edits for {path}.");
-            edits[path] = result;
-        }
-        lock (_gate)
-            if (!ReferenceEquals(original, _solution)) throw new InvalidOperationException("Documents changed while computing rename. Retry the rename.");
-        return new WorkspaceEditResult(edits.Values.ToArray(), warnings);
+        return await RenameWithXamlAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken)
@@ -355,5 +418,14 @@ public sealed class WorkspaceEngine : IWorkspaceRpc, IDisposable
         try { return System.Xml.Linq.XElement.Parse(xml).Element("summary")?.Value.Trim(); }
         catch (System.Xml.XmlException) { return null; }
     }
-    public void Dispose() => _workspace?.Dispose();
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            _solution = null;
+            _semanticRevision++;
+            ResetProjectAnalysis();
+        }
+        _workspace?.Dispose();
+    }
 }

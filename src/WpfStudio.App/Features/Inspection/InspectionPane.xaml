@@ -1,0 +1,158 @@
+<UserControl x:Class="WpfStudio.App.Features.Inspection.InspectionPane"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:WpfStudio.App.Features.Inspection" xmlns:b="clr-namespace:WpfStudio.App.Behaviors"
+ xmlns:appearance="clr-namespace:WpfStudio.App.Features.Appearance" xmlns:bindings="clr-namespace:WpfStudio.App.Features.BindingSources">
+ <UserControl.Resources>
+  <Style x:Key="IssueStateText" TargetType="Run">
+   <Setter Property="Text" Value="{Binding State}"/>
+   <Style.Triggers>
+    <DataTrigger Binding="{Binding State}" Value="Resolved"><Setter Property="Text" Value="Recovered"/></DataTrigger>
+    <DataTrigger Binding="{Binding State}" Value="NotObserved"><Setter Property="Text" Value="Awaiting observation"/></DataTrigger>
+    <DataTrigger Binding="{Binding State}" Value="BindingRemoved"><Setter Property="Text" Value="Binding removed or replaced"/></DataTrigger>
+    <DataTrigger Binding="{Binding State}" Value="TargetUnavailable"><Setter Property="Text" Value="Element unavailable"/></DataTrigger>
+    <DataTrigger Binding="{Binding State}" Value="SessionEnded"><Setter Property="Text" Value="Session ended"/></DataTrigger>
+   </Style.Triggers>
+  </Style>
+  <HierarchicalDataTemplate DataType="{x:Type local:RuntimeNodeViewModel}" ItemsSource="{Binding Children}">
+   <TextBlock Text="{Binding Label}" ToolTip="{Binding Node.Type}"/>
+  </HierarchicalDataTemplate>
+ </UserControl.Resources>
+ <DockPanel Background="{DynamicResource SurfaceBrush}">
+  <StackPanel DockPanel.Dock="Top" Margin="12,6">
+   <WrapPanel>
+    <Button Content="Run with inspection" Command="{Binding RunCommand}" Margin="0,0,6,0"/>
+    <Button Content="Debug with inspection" Command="{Binding DebugCommand}" Margin="0,0,12,0"/>
+    <Button Content="Refresh" Command="{Binding RefreshCommand}" IsEnabled="{Binding IsConnected}" Margin="0,0,6,0"/>
+    <Button Content="{Binding PickButtonLabel}" Command="{Binding TogglePickingCommand}" Margin="0,0,6,0"/>
+    <Button Content="Disconnect inspector" Command="{Binding DisconnectCommand}" ToolTip="Leaves the application running"/>
+    <CheckBox Content="Live refresh" IsChecked="{Binding AutoRefresh}" VerticalAlignment="Center" Margin="14,0"/>
+    <CheckBox Content="Logical tree" IsChecked="{Binding ShowLogicalTree}" VerticalAlignment="Center"/>
+    <CheckBox Content="Highlight selection" IsChecked="{Binding HighlightSelection}" IsEnabled="{Binding CanHighlight}" Margin="14,0,0,0" VerticalAlignment="Center"/>
+    <CheckBox Content="Verify source on build" IsChecked="{Binding VerifySourceOnBuild}" Margin="14,0,0,0" VerticalAlignment="Center" ToolTip="Keeps workspace XAML files stable during the inspected rebuild. Turn off for custom builds that rewrite those files; runtime inspection still works, but Show XAML will be unavailable."/>
+   </WrapPanel>
+   <TextBlock Text="{Binding SessionDescription}" Margin="0,5,0,0" FontWeight="SemiBold"/>
+   <TextBlock Text="{Binding Freshness}" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+   <TextBlock Text="{Binding PickStatus}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+   <DockPanel Margin="0,6,0,0">
+    <Button DockPanel.Dock="Left" Content="Show XAML" Command="{Binding ShowSourceCommand}" Margin="0,0,8,0" VerticalAlignment="Top" AutomationProperties.Name="Show runtime XAML"/>
+    <TextBlock Text="{Binding SourceDescription}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="11"/>
+   </DockPanel>
+  </StackPanel>
+  <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" TextWrapping="Wrap" Margin="12,6" Foreground="{DynamicResource MutedBrush}"/>
+  <Grid>
+   <Grid.ColumnDefinitions><ColumnDefinition Width="310" MinWidth="180"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*" MinWidth="300"/></Grid.ColumnDefinitions>
+   <TreeView ItemsSource="{Binding Tree}" b:Interaction.SelectedNode="{Binding SelectedNode}" b:Interaction.FollowSelection="True" BorderThickness="0">
+    <TreeView.ItemContainerStyle><Style TargetType="TreeViewItem"><Setter Property="IsExpanded" Value="True"/><Setter Property="IsSelected" Value="{Binding IsSelected,Mode=TwoWay}"/></Style></TreeView.ItemContainerStyle>
+   </TreeView>
+   <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}"/>
+   <TabControl Grid.Column="2" SelectedIndex="{Binding SelectedTabIndex}">
+    <TabItem Header="Binding issues">
+     <DockPanel>
+      <StackPanel DockPanel.Dock="Top" Margin="8">
+       <TextBlock Text="{Binding IssueSummary}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+       <TextBlock Text="Recovery requires a later successful observation of the same binding. Episodes count observed failures separated by a verified recovery; refreshes do not increase the count." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4"/>
+       <CheckBox Content="Include recovered, removed, and ended history" IsChecked="{Binding ShowIssueHistory}"/>
+      </StackPanel>
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+       <ItemsControl ItemsSource="{Binding IssueGroups}">
+        <ItemsControl.ItemTemplate><DataTemplate>
+         <Expander IsExpanded="True" Margin="6">
+          <Expander.Header><TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontWeight="SemiBold"/></Expander.Header>
+          <StackPanel Margin="18,4,4,8">
+           <TextBlock Text="{Binding Explanation}" TextWrapping="Wrap"/>
+           <TextBlock Text="{Binding SourceDescription}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+           <ItemsControl ItemsSource="{Binding Instances}">
+            <ItemsControl.ItemTemplate><DataTemplate>
+             <DockPanel Margin="0,5" ToolTip="{Binding Explanation}">
+              <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0">
+               <Button Content="Show element" Command="{Binding DataContext.SelectBindingIssueCommand,RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+               <Button Content="Show binding XAML" Command="{Binding DataContext.ShowBindingIssueSourceCommand,RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,4,0,0" AutomationProperties.Name="Show issue binding XAML"/>
+              </StackPanel>
+              <StackPanel>
+               <TextBlock Text="{Binding ElementLabel}" TextWrapping="Wrap"/>
+               <TextBlock Foreground="{DynamicResource MutedBrush}"><Run Style="{StaticResource IssueStateText}"/><Run Text=" · episodes "/><Run Text="{Binding Occurrences}"/></TextBlock>
+              </StackPanel>
+             </DockPanel>
+            </DataTemplate></ItemsControl.ItemTemplate>
+           </ItemsControl>
+          </StackPanel>
+         </Expander>
+        </DataTemplate></ItemsControl.ItemTemplate>
+       </ItemsControl>
+      </ScrollViewer>
+     </DockPanel>
+    </TabItem>
+    <TabItem Header="Bindings">
+     <DockPanel>
+      <bindings:BindingSourcePanel DockPanel.Dock="Top"/>
+      <diagnostics:BindingExplanationPanel xmlns:diagnostics="clr-namespace:WpfStudio.App.Features.BindingDiagnostics" DataContext="{Binding BindingExplanation}"/>
+     </DockPanel>
+    </TabItem>
+    <TabItem Header="Properties">
+     <DockPanel>
+      <Grid>
+       <Grid.ColumnDefinitions><ColumnDefinition Width="*" MinWidth="200"/><ColumnDefinition Width="360"/></Grid.ColumnDefinitions>
+       <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+       <StackPanel Margin="8">
+       <TextBlock FontWeight="SemiBold" Margin="0,0,0,5"><Run Text="Temporary value"/><Run Text=" · "/><Run Text="{Binding SelectedProperty.Name,Mode=OneWay}"/></TextBlock>
+       <DockPanel>
+        <CheckBox DockPanel.Dock="Right" Content="Null" IsChecked="{Binding EditAsNull}" IsEnabled="{Binding HasPropertySelection}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+        <TextBox Text="{Binding EditedValue,UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding HasPropertySelection}" MinHeight="30" MaxHeight="80" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Temporary property value"/>
+       </DockPanel>
+       <WrapPanel Margin="0,6,0,0">
+        <Button Content="Validate" Command="{Binding ValidatePropertyCommand}" Margin="0,0,6,4"/>
+        <Button Content="Try value" Command="{Binding ApplyPropertyCommand}" Margin="0,0,6,4"/>
+        <Button Content="Reset override" Command="{Binding ResetPropertyCommand}" Margin="0,0,6,4"/>
+        <Button Content="Reload value" Command="{Binding ReloadPropertyValueCommand}" Margin="0,0,6,4"/>
+        <Button Content="Check edit outcome" Command="{Binding CheckEditOutcomeCommand}" Margin="0,0,6,4"/>
+       </WrapPanel>
+       <TextBlock Text="{Binding PropertyEditHint}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+       <TextBlock Text="{Binding EditStatus}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+       <Separator Margin="0,10,0,6"/>
+       <TextBlock Text="Save the experiment in XAML" FontWeight="SemiBold"/>
+       <WrapPanel Margin="0,6,0,0">
+        <Button Content="Review XAML value…" Command="{Binding WritePropertyToSourceCommand}" Margin="0,0,6,4" AutomationProperties.Name="Review live XAML value" ToolTip="Review adding or replacing a local XAML value. The diff identifies bindings, resources or object content that would be replaced."/>
+        <Button Content="Review local removal…" Command="{Binding RemovePropertyFromSourceCommand}" Margin="0,0,6,4" ToolTip="Review removing the authored local value so a style, inherited value or default can apply. Does not edit a shared style."/>
+       </WrapPanel>
+       <TextBlock Text="{Binding SourcePropertyEditHint}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+       <TextBlock Text="{Binding SourceEditStatus}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+       </StackPanel>
+       </ScrollViewer>
+      <DataGrid ItemsSource="{Binding Properties}" SelectedItem="{Binding SelectedProperty}" b:Interaction.FollowSelection="True" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" HeadersVisibility="Column">
+       <DataGrid.Columns>
+        <DataGridTextColumn Header="Property" Binding="{Binding Name}" Width="180"/>
+        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"/>
+        <DataGridTextColumn Header="From" Binding="{Binding ValueSource}" Width="120"/>
+        <DataGridCheckBoxColumn Header="Override" Binding="{Binding IsOverridden}" Width="70"/>
+       </DataGrid.Columns>
+      </DataGrid>
+      </Grid>
+     </DockPanel>
+    </TabItem>
+    <TabItem Header="Binding trace history">
+     <DockPanel>
+      <TextBlock DockPanel.Dock="Top" Text="Historical trace messages are grouped and bounded. A quiet trace does not prove that a binding recovered; select its element for the current status." TextWrapping="Wrap" Margin="8" Foreground="{DynamicResource MutedBrush}"/>
+      <ListBox ItemsSource="{Binding Traces}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+       <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="6">
+        <TextBlock><Run Text="{Binding Timestamp}"/><Run Text=" · count "/><Run Text="{Binding Count}"/></TextBlock>
+        <TextBlock Text="{Binding Message}" TextWrapping="Wrap"/>
+       </StackPanel></DataTemplate></ListBox.ItemTemplate>
+      </ListBox>
+     </DockPanel>
+    </TabItem>
+    <TabItem Header="Layout" AutomationProperties.Name="Element layout"><layout:LayoutPanel xmlns:layout="clr-namespace:WpfStudio.App.Features.Layout" DataContext="{Binding LayoutDetails}"/></TabItem>
+    <TabItem Header="Appearance" IsSelected="{Binding AppearanceTabIsActive, Mode=TwoWay}" AutomationProperties.Name="Property appearance">
+     <DockPanel>
+      <DockPanel DockPanel.Dock="Top" Margin="8,6">
+       <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshAppearanceCommand}" Margin="6,0,0,0" AutomationProperties.Name="Refresh appearance"/>
+       <ComboBox ItemsSource="{Binding Properties}" SelectedItem="{Binding SelectedProperty, Mode=TwoWay}" AutomationProperties.Name="Appearance property">
+        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" ToolTip="{Binding OwnerType}"/></DataTemplate></ComboBox.ItemTemplate>
+       </ComboBox>
+      </DockPanel>
+      <appearance:AppearancePanel DataContext="{Binding AppearanceDetails}"/>
+     </DockPanel>
+    </TabItem>
+   </TabControl>
+  </Grid>
+ </DockPanel>
+</UserControl>

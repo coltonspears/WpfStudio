@@ -34,6 +34,7 @@ public static partial class ProjectDiscovery
         var properties = json.RootElement.GetProperty("Properties");
         string Property(string name) => properties.TryGetProperty(name, out var value) ? value.GetString() ?? "" : "";
         var files = new Dictionary<string, WorkspaceFile>(StringComparer.OrdinalIgnoreCase);
+        var resources = new List<EvaluatedXamlResource>();
         foreach (var group in json.RootElement.GetProperty("Items").EnumerateObject())
         foreach (var item in group.Value.EnumerateArray())
         {
@@ -41,8 +42,38 @@ public static partial class ProjectDiscovery
             if (string.IsNullOrEmpty(path)) continue;
             var link = item.TryGetProperty("Link", out var logicalPath) ? logicalPath.GetString() : null;
             files.TryAdd(path, new WorkspaceFile(path, System.IO.Path.GetFileName(path), group.Name, LogicalPath: string.IsNullOrWhiteSpace(link) ? null : link));
+            if (path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) && group.Name is "Page" or "ApplicationDefinition" or "Resource" or "Content")
+            {
+                string? Metadata(string name) => item.TryGetProperty(name, out var value) ? value.GetString() : null;
+                string? identity = group.Name == "Content" ? Metadata("TargetPath") : Metadata("LogicalName");
+                if (group.Name == "Content" && Metadata("CopyToOutputDirectory") is not ("Always" or "PreserveNewest" or "IfDifferent"))
+                    identity = null;
+                // WPF carries LogicalName/Link from markup items into generated BAML.
+                // Content needs an evaluated deployment path; its source location is
+                // not proof of where a custom build will place it.
+                if (group.Name != "Content" && string.IsNullOrWhiteSpace(identity))
+                {
+                    var perceived = string.IsNullOrWhiteSpace(link) ? path : System.IO.Path.GetFullPath(link, System.IO.Path.GetDirectoryName(projectPath)!);
+                    identity = System.IO.Path.GetRelativePath(System.IO.Path.GetDirectoryName(projectPath)!, perceived);
+                    if (identity.StartsWith(".." + System.IO.Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                        identity = System.IO.Path.GetFileName(perceived); // WPF ResourcesGenerator's outside-project fallback.
+                }
+                identity = NormalizeResourcePath(identity);
+                resources.Add(new(System.IO.Path.GetFullPath(path), identity, group.Name,
+                    identity is null ? "The evaluated resource output path is unavailable or unsupported." : null));
+            }
         }
-        return new EvaluatedProject(Property("TargetFramework"), Property("TargetFrameworks"), Property("TargetPath"), Property("OutputType"), files.Values.ToArray(), Property("AssemblyName"), Property("Configurations"));
+        return new EvaluatedProject(Property("TargetFramework"), Property("TargetFrameworks"), Property("TargetPath"), Property("OutputType"), files.Values.ToArray(), Property("AssemblyName"), Property("Configurations"), resources.ToArray());
+    }
+
+    private static string? NormalizeResourcePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length > 2048) return null;
+        path = path.Replace('\\', '/');
+        if (path.StartsWith('/') || path.Contains(':') || path.Contains('?') || path.Contains('#') || path.Any(char.IsControl)) return null;
+        var parts = path.Split('/');
+        if (parts.Any(part => part.Length == 0 || part is "." or "..")) return null;
+        return path;
     }
 
     internal static IReadOnlyList<WorkspaceFile> FallbackFiles(string projectPath)
@@ -85,5 +116,6 @@ public static partial class ProjectDiscovery
         catch (Exception exception) when (exception is IOException or System.Xml.XmlException) { return []; }
     }
 
-    internal sealed record EvaluatedProject(string TargetFramework, string TargetFrameworks, string OutputPath, string OutputType, IReadOnlyList<WorkspaceFile> Files, string AssemblyName, string Configurations);
+    internal sealed record EvaluatedXamlResource(string Path, string? ResourcePath, string Kind, string? Status);
+    internal sealed record EvaluatedProject(string TargetFramework, string TargetFrameworks, string OutputPath, string OutputType, IReadOnlyList<WorkspaceFile> Files, string AssemblyName, string Configurations, IReadOnlyList<EvaluatedXamlResource> XamlResources);
 }

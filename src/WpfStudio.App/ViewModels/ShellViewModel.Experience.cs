@@ -271,6 +271,10 @@ public sealed partial class ShellViewModel
         yield return Command("Debug", "Attach to process…", ShowToolCommand, "Debugger", icon: "Plug");
         yield return Command("View", "Solution Explorer", ShowToolCommand, "Explorer", icon: "Folder");
         yield return Command("View", "WPF Explorer", ShowToolCommand, "WpfTools", icon: "Layers");
+        yield return Command("View", "XAML Designer", OpenDesignerCommand, icon: "Layers");
+        yield return Command("View", "Live XAML", ShowToolCommand, "LiveInspection", icon: "Layers");
+        yield return Command("Debug", "Run with XAML inspection", RunWithInspectionCommand, icon: "PlayOutline");
+        yield return Command("Debug", "Debug with XAML inspection", DebugWithInspectionCommand, icon: "Play");
         yield return Command("View", "ColtonGPT", OpenAssistantCommand, icon: "Chat", detail: "Ask about code with optional editor context");
         yield return Command("View", "Output", ShowToolCommand, "Output", icon: "Output");
         yield return Command("View", "Problems", ShowToolCommand, "Problems", icon: "Warning");

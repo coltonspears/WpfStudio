@@ -1,0 +1,25 @@
+<UserControl x:Class="WpfStudio.InspectionFixture.AppearanceView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:fixture="clr-namespace:WpfStudio.InspectionFixture">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="AppearanceResources.xaml"/></ResourceDictionary.MergedDictionaries>
+   <SolidColorBrush x:Key="LocalAccent" Color="DarkCyan"/>
+   <Style x:Key="BaseAppearanceStyle" TargetType="TextBlock"><Setter Property="Foreground" Value="Navy"/></Style>
+   <Style x:Key="AppearanceStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseAppearanceStyle}">
+    <Setter Property="Foreground" Value="DarkGreen"/>
+    <Style.Triggers><Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="Gray"/></Trigger></Style.Triggers>
+   </Style>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <StackPanel x:Name="Body">
+  <TextBlock x:Name="AppearanceStyle" Text="Styled appearance" Style="{StaticResource AppearanceStyle}"/>
+  <TextBlock x:Name="AppearanceStatic" Text="Static appearance" Foreground="{StaticResource LocalAccent}"/>
+  <TextBlock x:Name="AppearanceDynamic" Text="Dynamic appearance" Foreground="{DynamicResource SharedAccent}"/>
+  <fixture:AppearanceProbe x:Name="AppearanceReadOnly"/>
+  <Button x:Name="AppearanceTemplate" Content="Template appearance">
+   <Button.Template><ControlTemplate TargetType="Button"><Border Background="Teal"><ContentPresenter/></Border></ControlTemplate></Button.Template>
+  </Button>
+ </StackPanel>
+</UserControl>

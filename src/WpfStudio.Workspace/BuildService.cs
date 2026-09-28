@@ -133,6 +133,7 @@ public sealed partial class BuildService
             if (request.Operation == BuildOperation.Restore) args.Add($"-p:TargetFramework={request.TargetFramework}");
             else args.AddRange(["--framework", request.TargetFramework]);
         }
+        if (request.XamlDebuggingInformation) args.Add("-p:XamlDebuggingInformation=true");
         if (request.Operation == BuildOperation.Run)
         {
             if (!string.IsNullOrWhiteSpace(request.LaunchProfile)) args.AddRange(["--launch-profile", request.LaunchProfile]);

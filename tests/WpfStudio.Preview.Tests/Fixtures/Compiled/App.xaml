@@ -1,0 +1,15 @@
+<Application x:Class="WpfStudio.PreviewFixture.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MustNotOpen.xaml" Startup="StartupTrap">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Theme/Colors.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <Style TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource AppAccent}" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

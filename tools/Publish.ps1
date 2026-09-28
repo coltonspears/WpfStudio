@@ -21,7 +21,7 @@ function Assert-ArtifactPath([string]$Path) {
 }
 
 function Invoke-DotNet([string[]]$Arguments) {
-    & dotnet @Arguments
+    & dotnet @Arguments '-m:2'
     if ($LASTEXITCODE -ne 0) { throw "dotnet $($Arguments -join ' ') failed with exit code $LASTEXITCODE" }
 }
 
@@ -30,7 +30,7 @@ function Export-PackageNotices {
     New-Item -ItemType Directory -Path $noticeDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses/AvalonEdit-LICENSE.txt') -Destination $noticeDirectory
     $inventory = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($project in @('WpfStudio.App', 'WpfStudio.WorkspaceHost')) {
+    foreach ($project in @('WpfStudio.App', 'WpfStudio.WorkspaceHost', 'WpfStudio.PreviewHost')) {
         $assetsPath = Join-Path $repository "src/$project/obj/project.assets.json"
         $assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
         foreach ($library in $assets.libraries.PSObject.Properties) {
@@ -86,10 +86,29 @@ try {
     Invoke-DotNet @('publish', 'src/WpfStudio.App/WpfStudio.App.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', $staging)
     # Preserve the entire worker publication, including Roslyn BuildHost-netcore and its dependency files.
     Invoke-DotNet @('publish', 'src/WpfStudio.WorkspaceHost/WpfStudio.WorkspaceHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'WorkspaceHost'))
+    Invoke-DotNet @('publish', 'src/WpfStudio.PreviewHost/WpfStudio.PreviewHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'PreviewHost'))
+    $inspectionDirectory = Join-Path $staging 'Inspection'
+    New-Item -ItemType Directory -Path $inspectionDirectory -Force | Out-Null
+    # Injected libraries run on the target's .NET/WPF runtime. Publish them
+    # independently so the IDE's RID/self-contained settings cannot leak in.
+    Invoke-DotNet @('publish', 'src/WpfStudio.Inspection.StartupHook/WpfStudio.Inspection.StartupHook.csproj', '-c', $Configuration, '--self-contained', 'false', '-o', $inspectionDirectory)
+    Invoke-DotNet @('publish', 'src/WpfStudio.Inspection.Agent/WpfStudio.Inspection.Agent.csproj', '-c', $Configuration, '--self-contained', 'false', '-o', $inspectionDirectory)
 
     $required = @(
         'WpfStudio.exe',
         'WorkspaceHost/WpfStudio.WorkspaceHost.dll',
+        'PreviewHost/WpfStudio.PreviewHost.exe',
+        'PreviewHost/WpfStudio.PreviewHost.dll',
+        'PreviewHost/WpfStudio.PreviewHost.deps.json',
+        'PreviewHost/WpfStudio.PreviewHost.runtimeconfig.json',
+        'PreviewHost/WpfStudio.Wpf.PropertyEditing.dll',
+        'PreviewHost/WpfStudio.Wpf.Diagnostics.dll',
+        'PreviewHost/WpfStudio.Inspection.Protocol.dll',
+        'Inspection/WpfStudio.Inspection.StartupHook.dll',
+        'Inspection/WpfStudio.Inspection.Agent.dll',
+        'Inspection/WpfStudio.Inspection.Protocol.dll',
+        'Inspection/WpfStudio.Wpf.PropertyEditing.dll',
+        'Inspection/WpfStudio.Wpf.Diagnostics.dll',
         'WorkspaceHost/BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll',
         'Assets/Terminal/index.html',
         'Assets/Terminal/xterm.js',
@@ -99,6 +118,18 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $staging $relative))) { throw "Published package is incomplete: $relative is missing." }
     }
     Copy-Item -LiteralPath (Join-Path $repository 'README.md'), (Join-Path $repository 'VALIDATION.md'), (Join-Path $repository 'THIRD-PARTY-NOTICES.md'), (Join-Path $PSScriptRoot 'DEBUGGER-NOTICES.md') -Destination $staging
+    $documentationDirectory = Join-Path $staging 'docs'
+    New-Item -ItemType Directory -Path $documentationDirectory -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/xaml-devtools-design.md'), (Join-Path $repository 'docs/xaml-runtime-bootstrap.md'), (Join-Path $repository 'docs/xaml-preview-scenarios.md'), (Join-Path $repository 'docs/xaml-appearance.md'), (Join-Path $repository 'docs/xaml-binding-navigation.md'), (Join-Path $repository 'docs/xaml-binding-diagnostics.md'), (Join-Path $repository 'docs/xaml-named-elements.md'), (Join-Path $repository 'docs/xaml-preview-interaction.md'), (Join-Path $repository 'docs/xaml-resource-resolution-plan.md'), (Join-Path $repository 'docs/xaml-feature-tour.md'), (Join-Path $repository 'docs/xaml-language-performance.md') -Destination $documentationDirectory
+    $imageDirectory = Join-Path $documentationDirectory 'images'
+    New-Item -ItemType Directory -Path $imageDirectory -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/images/xaml') -Destination $imageDirectory -Recurse
+    $performanceDocumentation = Join-Path $documentationDirectory 'performance'
+    New-Item -ItemType Directory -Path $performanceDocumentation -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/performance/xaml-resource-scale.json') -Destination $performanceDocumentation
+    $benchmarkDocumentation = Join-Path $staging 'tools/XamlLanguageBench'
+    New-Item -ItemType Directory -Path $benchmarkDocumentation -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repository 'tools/XamlLanguageBench/README.md') -Destination $benchmarkDocumentation
     $sampleRoot = Join-Path $repository 'samples/CounterApp'
     foreach ($sampleFile in Get-ChildItem -LiteralPath $sampleRoot -Recurse -File | Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' }) {
         $sampleTarget = Join-Path $staging ('samples/CounterApp/' + [IO.Path]::GetRelativePath($sampleRoot, $sampleFile.FullName))

@@ -24,7 +24,7 @@ internal sealed class ShellTestContext : IAsyncDisposable
     public ShellViewModel Shell { get; }
     private readonly DebuggerViewModel _debugger;
     private readonly TerminalViewModel _terminal;
-    public ShellTestContext()
+    public ShellTestContext(WpfStudio.Runtime.Design.IPreviewClient? previewClient = null)
     {
         Directory.CreateDirectory(Root);
         Store = new DocumentStore(Path.Combine(Root, "state"));
@@ -32,7 +32,8 @@ internal sealed class ShellTestContext : IAsyncDisposable
         var database = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Root, "sql.json")), Dialogs, Dialogs);
         _debugger = new DebuggerViewModel(new DebugSession(), Dispatcher);
         _terminal = new TerminalViewModel(Dispatcher);
-        Shell = new ShellViewModel(Store, settings, Workspace, new BuildService(), new WpfIndexService(), new ScaffoldingService(), new WorkspaceEditTransaction(Store), Xaml, Dialogs, Dialogs, Dispatcher, _debugger, _terminal, database, NullLogger<ShellViewModel>.Instance);
+        Shell = new ShellViewModel(Store, settings, Workspace, new BuildService(), new WpfIndexService(), new ScaffoldingService(), new WorkspaceEditTransaction(Store), Xaml, Dialogs, Dialogs, Dispatcher, _debugger, _terminal, database, NullLogger<ShellViewModel>.Instance,
+            designer: previewClient == null ? null : new WpfStudio.App.Features.Designer.DesignerViewModel(previewClient, Dispatcher));
     }
     public async Task<string> CreateFileAsync(string name, string content)
     {
@@ -47,7 +48,24 @@ internal sealed class ShellTestContext : IAsyncDisposable
         await Shell.DisposeAsync();
         await _debugger.DisposeAsync();
         await _terminal.DisposeAsync();
-        Directory.Delete(Root, true);
+        await DeleteRootAsync();
+    }
+    private async Task DeleteRootAsync()
+    {
+        string root = Path.GetFullPath(Root);
+        string temporaryDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+        if (!string.Equals(Path.GetDirectoryName(root), temporaryDirectory, StringComparison.OrdinalIgnoreCase)
+            || !Path.GetFileName(root).StartsWith("WpfStudio-ShellTests-", StringComparison.Ordinal))
+            throw new InvalidOperationException("Refusing to clean a path outside this test's temporary directory.");
+        // Worker shutdown requests process-tree termination but does not await
+        // exit. Allow transient Windows handles to close; persistent I/O errors
+        // still fail cleanup after seven attempts (3.15 seconds of total delay).
+        for (int attempt = 0; ; attempt++)
+        {
+            try { Directory.Delete(root, recursive: true); return; }
+            catch (IOException) when (attempt < 6)
+            { await Task.Delay(50 << attempt).ConfigureAwait(false); }
+        }
     }
 }
 

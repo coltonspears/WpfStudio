@@ -13,6 +13,7 @@ using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Rendering;
 using ICSharpCode.AvalonEdit.Search;
 using WpfStudio.App.ViewModels;
+using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 
@@ -29,6 +30,7 @@ public sealed class EditorSurface : TextEditor
     private bool _syncing;
     private CompletionWindow? _completion;
     private CancellationTokenSource? _completionRequest;
+    private CancellationTokenSource? _hoverRequest;
     private PendingCompletion? _pendingCompletion;
     private bool _replayingInput;
     private readonly ToolTip _signature = new() { Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint, StaysOpen = false };
@@ -67,14 +69,9 @@ public sealed class EditorSurface : TextEditor
         LostKeyboardFocus += (_, _) => CancelPendingCompletion();
         PreviewKeyDown += OnPreviewKeyDown;
         Loaded += (_, _) => Attach(); Unloaded += (_, _) => Detach();
-        MouseHover += (_, e) =>
-        {
-            var position = GetPositionFromPoint(e.GetPosition(this)); if (position == null || ViewModel == null) return;
-            var offset = Document.GetOffset(position.Value.Location);
-            var diagnostic = ViewModel.Diagnostics.FirstOrDefault(d => offset >= d.Start && offset <= d.Start + Math.Max(1, d.Length));
-            if (diagnostic != null) { _signature.Content = diagnostic.Id + ": " + diagnostic.Message; _signature.PlacementTarget = this; _signature.IsOpen = true; }
-        };
-        MouseHoverStopped += (_, _) => _signature.IsOpen = false;
+        MouseHover += OnMouseHover;
+        MouseHoverStopped += (_, _) => CancelHover();
+        ContextMenuOpening += (_, _) => { if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset); };
     }
     public EditorViewModel? ViewModel { get => (EditorViewModel?)GetValue(ViewModelProperty); set => SetValue(ViewModelProperty, value); }
     private static void Changed(DependencyObject owner, DependencyPropertyChangedEventArgs args) => ((EditorSurface)owner).Attach();
@@ -90,24 +87,43 @@ public sealed class EditorSurface : TextEditor
         IsReadOnly = ViewModel.State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
         ViewModel.State.PropertyChanged += StateChanged; ViewModel.PropertyChanged += ModelChanged;
         ViewModel.NavigationRequested += Navigate; ViewModel.Diagnostics.CollectionChanged += DiagnosticsChanged; ViewModel.BreakpointLines.CollectionChanged += BreakpointsChanged;
+        ViewModel.SelectionRequested += RestoreSelection;
         ViewModel.BreakpointMarkers.CollectionChanged += BreakpointsChanged;
         _syncing = false; Navigate();
     }
     private void Detach()
     {
+        CancelHover();
         CancelPendingCompletion();
         _completion?.Close(); _completionRequest?.Cancel();
         if (_attached != null)
         {
             _attached.State.PropertyChanged -= StateChanged; _attached.PropertyChanged -= ModelChanged;
             _attached.NavigationRequested -= Navigate; _attached.Diagnostics.CollectionChanged -= DiagnosticsChanged; _attached.BreakpointLines.CollectionChanged -= BreakpointsChanged;
+            _attached.SelectionRequested -= RestoreSelection;
             _attached.BreakpointMarkers.CollectionChanged -= BreakpointsChanged;
         }
         _attached = null;
     }
-    private void StateChanged(object? sender, PropertyChangedEventArgs args) { if (args.PropertyName == nameof(DocumentState.Content) && !_syncing) SyncText(); }
-    private void ModelChanged(object? sender, PropertyChangedEventArgs args) { if (args.PropertyName == nameof(EditorViewModel.ExecutionLine)) { _margin.InvalidateVisual(); TextArea.TextView.InvalidateLayer(KnownLayer.Background); } }
-    private void DiagnosticsChanged(object? sender, NotifyCollectionChangedEventArgs args) => TextArea.TextView.InvalidateLayer(KnownLayer.Selection);
+    private void StateChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName != nameof(DocumentState.Content)) return;
+        CancelHover();
+        if (!_syncing) SyncText();
+    }
+    private void ModelChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(EditorViewModel.ExecutionLine)) { _margin.InvalidateVisual(); TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
+        if (args.PropertyName == nameof(EditorViewModel.XamlContextRevision))
+        {
+            _completionRequest?.Cancel(); _completion?.Close(); CancelHover();
+        }
+    }
+    private void DiagnosticsChanged(object? sender, NotifyCollectionChangedEventArgs args)
+    {
+        CancelHover();
+        TextArea.TextView.InvalidateLayer(KnownLayer.Selection);
+    }
     private void BreakpointsChanged(object? sender, NotifyCollectionChangedEventArgs args) => _margin.InvalidateVisual();
     private void SyncText()
     {
@@ -134,12 +150,64 @@ public sealed class EditorSurface : TextEditor
         CaretOffset = Math.Clamp(ViewModel.State.CaretOffset, 0, Document.TextLength);
         TextArea.Caret.BringCaretToView(); Focus();
     }
+    private void RestoreSelection(EditorSelection selection)
+    {
+        bool syncing = _syncing;
+        _syncing = true;
+        try
+        {
+            CaretOffset = selection.CaretOffset;
+            int anchor = selection.CaretOffset == selection.Start ? selection.Start + selection.Length : selection.Start;
+            TextArea.Selection = Selection.Create(TextArea, anchor, selection.CaretOffset);
+            TextArea.Caret.BringCaretToView();
+            if (ViewModel is { } model)
+            {
+                model.State.CaretLine = TextArea.Caret.Line;
+                model.State.CaretColumn = TextArea.Caret.Column;
+            }
+        }
+        finally { _syncing = syncing; }
+    }
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (_pendingCompletion != null && e.Key == Key.Escape) { CancelPendingCompletion(); e.Handled = true; return; }
         if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _ = ShowCompletionAsync(); }
-        else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ContextMenu != null) { ContextMenu.PlacementTarget = this; ContextMenu.IsOpen = true; e.Handled = true; }
-        else if (e.Key == Key.Escape) { _completion?.Close(); _signature.IsOpen = false; }
+        else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ContextMenu != null)
+        {
+            if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset);
+            ContextMenu.PlacementTarget = this; ContextMenu.IsOpen = true; e.Handled = true;
+        }
+        else if (e.Key == Key.Escape) { _completion?.Close(); CancelHover(); }
+    }
+    private async void OnMouseHover(object? sender, MouseEventArgs e)
+    {
+        CancelHover();
+        if (ViewModel is not { } vm || GetPositionFromPoint(e.GetPosition(this)) is not { } position) return;
+        int offset = Document.GetOffset(position.Location);
+        long version = vm.State.Version;
+        _hoverRequest = new CancellationTokenSource();
+        var token = _hoverRequest.Token;
+        var diagnostic = vm.Diagnostics.FirstOrDefault(d => offset >= d.Start && offset < d.Start + Math.Max(1, d.Length));
+        string? message = diagnostic is null ? null : diagnostic.Id + ": " + diagnostic.Message;
+        if (message is not null) ShowHover(message);
+        try
+        {
+            var hover = await vm.HoverAsync(offset, token);
+            if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
+            if (hover is not null) message = message is null ? hover.Text : message + Environment.NewLine + Environment.NewLine + hover.Text;
+            if (!string.IsNullOrEmpty(message)) ShowHover(message);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { if (!token.IsCancellationRequested && vm == ViewModel) vm.LanguageStatus = ex.Message; }
+    }
+    private void ShowHover(string text)
+    {
+        _signature.Content = text; _signature.PlacementTarget = this; _signature.IsOpen = true;
+    }
+    private void CancelHover()
+    {
+        _hoverRequest?.Cancel(); _hoverRequest?.Dispose(); _hoverRequest = null;
+        _signature.IsOpen = false;
     }
     private void OnTextEntered(object? sender, TextCompositionEventArgs e)
     {
@@ -153,13 +221,16 @@ public sealed class EditorSurface : TextEditor
         if (ViewModel == null || IsReadOnly || _pendingCompletion != null) return;
         _completionRequest?.Cancel(); _completionRequest?.Dispose(); _completionRequest = new();
         var token = _completionRequest.Token; var vm = ViewModel; var version = vm.State.Version; var caret = CaretOffset;
+        long contextRevision = vm.XamlContextRevision;
         try
         {
             var result = await vm.CompleteAsync(caret, token);
-            if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version || caret != CaretOffset || result.Items.Count == 0 || !IsKeyboardFocusWithin) return;
+            if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version || caret != CaretOffset || result.Items.Count == 0 || !IsKeyboardFocusWithin
+                || vm.IsXaml && contextRevision != vm.XamlContextRevision) return;
             _completion?.Close();
-            var window = new CompletionWindow(TextArea) { StartOffset = result.Start, EndOffset = caret, CloseWhenCaretAtBeginning = true };
-            foreach (var item in result.Items.Take(250)) window.CompletionList.CompletionData.Add(new StudioCompletion(this, item, result.Version));
+            var end = vm.State.Extension == ".xaml" ? Math.Clamp(result.Start + result.Length, caret, Document.TextLength) : caret;
+            var window = new CompletionWindow(TextArea) { StartOffset = result.Start, EndOffset = end, CloseWhenCaretAtBeginning = true };
+            foreach (var item in result.Items.Take(250)) window.CompletionList.CompletionData.Add(new StudioCompletion(this, item, result.Version, contextRevision));
             window.Closed += (_, _) => { if (_completion == window) _completion = null; };
             _completion = window; window.Show();
         }
@@ -181,13 +252,55 @@ public sealed class EditorSurface : TextEditor
     }
     private void OnTextEntering(object? sender, TextCompositionEventArgs args)
     {
-        if (_replayingInput) return;
-        if (_pendingCompletion is { } pending)
+        if (!_replayingInput && _pendingCompletion is { } pending)
         {
             pending.Input.Add(new BufferedInput(args.Text, null, null)); args.Handled = true; return;
         }
-        if (_completion != null && args.Text.Length > 0 && !char.IsLetterOrDigit(args.Text[0]) && args.Text[0] != '_')
+        if (!_replayingInput && _completion != null && args.Text.Length > 0 && !char.IsLetterOrDigit(args.Text[0]) && args.Text[0] != '_')
             _completion.CompletionList.RequestInsertion(args);
+        if (!args.Handled && TryXamlTyping(args.Text)) args.Handled = true;
+    }
+    // AvalonEdit must consume this in TextEntering: a single update contains the
+    // typed character and generated suffix, including input replayed after completion.
+    private bool TryXamlTyping(string input)
+    {
+        if ((_replayingInput ? _attached : ViewModel) is not { IsXaml: true } || IsReadOnly || TextArea.OverstrikeMode || !TextArea.Selection.IsEmpty ||
+            Document.TextLength > XamlTypingService.MaximumCharacters || !TextArea.ReadOnlySectionProvider.CanInsert(CaretOffset)) return false;
+        var plan = XamlTypingService.GetEdit(Text, CaretOffset, SelectionLength, input, Options.IndentationString,
+            TextUtilities.GetNewLineFromDocument(Document, TextArea.Caret.Line));
+        if (plan is null) return false;
+        if (plan.Edit.Length > 0)
+        {
+            var editable = TextArea.ReadOnlySectionProvider.GetDeletableSegments(new TextSegment { StartOffset = plan.Edit.Start, Length = plan.Edit.Length }).ToArray();
+            if (editable.Length != 1 || editable[0].Offset != plan.Edit.Start || editable[0].Length != plan.Edit.Length) return false;
+        }
+        using (Document.RunUpdate())
+        {
+            if (plan.Edit.Length != 0 || plan.Edit.NewText.Length != 0)
+            {
+                Document.Replace(plan.Edit.Start, plan.Edit.Length, plan.Edit.NewText);
+                // AvalonEdit records the pre-edit caret for undo. Redo replays
+                // that position before the insertion, so it also needs the
+                // intended position inside the generated pair after insertion.
+                Document.UndoStack.PushOptional(new RestoreTypingCaretOnRedo(TextArea, Document, plan.CaretOffset));
+            }
+            CaretOffset = plan.CaretOffset;
+            TextArea.ClearSelection();
+        }
+        TextArea.Caret.BringCaretToView();
+        return true;
+    }
+    private sealed class RestoreTypingCaretOnRedo(TextArea textArea, TextDocument document, int caretOffset) : IUndoableOperation
+    {
+        private readonly WeakReference<TextArea> _textArea = new(textArea);
+        private readonly WeakReference<TextDocument> _document = new(document);
+        public void Undo() { }
+        public void Redo()
+        {
+            if (!_textArea.TryGetTarget(out var area) || !_document.TryGetTarget(out var buffer) || area.Document != buffer) return;
+            area.Caret.Offset = Math.Clamp(caretOffset, 0, buffer.TextLength);
+            area.ClearSelection();
+        }
     }
     private void OnPreviewExecuted(object sender, ExecutedRoutedEventArgs args)
     {
@@ -195,7 +308,7 @@ public sealed class EditorSurface : TextEditor
         pending.Input.Add(new BufferedInput(null, command, args.Parameter)); args.Handled = true;
     }
 
-    private Task AcceptCompletionAsync(CompletionEntry entry, long version, ISegment segment, EventArgs insertionRequest)
+    private Task AcceptCompletionAsync(CompletionEntry entry, long version, long contextRevision, ISegment segment, EventArgs insertionRequest)
     {
         if (ViewModel is not { } vm) return Task.CompletedTask;
         string? punctuation = insertionRequest is TextCompositionEventArgs textInput ? textInput.Text : null;
@@ -203,6 +316,7 @@ public sealed class EditorSurface : TextEditor
         int start = segment.Offset, length = segment.Length;
         return CommitCompletionAsync(async token =>
         {
+            if (vm.IsXaml) return (vm.State.Version, vm.XamlCompletionEdit(entry, start, length, contextRevision));
             if (vm.State.Extension != ".cs") return (vm.State.Version, new TextEdit(start, length, entry.InsertText));
             if (version != vm.State.Version)
             {
@@ -282,14 +396,14 @@ public sealed class EditorSurface : TextEditor
         public CancellationTokenSource Cancellation { get; } = new(TimeSpan.FromSeconds(5));
         public List<BufferedInput> Input { get; } = [];
     }
-    private sealed class StudioCompletion(EditorSurface owner, CompletionEntry entry, long version) : ICompletionData
+    private sealed class StudioCompletion(EditorSurface owner, CompletionEntry entry, long version, long contextRevision) : ICompletionData
     {
         public ImageSource? Image => null;
         public string Text => entry.DisplayText;
         public object Content => entry.DisplayText;
         public object Description => entry.Description ?? string.Join(", ", entry.Tags);
         public double Priority => 0;
-        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => _ = owner.AcceptCompletionAsync(entry, version, completionSegment, insertionRequestEventArgs);
+        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => _ = owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs);
     }
     private sealed class DebugMargin(EditorSurface owner) : AbstractMargin
     {

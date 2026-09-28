@@ -1,0 +1,35 @@
+<UserControl x:Class="WpfStudio.PreviewFixture.AppearanceView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:WpfStudio.PreviewFixture">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Theme/Appearance.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <local:DeferredAppearanceValue x:Key="NeverConstructed" />
+            <Style x:Key="AppearanceBase" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource AppearanceAccent}" />
+                <Setter Property="Tag" Value="{StaticResource NeverConstructed}" />
+            </Style>
+            <Style x:Key="AppearanceDerived" TargetType="Button" BasedOn="{StaticResource AppearanceBase}">
+                <Setter Property="Background" Value="CornflowerBlue" />
+                <Style.Triggers>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Background" Value="Gray" />
+                    </Trigger>
+                    <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                        <Setter Property="Background" Value="Orange" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+    <StackPanel>
+        <!-- Local Tag hides the deferred style setter; inspection must not inflate it. -->
+        <Button x:Name="AppearanceTarget" Content="Styles" Tag="local tag" Style="{StaticResource AppearanceDerived}" />
+        <Button x:Name="DynamicTarget" Content="Dynamic" Background="{DynamicResource AppearanceAccent}" />
+        <Button x:Name="StaticTarget" Content="Static" Background="{StaticResource AppearanceAccent}" />
+        <TextBlock x:Name="AppearanceCounters" />
+    </StackPanel>
+</UserControl>

@@ -1,0 +1,56 @@
+<UserControl x:Class="WpfStudio.InspectionFixture.BindingSourceProbeView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <UserControl.Resources>
+  <Style x:Key="ProbeStyle" TargetType="TextBlock">
+   <Setter Property="Text" Value="{Binding Primary}"/>
+  </Style>
+  <Binding x:Key="ProbeSharedBinding" Path="Primary"/>
+ </UserControl.Resources>
+ <StackPanel>
+  <TextBlock x:Name="InlinePrimary" Text="{Binding Primary}" Tag="{Binding Secondary}" ToolTip="{Binding Primary}"/>
+  <TextBlock x:Name="EntityPrimary" Text="{Binding Pri&#109;ary}"/>
+  <TextBlock x:Name="MultilinePrimary" Text="{Binding
+    Path=Primary,
+    Mode=OneWay}"/>
+  <TextBlock x:Name="ObjectPrimary">
+   <TextBlock.Text>
+    <Binding Path="Primary"/>
+   </TextBlock.Text>
+  </TextBlock>
+  <TextBlock x:Name="StylePrimary" Style="{StaticResource ProbeStyle}"/>
+  <TextBlock x:Name="StyleShared" Style="{StaticResource ProbeStyle}"/>
+  <ContentControl x:Name="TemplateOwner">
+   <ContentControl.Template>
+    <ControlTemplate TargetType="ContentControl">
+     <TextBlock x:Name="TemplatePrimary" Text="{Binding Primary}"/>
+    </ControlTemplate>
+   </ContentControl.Template>
+  </ContentControl>
+  <ContentPresenter x:Name="DataTemplateOwner" Content="{Binding}">
+   <ContentPresenter.ContentTemplate>
+    <DataTemplate>
+     <TextBlock x:Name="DataTemplatePrimary" Text="{Binding Primary}"/>
+    </DataTemplate>
+   </ContentPresenter.ContentTemplate>
+  </ContentPresenter>
+  <TextBlock x:Name="MultiPrimary">
+   <TextBlock.Text>
+    <MultiBinding StringFormat="{}{0}:{1}">
+     <Binding Path="Primary"/>
+     <Binding Path="Secondary"/>
+    </MultiBinding>
+   </TextBlock.Text>
+  </TextBlock>
+  <TextBlock x:Name="PriorityPrimary">
+   <TextBlock.Text>
+    <PriorityBinding>
+     <Binding Path="MissingPrimary"/>
+     <Binding Path="Primary"/>
+    </PriorityBinding>
+   </TextBlock.Text>
+  </TextBlock>
+  <TextBlock x:Name="ResourcePrimary"/>
+  <TextBlock x:Name="CodePrimary"/>
+ </StackPanel>
+</UserControl>

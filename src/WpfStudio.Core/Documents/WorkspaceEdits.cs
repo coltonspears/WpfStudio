@@ -24,7 +24,7 @@ public sealed class WorkspaceEditTransaction
         }
         return changes;
     }
-    public async Task ApplyAsync(IReadOnlyList<FileChange> changes, CancellationToken token = default)
+    public async Task ApplyAsync(IReadOnlyList<FileChange> changes, CancellationToken token = default, Func<bool>? canApply = null)
     {
         var resolved = new List<(DocumentState? Document, FileChange Change)>();
         if (changes.Select(c => System.IO.Path.GetFullPath(c.Path)).Distinct(StringComparer.OrdinalIgnoreCase).Count() != changes.Count)
@@ -50,14 +50,19 @@ public sealed class WorkspaceEditTransaction
             if (item.Document != null && item.Document.Content != item.Change.Before) throw new InvalidOperationException($"{item.Document.Name} changed after the preview. Recompute the edit.");
             if (item.Document == null && (_store.Find(item.Change.Path) != null || File.Exists(item.Change.Path))) throw new ExternalFileChangedException(item.Change.Path);
         }
+        if (canApply is not null && !canApply())
+            throw new InvalidOperationException("The context for this reviewed edit changed. Recompute the edit.");
         var applied = new List<AppliedChange>();
         foreach (var item in resolved)
         {
+            // An unchanged document can be a prerequisite for a cross-file action.
+            // Check it above, but do not turn it into an edit or an undo dependency.
+            if (item.Document is not null && item.Change.Before == item.Change.After) continue;
             var document = item.Document ?? _store.Create(item.Change.Path);
             document.Content = item.Change.After;
             applied.Add(new(item.Change, document, item.Document == null));
         }
-        _undo.Push(applied);
+        if (applied.Count > 0) _undo.Push(applied);
     }
     /// <summary>Restores buffers and returns newly-created, never-saved documents removed from the store.</summary>
     public IReadOnlyList<string> Undo()
@@ -84,13 +89,27 @@ public sealed class WorkspaceEditTransaction
     }
     public static string ApplyTextEdits(string text, IReadOnlyList<TextEdit> edits)
     {
+        if (edits.Count == 0) return text;
+        var ordered = edits.OrderByDescending(edit => edit.Start).ToArray();
         var lastStart = text.Length;
-        foreach (var edit in edits.OrderByDescending(e => e.Start))
+        foreach (var edit in ordered)
         {
-            if (edit.Start < 0 || edit.Length < 0 || edit.Start + edit.Length > lastStart) throw new InvalidOperationException("Overlapping or invalid edits received.");
-            text = text.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.NewText);
+            if (edit.Start < 0 || edit.Start > lastStart || edit.Length < 0 || edit.Length > lastStart - edit.Start || edit.NewText is null)
+                throw new InvalidOperationException("Overlapping or invalid edits received.");
             lastStart = edit.Start;
         }
-        return text;
+        // Formatting can contain thousands of trivia edits. Copy each unchanged
+        // range once, retaining the previous ordering for same-offset insertions.
+        var output = new StringBuilder(text.Length);
+        int cursor = 0;
+        for (int index = ordered.Length - 1; index >= 0; index--)
+        {
+            var edit = ordered[index];
+            output.Append(text, cursor, edit.Start - cursor);
+            output.Append(edit.NewText);
+            cursor = edit.Start + edit.Length;
+        }
+        output.Append(text, cursor, text.Length - cursor);
+        return output.ToString();
     }
 }

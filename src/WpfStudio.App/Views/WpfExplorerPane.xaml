@@ -36,7 +36,25 @@
      <Expander Header="Asset tools" Margin="0,10,0,0" Visibility="{Binding HasWpfAssetSelection, Converter={StaticResource BooleanToVisibility}}"><StackPanel><Button Content="Import asset…" c:Ui.Icon="Image" Command="{Binding ImportAssetCommand}" HorizontalAlignment="Left"/><ComboBox ItemsSource="{Binding BuildActions}" SelectedItem="{Binding SelectedBuildAction}" ToolTip="Build action"/><WrapPanel><Button Content="Set build action" Command="{Binding SetBuildActionCommand}"/><Button Content="Show pack URI" c:Ui.Icon="Link" Command="{Binding ShowPackUriCommand}"/></WrapPanel></StackPanel></Expander>
     </StackPanel></ScrollViewer></Border>
    </Grid></TabItem>
-   <TabItem Header="{Binding WpfIssueTitle}"><DockPanel><TextBlock DockPanel.Dock="Top" Text="Errors are definite problems. Informational items need runtime or library context and may be valid." Style="{StaticResource Caption}" Margin="12,8,12,4"/><ListBox ItemsSource="{Binding WpfIssues}" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}"><ListBox.ItemTemplate><DataTemplate><DockPanel><c:Glyph DockPanel.Dock="Left" Width="15" Height="15" Margin="0,1,8,0" VerticalAlignment="Top" Kind="{Binding Severity, Converter={StaticResource SeverityGlyph}}" Foreground="{Binding Severity, Converter={StaticResource SeverityGlyph}, ConverterParameter=Brush}"/><StackPanel><TextBlock Text="{Binding Message}" TextWrapping="Wrap"/><TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="0,3,0,0"/></StackPanel></DockPanel></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel></TabItem>
+   <TabItem Header="{Binding WpfIssueTitle}">
+    <DockPanel>
+     <StackPanel DockPanel.Dock="Top" Margin="12,8,12,4">
+      <TextBlock Text="Errors are definite problems. Informational items need runtime or library context and may be valid." Style="{StaticResource Caption}" />
+      <TextBlock Text="{Binding XamlAnalysisStatus}" Style="{StaticResource Caption}" Margin="0,4,0,0" TextWrapping="Wrap" />
+      <Button Content="Check project XAML" Style="{StaticResource QuietButton}" Command="{Binding RefreshProjectXamlAnalysisCommand}" HorizontalAlignment="Left" Margin="-4,4,0,0" />
+     </StackPanel>
+     <ListBox ItemsSource="{Binding WpfIssues}" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
+      <ListBox.ItemTemplate><DataTemplate><DockPanel>
+       <c:Glyph DockPanel.Dock="Left" Width="15" Height="15" Margin="0,1,8,0" VerticalAlignment="Top" Kind="{Binding Severity, Converter={StaticResource SeverityGlyph}}" Foreground="{Binding Severity, Converter={StaticResource SeverityGlyph}, ConverterParameter=Brush}"/>
+       <StackPanel>
+        <TextBlock Text="{Binding Message}" TextWrapping="Wrap"/>
+        <TextBlock Text="{Binding ProjectName}" Foreground="{DynamicResource AccentBrush}" FontSize="11" Margin="0,3,0,0" Visibility="{Binding ProjectName, Converter={StaticResource Presence}}"/>
+        <TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="0,3,0,0"/>
+       </StackPanel>
+      </DockPanel></DataTemplate></ListBox.ItemTemplate>
+     </ListBox>
+    </DockPanel>
+   </TabItem>
   </TabControl>
  </DockPanel>
 </UserControl>

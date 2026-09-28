@@ -3,13 +3,23 @@
   <MenuItem Header="Go to definition" c:Ui.Icon="Target" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Definition}" InputGestureText="F12"/>
   <MenuItem Header="Find references" c:Ui.Icon="Search" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.References}" InputGestureText="Shift+F12"/>
   <MenuItem Header="Switch view ⇄ view model" c:Ui.Icon="Swap" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.SwitchRelated}" InputGestureText="F7"/>
+  <MenuItem Header="Open XAML designer" c:Ui.Icon="Layers" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.OpenDesigner}" IsEnabled="{Binding IsXaml}"/>
+  <MenuItem Header="Quick fixes" InputGestureText="Ctrl+." ItemsSource="{Binding QuickFixes}" IsEnabled="{Binding HasItems, RelativeSource={RelativeSource Self}}">
+   <MenuItem.ItemContainerStyle>
+    <Style TargetType="MenuItem">
+     <Setter Property="Header" Value="{Binding Title}"/>
+     <Setter Property="Command" Value="{Binding ApplyCommand}"/>
+     <Setter Property="CommandParameter" Value="{Binding Action}"/>
+    </Style>
+   </MenuItem.ItemContainerStyle>
+  </MenuItem>
   <Separator/>
   <MenuItem Header="Refactor" c:Ui.Icon="Braces">
    <MenuItem Header="Rename symbol…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Rename}" InputGestureText="F2"/>
    <MenuItem Header="Organize usings…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.OrganizeUsings}"/>
    <MenuItem Header="Use var…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.UseVar}"/>
    <MenuItem Header="Use explicit type…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.UseExplicitType}"/>
-   <Separator/><MenuItem Header="Format document" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Format}"/>
+   <Separator/><MenuItem Header="Format document" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Format}" InputGestureText="Ctrl+Shift+F"/>
   </MenuItem>
   <MenuItem Header="MVVM" c:Ui.Icon="Layers">
    <MenuItem Header="Insert observable property…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertProperty}"/>

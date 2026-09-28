@@ -1,0 +1,213 @@
+<UserControl x:Class="WpfStudio.App.Features.Designer.DesignerPane"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:WpfStudio.App.Features.Designer" xmlns:b="clr-namespace:WpfStudio.App.Behaviors"
+ xmlns:layout="clr-namespace:WpfStudio.App.Features.Layout" xmlns:appearance="clr-namespace:WpfStudio.App.Features.Appearance"
+ xmlns:bindings="clr-namespace:WpfStudio.App.Features.BindingSources">
+ <UserControl.Resources>
+  <BooleanToVisibilityConverter x:Key="DesignerBoolVisibility"/>
+  <local:NativePreviewSuppressionConverter x:Key="NativePreviewSuppression"/>
+  <HierarchicalDataTemplate DataType="{x:Type local:DesignerNode}" ItemsSource="{Binding Children}">
+   <TextBlock Text="{Binding Label}" ToolTip="{Binding Node.Type}" />
+  </HierarchicalDataTemplate>
+ </UserControl.Resources>
+ <DockPanel Background="{DynamicResource SurfaceBrush}">
+  <StackPanel x:Name="DesignerHeader" DockPanel.Dock="Top">
+   <WrapPanel Margin="8,4">
+    <TextBlock Text="{Binding DocumentName}" ToolTip="{Binding DocumentName}" MaxWidth="200" TextTrimming="CharacterEllipsis"
+               FontWeight="SemiBold" VerticalAlignment="Center" Margin="4,0,16,0" />
+    <ComboBox ItemsSource="{Binding PreviewModes}" SelectedItem="{Binding Mode}" MinWidth="98" Margin="2" ToolTip="Source uses the editor buffer; Compiled runs the last built view"/>
+    <Button Content="Refresh" Command="{Binding RefreshCommand}" Margin="2" ToolTip="Recreate the preview from its source or built view; resets preview state" />
+    <Button Content="Update snapshot" Command="{Binding UpdateSnapshotCommand}" Margin="2"
+            AutomationProperties.Name="Update preview snapshot" ToolTip="Reread the existing view, tree and diagnostics without recreating the preview" />
+    <Button Content="Interact" Command="{Binding EnterInteractionCommand}" Margin="2"
+            AutomationProperties.Name="Interact with preview" ToolTip="Use the real view with mouse and keyboard at 100% size. Press F8 to return to inspection.">
+     <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers>
+      <DataTrigger Binding="{Binding IsInteracting}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+     </Style.Triggers></Style></Button.Style>
+    </Button>
+    <Button Content="Inspect" Command="{Binding ExitInteractionCommand}" Margin="2"
+            AutomationProperties.Name="Inspect preview" ToolTip="Return to picking and overlays; update the snapshot without recreating the view (F8)">
+     <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers>
+      <DataTrigger Binding="{Binding IsInteracting}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+     </Style.Triggers></Style></Button.Style>
+    </Button>
+    <Button Content="Restart" Command="{Binding RestartCommand}" Margin="2" ToolTip="Restart the isolated preview process" />
+    <Button Content="Stop" Command="{Binding StopCommand}" Margin="2" />
+    <CheckBox Content="Live preview" IsChecked="{Binding AutoRefresh}" IsEnabled="{Binding SupportsLivePreview}" Margin="12,0" VerticalAlignment="Center" />
+   </WrapPanel>
+   <WrapPanel Margin="12,0,12,3">
+    <TextBlock Text="Scenario" VerticalAlignment="Center" Margin="0,0,6,0"/>
+    <ComboBox ItemsSource="{Binding Scenarios}" SelectedItem="{Binding SelectedScenario}" DisplayMemberPath="Name"
+              MinWidth="160" MaxWidth="280" AutomationProperties.Name="Preview scenario" Margin="0,0,8,0"
+              ToolTip="Select a named scenario, then Refresh. Default preserves the view's data."/>
+    <Button Content="Reload scenarios" Command="{Binding ReloadScenariosCommand}" Margin="0,0,8,0"/>
+    <CheckBox Content="Design-time values" IsChecked="{Binding UseDesignTimeValues}" IsEnabled="{Binding SupportsLivePreview}"
+              AutomationProperties.Name="Use design-time values" VerticalAlignment="Center"
+              ToolTip="Apply supported d: values in Source mode. Refresh to apply changes."/>
+   </WrapPanel>
+   <Expander x:Name="PreviewSettings" IsExpanded="False" AutomationProperties.Name="Preview settings" Margin="12,0,12,4">
+    <Expander.Header>
+     <StackPanel Orientation="Horizontal">
+      <TextBlock Text="Preview settings" VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding ScenarioDescription}" ToolTip="{Binding ScenarioDescription}" TextTrimming="CharacterEllipsis"
+                 MaxWidth="680" FontSize="11" Margin="16,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource SubtleBrush}"/>
+     </StackPanel>
+    </Expander.Header>
+    <ScrollViewer MaxHeight="170" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+     <StackPanel Margin="0,4,0,2">
+      <WrapPanel>
+       <TextBlock Text="Size" VerticalAlignment="Center" Margin="0,0,6,0"/>
+       <TextBox Text="{Binding PreviewWidth}" Width="58" Margin="2" ToolTip="Width in DIPs; refresh to apply"/>
+       <TextBlock Text="×" VerticalAlignment="Center"/>
+       <TextBox Text="{Binding PreviewHeight}" Width="58" Margin="2" ToolTip="Height in DIPs; refresh to apply"/>
+       <TextBlock Text="Zoom" VerticalAlignment="Center" Margin="12,0,0,0"/>
+       <Slider Value="{Binding Zoom}" Minimum="0.1" Maximum="2" Width="85" VerticalAlignment="Center" Margin="8,0,4,0" ToolTip="Snapshot zoom; interactive preview uses actual size (100%)"/>
+       <TextBlock Text="{Binding Zoom, StringFormat={}{0:P0}}" VerticalAlignment="Center" Margin="4"/>
+      </WrapPanel>
+      <StackPanel Visibility="{Binding UsesApplicationResources, Converter={StaticResource DesignerBoolVisibility}}" Margin="0,4">
+       <WrapPanel>
+        <StackPanel Orientation="Horizontal" Visibility="{Binding IsCompiledPreview, Converter={StaticResource DesignerBoolVisibility}}">
+         <TextBlock Text="View type" VerticalAlignment="Center" Margin="0,0,6,0"/>
+         <TextBox Text="{Binding ViewTypeName, UpdateSourceTrigger=PropertyChanged}" MinWidth="240" Margin="0,0,12,0" ToolTip="Full CLR name of the built view"/>
+        </StackPanel>
+        <TextBlock Text="App resources" VerticalAlignment="Center" Margin="0,0,6,0"/>
+        <TextBox Text="{Binding ApplicationResourcePath, UpdateSourceTrigger=PropertyChanged}" MinWidth="150" ToolTip="Compiled application XAML resource path; leave empty to omit"/>
+       </WrapPanel>
+       <TextBlock Text="{Binding BuildDescription}" TextWrapping="Wrap" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="0,4,0,0"/>
+      </StackPanel>
+      <TextBlock Text="{Binding SessionDescription}" TextWrapping="Wrap" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="0,4"/>
+      <TextBlock Text="{Binding ScenarioConfigurationTitle}" FontWeight="SemiBold" Margin="0,4,0,0"/>
+      <TextBlock Text="{Binding ScenarioConfigurationDescription}" TextWrapping="Wrap" FontSize="11" Margin="0,4"/>
+      <Button Content="Open configuration" Command="{Binding OpenScenarioConfigurationCommand}" HorizontalAlignment="Left"/>
+      <TextBlock Text="Factories run from the last built project in the isolated preview. Save configuration changes, then Refresh."
+                 TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource SubtleBrush}" Margin="0,4"/>
+      <ItemsControl ItemsSource="{Binding ScenarioWarnings}">
+       <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2"/></DataTemplate></ItemsControl.ItemTemplate>
+      </ItemsControl>
+     </StackPanel>
+    </ScrollViewer>
+   </Expander>
+  </StackPanel>
+  <Border DockPanel.Dock="Bottom" Padding="12,5" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+   <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
+  </Border>
+  <Grid x:Name="DesignerBody">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="190" MinWidth="130"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*" MinWidth="200"/><ColumnDefinition Width="5"/><ColumnDefinition Width="340" MinWidth="230"/></Grid.ColumnDefinitions>
+   <DockPanel>
+    <CheckBox DockPanel.Dock="Top" Content="Logical tree" IsChecked="{Binding ShowLogicalTree}" Margin="10,6" />
+    <Button DockPanel.Dock="Bottom" Content="Go to source" Command="{Binding GoToSourceCommand}" Margin="6" />
+    <TreeView ItemsSource="{Binding Tree}" b:Interaction.SelectedNode="{Binding SelectedNode}" BorderThickness="0">
+     <TreeView.ItemContainerStyle><Style TargetType="TreeViewItem"><Setter Property="IsExpanded" Value="True"/><Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/></Style></TreeView.ItemContainerStyle>
+    </TreeView>
+   </DockPanel>
+   <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}"/>
+   <DockPanel Grid.Column="2" Background="{DynamicResource EditorBrush}">
+    <TextBlock DockPanel.Dock="Bottom" Text="{Binding SelectionDescription}" TextWrapping="Wrap" Margin="10,5" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+    <Grid>
+     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Padding="16">
+      <ScrollViewer.Style><Style TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}"><Style.Triggers>
+       <DataTrigger Binding="{Binding IsInteracting}" Value="True"><Setter Property="Visibility" Value="Hidden"/></DataTrigger>
+      </Style.Triggers></Style></ScrollViewer.Style>
+      <local:PreviewSurface ImageBytes="{Binding Image}" Scale="{Binding Zoom}" Selection="{Binding SelectionBounds}" LayoutOverlays="{Binding LayoutDetails.VisibleOverlays}" PickCommand="{Binding PickElementCommand}" IsEnabled="{Binding IsCurrent}" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+     </ScrollViewer>
+     <!-- Native content is never transformed or placed inside a WPF ScrollViewer. -->
+     <local:NativePreviewPane Session="{Binding InteractionSession}" IsActive="{Binding IsInteracting}"
+                              ContentWidth="{Binding InteractionWidth}" ContentHeight="{Binding InteractionHeight}"
+                              ExitInteractionCommand="{Binding ExitInteractionCommand}">
+      <local:NativePreviewPane.Style><Style TargetType="local:NativePreviewPane"><Setter Property="Visibility" Value="Hidden"/><Style.Triggers>
+       <DataTrigger Binding="{Binding IsInteracting}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+      </Style.Triggers></Style></local:NativePreviewPane.Style>
+      <local:NativePreviewPane.IsSuppressed>
+       <MultiBinding Converter="{StaticResource NativePreviewSuppression}">
+        <Binding Path="MainWindow.DataContext.IsPaletteOpen" Source="{x:Static Application.Current}"/>
+        <Binding Path="MainWindow.DataContext.IsScaffoldOpen" Source="{x:Static Application.Current}"/>
+        <Binding Path="MainWindow.DataContext.IsPreviewOpen" Source="{x:Static Application.Current}"/>
+        <Binding Path="MainWindow.DataContext.IsSettingsOpen" Source="{x:Static Application.Current}"/>
+       </MultiBinding>
+      </local:NativePreviewPane.IsSuppressed>
+     </local:NativePreviewPane>
+    </Grid>
+   </DockPanel>
+   <GridSplitter Grid.Column="3" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}"/>
+   <TabControl Grid.Column="4" b:Interaction.FollowSelection="True" SelectedIndex="{Binding SelectedTabIndex}">
+    <!-- Keep inspector headers on one row as the pane narrows. Wrapping takes
+         space from the selected property's rows and editing controls. -->
+    <TabControl.Template>
+     <ControlTemplate TargetType="TabControl">
+      <Grid KeyboardNavigation.TabNavigation="Local" SnapsToDevicePixels="True">
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+       <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="0,0,0,1">
+        <ScrollViewer x:Name="DesignerInspectorTabs" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                      Focusable="False" CanContentScroll="False" AutomationProperties.Name="Preview inspector tabs">
+         <TabPanel x:Name="HeaderPanel" IsItemsHost="True" Margin="4,0" KeyboardNavigation.TabIndex="1" Panel.ZIndex="1"/>
+        </ScrollViewer>
+       </Border>
+       <Border Grid.Row="1" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+               KeyboardNavigation.TabNavigation="Local" KeyboardNavigation.DirectionalNavigation="Contained" KeyboardNavigation.TabIndex="2">
+        <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"/>
+       </Border>
+      </Grid>
+     </ControlTemplate>
+    </TabControl.Template>
+    <TabItem Header="Properties">
+     <DockPanel>
+      <StackPanel DockPanel.Dock="Bottom" Margin="8" IsEnabled="{Binding IsCurrent}">
+       <TextBlock Text="{Binding SelectedProperty.Type}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource SubtleBrush}" />
+       <TextBox Text="{Binding EditedValue, UpdateSourceTrigger=PropertyChanged}" Margin="0,6" MinHeight="36" MaxHeight="96"
+                AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                ToolTip="Literal property value; try it in the preview or review a XAML edit"/>
+       <WrapPanel IsEnabled="{Binding SelectedProperty.CanEdit}">
+        <Button Content="Try value" Command="{Binding ApplyPropertyCommand}" Margin="0,0,4,0"/>
+        <Button Content="Reset" Command="{Binding ResetPropertyCommand}"/>
+       </WrapPanel>
+       <WrapPanel Margin="0,6,0,0" ToolTip="{Binding SourceEditDescription}">
+        <Button Content="Write to XAML…" Command="{Binding WritePropertyToSourceCommand}" Margin="0,0,4,0"/>
+        <Button Content="Remove local XAML…" Command="{Binding RemovePropertyFromSourceCommand}"/>
+       </WrapPanel>
+      </StackPanel>
+      <DataGrid x:Name="PreviewPropertiesGrid" ItemsSource="{Binding Properties}" SelectedItem="{Binding SelectedProperty}" b:Interaction.FollowSelection="True" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" HeadersVisibility="Column">
+       <DataGrid.Columns>
+        <DataGridTextColumn Header="Property" Binding="{Binding Name}" Width="110"/>
+        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"/>
+        <DataGridTextColumn Header="From" Binding="{Binding ValueSource}" Width="80">
+         <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="ToolTip" Value="{Binding ValueSource}"/></Style></DataGridTextColumn.ElementStyle>
+        </DataGridTextColumn>
+       </DataGrid.Columns>
+      </DataGrid>
+     </DockPanel>
+    </TabItem>
+    <TabItem Header="Bindings">
+     <DockPanel>
+      <bindings:BindingSourcePanel DockPanel.Dock="Top"/>
+      <diagnostics:BindingExplanationPanel xmlns:diagnostics="clr-namespace:WpfStudio.App.Features.BindingDiagnostics" DataContext="{Binding BindingExplanation}"/>
+     </DockPanel>
+    </TabItem>
+    <TabItem Header="Diagnostics">
+     <ListBox ItemsSource="{Binding Diagnostics}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+      <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4,6">
+       <TextBlock Text="{Binding Severity}" FontWeight="SemiBold"/>
+       <TextBlock Text="{Binding Message}" TextWrapping="Wrap"/>
+       <Button Content="Explain binding" HorizontalAlignment="Left" Margin="0,4,0,0"
+               Command="{Binding DataContext.ShowBindingDiagnosticCommand,RelativeSource={RelativeSource AncestorType=UserControl}}"
+               CommandParameter="{Binding}" AutomationProperties.Name="Explain preview binding">
+        <Button.Style><Style TargetType="Button"><Style.Triggers><DataTrigger Binding="{Binding BindingId}" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Button.Style>
+       </Button>
+      </StackPanel></DataTemplate></ListBox.ItemTemplate>
+     </ListBox>
+    </TabItem>
+    <TabItem Header="Layout" AutomationProperties.Name="Element layout"><layout:LayoutPanel DataContext="{Binding LayoutDetails}"/></TabItem>
+    <TabItem Header="Appearance" IsSelected="{Binding AppearanceTabIsActive, Mode=TwoWay}" AutomationProperties.Name="Property appearance">
+     <DockPanel>
+      <DockPanel DockPanel.Dock="Top" Margin="8,6">
+       <Button DockPanel.Dock="Right" Content="Refresh" Command="{Binding RefreshAppearanceCommand}" Margin="6,0,0,0" AutomationProperties.Name="Refresh appearance"/>
+       <ComboBox ItemsSource="{Binding Properties}" SelectedItem="{Binding SelectedProperty, Mode=TwoWay}" AutomationProperties.Name="Appearance property">
+        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" ToolTip="{Binding OwnerType}"/></DataTemplate></ComboBox.ItemTemplate>
+       </ComboBox>
+      </DockPanel>
+      <appearance:AppearancePanel DataContext="{Binding AppearanceDetails}"/>
+     </DockPanel>
+    </TabItem>
+   </TabControl>
+  </Grid>
+ </DockPanel>
+</UserControl>

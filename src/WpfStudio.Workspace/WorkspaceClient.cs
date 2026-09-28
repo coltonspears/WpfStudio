@@ -13,6 +13,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Dictionary<string, UpdateDocumentRequest> _buffers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, XamlNameProjectionPlan> _nameProjections = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _bufferGate = new();
     private Process? _process;
     private NamedPipeClientStream? _pipe;
@@ -25,6 +26,10 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public WorkspaceClient(string? hostPath = null) => _hostPath = hostPath;
     public event EventHandler<WorkspaceDiagnosticEvent>? DiagnosticsReceived;
     public event EventHandler<string>? WorkerExited;
+    /// <summary>Project types or worker availability changed; subscribers must marshal to their UI dispatcher.</summary>
+    public event EventHandler? SemanticStateChanged;
+    /// <summary>Accepted generated-name projections changed; C# subscribers must invalidate same-version observations.</summary>
+    public event EventHandler? NameProjectionChanged;
     public int? WorkerProcessId
     {
         get { try { return _process is { HasExited: false } process ? process.Id : null; } catch (InvalidOperationException) { return null; } }
@@ -46,12 +51,16 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            bool hadNameProjections = NameProjectionPlans().Length != 0;
             StopWorker();
-            lock (_bufferGate) _buffers.Clear();
+            lock (_bufferGate) { _buffers.Clear(); _nameProjections.Clear(); }
             _lastLoad = request;
             await StartWorkerAsync(request.Path, cancellationToken).ConfigureAwait(false);
             // RPC cancellation otherwise waits for the server to acknowledge it. User build tasks may ignore cancellation.
-            return await Proxy.LoadAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            var snapshot = await Proxy.LoadAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+            if (hadNameProjections) NameProjectionChanged?.Invoke(this, EventArgs.Empty);
+            return snapshot;
         }
         catch { StopWorker(); throw; }
         finally { _lifecycle.Release(); }
@@ -72,6 +81,15 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             UpdateDocumentRequest[] buffers;
             lock (_bufferGate) buffers = _buffers.Values.ToArray();
             foreach (var buffer in buffers) await Proxy.UpdateDocumentAsync(buffer, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            var replayPlans = NameProjectionPlans();
+            foreach (var plan in replayPlans)
+            {
+                var result = await Proxy.ApplyXamlNameProjectionAsync(new(plan, buffers, Replay: true), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+                if (!result.Accepted) throw new InvalidOperationException("Generated-name projection could not be restored: " + result.Status);
+                if (result.BaselineRefreshed) ForgetNameProjection(plan);
+            }
+            if (replayPlans.Length != 0) NameProjectionChanged?.Invoke(this, EventArgs.Empty);
+            SemanticStateChanged?.Invoke(this, EventArgs.Empty);
             return snapshot;
         }
         catch { StopWorker(); throw; }
@@ -80,30 +98,161 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
 
     public async Task<DocumentUpdateResult> UpdateDocumentAsync(UpdateDocumentRequest request, CancellationToken cancellationToken = default)
     {
-        lock (_bufferGate)
-        {
-            if (_buffers.TryGetValue(request.Path, out var existing) && existing.Version == request.Version && existing.Text != request.Text)
-                throw new InvalidOperationException("A document version cannot identify different text. Increment its version before updating.");
-            if (!_buffers.TryGetValue(request.Path, out var previous) || request.Version >= previous.Version) _buffers[request.Path] = request;
-        }
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        try { return await UpdateDocumentCoreAsync(request, lifetime.Token).ConfigureAwait(false); }
+        finally { _lifecycle.Release(); }
+    }
+
+    private async Task<DocumentUpdateResult> UpdateDocumentCoreAsync(UpdateDocumentRequest request, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        bool changed = RememberBuffer(request);
+        bool semanticChange = changed && !IsXaml(request.Path);
+        // Only C# synchronization invalidates dependent XAML here. XAML editors
+        // already share resource invalidation; firing their own event would
+        // cancel the synchronization at the start of every analysis.
+        if (semanticChange) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
         var result = await Proxy.UpdateDocumentAsync(request, cancellationToken).ConfigureAwait(false);
+        if (semanticChange) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+        if (changed && IsXaml(request.Path) && result.Accepted) NotifyNameProjectionChanged();
         if (result.Accepted && request.Analyze) DiagnosticsReceived?.Invoke(this, new WorkspaceDiagnosticEvent(request.Path, result.Version, result.Diagnostics));
         return result;
     }
 
-    public async Task CloseDocumentAsync(string path, CancellationToken cancellationToken = default)
+    private bool RememberBuffer(UpdateDocumentRequest request)
     {
-        // Forget discarded text even if the worker is gone or crashes while processing close.
-        lock (_bufferGate) _buffers.Remove(path);
-        if (IsConnected) await Proxy.CloseDocumentAsync(path, cancellationToken).ConfigureAwait(false);
+        lock (_bufferGate)
+        {
+            if (_buffers.TryGetValue(request.Path, out var existing) && existing.Version == request.Version && existing.Text != request.Text)
+                throw new InvalidOperationException("A document version cannot identify different text. Increment its version before updating.");
+            bool changed = !_buffers.TryGetValue(request.Path, out var previous) || (request.Version >= previous.Version && request.Text != previous.Text);
+            if (previous is null || request.Version >= previous.Version) _buffers[request.Path] = request;
+            return changed;
+        }
     }
 
+    public async Task CloseDocumentAsync(string path, CancellationToken cancellationToken = default)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            // Forget discarded text even if the worker is gone or crashes while processing close.
+            lock (_bufferGate) _buffers.Remove(path);
+            if (IsConnected) await Proxy.CloseDocumentAsync(path, lifetime.Token).ConfigureAwait(false);
+            SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+            if (IsXaml(path)) NotifyNameProjectionChanged();
+        }
+        finally { _lifecycle.Release(); }
+    }
+
+    public async Task<XamlNameProjectionResult> ApplyXamlNameProjectionAsync(XamlNameProjectionRequest request, CancellationToken cancellationToken = default)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            lock (_bufferGate)
+                if (!_nameProjections.ContainsKey(request.Plan.XamlPath) && _nameProjections.Count >= 32)
+                    return new(false, "The generated-name projection limit was reached. Save, build and reload before another page rename.");
+            ValidateProjectionBuffers(request.Documents);
+            var result = await Proxy.ApplyXamlNameProjectionAsync(request, lifetime.Token).ConfigureAwait(false);
+            if (result.Accepted)
+            {
+                foreach (var document in request.Documents) RememberBuffer(document);
+                if (result.BaselineRefreshed) ForgetNameProjection(request.Plan);
+                else lock (_bufferGate) _nameProjections[request.Plan.XamlPath] = request.Plan;
+                SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+                NameProjectionChanged?.Invoke(this, EventArgs.Empty);
+            }
+            return result;
+        }
+        finally { _lifecycle.Release(); }
+    }
+
+    /// <summary>Reconciles an entire completed editor transaction, without observing its per-file intermediate states.</summary>
+    public async Task<XamlNameProjectionResult> ReconcileNameProjectionsAsync(IReadOnlyList<UpdateDocumentRequest> documents, CancellationToken cancellationToken = default)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ValidateProjectionBuffers(documents);
+            var plans = NameProjectionPlans();
+            if (plans.Length == 0)
+            {
+                foreach (var document in documents)
+                {
+                    var synchronized = await UpdateDocumentCoreAsync(document, lifetime.Token).ConfigureAwait(false);
+                    // Unowned scratch files have no worker document. They must
+                    // not prevent operations on a separate, evaluated page.
+                    if (!synchronized.Accepted && synchronized.Version != document.Version)
+                        return new(false, "An editor buffer could not be synchronized.");
+                }
+                return new(true);
+            }
+            var statuses = new List<string>();
+            foreach (var plan in plans)
+            {
+                var result = await Proxy.ApplyXamlNameProjectionAsync(new(plan, documents, Replay: true), lifetime.Token).ConfigureAwait(false);
+                if (!result.Accepted) return result;
+                if (result.BaselineRefreshed) ForgetNameProjection(plan);
+                if (!string.IsNullOrWhiteSpace(result.Status)) statuses.Add(result.Status);
+                foreach (var document in documents) RememberBuffer(document);
+            }
+            SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+            NameProjectionChanged?.Invoke(this, EventArgs.Empty);
+            return new(true, statuses.Count == 0 ? null : string.Join(" ", statuses.Distinct()));
+        }
+        finally { _lifecycle.Release(); }
+    }
+
+    private void ValidateProjectionBuffers(IReadOnlyList<UpdateDocumentRequest> documents)
+    {
+        lock (_bufferGate)
+            foreach (var document in documents)
+                if (_buffers.TryGetValue(document.Path, out var current) &&
+                    (current.Version > document.Version || current.Version == document.Version && current.Text != document.Text))
+                    throw new InvalidOperationException("An editor buffer changed before generated-name synchronization. Retry with current buffers.");
+    }
+    private XamlNameProjectionPlan[] NameProjectionPlans() { lock (_bufferGate) return _nameProjections.Values.ToArray(); }
+    private void ForgetNameProjection(XamlNameProjectionPlan plan) { lock (_bufferGate) _nameProjections.Remove(plan.XamlPath); }
+    private void NotifyNameProjectionChanged()
+    {
+        if (NameProjectionPlans().Length != 0) NameProjectionChanged?.Invoke(this, EventArgs.Empty);
+    }
+    private static bool IsXaml(string path) => Path.GetExtension(path).Equals(".xaml", StringComparison.OrdinalIgnoreCase);
+
     public Task<CompletionResult> GetCompletionsAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetCompletionsAsync(request, cancellationToken);
+    public Task<XamlAnalysisResult> AnalyzeXamlAsync(XamlDocumentRequest request, CancellationToken cancellationToken = default) => Proxy.AnalyzeXamlAsync(request, cancellationToken);
+    public Task<XamlProjectAnalysisResult> AnalyzeXamlProjectAsync(XamlProjectAnalysisRequest request, CancellationToken cancellationToken = default) => Proxy.AnalyzeXamlProjectAsync(request, cancellationToken);
+    public async Task<RefreshDiskDocumentsResult> RefreshDiskDocumentsAsync(RefreshDiskDocumentsRequest request, CancellationToken cancellationToken = default)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        try
+        {
+            var result = await Proxy.RefreshDiskDocumentsAsync(request, lifetime.Token).ConfigureAwait(false);
+            if (result.Changed) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }
+            return result;
+        }
+        finally { _lifecycle.Release(); }
+    }
+    public Task<XamlCompletionResult> GetXamlCompletionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlCompletionsAsync(request, cancellationToken);
+    public Task<IReadOnlyList<SourceLocation>> GetXamlDefinitionAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlDefinitionAsync(request, cancellationToken);
+    public Task<XamlHoverInfo?> GetXamlHoverAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlHoverAsync(request, cancellationToken);
+    public Task<IReadOnlyList<XamlCodeAction>> GetXamlCodeActionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlCodeActionsAsync(request, cancellationToken);
     public Task<TextEdit?> GetCompletionEditAsync(CompletionEditRequest request, CancellationToken cancellationToken = default) => Proxy.GetCompletionEditAsync(request, cancellationToken);
     public Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetSignatureHelpAsync(request, cancellationToken);
     public Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetDefinitionAsync(request, cancellationToken);
     public Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.FindReferencesAsync(request, cancellationToken);
+    public Task<SymbolReferenceResult> FindSymbolReferencesAsync(SymbolReferenceRequest request, CancellationToken cancellationToken = default) => Proxy.FindSymbolReferencesAsync(request, cancellationToken);
     public Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken = default) => Proxy.FormatDocumentAsync(request, cancellationToken);
+    public Task<WorkspaceEditResult> FormatXamlAsync(XamlFormattingRequest request, CancellationToken cancellationToken = default) => Proxy.FormatXamlAsync(request, cancellationToken);
     public Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken = default) => Proxy.RenameAsync(request, cancellationToken);
     public Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken = default) => Proxy.RefactorAsync(request, cancellationToken);
 
@@ -127,7 +276,15 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         _workerError = "";
         process.ErrorDataReceived += (_, args) => { if (args.Data is { } line) _workerError = line; };
         process.OutputDataReceived += (_, _) => { };
-        process.Exited += (_, _) => { if (ReferenceEquals(_process, process) && !_disposed) WorkerExited?.Invoke(this, _workerError); };
+        process.Exited += (_, _) =>
+        {
+            if (ReferenceEquals(_process, process) && !_disposed)
+            {
+                SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+                NotifyNameProjectionChanged();
+                WorkerExited?.Invoke(this, _workerError);
+            }
+        };
         _process = process;
         try
         {
@@ -136,6 +293,12 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             await _pipe.ConnectAsync(30_000, cancellationToken).ConfigureAwait(false);
             _rpc = new JsonRpc(_pipe);
             _proxy = _rpc.Attach<IWorkspaceRpc>();
+            var rpc = _rpc;
+            _proxy.SemanticStateChanged += (_, _) =>
+            {
+                if (ReferenceEquals(_rpc, rpc) && ReferenceEquals(_process, process) && !_disposed)
+                    SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+            };
             _rpc.StartListening();
         }
         catch
@@ -168,6 +331,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         _proxy = null;
         _rpc?.Dispose(); _rpc = null;
         _pipe?.Dispose(); _pipe = null;
+        if (process is not null) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }
         if (process is not null) { ProcessRunner.Kill(process); process.Dispose(); }
     }
 

@@ -9,11 +9,13 @@
 
   <ItemGroup>
     <ProjectReference Include="../WpfStudio.Contracts/WpfStudio.Contracts.csproj" />
+    <ProjectReference Include="../WpfStudio.Inspection.Protocol/WpfStudio.Inspection.Protocol.csproj" />
     <Content Include="Assets/Terminal/**/*" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../tools/netcoredbg/*" Link="debugger/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>

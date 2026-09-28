@@ -57,6 +57,14 @@ $appPresent = Test-Path -LiteralPath (Join-Path $ApplicationDirectory 'WpfStudio
 $workerPresent = (Test-Path -LiteralPath (Join-Path $ApplicationDirectory 'WorkspaceHost/WpfStudio.WorkspaceHost.dll')) -and (Test-Path -LiteralPath (Join-Path $ApplicationDirectory 'WorkspaceHost/BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll'))
 Add-Check 'Application package' $true ($appPresent -and $workerPresent) $(if ($appPresent -and $workerPresent) { "App and Roslyn workspace host found in $ApplicationDirectory." } else { 'Copy the complete published folder, including WorkspaceHost and BuildHost-netcore. From source, run tools/Publish.ps1, or pass -ApplicationDirectory with the complete build output.' })
 
+$previewFiles = @('WpfStudio.PreviewHost.exe', 'WpfStudio.PreviewHost.dll', 'WpfStudio.PreviewHost.runtimeconfig.json', 'WpfStudio.PreviewHost.deps.json', 'WpfStudio.Wpf.PropertyEditing.dll', 'WpfStudio.Wpf.Diagnostics.dll', 'WpfStudio.Inspection.Protocol.dll')
+$previewPresent = @($previewFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ApplicationDirectory "PreviewHost/$_") -PathType Leaf) }).Count -eq 0
+Add-Check 'XAML Designer: preview host' $false $previewPresent $(if ($previewPresent) { 'Isolated WPF preview host found in PreviewHost/.' } else { 'Restore the complete PreviewHost/ directory from the portable package, or rebuild/republish. Source editing and diagnostics remain available.' })
+
+$inspectionFiles = @('WpfStudio.Inspection.StartupHook.dll', 'WpfStudio.Inspection.Agent.dll', 'WpfStudio.Inspection.Protocol.dll', 'WpfStudio.Wpf.PropertyEditing.dll', 'WpfStudio.Wpf.Diagnostics.dll')
+$inspectionPresent = @($inspectionFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ApplicationDirectory "Inspection/$_") -PathType Leaf) }).Count -eq 0
+Add-Check 'Live XAML: inspection agent' $false $inspectionPresent $(if ($inspectionPresent) { 'Launch-time inspection components found in Inspection/. The target application requires its own compatible .NET Desktop runtime.' } else { 'Restore the complete Inspection/ directory from the portable package, or rebuild/republish. Source editing and preview remain available.' })
+
 $webViewVersion = $null
 if ($isWindowsPlatform) {
     # Official Evergreen detection locations:

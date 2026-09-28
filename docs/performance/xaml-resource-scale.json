@@ -1,0 +1,1067 @@
+{
+  "Description": "Summary excerpts from sequential synthetic XAML worker measurements on one Windows workstation. Original reports retain individual observations under ignored artifacts/performance. Their SHA256 hashes and worker payload hashes identify the evidence. Absolute local paths are omitted here. Each 152-observation fixture contains 122 RPC requests plus 30 combined-cycle observations. Baseline 600-file answers are incorrect and their latency is not a valid successful-result comparison.",
+  "Date": "2026-09-28",
+  "Machine": "Ryzen 9 5900X; approximately 96 GiB RAM; Windows 11 x64 build 26100; warm OS/SDK caches possible",
+  "Runs": [
+    {
+      "Role": "Prior packaged worker",
+      "OriginalReportFile": "xaml-resource-scale-before.json",
+      "OriginalReportSha256": "EB8BADCB10078A07A2F73CF8B40411826D0D83EEC7CFEF793D523242D96E94B8",
+      "WorkerPathRelativeToRepository": "artifacts/WpfStudio/WorkspaceHost/WpfStudio.WorkspaceHost.dll",
+      "StartedUtc": "2026-09-28T08:10:08.8337944-05:00",
+      "FinishedUtc": "2026-09-28T08:10:53.4634229-05:00",
+      "OperatingSystem": "Microsoft Windows 10.0.26100",
+      "Runtime": ".NET 10.0.11",
+      "LogicalProcessors": 24,
+      "Iterations": 30,
+      "Cancelled": false,
+      "WorkerFileHashes": {
+        "WpfStudio.WorkspaceHost.dll": "3E990BADDBE604D3B214C1D556C4802F4C93A8A718FBFA6797CA7FD5F381BE09",
+        "WpfStudio.Workspace.dll": "93C0BC87D49423C2682DB737968E1BC7FC5B705899602AF8B4031ABE3D9577EF",
+        "WpfStudio.Contracts.dll": "91E9915E3F8E2D77CF71A7AF2722EA2A88B475E4E0771A0683FB70A2A1C942C5"
+      },
+      "Fixtures": [
+        {
+          "EvaluatedXamlFiles": 20,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 785.5499,
+          "LoadMilliseconds": 3940.8994,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 536.9585,
+              "P95Milliseconds": 536.9585,
+              "MaximumMilliseconds": 536.9585
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 84.9081,
+              "P95Milliseconds": 84.9081,
+              "MaximumMilliseconds": 84.9081
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 28.8966,
+              "P95Milliseconds": 34.4554,
+              "MaximumMilliseconds": 34.5695
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 38.6579,
+              "P95Milliseconds": 55.8094,
+              "MaximumMilliseconds": 59.7867
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 33.8828,
+              "P95Milliseconds": 48.1972,
+              "MaximumMilliseconds": 52.2771
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 49.4007,
+              "P95Milliseconds": 61.476,
+              "MaximumMilliseconds": 70.1514
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 84.3325,
+              "P95Milliseconds": 107.6407,
+              "MaximumMilliseconds": 117.1798
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 200,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 818.8954,
+          "LoadMilliseconds": 4377.4023,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 509.6295,
+              "P95Milliseconds": 509.6295,
+              "MaximumMilliseconds": 509.6295
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 129.4074,
+              "P95Milliseconds": 129.4074,
+              "MaximumMilliseconds": 129.4074
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 66.3633,
+              "P95Milliseconds": 87.1979,
+              "MaximumMilliseconds": 93.405
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 80.161,
+              "P95Milliseconds": 103.822,
+              "MaximumMilliseconds": 109.7608
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 40.5638,
+              "P95Milliseconds": 48.6919,
+              "MaximumMilliseconds": 49.3384
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 46.051,
+              "P95Milliseconds": 51.6543,
+              "MaximumMilliseconds": 66.2664
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 86.4176,
+              "P95Milliseconds": 98.7766,
+              "MaximumMilliseconds": 106.2376
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 600,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 874.7874,
+          "LoadMilliseconds": 5930.1387,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 0,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 0,
+              "P50Milliseconds": 535.0772,
+              "P95Milliseconds": 535.0772,
+              "MaximumMilliseconds": 535.0772
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 0,
+              "P50Milliseconds": 198.1338,
+              "P95Milliseconds": 198.1338,
+              "MaximumMilliseconds": 198.1338
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 0,
+              "P50Milliseconds": 120.5135,
+              "P95Milliseconds": 160.1542,
+              "MaximumMilliseconds": 164.5468
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 0,
+              "P50Milliseconds": 115.0113,
+              "P95Milliseconds": 165.0418,
+              "MaximumMilliseconds": 165.7196
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 0,
+              "P50Milliseconds": 99.8044,
+              "P95Milliseconds": 124.3775,
+              "MaximumMilliseconds": 127.8497
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 0,
+              "P50Milliseconds": 104.1524,
+              "P95Milliseconds": 116.446,
+              "MaximumMilliseconds": 117.1775
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 0,
+              "P50Milliseconds": 205.0536,
+              "P95Milliseconds": 236.4182,
+              "MaximumMilliseconds": 242.0965
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Role": "Intermediate closure implementation without schema cache; not accepted for performance",
+      "OriginalReportFile": "xaml-resource-scale-after.json",
+      "OriginalReportSha256": "71CFC29D596BB9C4DD6E3D6C2650D01B748E609535BDA3DA813900ED2A77912C",
+      "WorkerPathRelativeToRepository": "src/WpfStudio.WorkspaceHost/bin/Release/net10.0/WpfStudio.WorkspaceHost.dll",
+      "StartedUtc": "2026-09-28T08:17:50.5769757-05:00",
+      "FinishedUtc": "2026-09-28T08:18:22.6967702-05:00",
+      "OperatingSystem": "Microsoft Windows 10.0.26100",
+      "Runtime": ".NET 10.0.11",
+      "LogicalProcessors": 24,
+      "Iterations": 30,
+      "Cancelled": false,
+      "WorkerFileHashes": {
+        "WpfStudio.WorkspaceHost.dll": "7E83CAE44CC5628B76FE1FE96A3672A131CD744D2D11676A691B131A2B31E1A1",
+        "WpfStudio.Workspace.dll": "07E0540EB9FD79F399062FC96874B41FA958C669AA54BDA888DD790964300E8C",
+        "WpfStudio.Contracts.dll": "91E9915E3F8E2D77CF71A7AF2722EA2A88B475E4E0771A0683FB70A2A1C942C5"
+      },
+      "Fixtures": [
+        {
+          "EvaluatedXamlFiles": 20,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 794.1387,
+          "LoadMilliseconds": 3918.3049,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 715.519,
+              "P95Milliseconds": 715.519,
+              "MaximumMilliseconds": 715.519
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 165.2935,
+              "P95Milliseconds": 165.2935,
+              "MaximumMilliseconds": 165.2935
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 68.1833,
+              "P95Milliseconds": 116.2686,
+              "MaximumMilliseconds": 121.1575
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 78.2097,
+              "P95Milliseconds": 146.9978,
+              "MaximumMilliseconds": 153.3856
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 12.4611,
+              "P95Milliseconds": 13.9808,
+              "MaximumMilliseconds": 15.2669
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 13.5987,
+              "P95Milliseconds": 15.8,
+              "MaximumMilliseconds": 32.4207
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 24.877,
+              "P95Milliseconds": 28.6012,
+              "MaximumMilliseconds": 48.3102
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 200,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 807.1023,
+          "LoadMilliseconds": 4259.5541,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 585.3405,
+              "P95Milliseconds": 585.3405,
+              "MaximumMilliseconds": 585.3405
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 126.6131,
+              "P95Milliseconds": 126.6131,
+              "MaximumMilliseconds": 126.6131
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 29.6312,
+              "P95Milliseconds": 113.597,
+              "MaximumMilliseconds": 123.0648
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 19.4656,
+              "P95Milliseconds": 146.8835,
+              "MaximumMilliseconds": 153.8449
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 7.9961,
+              "P95Milliseconds": 8.9487,
+              "MaximumMilliseconds": 15.2184
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 9.165,
+              "P95Milliseconds": 21.4336,
+              "MaximumMilliseconds": 30.1624
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 17.3179,
+              "P95Milliseconds": 29.5033,
+              "MaximumMilliseconds": 45.4003
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 600,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 840.7247,
+          "LoadMilliseconds": 5805.1069,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 533.5196,
+              "P95Milliseconds": 533.5196,
+              "MaximumMilliseconds": 533.5196
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 137.5466,
+              "P95Milliseconds": 137.5466,
+              "MaximumMilliseconds": 137.5466
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 68.1261,
+              "P95Milliseconds": 106.1641,
+              "MaximumMilliseconds": 136.4285
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 77.417,
+              "P95Milliseconds": 130.6912,
+              "MaximumMilliseconds": 147.0042
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 8.8835,
+              "P95Milliseconds": 16.1932,
+              "MaximumMilliseconds": 16.8472
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 10.1089,
+              "P95Milliseconds": 17.8673,
+              "MaximumMilliseconds": 34.7452
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 18.8146,
+              "P95Milliseconds": 34.2814,
+              "MaximumMilliseconds": 50.9525
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Role": "Final schema cache implementation, Release source output",
+      "OriginalReportFile": "xaml-resource-scale-cached.json",
+      "OriginalReportSha256": "72ABA442A6950E7C4BB03CA556F0CF89664526121F56AF0BDFD9DD11413183E9",
+      "WorkerPathRelativeToRepository": "src/WpfStudio.WorkspaceHost/bin/Release/net10.0/WpfStudio.WorkspaceHost.dll",
+      "StartedUtc": "2026-09-28T08:23:58.7905854-05:00",
+      "FinishedUtc": "2026-09-28T08:24:19.332663-05:00",
+      "OperatingSystem": "Microsoft Windows 10.0.26100",
+      "Runtime": ".NET 10.0.11",
+      "LogicalProcessors": 24,
+      "Iterations": 30,
+      "Cancelled": false,
+      "WorkerFileHashes": {
+        "WpfStudio.WorkspaceHost.dll": "DC4B52EF16F61782A40D83A388C453F30CA8C5C0F3473F38A9C8655AF17FFEA3",
+        "WpfStudio.Workspace.dll": "65CA2191EE072E1AD4B2F00FA21766EEB756F00EEAE659AD7928FB658A1B7344",
+        "WpfStudio.Contracts.dll": "91E9915E3F8E2D77CF71A7AF2722EA2A88B475E4E0771A0683FB70A2A1C942C5"
+      },
+      "Fixtures": [
+        {
+          "EvaluatedXamlFiles": 20,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 766.9843,
+          "LoadMilliseconds": 3810.5374,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 512.9207,
+              "P95Milliseconds": 512.9207,
+              "MaximumMilliseconds": 512.9207
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 28.463,
+              "P95Milliseconds": 28.463,
+              "MaximumMilliseconds": 28.463
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 3.9346,
+              "P95Milliseconds": 6.2122,
+              "MaximumMilliseconds": 14.3606
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.8291,
+              "P95Milliseconds": 11.0584,
+              "MaximumMilliseconds": 19.5366
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 2.9707,
+              "P95Milliseconds": 4.1479,
+              "MaximumMilliseconds": 9.6072
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 3.7039,
+              "P95Milliseconds": 5.2224,
+              "MaximumMilliseconds": 18.7497
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 6.6818,
+              "P95Milliseconds": 13.6845,
+              "MaximumMilliseconds": 23.095
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 200,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 949.3028,
+          "LoadMilliseconds": 4166.8206,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 498.3513,
+              "P95Milliseconds": 498.3513,
+              "MaximumMilliseconds": 498.3513
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 35.5408,
+              "P95Milliseconds": 35.5408,
+              "MaximumMilliseconds": 35.5408
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.0398,
+              "P95Milliseconds": 6.8619,
+              "MaximumMilliseconds": 21.7586
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.9499,
+              "P95Milliseconds": 14.4943,
+              "MaximumMilliseconds": 16.5505
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.4944,
+              "P95Milliseconds": 4.9696,
+              "MaximumMilliseconds": 5.3118
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.4607,
+              "P95Milliseconds": 6.3374,
+              "MaximumMilliseconds": 19.2461
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 9.9603,
+              "P95Milliseconds": 10.9453,
+              "MaximumMilliseconds": 23.2171
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 600,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 926.3647,
+          "LoadMilliseconds": 5883.6565,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 478.4907,
+              "P95Milliseconds": 478.4907,
+              "MaximumMilliseconds": 478.4907
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 30.9111,
+              "P95Milliseconds": 30.9111,
+              "MaximumMilliseconds": 30.9111
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.0856,
+              "P95Milliseconds": 7.7587,
+              "MaximumMilliseconds": 7.7907
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.5928,
+              "P95Milliseconds": 13.6356,
+              "MaximumMilliseconds": 33.3209
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.0121,
+              "P95Milliseconds": 5.8748,
+              "MaximumMilliseconds": 6.095
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.6482,
+              "P95Milliseconds": 6.8713,
+              "MaximumMilliseconds": 20.62
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 8.7677,
+              "P95Milliseconds": 12.757,
+              "MaximumMilliseconds": 26.7534
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Role": "Final packaged worker",
+      "OriginalReportFile": "xaml-resource-scale-after-packaged.json",
+      "OriginalReportSha256": "FFC5406F376038DC51E0D546269EF37A2DEE69D596EC71E66E327AC5BB73D226",
+      "WorkerPathRelativeToRepository": "artifacts/WpfStudio/WorkspaceHost/WpfStudio.WorkspaceHost.dll",
+      "StartedUtc": "2026-09-28T08:27:52.7494577-05:00",
+      "FinishedUtc": "2026-09-28T08:28:13.5689245-05:00",
+      "OperatingSystem": "Microsoft Windows 10.0.26100",
+      "Runtime": ".NET 10.0.11",
+      "LogicalProcessors": 24,
+      "Iterations": 30,
+      "Cancelled": false,
+      "WorkerFileHashes": {
+        "WpfStudio.WorkspaceHost.dll": "62003FD2D00DDA4E4214D2BDCF21238E79E878626539F67C9535360E67A04BA5",
+        "WpfStudio.Workspace.dll": "65CA2191EE072E1AD4B2F00FA21766EEB756F00EEAE659AD7928FB658A1B7344",
+        "WpfStudio.Contracts.dll": "91E9915E3F8E2D77CF71A7AF2722EA2A88B475E4E0771A0683FB70A2A1C942C5"
+      },
+      "Fixtures": [
+        {
+          "EvaluatedXamlFiles": 20,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 761.0667,
+          "LoadMilliseconds": 4021.6765,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 500.0724,
+              "P95Milliseconds": 500.0724,
+              "MaximumMilliseconds": 500.0724
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 28.119,
+              "P95Milliseconds": 28.119,
+              "MaximumMilliseconds": 28.119
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 3.8513,
+              "P95Milliseconds": 4.9944,
+              "MaximumMilliseconds": 5.0152
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.7456,
+              "P95Milliseconds": 11.4803,
+              "MaximumMilliseconds": 19.4674
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 3.1819,
+              "P95Milliseconds": 4.5982,
+              "MaximumMilliseconds": 9.7874
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 3.8535,
+              "P95Milliseconds": 14.3779,
+              "MaximumMilliseconds": 16.4002
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 7.0824,
+              "P95Milliseconds": 17.5884,
+              "MaximumMilliseconds": 20.3816
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 200,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 889.9081,
+          "LoadMilliseconds": 4363.7386,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 493.8304,
+              "P95Milliseconds": 493.8304,
+              "MaximumMilliseconds": 493.8304
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 37.2455,
+              "P95Milliseconds": 37.2455,
+              "MaximumMilliseconds": 37.2455
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.8643,
+              "P95Milliseconds": 10.0535,
+              "MaximumMilliseconds": 19.3557
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 6.0052,
+              "P95Milliseconds": 17.5483,
+              "MaximumMilliseconds": 17.8339
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 3.7053,
+              "P95Milliseconds": 4.7064,
+              "MaximumMilliseconds": 4.7902
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.2598,
+              "P95Milliseconds": 6.1334,
+              "MaximumMilliseconds": 16.9582
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 7.9758,
+              "P95Milliseconds": 10.753,
+              "MaximumMilliseconds": 20.7695
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 600,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 942.4645,
+          "LoadMilliseconds": 5694.8741,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 466.348,
+              "P95Milliseconds": 466.348,
+              "MaximumMilliseconds": 466.348
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 38.4786,
+              "P95Milliseconds": 38.4786,
+              "MaximumMilliseconds": 38.4786
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.6663,
+              "P95Milliseconds": 12.3709,
+              "MaximumMilliseconds": 18.3157
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 6.6707,
+              "P95Milliseconds": 13.8705,
+              "MaximumMilliseconds": 24.0498
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.067,
+              "P95Milliseconds": 5.9262,
+              "MaximumMilliseconds": 6.0704
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.6983,
+              "P95Milliseconds": 7.1878,
+              "MaximumMilliseconds": 18.0427
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 9.0168,
+              "P95Milliseconds": 13.0472,
+              "MaximumMilliseconds": 22.7963
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Role": "Named-element integration packaged worker",
+      "OriginalReportFile": "xaml-namescope-after-packaged.json",
+      "OriginalReportSha256": "6A3DEF413B62F0B003534C4302422B1AEE62ED4968F59A8D6206CADAC2205333",
+      "WorkerPathRelativeToRepository": "artifacts/WpfStudio/WorkspaceHost/WpfStudio.WorkspaceHost.dll",
+      "StartedUtc": "2026-09-28T09:42:48.5688065-05:00",
+      "FinishedUtc": "2026-09-28T09:43:09.3423782-05:00",
+      "OperatingSystem": "Microsoft Windows 10.0.26100",
+      "Runtime": ".NET 10.0.11",
+      "LogicalProcessors": 24,
+      "Iterations": 30,
+      "Cancelled": false,
+      "WorkerFileHashes": {
+        "WpfStudio.WorkspaceHost.dll": "3B1CA327C4B261B8580C1BD579833831A7916515D61DCA1BA82C6DBF19CBAE57",
+        "WpfStudio.Workspace.dll": "5757950F5C335913CD81FAFBE9B2DCF2BD8B7EB8B4B25171C32D9C78B09831BA",
+        "WpfStudio.Contracts.dll": "4524B655BFEB1BD85DF78AF613F612546BE19627F839E6EC1B20C00A6E387EA5"
+      },
+      "Fixtures": [
+        {
+          "EvaluatedXamlFiles": 20,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 766.4657,
+          "LoadMilliseconds": 3839.0036,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 531.5336,
+              "P95Milliseconds": 531.5336,
+              "MaximumMilliseconds": 531.5336
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 42.0571,
+              "P95Milliseconds": 42.0571,
+              "MaximumMilliseconds": 42.0571
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 3.7538,
+              "P95Milliseconds": 12.6198,
+              "MaximumMilliseconds": 18.3363
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.9496,
+              "P95Milliseconds": 12.1074,
+              "MaximumMilliseconds": 22.3441
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 3.1327,
+              "P95Milliseconds": 4.7315,
+              "MaximumMilliseconds": 9.9321
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.3728,
+              "P95Milliseconds": 6.7385,
+              "MaximumMilliseconds": 16.922
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 7.4911,
+              "P95Milliseconds": 14.6602,
+              "MaximumMilliseconds": 21.0602
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 200,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 882.2113,
+          "LoadMilliseconds": 4251.4031,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 484.0517,
+              "P95Milliseconds": 484.0517,
+              "MaximumMilliseconds": 484.0517
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 57.134,
+              "P95Milliseconds": 57.134,
+              "MaximumMilliseconds": 57.134
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.0198,
+              "P95Milliseconds": 7.2678,
+              "MaximumMilliseconds": 14.4266
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.4856,
+              "P95Milliseconds": 25.4611,
+              "MaximumMilliseconds": 30.1183
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 4.5603,
+              "P95Milliseconds": 5.1369,
+              "MaximumMilliseconds": 5.3179
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 6.4363,
+              "P95Milliseconds": 6.9557,
+              "MaximumMilliseconds": 20.5709
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 11.0747,
+              "P95Milliseconds": 12.0176,
+              "MaximumMilliseconds": 25.9406
+            }
+          }
+        },
+        {
+          "EvaluatedXamlFiles": 600,
+          "UnrelatedMinimumBytes": 6219,
+          "UnrelatedMaximumBytes": 6219,
+          "RestoreMilliseconds": 912.6559,
+          "LoadMilliseconds": 5759.5809,
+          "SdkVersion": "10.0.400",
+          "Error": null,
+          "WorkspaceIssues": [],
+          "ObservationCount": 152,
+          "CorrectObservations": 152,
+          "RequestCount": 122,
+          "Distributions": {
+            "first-completion": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 483.7842,
+              "P95Milliseconds": 483.7842,
+              "MaximumMilliseconds": 483.7842
+            },
+            "first-analysis": {
+              "Count": 1,
+              "CorrectCount": 1,
+              "P50Milliseconds": 45.2227,
+              "P95Milliseconds": 45.2227,
+              "MaximumMilliseconds": 45.2227
+            },
+            "warm-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.2057,
+              "P95Milliseconds": 7.3239,
+              "MaximumMilliseconds": 12.8876
+            },
+            "warm-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 6.1724,
+              "P95Milliseconds": 12.9709,
+              "MaximumMilliseconds": 27.0912
+            },
+            "dependency-update-completion": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 5.2671,
+              "P95Milliseconds": 6.0373,
+              "MaximumMilliseconds": 6.4869
+            },
+            "dependency-update-analysis": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 6.2468,
+              "P95Milliseconds": 8.1701,
+              "MaximumMilliseconds": 18.9147
+            },
+            "dependency-update-cycle": {
+              "Count": 30,
+              "CorrectCount": 30,
+              "P50Milliseconds": 11.6052,
+              "P95Milliseconds": 14.254,
+              "MaximumMilliseconds": 24.2437
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -68,6 +68,10 @@ public static class DockingBehavior
             // views here so closing/reopening tabs preserves feature state.
             staticContent["Packages"] = new Features.Packages.PackagesPane { DataContext = shell.Features?.Packages };
             staticContent["Git"] = new Features.Git.GitPane { DataContext = shell.Features?.Git };
+            staticContent["Designer"] = new Features.Designer.DesignerPane { DataContext = shell.Designer };
+            staticTitles["Designer"] = "XAML Designer";
+            staticContent["LiveInspection"] = new Features.Inspection.InspectionPane { DataContext = shell.LiveInspection };
+            staticTitles["LiveInspection"] = "Live XAML";
             staticTitles["Packages"] = "NuGet packages"; staticTitles["Git"] = "Git changes";
             foreach (var content in manager.Layout.Descendents().OfType<LayoutContent>().Where(x => x.Content is not EditorViewModel && !string.IsNullOrEmpty(x.ContentId)))
             {
@@ -181,13 +185,20 @@ public static class DockingBehavior
             if (tool is null && staticContent.TryGetValue(aliases, out var content))
             {
                 tool = new LayoutAnchorable { ContentId = aliases, Content = content, Title = staticTitles[aliases], CanClose = false };
-                tool.AddToLayout(manager, AnchorableShowStrategy.Bottom | AnchorableShowStrategy.Most);
+                if (aliases is "Designer" or "LiveInspection" && manager.Layout.Descendents().OfType<LayoutAnchorable>()
+                    .FirstOrDefault(candidate => candidate.ContentId == "Output")?.Parent is LayoutAnchorablePane bottomPane)
+                    bottomPane.Children.Add(tool);
+                else tool.AddToLayout(manager, AnchorableShowStrategy.Bottom | AnchorableShowStrategy.Most);
             }
             if (tool is null) return;
             if (tool.IsHidden) tool.Show();
             if (tool.IsAutoHidden) tool.ToggleAutoHide();
             if (aliases == "Debugger" && tool.Parent is LayoutAnchorablePane debugPane && debugPane.DockHeight.IsAbsolute && debugPane.DockHeight.Value < 320)
                 debugPane.DockHeight = new GridLength(320);
+            if (aliases == "Designer" && tool.Parent is LayoutAnchorablePane designerPane && (!designerPane.DockHeight.IsAbsolute || designerPane.DockHeight.Value < 500))
+                designerPane.DockHeight = new GridLength(500);
+            if (aliases == "LiveInspection" && tool.Parent is LayoutAnchorablePane inspectionPane && (!inspectionPane.DockHeight.IsAbsolute || inspectionPane.DockHeight.Value < 420))
+                inspectionPane.DockHeight = new GridLength(420);
             tool.IsSelected = true; tool.IsActive = true;
         }
         private void Save()

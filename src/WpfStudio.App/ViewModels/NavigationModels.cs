@@ -43,10 +43,11 @@ public sealed partial class ExplorerNode : ObservableObject
         foreach (var path in groups.Where(g => g.Key == "").SelectMany(g => g).OrderBy(System.IO.Path.GetFileName)) yield return new ExplorerNode(System.IO.Path.GetFileName(path), path, false, projectPath: projectPath);
     }
 }
-public sealed record NavigationResult(string Path, int Line, int Column, string Text, int Start = 0)
+public sealed record NavigationResult(string Path, int Line, int Column, string Text, int Start = 0,
+    string? ExpectedTextHash = null, string? ProjectPath = null, string? ProjectName = null)
 {
     public string FileName => System.IO.Path.GetFileName(Path);
-    public string Location => $"{FileName}:{Line}";
+    public string Location => $"{FileName}:{Line}" + (ProjectName is { Length: > 0 } ? $" · {ProjectName}" : "");
 }
 /// <summary>A quick-open file or command-palette entry.</summary>
 public sealed record PaletteEntry(string Label, string Detail, Func<Task> Execute, string Category = "", string Shortcut = "", string Icon = "", string IconKind = "")

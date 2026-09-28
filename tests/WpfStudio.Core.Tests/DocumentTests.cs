@@ -175,4 +175,32 @@ public class DocumentTests
         Assert.Throws<InvalidOperationException>(() => WorkspaceEditTransaction.ApplyTextEdits("abcdef", [new(1, 3, "x"), new(2, 2, "y")]));
         Assert.Equal("aXdeY", WorkspaceEditTransaction.ApplyTextEdits("abcdef", [new(1, 2, "X"), new(5, 1, "Y")]));
     }
+
+    [Fact]
+    public void SameOffsetInsertionsRetainTransactionOrdering()
+    {
+        Assert.Equal("aBAc", WorkspaceEditTransaction.ApplyTextEdits("abc", [new(1, 1, "A"), new(1, 0, "B")]));
+        Assert.Equal("aBAbc", WorkspaceEditTransaction.ApplyTextEdits("abc", [new(1, 0, "A"), new(1, 0, "B")]));
+        Assert.Throws<InvalidOperationException>(() => WorkspaceEditTransaction.ApplyTextEdits("abc", [new(1, 0, "A"), new(1, 1, "B")]));
+    }
+
+    [Fact]
+    public void OverflowingEditSpansAreRejected()
+    {
+        Assert.Throws<InvalidOperationException>(() => WorkspaceEditTransaction.ApplyTextEdits("abc", [new(1, int.MaxValue, "invalid")]));
+    }
+
+    [Fact]
+    public void LargeFormattingBatchDoesNotCopyWholeDocumentForEachEdit()
+    {
+        const int count = 8000;
+        string source = string.Concat(Enumerable.Repeat("<Grid/>", count));
+        var edits = Enumerable.Range(0, count).Select(index => new WpfStudio.Contracts.TextEdit(index * 7 + 5, 0, " ")).ToArray();
+        _ = WorkspaceEditTransaction.ApplyTextEdits("<Grid/>", [new(5, 0, " ")]);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        string result = WorkspaceEditTransaction.ApplyTextEdits(source, edits);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(string.Concat(Enumerable.Repeat("<Grid />", count)), result);
+        Assert.True(allocated < source.Length * 24L + count * 160L, $"Applying the batch allocated {allocated:N0} bytes.");
+    }
 }

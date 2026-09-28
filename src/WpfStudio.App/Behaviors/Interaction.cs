@@ -86,17 +86,54 @@ public static class Interaction
             return;
         }
     }
-    /// <summary>Keeps the selected item of a list visible, e.g. while arrowing through palette results.</summary>
+    /// <summary>Keeps the selected list item, tree row or tab header visible.</summary>
     public static readonly DependencyProperty FollowSelectionProperty = DependencyProperty.RegisterAttached("FollowSelection", typeof(bool), typeof(Interaction), new PropertyMetadata(false, FollowSelectionChanged));
     public static void SetFollowSelection(DependencyObject target, bool value) => target.SetValue(FollowSelectionProperty, value);
     public static bool GetFollowSelection(DependencyObject target) => (bool)target.GetValue(FollowSelectionProperty);
     private static void FollowSelectionChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {
-        if (owner is not ListBox list) return;
+        if (owner is TreeView tree)
+        {
+            tree.RemoveHandler(TreeViewItem.SelectedEvent, new RoutedEventHandler(ScrollTreeSelection));
+            if ((bool)args.NewValue) tree.AddHandler(TreeViewItem.SelectedEvent, new RoutedEventHandler(ScrollTreeSelection), true);
+            return;
+        }
+        if (owner is not System.Windows.Controls.Primitives.Selector list) return;
         list.SelectionChanged -= ScrollSelection;
         if ((bool)args.NewValue) list.SelectionChanged += ScrollSelection;
     }
-    private static void ScrollSelection(object sender, SelectionChangedEventArgs args) { if (sender is ListBox { SelectedItem: { } selected } list) list.ScrollIntoView(selected); }
+    private static void ScrollTreeSelection(object sender, RoutedEventArgs args)
+    {
+        if (sender is not TreeView tree || args.OriginalSource is not TreeViewItem item) return;
+        _ = tree.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            if (!GetFollowSelection(tree) || !item.IsSelected || !item.IsLoaded || !item.IsDescendantOf(tree)) return;
+            // Bring the selected row's header into view, not its whole expanded subtree.
+            item.BringIntoView(new Rect(0, 0, 1, Math.Min(24, item.ActualHeight)));
+        });
+    }
+    private static void ScrollSelection(object sender, SelectionChangedEventArgs args)
+    {
+        if (sender is ListBox { SelectedItem: { } selected } list) list.ScrollIntoView(selected);
+        else if (sender is TabControl { SelectedItem: { } selectedTab } tabs && ReferenceEquals(args.OriginalSource, tabs))
+            _ = tabs.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+            {
+                if (!GetFollowSelection(tabs) || !tabs.IsLoaded || !ReferenceEquals(tabs.SelectedItem, selectedTab) ||
+                    tabs.ItemContainerGenerator.ContainerFromItem(selectedTab) is not TabItem header ||
+                    !header.IsSelected || !header.IsLoaded || !header.IsDescendantOf(tabs)) return;
+                // TabItem's visual is the header; the selected content is hosted
+                // separately. Let its enclosing scroll viewer reveal the full label.
+                header.BringIntoView();
+            });
+        else if (sender is DataGrid { SelectedItem: { } row } grid)
+            _ = grid.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+            {
+                if (!GetFollowSelection(grid) || !Equals(grid.SelectedItem, row)) return;
+                grid.UpdateLayout();
+                grid.ScrollIntoView(row);
+                grid.UpdateLayout();
+            });
+    }
     /// <summary>Focuses a text box when it becomes visible and places the caret after any prefilled text.</summary>
     public static readonly DependencyProperty FocusCaretEndProperty = DependencyProperty.RegisterAttached("FocusCaretEnd", typeof(bool), typeof(Interaction), new PropertyMetadata(false, FocusCaretEndChanged));
     public static void SetFocusCaretEnd(DependencyObject target, bool value) => target.SetValue(FocusCaretEndProperty, value);

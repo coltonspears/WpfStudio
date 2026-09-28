@@ -1,0 +1,42 @@
+<Window x:Class="WpfStudio.InspectionFixture.PrimaryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:fixture="clr-namespace:WpfStudio.InspectionFixture"
+        Title="Inspection fixture primary" Name="PrimaryRoot" Width="320" Height="520"
+        Left="-32000" Top="-32000" ShowActivated="False" ShowInTaskbar="False">
+    <StackPanel Name="PrimaryContent">
+        <TextBlock Name="GoodText" Text="{Binding DisplayName}" />
+        <TextBlock Name="BadText" Text="{Binding Misspelled}" />
+        <TextBlock Name="MultiBadText">
+            <TextBlock.Text>
+                <MultiBinding StringFormat="{}{0} | {1}">
+                    <Binding Path="DisplayName" />
+                    <Binding Path="BrokenChildName" />
+                </MultiBinding>
+            </TextBlock.Text>
+        </TextBlock>
+        <Button Name="StyleButton" Content="Styled button">
+            <Button.Style>
+                <Style TargetType="Button"><Setter Property="Tag" Value="From fixture style" /></Style>
+            </Button.Style>
+        </Button>
+        <TextBlock Name="LifecycleText" DataContext="{Binding LifecycleSource}" Text="{Binding Value}" />
+        <TextBlock Name="DelayedText" DataContext="{Binding DelayedSource}" Text="{Binding Value}" />
+        <TextBlock Name="NullIntermediateText" Text="{Binding OptionalChild.Value}" />
+        <TextBlock Name="StyleBindingText">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock"><Setter Property="Text" Value="{Binding MissingStyleValue}" /></Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <TextBlock Name="AttachedStyleBindingText" Text="Attached property from style">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock"><Setter Property="fixture:AttachedBindingProbe.Value" Value="{Binding MissingAttachedStyleValue}" /></Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <TextBlock Name="ReplacementText" Text="{Binding Misspelled}" />
+        <TextBlock Name="RemovalText" Text="{Binding Misspelled}" />
+        <StackPanel Name="DetachableContainer"><TextBlock Name="DetachableText" Text="{Binding Misspelled}" /></StackPanel>
+        <Button Name="PrimaryPickButton" Content="Primary application input" Width="220" Height="35" ClickMode="Press" />
+        <StackPanel Name="BulkBindingContainer" />
+    </StackPanel>
+</Window>

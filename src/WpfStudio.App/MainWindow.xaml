@@ -39,6 +39,11 @@
         <Border DockPanel.Dock="Top" Height="30" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="14,0,8,0">
           <DockPanel>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+              <TextBlock Text="Project" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="0,0,5,0" Visibility="{Binding HasXamlProjects, Converter={StaticResource BooleanToVisibility}}" />
+              <ComboBox ItemsSource="{Binding XamlProjects}" SelectedItem="{Binding XamlProject}" DisplayMemberPath="Name"
+                        Width="160" Height="24" FontSize="11" Padding="6,0" Margin="0,0,6,0"
+                        Visibility="{Binding HasXamlProjects, Converter={StaticResource BooleanToVisibility}}"
+                        AutomationProperties.Name="XAML project context" ToolTip="Choose the project whose types are used for XAML completion, diagnostics and navigation." />
               <ItemsControl ItemsSource="{Binding RelatedFiles}" ItemsPanel="{StaticResource HorizontalItems}" Focusable="False">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
@@ -55,6 +60,7 @@
               <Border Width="1" Margin="6,7" Background="{DynamicResource BorderBrush}" Visibility="{Binding IsViewModel, Converter={StaticResource BooleanToVisibility}}" />
               <Button Style="{StaticResource ContextChip}" c:Ui.Icon="Plus" Content="Property" ToolTip="Insert an [ObservableProperty]" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertProperty}" Visibility="{Binding IsViewModel, Converter={StaticResource BooleanToVisibility}}" />
               <Button Style="{StaticResource ContextChip}" c:Ui.Icon="Plus" Content="Command" ToolTip="Insert a [RelayCommand]" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertCommand}" Visibility="{Binding IsViewModel, Converter={StaticResource BooleanToVisibility}}" />
+              <Button Style="{StaticResource ContextChip}" Content="Preview" ToolTip="Open XAML Designer" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.OpenDesigner}" Visibility="{Binding IsXaml, Converter={StaticResource BooleanToVisibility}}" />
             </StackPanel>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
               <TextBlock Text="{Binding Location}" Foreground="{DynamicResource SubtleBrush}" FontSize="11.5" VerticalAlignment="Center" />
@@ -221,6 +227,7 @@
     <KeyBinding Key="F12" Command="{Binding GoToDefinitionCommand}" />
     <KeyBinding Key="F12" Modifiers="Shift" Command="{Binding FindReferencesCommand}" />
     <KeyBinding Key="F2" Command="{Binding RenameSymbolCommand}" />
+    <KeyBinding Key="F" Modifiers="Control+Shift" Command="{Binding FormatCommand}" />
     <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding NewWpfItemCommand}" />
     <KeyBinding Key="OemComma" Modifiers="Control" Command="{Binding OpenSettingsCommand}" />
     <KeyBinding Key="Oem3" Modifiers="Control" Command="{Binding ShowToolCommand}" CommandParameter="Terminal" />
@@ -297,6 +304,8 @@
             <Separator />
             <MenuItem Header="Solution Explorer" c:Ui.Icon="Folder" Command="{Binding ShowToolCommand}" CommandParameter="Explorer" />
             <MenuItem Header="WPF Explorer" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="WpfTools" />
+            <MenuItem Header="XAML Designer" c:Ui.Icon="Layers" Command="{Binding OpenDesignerCommand}" />
+            <MenuItem Header="Live XAML" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="LiveInspection" />
             <MenuItem Header="ColtonGPT" c:Ui.Icon="Chat" Command="{Binding OpenAssistantCommand}" />
             <Separator />
             <MenuItem Header="Output" c:Ui.Icon="Output" Command="{Binding ShowToolCommand}" CommandParameter="Output" />
@@ -324,7 +333,7 @@
             <MenuItem Header="Use var…" Command="{Binding RefactorCommand}" CommandParameter="UseVar" />
             <MenuItem Header="Use explicit type…" Command="{Binding RefactorCommand}" CommandParameter="UseExplicitType" />
             <Separator />
-            <MenuItem Header="Format document" c:Ui.Icon="Braces" Command="{Binding FormatCommand}" />
+            <MenuItem Header="Format document" c:Ui.Icon="Braces" Command="{Binding FormatCommand}" InputGestureText="Ctrl+Shift+F" />
           </MenuItem>
           <MenuItem Header="_WPF">
             <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
@@ -353,6 +362,8 @@
           <MenuItem Header="_Debug">
             <MenuItem Header="Start / continue" c:Ui.Icon="Play" Command="{Binding DebugCommand}" InputGestureText="F5" />
             <MenuItem Header="Run without debugging" c:Ui.Icon="PlayOutline" Command="{Binding RunCommand}" InputGestureText="Ctrl+F5" />
+            <MenuItem Header="Run with XAML inspection" Command="{Binding RunWithInspectionCommand}" />
+            <MenuItem Header="Debug with XAML inspection" Command="{Binding DebugWithInspectionCommand}" />
             <MenuItem Header="Attach to process…" c:Ui.Icon="Plug" Command="{Binding ShowToolCommand}" CommandParameter="Debugger" />
             <Separator />
             <MenuItem Header="Pause" c:Ui.Icon="Pause" Command="{Binding Debugger.PauseCommand}" />
@@ -715,7 +726,12 @@
             </layout:LayoutAnchorable>
             <layout:LayoutAnchorable Title="Problems" ContentId="Problems" CanClose="False" CanHide="True">
               <Grid Background="{DynamicResource SurfaceBrush}">
-                <DataGrid ItemsSource="{Binding Diagnostics}" SelectedItem="{Binding SelectedDiagnostic}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <DockPanel Margin="10,3,8,3">
+                  <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Check XAML" Command="{Binding RefreshProjectXamlAnalysisCommand}" ToolTip="Refresh XAML diagnostics across the loaded projects, including closed files." />
+                  <TextBlock Text="{Binding XamlAnalysisStatus}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding XamlAnalysisStatus}" />
+                </DockPanel>
+                <DataGrid Grid.Row="1" ItemsSource="{Binding Diagnostics}" SelectedItem="{Binding SelectedDiagnostic}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
                   <DataGrid.Columns>
                     <DataGridTemplateColumn Header="" Width="34">
                       <DataGridTemplateColumn.CellTemplate>
@@ -724,15 +740,16 @@
                         </DataTemplate>
                       </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="Code" Binding="{Binding Id}" Width="86" />
+                    <DataGridTextColumn Header="Code" Binding="{Binding Id}" Width="112" />
                     <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
+                    <DataGridTextColumn Header="Project" Binding="{Binding ProjectName}" Width="130" />
                     <DataGridTextColumn Header="File" Binding="{Binding Path}" Width="240" />
                     <DataGridTextColumn Header="Line" Binding="{Binding Line}" Width="56" />
                   </DataGrid.Columns>
                 </DataGrid>
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24,0,0" Visibility="{Binding Diagnostics.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}" IsHitTestVisible="False">
+                <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24,0,0" Visibility="{Binding Diagnostics.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}" IsHitTestVisible="False">
                   <c:Glyph Kind="Check" Width="22" Height="22" Foreground="{DynamicResource SuccessBrush}" />
-                  <TextBlock Text="No problems detected" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" HorizontalAlignment="Center" />
+                  <TextBlock Text="No reported problems" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" HorizontalAlignment="Center" />
                 </StackPanel>
               </Grid>
             </layout:LayoutAnchorable>
@@ -747,7 +764,7 @@
                     </TextBox.InputBindings>
                   </TextBox>
                 </DockPanel>
-                <ListBox ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult}" b:Interaction.ActivateCommand="{Binding NavigateSearchCommand}">
+                <ListBox ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult}" b:Interaction.ActivateCommand="{Binding NavigateSearchCommand}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                   <ListBox.ItemTemplate>
                     <DataTemplate>
                       <Grid>
@@ -755,11 +772,11 @@
                           <ColumnDefinition Width="220" />
                           <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <StackPanel Orientation="Horizontal">
-                          <c:StudioIcon Kind="{Binding Path, Converter={StaticResource FileIconKind}}" Width="14" Height="14" Margin="0,0,6,0" />
-                          <TextBlock Text="{Binding Location}" Foreground="{DynamicResource AccentBrush}" TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
-                        <TextBlock Grid.Column="1" Text="{Binding Text}" TextTrimming="CharacterEllipsis" FontFamily="{StaticResource CodeFont}" />
+                        <DockPanel Margin="0,0,12,0">
+                          <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Path, Converter={StaticResource FileIconKind}}" Width="14" Height="14" Margin="0,0,6,0" />
+                          <TextBlock Text="{Binding Location}" ToolTip="{Binding Location}" Foreground="{DynamicResource AccentBrush}" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding Text}" ToolTip="{Binding Text}" TextTrimming="CharacterEllipsis" FontFamily="{StaticResource CodeFont}" />
                       </Grid>
                     </DataTemplate>
                   </ListBox.ItemTemplate>
@@ -995,7 +1012,7 @@
           <Border DockPanel.Dock="Top" Padding="24,20,24,14" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <StackPanel>
               <TextBlock Text="{Binding PreviewTitle}" FontSize="20" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" />
-              <TextBlock Text="Review each file. Nothing changes on disk until you apply, and edits stay undoable." Style="{StaticResource Caption}" FontSize="12" Margin="0,4,0,0" />
+              <TextBlock Text="Review the proposed changes and their effects before applying." Style="{StaticResource Caption}" FontSize="12" Margin="0,4,0,0" />
               <Border Background="{DynamicResource AccentSoftBrush}" CornerRadius="6" Padding="10,8" Margin="0,12,0,0" Visibility="{Binding PreviewWarnings, Converter={StaticResource Presence}}">
                 <DockPanel>
                   <c:Glyph DockPanel.Dock="Left" Kind="Info" Width="16" Height="16" Margin="0,0,8,0" Foreground="{DynamicResource WarningBrush}" VerticalAlignment="Top" />

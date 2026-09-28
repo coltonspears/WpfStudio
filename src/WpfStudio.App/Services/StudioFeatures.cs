@@ -13,6 +13,7 @@ namespace WpfStudio.App.Services;
 /// <summary>Composition and workspace coordination for optional tools.</summary>
 public sealed class StudioFeatures : IDisposable
 {
+    private bool _disposed;
     public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs)
     {
         Assistant = assistant;
@@ -24,7 +25,12 @@ public sealed class StudioFeatures : IDisposable
     public PackagesViewModel Packages { get; }
     public GitViewModel Git { get; }
     public AssistantViewModel Assistant { get; }
-    public void Dispose() { Packages.Dispose(); Git.Dispose(); Assistant.Dispose(); }
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Packages.Dispose(); Git.Dispose(); Assistant.Dispose();
+    }
 }
 
 public static class StudioFeatureRegistration

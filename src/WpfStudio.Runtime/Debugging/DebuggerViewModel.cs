@@ -85,7 +85,9 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     [ObservableProperty] public partial DebugThread? SelectedThread { get; set; }
     [ObservableProperty] public partial DebugFrame? SelectedFrame { get; set; }
     [ObservableProperty] public partial BreakpointViewModel? SelectedBreakpoint { get; set; }
-    [ObservableProperty] public partial bool IsActive { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(CanDetach)), NotifyCanExecuteChangedFor(nameof(DetachCommand))]
+    public partial bool IsActive { get; set; }
+    public bool CanDetach => IsActive && session.CanDetach;
     [ObservableProperty] public partial bool IsStopped { get; set; }
     [ObservableProperty] public partial int SelectedTab { get; set; }
     partial void OnSelectedThreadChanged(DebugThread? value) { if (value is not null && IsStopped) { threadId = value.Id; _ = GuardAsync(RefreshFramesAsync); } }
@@ -143,7 +145,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     [RelayCommand] private Task StepIntoAsync() => GuardAsync(() => session.StepAsync("stepIn", threadId));
     [RelayCommand] private Task StepOutAsync() => GuardAsync(() => session.StepAsync("stepOut", threadId));
     [RelayCommand] private Task StopAsync() => GuardAsync(async () => { await session.StopAsync(); EndSession(); });
-    [RelayCommand] private Task DetachAsync() => GuardAsync(async () => { await session.StopAsync(false); EndSession(); });
+    [RelayCommand(CanExecute = nameof(CanDetach))] private Task DetachAsync() => GuardAsync(async () => { await session.StopAsync(false); EndSession(); });
     [RelayCommand] private Task ApplyBreakpointsAsync() => GuardAsync(async () =>
     {
         await SaveStateAsync();

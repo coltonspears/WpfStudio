@@ -1,0 +1,24 @@
+# XAML worker benchmark
+
+This opt-in console tool creates temporary SDK WPF projects and calls the real workspace worker. It does not change production code or open the app. From a source checkout, build and run it explicitly on Windows with the .NET 10 SDK (the portable app package includes this guide, but not the benchmark project):
+
+```powershell
+dotnet build tools/XamlLanguageBench/XamlLanguageBench.csproj -c Release -m:2
+dotnet tools/XamlLanguageBench/bin/Release/net10.0/XamlLanguageBench.dll --host C:/path/to/WorkspaceHost/WpfStudio.WorkspaceHost.exe --output C:/results/xaml-baseline.json
+```
+
+`--host` accepts an existing packaged or locally built worker executable/DLL. Omit it to use `WorkspaceClient` discovery. `--output` is required; no benchmark result is written elsewhere in the repository. Each run restores fresh temporary fixture projects and cleans up its own temporary directories after stopping the owned workers. Normal SDK/NuGet caches may be updated by restore. It does not clean or modify a worker package.
+
+With an explicit `--host`, the report's `WorkerFileHashes` records SHA256 hashes of the selected host file and its adjacent `WpfStudio.Workspace.dll` and `WpfStudio.Contracts.dll` when present. Keep the selected package unchanged during a run and compare these hashes when identifying before/after payloads. Default discovery does not populate these explicit-path hashes.
+
+Defaults are `--sizes 20,200,600 --iterations 12`. Sizes count **all evaluated XAML files**: one consumer, three nested resource dictionaries, and the remaining unrelated views. Each unrelated view contains roughly 6 KiB of ordinary control markup. The consumer imports a three-dictionary chain whose final dictionary declares a `Customer` object with `Name`.
+
+The JSON separates restore/workspace-load time from first completion/analysis, repeated warm calls, and dependency-only unsaved updates. Updates alternate the final resource between `Customer` and `Order`; only its overlay text/version changes. The consumer remains byte-identical at version 1, and the dependency stays unchanged on disk. Completion must offer `Name` or `Title` as appropriate. Analysis must report the exact missing `Name` span for `Order`, and no diagnostics for `Customer`.
+
+Every sample includes its correctness result and response status. Completion and analysis must both have a null status as well as the expected accepted/available state, version, and semantic result: these fixtures have a fully known, small resource dependency chain. Unknown, unavailable, or incomplete responses fail even when they return quickly or contain some expected items. Setup failures are recorded per fixture and do not prevent later fixture sizes from running. Exit code 1 means at least one incorrect result, fixture failure, or cancellation; 2 means invalid arguments. Press Ctrl+C to cancel and write the observations collected so far. A fixture has a ten-minute deadline.
+
+Each phase reports nearest-rank p50/p95/max and a correct-result count; individual samples remain available. `dependency-update-cycle` times the completion and analysis calls together. A first call occurs **after restore and workspace loading**, so it is not a cold-start measurement. The tool measures sequential RPC latency including serialization, not editor debounce, typing, rendering, concurrency, or physical input. Synthetic markup and warm OS/SDK caches limit how far these numbers generalize to real projects. Compare identical sizes, iterations, worker configuration, SDK and hardware, and examine correctness before comparing latency.
+
+The 600-file fixture deliberately crosses the original 512-file resource-snapshot budget. The saved worker implementation now retains a complete evaluated catalog separately from captured text: up to 16,384 identities and 16 million metadata characters. Ordinary requests read only their source, unique current-project application document, and transitive dictionary imports, within the existing 512-identity/8-million-character text budget. URI resolution and schema checks are shared between dependency discovery and semantic lookup; physical byte reads are deduplicated while relative imports retain their logical origins. Batch analysis and rename keep their full-scan budgets, and immutable snapshots memoize resource fingerprints per project.
+
+The [measured report](../../docs/xaml-language-performance.md) records the validated 20/200/600-file comparison with `--iterations 30`, exact payload hashes and regression coverage. A fast unknown response remains incorrect rather than a responsiveness improvement. This tool measures the ordinary request path; it does not validate the full batch/rename limits or replace the scale integration tests for duplicate identities, linked resources, locked dependencies, and stale overlays.

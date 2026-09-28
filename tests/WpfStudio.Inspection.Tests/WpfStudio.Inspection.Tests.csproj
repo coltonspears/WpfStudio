@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <Using Include="Xunit" />
+    <ProjectReference Include="../../src/WpfStudio.Runtime/WpfStudio.Runtime.csproj" />
+    <ProjectReference Include="../../src/WpfStudio.Inspection.Protocol/WpfStudio.Inspection.Protocol.csproj" />
+    <ProjectReference Include="../../src/WpfStudio.Inspection.StartupHook/WpfStudio.Inspection.StartupHook.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../src/WpfStudio.Inspection.Agent/WpfStudio.Inspection.Agent.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="Fixtures/App/WpfStudio.InspectionFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="Fixtures/ExistingHook/WpfStudio.ExistingStartupHook.csproj" ReferenceOutputAssembly="false" />
+    <Compile Remove="Fixtures/**/*.cs" />
+    <AssemblyMetadata Include="InspectionFixtureSourcePath" Value="$(MSBuildProjectDirectory)/Fixtures/App/Program.cs" />
+  </ItemGroup>
+  <Target Name="BuildOtherInspectionFixtureFrameworks" BeforeTargets="CopyInspectionFixtures">
+    <MSBuild Projects="Fixtures/App/WpfStudio.InspectionFixture.csproj" Targets="Build" Properties="Configuration=$(Configuration);TargetFramework=net8.0-windows" />
+    <MSBuild Projects="Fixtures/App/WpfStudio.InspectionFixture.csproj" Targets="Build" Properties="Configuration=$(Configuration);TargetFramework=net9.0-windows" />
+  </Target>
+  <Target Name="CopyInspectionFixtures" AfterTargets="Build">
+    <ItemGroup>
+      <InspectionFixtureFiles Include="$(MSBuildProjectDirectory)/Fixtures/App/bin/$(Configuration)/**/*" />
+      <ExistingHookFiles Include="$(MSBuildProjectDirectory)/Fixtures/ExistingHook/bin/$(Configuration)/net8.0/*.dll" />
+      <InspectionHookFiles Include="$(MSBuildProjectDirectory)/../../src/WpfStudio.Inspection.StartupHook/bin/$(Configuration)/net8.0/*.dll" />
+      <InspectionAgentFiles Include="$(MSBuildProjectDirectory)/../../src/WpfStudio.Inspection.Agent/bin/$(Configuration)/net8.0-windows/*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(InspectionFixtureFiles)" DestinationFiles="@(InspectionFixtureFiles->'$(OutDir)Fixtures/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ExistingHookFiles)" DestinationFolder="$(OutDir)ExistingHook" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(InspectionHookFiles);@(InspectionAgentFiles)" DestinationFolder="$(OutDir)Inspection" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

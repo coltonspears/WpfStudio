@@ -1,0 +1,444 @@
+using System.Collections.ObjectModel;
+using System.IO;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using WpfStudio.Contracts;
+using WpfStudio.Core.Documents;
+using WpfStudio.Runtime.Design;
+
+namespace WpfStudio.App.Features.Designer;
+
+public sealed partial class DesignerNode(PreviewNode node) : ObservableObject
+{
+    public PreviewNode Node { get; } = node;
+    public string Label => Node.Type.Split('.').Last() + (string.IsNullOrEmpty(Node.Name) ? "" : " #" + Node.Name);
+    public ObservableCollection<DesignerNode> Children { get; } = [];
+    [ObservableProperty] public partial bool IsSelected { get; set; }
+}
+
+/// <summary>Coordinates source revisions, preview lifetime and inspection without WPF controls.</summary>
+public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposable
+{
+    private readonly IPreviewClient _client;
+    private readonly IUiDispatcher _dispatcher;
+    private readonly CancellationTokenSource _lifetime = new();
+    private CancellationTokenSource? _render;
+    private DocumentState? _document;
+    private PreviewSnapshot? _snapshot;
+    private long _revision;
+    private long _selectionRevision;
+    private string? _inspectedNodeId;
+    private long _sourceVersion;
+    private string? _sourceHash;
+    private string? _sourceAssembly;
+    private bool _disposed;
+    private bool _picking;
+    public DesignerViewModel(IPreviewClient client, IUiDispatcher dispatcher)
+    {
+        _client = client; _dispatcher = dispatcher;
+        _client.Disconnected += Disconnected;
+    }
+    public ObservableCollection<DesignerNode> Tree { get; } = [];
+    public ObservableCollection<PreviewProperty> Properties { get; } = [];
+    public ObservableCollection<PreviewProperty> Bindings { get; } = [];
+    public ObservableCollection<PreviewDiagnostic> Diagnostics { get; } = [];
+    public event Action<SourceLocation>? SourceRequested;
+    public string? SourcePath => _document?.Path;
+    [ObservableProperty] public partial string DocumentName { get; set; } = "Open a XAML document and choose Preview";
+    [ObservableProperty] public partial string Status { get; set; } = "Preview has not started";
+    [ObservableProperty] public partial byte[]? Image { get; set; }
+    [ObservableProperty] public partial bool IsBusy { get; set; }
+    [ObservableProperty] public partial bool IsCurrent { get; set; }
+    [ObservableProperty] public partial bool AutoRefresh { get; set; } = true;
+    [ObservableProperty] public partial bool ShowLogicalTree { get; set; }
+    [ObservableProperty] public partial double PreviewWidth { get; set; } = 960;
+    [ObservableProperty] public partial double PreviewHeight { get; set; } = 640;
+    [ObservableProperty] public partial double Zoom { get; set; } = 0.65;
+    [ObservableProperty] public partial string? AssemblyPath { get; set; }
+    [ObservableProperty] public partial string? ProjectDirectory { get; set; }
+    [ObservableProperty] public partial DesignerNode? SelectedNode { get; set; }
+    [ObservableProperty] public partial PreviewProperty? SelectedProperty { get; set; }
+    [ObservableProperty] public partial string EditedValue { get; set; } = "";
+    [ObservableProperty] public partial PreviewBounds? SelectionBounds { get; set; }
+    public string SelectionDescription => SelectedNode?.Node is { } node
+        ? node.Type + (node.Bounds is { } bounds ? $"  ·  {bounds.Width:0.#} × {bounds.Height:0.#} at {bounds.X:0.#}, {bounds.Y:0.#}" : "") : "Select an element in the preview or tree";
+    public string SessionDescription => IsCompiledPreview
+        ? "Compiled preview · last built view and code-behind · application startup is not run"
+        : string.IsNullOrWhiteSpace(AssemblyPath) || !File.Exists(AssemblyPath) ? "Source preview · framework controls"
+        : "Source preview · built assembly · code-behind and application startup are not run";
+
+    public async Task OpenAsync(DocumentState document, string? assemblyPath = null, string? projectDirectory = null, string? sourceAssembly = null)
+    {
+        if (_disposed) return;
+        if (document.Extension != ".xaml") throw new ArgumentException("The designer requires a XAML document.", nameof(document));
+        if (_document != null) _document.ContentChanged -= ContentChanged;
+        _document = document; _document.ContentChanged += ContentChanged;
+        DocumentName = document.Name; AssemblyPath = assemblyPath; ProjectDirectory = projectDirectory; _sourceAssembly = sourceAssembly;
+        ConfigureScenarios(document.Path, projectDirectory);
+        ViewTypeName = ReadViewType(document.Content);
+        OnPropertyChanged(nameof(SourcePath));
+        await RefreshAsync();
+    }
+    private void ContentChanged(object? sender, EventArgs args)
+    {
+        Invalidate();
+        if (IsCompiledPreview) { Status = "Source changed. Rebuild the project, then refresh to see compiled changes."; return; }
+        Status = AutoRefresh ? "Source changed; updating preview…" : "Source changed; refresh the preview";
+        if (AutoRefresh) _ = RenderAsync(debounce: true);
+    }
+    private void Invalidate()
+    {
+        _render?.Cancel();
+        _revision++; _selectionRevision++;
+        ForgetInteraction();
+        IsCurrent = false; IsBusy = false; SelectedNode = null; SelectedProperty = null; SelectionBounds = null;
+        Properties.Clear(); Bindings.Clear(); Tree.Clear(); Diagnostics.Clear(); Image = null; _snapshot = null; _sourceHash = null;
+        UpdateInteractionSnapshot();
+        RefreshBindingDeclarations();
+        LayoutDetails.Clear("Preview changed. Refresh and select an element to inspect current layout.");
+        ClearAppearance("Preview changed. Refresh and select a property to inspect its appearance.");
+        OnPropertyChanged(nameof(BuildDescription));
+        OnPropertyChanged(nameof(ScenarioDescription));
+    }
+    [RelayCommand] private Task RefreshAsync() => RenderAsync(debounce: false);
+    private async Task RenderAsync(bool debounce)
+    {
+        if (_document == null || _disposed) return;
+        if (debounce && _scenarioSelectionPending)
+        {
+            Status = "Preview configuration changed. Refresh to apply it.";
+            return;
+        }
+        Invalidate();
+        _render?.Dispose(); _render = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var token = _render.Token; var revision = _revision;
+        var document = _document; var text = document.Content; var sourceVersion = document.Version;
+        IsBusy = true; Status = "Rendering preview…";
+        try
+        {
+            if (debounce) await Task.Delay(650, token);
+            var previousConfiguration = _scenarioFingerprint;
+            if (!await LoadScenariosAsync(revision, token) || !Current(revision)) return;
+            if (debounce && previousConfiguration != _scenarioFingerprint)
+            {
+                _scenarioSelectionPending = true;
+                Status = "Scenario configuration changed. Refresh to apply it.";
+                return;
+            }
+            if (!debounce) _scenarioSelectionPending = false;
+            var scenario = SelectedScenario?.Configuration;
+            if (scenario?.ViewFactory is not null && !IsCompiledPreview)
+            {
+                Status = "This scenario creates a view. Select Compiled mode, then Refresh.";
+                return;
+            }
+            if (!double.IsFinite(PreviewWidth) || !double.IsFinite(PreviewHeight) || PreviewWidth < 32 || PreviewHeight < 32 || PreviewWidth > 4096 || PreviewHeight > 4096)
+                throw new InvalidOperationException("Preview width and height must be between 32 and 4096.");
+            var assembly = string.IsNullOrWhiteSpace(AssemblyPath) || !IsCompiledPreview && !File.Exists(AssemblyPath) ? null : AssemblyPath;
+            OnPropertyChanged(nameof(SessionDescription));
+            var snapshot = await _client.RenderAsync(new(document.Path, text, revision, PreviewWidth, PreviewHeight,
+                assembly, ProjectDirectory, Mode,
+                string.IsNullOrWhiteSpace(ViewTypeName) ? null : ViewTypeName,
+                string.IsNullOrWhiteSpace(ApplicationResourcePath) ? null : ApplicationResourcePath,
+                scenario, UseDesignTimeValues), token);
+            if (!Current(revision) || document.Version != sourceVersion || snapshot.Version != revision) return;
+            if (!await VerifyScenarioConfigurationAsync(revision, token) || !Current(revision) || document.Version != sourceVersion) return;
+            if (snapshot.Success && snapshot.Scenario?.Configuration != scenario)
+                throw new InvalidOperationException("The preview did not confirm the selected scenario. Refresh and try again.");
+            _sourceVersion = sourceVersion;
+            _sourceHash = DocumentStore.Hash(System.Text.Encoding.UTF8.GetBytes(text));
+            SetSnapshot(snapshot);
+            Status = snapshot.Status ?? (snapshot.Success ? "Preview ready. Select an element to inspect it." : "Preview could not render; see diagnostics.");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            if (Current(revision)) { Status = exception.Message; Diagnostics.Add(new(exception.Message)); }
+        }
+        finally { if (Current(revision)) IsBusy = false; }
+    }
+    private bool Current(long revision) => !_disposed && revision == _revision;
+    private void SetSnapshot(PreviewSnapshot snapshot)
+    {
+        _snapshot = snapshot; Image = snapshot.PngBytes; IsCurrent = snapshot.Success;
+        UpdateInteractionSnapshot();
+        OnPropertyChanged(nameof(BuildDescription));
+        OnPropertyChanged(nameof(ScenarioDescription));
+        Diagnostics.Clear(); foreach (var diagnostic in snapshot.Diagnostics.Distinct()) Diagnostics.Add(diagnostic);
+        foreach (var warning in ScenarioWarnings) Diagnostics.Add(new(warning, "Warning"));
+        RebuildTree();
+    }
+    private void RebuildTree()
+    {
+        var selectedId = SelectedNode?.Node.Id;
+        var wasPicking = _picking;
+        bool selectionRemoved = false;
+        _picking = true;
+        try
+        {
+            // A bound TreeView reports a null selection while its collection is
+            // reset. Suppress that feedback for the whole rebuild, preserving
+            // the inspector and draft when the same runtime object survives.
+            Tree.Clear();
+            var nodes = (_snapshot?.Nodes ?? []).Where(n => ShowLogicalTree || n.IsVisual)
+                .ToDictionary(n => n.Id, n => new DesignerNode(n));
+            foreach (var node in nodes.Values)
+            {
+                var parent = ShowLogicalTree ? node.Node.LogicalParentId : node.Node.ParentId;
+                // Logical roots include visual-only template children only in the visual view.
+                if (ShowLogicalTree && parent == null && node.Node.ParentId != null) continue;
+                if (parent != null && nodes.TryGetValue(parent, out var owner) && owner != node) owner.Children.Add(node);
+                else Tree.Add(node);
+            }
+            if (selectedId != null && nodes.TryGetValue(selectedId, out var selected)) SelectedNode = selected;
+            else if (selectedId != null) { SelectedNode = null; selectionRemoved = true; }
+        }
+        finally { _picking = wasPicking; }
+        if (selectionRemoved) UpdateSelectedNode(null);
+    }
+    partial void OnShowLogicalTreeChanged(bool value) => RebuildTree();
+    partial void OnAssemblyPathChanged(string? value)
+    {
+        _scenarioSelectionPending = true;
+        Invalidate();
+        OnPropertyChanged(nameof(SessionDescription));
+        Status = "Preview assembly changed. Refresh to load it.";
+    }
+    partial void OnProjectDirectoryChanged(string? value)
+    {
+        Invalidate();
+        if (_document is not null) ConfigureScenarios(_document.Path, value);
+        _scenarioSelectionPending = true;
+        Status = "Preview project changed. Refresh to load its scenarios.";
+    }
+    partial void OnSelectedPropertyChanged(PreviewProperty? value)
+    {
+        if (_updatingBindingProperties) return;
+        EditedValue = value?.EditableValue ?? (value?.CanWriteSource == true ? "" : value?.Value ?? "");
+        NotifySourceCommands();
+        RefreshAppearanceSelection();
+        BindingPropertySelectionChanged();
+    }
+    partial void OnIsCurrentChanged(bool value)
+    {
+        if (!value) ForgetInteraction();
+        UpdateSnapshotCommand.NotifyCanExecuteChanged();
+        NotifyInteractionState();
+        NotifySourceCommands();
+        if (!value) LayoutDetails.Clear("Preview unavailable. Refresh to inspect current layout.");
+        if (!value) ClearAppearance("Preview unavailable. Refresh to inspect appearance.");
+        RefreshBindingSourceState();
+    }
+    partial void OnSelectedNodeChanging(DesignerNode? oldValue, DesignerNode? newValue)
+    {
+        if (oldValue != null) oldValue.IsSelected = false;
+        if (newValue != null) newValue.IsSelected = true;
+    }
+    partial void OnSelectedNodeChanged(DesignerNode? value) => UpdateSelectedNode(value);
+    private void UpdateSelectedNode(DesignerNode? value)
+    {
+        OnPropertyChanged(nameof(SelectionDescription));
+        SelectionBounds = value?.Node.Bounds;
+        if (!_picking)
+        {
+            ++_bindingDiagnosticSelection;
+            _bindingSelectionRemoved = false;
+            _bindingObservedNodeId = null;
+            ClearBindingExplanation("Select an element to inspect its bindings.");
+            _selectionRevision++;
+            _inspectedNodeId = null;
+            ClearAppearance("Select a property to inspect its appearance.");
+            Properties.Clear(); Bindings.Clear(); SelectedProperty = null;
+            RefreshBindingDeclarations();
+            LayoutDetails.Clear(value is null ? "Select an element to inspect its layout." : "Reading the selected element's layout…");
+        }
+        NotifySourceCommands();
+        if (!_picking && value != null && IsCurrent) _ = InspectAsync(value.Node.Id);
+    }
+    private async Task InspectAsync(string id)
+    {
+        var revision = _revision; var selection = ++_selectionRevision;
+        var operationEpoch = _bindingOperationEpoch;
+        bool operationIdle = _bindingOperations == 0;
+        _inspectedNodeId = null;
+        ClearBindingExplanation("Reading the selected element's bindings…");
+        ClearAppearance("Reading the selected element. Select a property to inspect its appearance.");
+        LayoutDetails.Clear("Reading the selected element's layout…");
+        try
+        {
+            var result = await _client.InspectAsync(new(revision, id), _lifetime.Token);
+            if (Current(revision) && selection == _selectionRevision && result.Version == revision &&
+                SelectedNode?.Node.Id == id && (result.Node is null || result.Node.Id == id))
+                SetInspection(result, operationIdle && operationEpoch == _bindingOperationEpoch && _bindingOperations == 0);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { if (Current(revision) && selection == _selectionRevision) { IsCurrent = false; Status = exception.Message; } }
+    }
+    public async Task PickAsync(double x, double y)
+    {
+        if (!IsCurrent || _disposed) return;
+        var revision = _revision; var selection = ++_selectionRevision;
+        var operationEpoch = _bindingOperationEpoch;
+        bool operationIdle = _bindingOperations == 0;
+        _inspectedNodeId = null;
+        ++_bindingDiagnosticSelection;
+        ClearBindingExplanation("Picking an element and reading its bindings…");
+        ClearAppearance("Picking an element. Select a property to inspect its appearance.");
+        LayoutDetails.Clear("Picking an element and reading its layout…");
+        try
+        {
+            var result = await _client.PickAsync(new(revision, x, y), _lifetime.Token);
+            if (!Current(revision) || selection != _selectionRevision || result.Version != revision) return;
+            _picking = true;
+            try { SelectedNode = result.Node == null ? null : FindNode(Tree, result.Node.Id) ?? new DesignerNode(result.Node); }
+            finally { _picking = false; }
+            SetInspection(result, operationIdle && operationEpoch == _bindingOperationEpoch && _bindingOperations == 0);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { if (Current(revision) && selection == _selectionRevision) { IsCurrent = false; Status = exception.Message; } }
+    }
+    [RelayCommand] private Task PickElementAsync(PreviewPoint? point) => point == null ? Task.CompletedTask : PickAsync(point.X, point.Y);
+    private static DesignerNode? FindNode(IEnumerable<DesignerNode> nodes, string id)
+    {
+        foreach (var node in nodes) { if (node.Node.Id == id) return node; if (FindNode(node.Children, id) is { } found) return found; }
+        return null;
+    }
+    public void SelectSource(string path, int offset)
+    {
+        if (!IsCurrent || _snapshot == null || _document?.Path != path || _document.Version != _sourceVersion) return;
+        var match = _snapshot.Nodes.Where(n => n.Source is { } s && s.Path == path && offset >= s.Start && offset < s.Start + s.Length)
+            .OrderBy(n => n.Source!.Length).FirstOrDefault();
+        if (match == null || SelectedNode?.Node.Id == match.Id) return;
+        SelectedNode = FindNode(Tree, match.Id) ?? new DesignerNode(match);
+    }
+    private void SetInspection(PreviewInspection inspection, bool bindingObservationCurrent = true)
+    {
+        ClearAppearance("Select a property to inspect its appearance.");
+        var selected = _bindingObservedNodeId == inspection.Node?.Id ? SelectedProperty : null;
+        var draft = EditedValue;
+        _updatingBindingProperties = true;
+        try
+        {
+            _inspectedNodeId = inspection.Node?.Id;
+            Properties.Clear(); Bindings.Clear(); SelectedProperty = null;
+            foreach (var property in inspection.Properties) { Properties.Add(property); if (property.BindingStatus != null || property.Binding != null) Bindings.Add(property); }
+            SelectedProperty = selected is null ? null : Properties.FirstOrDefault(property => property.Name == selected.Name
+                && property.OwnerType == selected.OwnerType && property.OwnerAssembly == selected.OwnerAssembly);
+        }
+        finally { _updatingBindingProperties = false; }
+        if (SelectedProperty is not null) EditedValue = draft;
+        else EditedValue = "";
+        _bindingObservationReady = inspection.Node is not null && bindingObservationCurrent;
+        _bindingObservedNodeId = inspection.Node?.Id;
+        NotifySourceCommands();
+        RefreshAppearanceSelection();
+        SelectionBounds = inspection.Node?.Bounds;
+        LayoutDetails.Apply(IsCurrent && inspection.Node is not null ? inspection.Layout : null, IsCurrent,
+            "Layout details are unavailable for this preview element.");
+        // Replace current binding errors for the inspected target. Historical
+        // trace warnings and diagnostics for other targets retain their history.
+        if (inspection.Node is { } observed)
+            foreach (var old in Diagnostics.Where(issue => issue.NodeId == observed.Id && issue.BindingId is not null).ToArray()) Diagnostics.Remove(old);
+        foreach (var issue in inspection.Diagnostics.Where(d => !Diagnostics.Contains(d))) Diagnostics.Add(issue);
+        if (inspection.Status != null) Status = inspection.Status;
+        RefreshBindingDeclarations();
+    }
+    [RelayCommand] private Task ApplyPropertyAsync() => EditPropertyAsync(reset: false);
+    [RelayCommand] private Task ResetPropertyAsync() => EditPropertyAsync(reset: true);
+    private async Task EditPropertyAsync(bool reset)
+    {
+        if (!IsCurrent || SelectedNode == null || _inspectedNodeId != SelectedNode.Node.Id ||
+            SelectedProperty is not { CanEdit: true } property || !Properties.Contains(property)) return;
+        var revision = _revision; var nodeId = SelectedNode.Node.Id;
+        var selection = ++_selectionRevision; var submittedValue = EditedValue;
+        string? reinspectionNodeId = null;
+        ClearBindingExplanation("Preview property operation in progress. Waiting for a new observation…");
+        ++_bindingOperationEpoch;
+        ++_bindingOperations;
+        ++_appearancePropertyOperations;
+        ++_bindingSourceEpoch; RefreshBindingSourceState();
+        ClearAppearance("Preview property changing. Appearance will refresh after the edit.");
+        LayoutDetails.Clear("Preview property changing. Waiting for updated layout…");
+        try
+        {
+            var result = await _client.SetPropertyAsync(new(revision, nodeId, property.Name, submittedValue, reset,
+                property.OwnerType, property.OwnerAssembly), _lifetime.Token);
+            if (!Current(revision) || result.Snapshot.Version != revision) return;
+            // The user can select another property or keep typing while a setter
+            // and layout run in the host. Refresh values without losing that work.
+            var sameProperty = SelectedProperty is { } selected && selected.Name == property.Name &&
+                selected.OwnerType == property.OwnerType && selected.OwnerAssembly == property.OwnerAssembly;
+            var preserveInput = selection != _selectionRevision || !sameProperty || EditedValue != submittedValue;
+            var selectedProperty = preserveInput ? SelectedProperty : property;
+            var editedValue = EditedValue;
+            SetSnapshot(result.Snapshot);
+            LayoutDetails.Clear("Preview changed. Reading updated layout…");
+            if (SelectedNode?.Node.Id == nodeId)
+            {
+                SetInspection(result.Inspection);
+                SelectedProperty = selectedProperty is null ? null : Properties.FirstOrDefault(p =>
+                    p.Name == selectedProperty.Name && p.OwnerType == selectedProperty.OwnerType && p.OwnerAssembly == selectedProperty.OwnerAssembly);
+                if (preserveInput && SelectedProperty != null) EditedValue = editedValue;
+                else EditedValue = SelectedProperty?.EditableValue ?? (SelectedProperty?.CanWriteSource == true ? "" : SelectedProperty?.Value ?? "");
+            }
+            else if (SelectedNode is { } current) reinspectionNodeId = current.Node.Id;
+            Status = result.Success ? (reset ? "Original preview value restored" : "Preview value changed. Source is unchanged.") : result.Error ?? "The property could not be changed";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { if (Current(revision)) { IsCurrent = false; Status = exception.Message; } }
+        finally
+        {
+            --_bindingOperations;
+            --_appearancePropertyOperations;
+            RefreshAppearanceSelection();
+            RefreshBindingSourceState();
+            if (Current(revision) && reinspectionNodeId is not null && SelectedNode?.Node.Id == reinspectionNodeId)
+                _ = InspectAsync(reinspectionNodeId);
+        }
+    }
+    [RelayCommand] private void GoToSource()
+    {
+        if (IsCurrent && _document?.Version == _sourceVersion && SelectedNode?.Node.Source is { } source) SourceRequested?.Invoke(source);
+        else Status = "This element has no known source location";
+    }
+    [RelayCommand] private async Task RestartAsync()
+    {
+        Invalidate();
+        try { await _client.StopAsync(_lifetime.Token); await RefreshAsync(); }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { Status = exception.Message; }
+    }
+    [RelayCommand] private async Task StopAsync()
+    {
+        AutoRefresh = false;
+        Invalidate(); IsBusy = false;
+        try { await _client.StopAsync(_lifetime.Token); Status = "Preview stopped. Refresh to resume."; }
+        catch (OperationCanceledException) { }
+    }
+    public async Task CloseAsync()
+    {
+        if (_document != null) _document.ContentChanged -= ContentChanged;
+        _document = null; OnPropertyChanged(nameof(SourcePath));
+        ClearScenarios();
+        DocumentName = "Open a XAML document and choose Preview";
+        await StopAsync();
+    }
+    private void Disconnected(object? sender, string reason) => _dispatcher.Post(() =>
+    {
+        if (_disposed) return;
+        Invalidate(); IsBusy = false; Status = reason;
+    });
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        ForgetInteraction();
+        ++_bindingSourceEpoch; RefreshBindingSourceState();
+        ClearAppearance("Preview closed. Open a preview to inspect appearance.");
+        ClearScenarios();
+        LayoutDetails.Clear("Preview closed. Open a preview to inspect layout.");
+        if (_document != null) _document.ContentChanged -= ContentChanged;
+        _client.Disconnected -= Disconnected; _lifetime.Cancel(); _render?.Cancel();
+        await _client.DisposeAsync(); _render?.Dispose(); _lifetime.Dispose();
+    }
+}

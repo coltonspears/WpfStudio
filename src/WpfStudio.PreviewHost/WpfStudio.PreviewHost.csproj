@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WpfStudio.Contracts/WpfStudio.Contracts.csproj" />
+    <ProjectReference Include="../WpfStudio.Wpf.PropertyEditing/WpfStudio.Wpf.PropertyEditing.csproj" />
+    <ProjectReference Include="../WpfStudio.Wpf.Diagnostics/WpfStudio.Wpf.Diagnostics.csproj" />
+    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
+  </ItemGroup>
+</Project>

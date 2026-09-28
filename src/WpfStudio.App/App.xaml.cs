@@ -63,6 +63,8 @@ public partial class App : Application
         services.AddSingleton<DocumentStore>(); services.AddSingleton<SettingsStore>();
         services.AddSingleton<WorkspaceEditTransaction>(); services.AddSingleton<WorkspaceClient>(); services.AddSingleton<BuildService>();
         services.AddSingleton<WpfIndexService>(); services.AddSingleton<ScaffoldingService>(); services.AddSingleton<XamlCompletionService>();
+        services.AddSingleton<WpfStudio.Runtime.Design.IPreviewClient, WpfStudio.Runtime.Design.PreviewClient>();
+        services.AddSingleton<Features.Designer.DesignerViewModel>();
         services.AddSingleton<DebugSession>(); services.AddSingleton<DebuggerViewModel>(); services.AddSingleton<TerminalViewModel>();
         services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(AppPaths.DataDirectory, "sql-connections.json")));
         services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(AppPaths.DataDirectory, "sql-recovery.json")));
