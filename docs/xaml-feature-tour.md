@@ -2,7 +2,7 @@
 
 WpfStudio connects XAML authoring, an isolated preview, and inspection of a running WPF application. This tour follows the loop from a binding diagnostic to a checked source change.
 
-These are **actual loaded-app captures from automated fixtures**, taken on September 28, 2026. The eleven PNGs were copied unchanged from the screenshot output of the [loaded-shell smoke test in the source repository](https://github.com/coltonspears/WpfStudio/blob/main/tests/WpfStudio.App.Tests/ShellSmokeTests.cs). They show the implemented UI and fixture observations; they are not mockups or proof of physical mouse, keyboard, IME, or accessibility behavior. Current test results and remaining acceptance work are recorded in [VALIDATION.md](../VALIDATION.md).
+These are **actual loaded-app captures from automated fixtures**, taken on September 28, 2026. The twelve PNGs were copied unchanged from the screenshot output of the [loaded-shell smoke test in the source repository](https://github.com/coltonspears/WpfStudio/blob/main/tests/WpfStudio.App.Tests/ShellSmokeTests.cs). They show the implemented UI and fixture observations; they are not mockups or proof of physical mouse, keyboard, IME, or accessibility behavior. Current test results and remaining acceptance work are recorded in [VALIDATION.md](../VALIDATION.md).
 
 ## Catch binding mistakes while editing
 
@@ -24,9 +24,19 @@ Static analysis describes declared types. Runtime-created DataContexts, dynamic 
 
 Missing authored names are warnings because runtime registration or outer scopes may supply them. Unknown custom scopes remain unresolved. **Ctrl+.** can offer an unambiguous spelling fix with workspace undo. See [named-element assistance and limits](xaml-named-elements.md).
 
+## Keep C# current while editing XAML
+
+Change a named control's type directly in XAML. On a supported evaluated WPF page, the worker updates its C# field type from the unsaved buffer. Completion offers the new type's members, and existing C# receives diagnostics when its member access no longer matches.
+
+![ContactView.xaml.cs has ContactEmail.Text underlined, while Problems reports CS1061 because PasswordBox has no Text member; the XAML tab has unsaved changes.](images/xaml/live-fields.png)
+
+*The fixture changed `ContactEmail` from `TextBox` to `PasswordBox` in an unsaved XAML buffer. The unchanged C# still accesses `.Text`, so its compiler diagnostic now names `PasswordBox`. No generated file was rewritten for this field update.*
+
+Adding, removing or renaming a supported named element also updates current fields, including on an evaluated page before its first build. **F12** from C# selects the current authored name. Use reviewed **Rename** to change existing references together; direct typing changes only the edited source. Malformed or unsupported declarations receive incomplete-coverage status. These declarations describe editor semantics; a build still compiles saved XAML. See [current fields and their limits](xaml-named-elements.md#current-xaml-fields-while-editing).
+
 ## Refactor a name across XAML and C#
 
-Use **Find References** on a supported declaration, `ElementName` value or proven generated-field use. Search results connect the authored XAML and C# locations while retaining project context.
+Use **Find References** on a supported declaration, `ElementName` value or current page-field use. Search results connect the authored XAML and C# locations while retaining project context.
 
 ![Search lists the ContactEmail declaration and ElementName value in ContactView.xaml, plus its authored C# use in ContactView.xaml.cs.](images/xaml/name-references.png)
 
@@ -36,9 +46,9 @@ Use **Find References** on a supported declaration, `ElementName` value or prove
 
 ![Rename review shows ContactEmail changing to EmailInput in Name and ElementName, with the code-behind file also listed and Cancel and Apply changes available.](images/xaml/name-rename-review.png)
 
-*Apply changes updates editor buffers as one undoable transaction without saving. The current workflow also synchronizes verified generated fields in memory, keeping subsequent C# assistance and reviewed page-name renames current without writing generated files. The visible notice distinguishes this compiler update from a build of saved XAML.*
+*Apply changes updates editor buffers as one undoable transaction without saving. The current workflow synchronizes page fields from those source buffers, keeping C# assistance and subsequent renames current. Generated files remain unchanged; a real build still compiles saved XAML.*
 
-WpfStudio verifies the compiler's exact XAML checksum, mapped attribute line, page class and field type before connecting a name to generated C#. Accepted rename states support repeat rename, workspace undo and language-worker restart against unchanged generated baselines. Newly compiled output can establish a fresh verified baseline and retire that history; stale evidence blocks replay. Template-local names retain their own scope identities. Direct name/type edits outside the bounded history and unsupported name consumers remain work in progress. See [reference and rename coverage](xaml-named-elements.md#references-and-reviewed-rename).
+WpfStudio connects the exact current name span, page class and field type to an editor-derived C# declaration in each owning project. Undo, discard and language-worker restart derive fields again from current source. Template-local names retain their own scope identities, and broader name consumers still require support. See [current fields and refactoring coverage](xaml-named-elements.md#current-xaml-fields-while-editing).
 
 ## Preview a named application state
 
@@ -118,6 +128,7 @@ Visual drag-and-drop authoring, complete runtime resource attribution, arbitrary
 | --- | --- |
 | `project-diagnostics.png` | `artifacts/screenshots/xaml-project-diagnostics.png` |
 | `named-elements.png` | `artifacts/screenshots/xaml-named-elements.png` |
+| `live-fields.png` | `artifacts/screenshots/xaml-live-fields.png` |
 | `name-references.png` | `artifacts/screenshots/xaml-name-references.png` |
 | `name-rename-review.png` | `artifacts/screenshots/xaml-name-rename-review.png` |
 | `preview-scenarios.png` | `artifacts/screenshots/xaml-preview-scenarios.png` |

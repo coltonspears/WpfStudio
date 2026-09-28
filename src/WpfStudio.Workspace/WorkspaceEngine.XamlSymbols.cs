@@ -398,7 +398,7 @@ public sealed partial class WorkspaceEngine
     private void EnsureSymbolSnapshotCurrent(SymbolSnapshot snapshot)
     {
         lock (_gate)
-            if (!ReferenceEquals(snapshot.Solution, _solution) || snapshot.Revision != _semanticRevision)
+            if (_pageProjectionPending || !ReferenceEquals(snapshot.Solution, _solution) || snapshot.Revision != _semanticRevision)
                 throw new InvalidOperationException("Project types or buffers changed during the operation. Request it again.");
     }
 

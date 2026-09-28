@@ -149,9 +149,13 @@ public sealed class XamlNameRefactoringIntegrationTests
     }
 
     [Fact]
-    public async Task ChangedXamlBytesOrOverlayNeverDowngradeGeneratedNameToCsharpOnlyRename()
+    public async Task UnsynchronizedOverlayWithholdsRefactoringWhileRefreshedSavedXamlRenamesBothLanguages()
     {
         await using var fixture = await Fixture.CreateAsync();
+        var generatedBytes = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (string path in Directory.EnumerateFiles(fixture.Root, "*.g*.cs", SearchOption.AllDirectories))
+            generatedBytes[path] = await File.ReadAllBytesAsync(path);
+        Assert.NotEmpty(generatedBytes);
         int xamlPosition = Markup.IndexOf("Name=\"Input\"", StringComparison.Ordinal) + 6;
         int codePosition = Code.IndexOf("Input.Text", StringComparison.Ordinal);
         string changed = Markup + "\n<!-- source changed after compilation -->";
@@ -172,9 +176,30 @@ public sealed class XamlNameRefactoringIntegrationTests
         Assert.DoesNotContain(references.Locations, location => location.Path == fixture.CodePath);
         Assert.Contains(references.Warnings, warning => warning.Contains("buffer", StringComparison.OrdinalIgnoreCase));
         await File.WriteAllTextAsync(fixture.XamlPath, changed);
-        var diskError = await Assert.ThrowsAnyAsync<Exception>(() => fixture.Client.RenameAsync(new(fixture.CodePath, codePosition, 0,
-            "Changed", Code, fixture.Project)));
-        Assert.Contains("checksum", diskError.Message, StringComparison.OrdinalIgnoreCase);
+        var refresh = await fixture.Client.RefreshDiskDocumentsAsync(new(Paths: [fixture.XamlPath]));
+        Assert.True(refresh.Accepted, refresh.Status);
+        Assert.True(refresh.Changed);
+        // A saved page can change independently of its old compiler checksum.
+        // Once current source is synchronized, both authored languages use it.
+        var currentReferences = await fixture.Client.FindSymbolReferencesAsync(new(fixture.CodePath, codePosition, 0, Code, fixture.Project));
+        Assert.True(currentReferences.SymbolFound, string.Join("\n", currentReferences.Warnings));
+        Assert.Equal(2, currentReferences.Locations.Count(location => location.Path == fixture.XamlPath));
+        Assert.Single(currentReferences.Locations, location => location.Path == fixture.CodePath);
+        Assert.All(currentReferences.Locations.Where(location => location.Path == fixture.XamlPath),
+            location => Assert.Equal(Hash(changed), location.ExpectedTextHash));
+        var rename = await fixture.Client.RenameAsync(new(fixture.CodePath, codePosition, 0, "Changed", Code, fixture.Project));
+        Assert.DoesNotContain(rename.Documents, document => IsGenerated(document.Path));
+        var xamlEdit = Assert.Single(rename.Documents, document => document.Path == fixture.XamlPath);
+        var codeEdit = Assert.Single(rename.Documents, document => document.Path == fixture.CodePath);
+        Assert.Equal(Hash(changed), xamlEdit.ExpectedTextHash);
+        Assert.Equal(Hash(Code), codeEdit.ExpectedTextHash);
+        string proposed = Apply(changed, xamlEdit.Edits);
+        Assert.Contains("Name=\"Changed\"", proposed);
+        Assert.Contains("ElementName=Changed", proposed);
+        Assert.Contains("Changed.Text", Apply(Code, codeEdit.Edits));
+        Assert.Equal(changed, await File.ReadAllTextAsync(fixture.XamlPath));
+        Assert.Equal(Code, await File.ReadAllTextAsync(fixture.CodePath));
+        foreach (var (path, bytes) in generatedBytes) Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
         Assert.True(fixture.Client.IsConnected);
     }
 

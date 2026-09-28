@@ -45,7 +45,14 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             _workspace.SemanticStateChanged += SemanticStateChanged;
             if (_resources is not null) _resources.Changed += SemanticStateChanged;
         }
-        else if (State.Extension == ".cs") _workspace.NameProjectionChanged += SemanticStateChanged;
+        // XAML synchronization can change generated fields while this C# buffer
+        // stays unchanged. Keep this separate from the XAML semantic event:
+        // notifying the authoring XAML editor would cancel its own analysis.
+        else if (State.Extension == ".cs")
+        {
+            _workspace.NameProjectionChanged += SemanticStateChanged;
+            _workspace.CSharpModelChanged += CSharpModelChanged;
+        }
         ContentChanged(this, EventArgs.Empty);
     }
     public DocumentState State { get; }
@@ -133,6 +140,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             ClearQuickFixes();
             ContextChanged?.Invoke();
         }
+    }
+    private void CSharpModelChanged(object? sender, string path)
+    {
+        if (!StringComparer.OrdinalIgnoreCase.Equals(System.IO.Path.GetFullPath(State.Path), path))
+            SemanticStateChanged(sender, EventArgs.Empty);
     }
     private void SemanticStateChanged(object? sender, EventArgs e)
     {
@@ -337,6 +349,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         State.PropertyChanged -= StatePropertyChanged;
         _workspace.SemanticStateChanged -= SemanticStateChanged;
         _workspace.NameProjectionChanged -= SemanticStateChanged;
+        _workspace.CSharpModelChanged -= CSharpModelChanged;
         if (_resources is not null) _resources.Changed -= SemanticStateChanged;
         ClearQuickFixes();
         _analysis?.Cancel();

@@ -100,7 +100,7 @@ public sealed class XamlNameProjectionIntegrationTests
         await fixture.CaptureGeneratedBaselineAsync();
 
         // No open buffer is available to rescue replay here. The worker must
-        // use the saved state or prove a fresh compiler baseline for that state.
+        // derive its current fields from the saved page rather than old history.
         await fixture.AssertFieldsAsync(changed, 0, "ContactEmail", "Other", absent: ["Input"]);
         await fixture.SynchronizeAsync(changed, 1);
         await fixture.AssertHealthyAsync(changed, 1, "ContactEmail", "Other", absent: ["Input"]);
@@ -162,12 +162,14 @@ public sealed class XamlNameProjectionIntegrationTests
     }
 
     [Fact]
-    public async Task CancelledAndTamperedPlansDoNotCommitAuthoredBuffersOrGeneratedState()
+    public async Task CancelledOrInvalidCurrentSourcePlansDoNotCommitAuthoredBuffersOrVersions()
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.SynchronizeAsync(fixture.Initial, 1);
         var rename = await fixture.RenameAsync(fixture.Initial, 1, "Input", "ContactEmail");
         var plan = Assert.IsType<XamlNameProjectionPlan>(rename.NameProjection);
+        Assert.True(plan.CurrentSource);
+        Assert.Empty(plan.Baselines);
         var changed = fixture.Apply(fixture.Initial, rename);
         var documents = fixture.Documents(changed, 2);
         using (var cancellation = new CancellationTokenSource())
@@ -177,39 +179,62 @@ public sealed class XamlNameProjectionIntegrationTests
         }
         await fixture.AssertHealthyAsync(fixture.Initial, 1, "Input", "Other", absent: ["ContactEmail"]);
 
-        var badHash = plan with { Baselines = plan.Baselines.Select(baseline => baseline with { TextHash = new string('0', 64) }).ToArray() };
+        var badHash = plan with { ExpectedDocuments = plan.ExpectedDocuments.Select(document => document with { TextHash = new string('0', 64) }).ToArray() };
+        var unownedPage = plan with { XamlPath = Path.Combine(fixture.Root, "Unowned.xaml") };
+        var legacyPlan = plan with { CurrentSource = false };
         var badBytes = plan with { BaselineSourceBytes = Convert.ToBase64String(Encoding.UTF8.GetBytes(Markup + "\n<!-- forged baseline -->")) };
-        var badStep = plan with { Steps = plan.Steps.Select(step => step with { NewName = "UnexpectedName" }).ToArray() };
-        foreach (var bad in new[] { badHash, badBytes, badStep })
+        foreach (var bad in new[] { badHash, unownedPage, legacyPlan, badBytes })
         {
             var result = await fixture.Client.ApplyXamlNameProjectionAsync(new(bad, documents));
             Assert.False(result.Accepted);
             Assert.False(string.IsNullOrWhiteSpace(result.Status));
             // Version 1 remaining valid proves rejected requests did not first
             // synchronize their version-2 authored C# buffers as a side effect.
-            await fixture.AssertHealthyAsync(fixture.Initial, 1, "Input", "Other", absent: ["ContactEmail", "UnexpectedName"]);
+            await fixture.AssertHealthyAsync(fixture.Initial, 1, "Input", "Other", absent: ["ContactEmail"]);
         }
+        var missingAuthoredDocument = await fixture.Client.ApplyXamlNameProjectionAsync(new(plan,
+            documents.Where(document => document.Path != fixture.CodePath).ToArray()));
+        Assert.False(missingAuthoredDocument.Accepted);
+        Assert.False(string.IsNullOrWhiteSpace(missingAuthoredDocument.Status));
+        var unownedSource = new UpdateDocumentRequest(Path.Combine(fixture.Root, "Unowned.cs"), "class Unowned { }", 2, Analyze: false);
+        var foreignPrerequisite = plan with
+        {
+            ExpectedDocuments = plan.ExpectedDocuments.Append(new XamlNameProjectionExpectedDocument(unownedSource.Path,
+                Hash(Encoding.UTF8.GetBytes(unownedSource.Text)))).ToArray()
+        };
+        var foreignResult = await fixture.Client.ApplyXamlNameProjectionAsync(new(foreignPrerequisite, documents.Append(unownedSource).ToArray()));
+        Assert.False(foreignResult.Accepted);
+        Assert.False(string.IsNullOrWhiteSpace(foreignResult.Status));
+        await Assert.ThrowsAnyAsync<Exception>(() => fixture.Client.ApplyXamlNameProjectionAsync(new(plan, fixture.Documents(changed, 0))));
+        await fixture.AssertHealthyAsync(fixture.Initial, 1, "Input", "Other", absent: ["ContactEmail"]);
         await fixture.Client.RestartAsync();
         await fixture.AssertHealthyAsync(fixture.Initial, 1, "Input", "Other", absent: ["ContactEmail"]);
         await fixture.AssertGeneratedUnchangedAsync();
     }
 
     [Fact]
-    public async Task ChangedGeneratedBaselineRefusesProjectionWithoutAcceptingItsAuthoredUpdates()
+    public async Task ChangedGeneratedDiskOutputDoesNotBlockCurrentFieldsAndIsNeverOverwritten()
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.SynchronizeAsync(fixture.Initial, 1);
         var rename = await fixture.RenameAsync(fixture.Initial, 1, "Input", "ContactEmail");
         var plan = Assert.IsType<XamlNameProjectionPlan>(rename.NameProjection);
         var changed = fixture.Apply(fixture.Initial, rename);
-        string generated = plan.Baselines[0].Path;
+        Assert.True(plan.CurrentSource);
+        Assert.Empty(plan.Baselines);
+        string generated = Directory.EnumerateFiles(fixture.Root, "View.g*.cs", SearchOption.AllDirectories).First();
         byte[] before = await File.ReadAllBytesAsync(generated);
+        byte[] externallyChanged = before.Concat(Encoding.UTF8.GetBytes("\n// A newer build replaced this compiler output.\n")).ToArray();
         try
         {
-            await File.WriteAllTextAsync(generated, Encoding.UTF8.GetString(before) + "\n// A newer build replaced this baseline.\n");
-            var rejected = await fixture.Client.ApplyXamlNameProjectionAsync(new(plan, fixture.Documents(changed, 2)));
-            Assert.False(rejected.Accepted);
-            await fixture.AssertHealthyAsync(fixture.Initial, 1, "Input", "Other", absent: ["ContactEmail"]);
+            await File.WriteAllBytesAsync(generated, externallyChanged);
+            var accepted = await fixture.Client.ApplyXamlNameProjectionAsync(new(plan, fixture.Documents(changed, 2)));
+            Assert.True(accepted.Accepted, accepted.Status);
+            await fixture.AssertHealthyAsync(changed, 2, "ContactEmail", "Other", absent: ["Input"]);
+            await fixture.AssertNavigationAsync(changed, 2, "ContactEmail");
+            Assert.Equal(externallyChanged, await File.ReadAllBytesAsync(generated));
+            Assert.Equal(Markup, await File.ReadAllTextAsync(fixture.XamlPath));
+            Assert.Equal(Code, await File.ReadAllTextAsync(fixture.CodePath));
         }
         finally { await File.WriteAllBytesAsync(generated, before); }
         await fixture.AssertGeneratedUnchangedAsync();
@@ -222,21 +247,36 @@ public sealed class XamlNameProjectionIntegrationTests
         await fixture.SynchronizeAsync(fixture.Initial, 1);
         var rename = await fixture.RenameAsync(fixture.Initial, 1, "Input", "ContactEmail");
         var plan = Assert.IsType<XamlNameProjectionPlan>(rename.NameProjection);
-        Assert.Equal(2, plan.Baselines.Select(baseline => baseline.ProjectPath).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.True(plan.CurrentSource);
+        Assert.Empty(plan.Baselines);
+        foreach (string path in fixture.CodePaths)
+            Assert.Contains(plan.ExpectedDocuments, document => document.Path == path);
         var changed = fixture.Apply(fixture.Initial, rename);
-        var incomplete = plan with
-        {
-            Baselines = plan.Baselines.Where(baseline => baseline.ProjectPath == plan.Baselines[0].ProjectPath).ToArray()
-        };
-        var refused = await fixture.Client.ApplyXamlNameProjectionAsync(new(incomplete, fixture.Documents(changed, 2)));
+        // Every authored consumer in every owning context is a transaction
+        // prerequisite even though generated compiler baselines are obsolete.
+        var incomplete = fixture.Documents(changed, 2).Where(document => document.Path != fixture.CodePaths[1]).ToArray();
+        var refused = await fixture.Client.ApplyXamlNameProjectionAsync(new(plan, incomplete));
         Assert.False(refused.Accepted);
         await fixture.AssertHealthyAsync(fixture.Initial, 1, "Input", "Other", absent: ["ContactEmail"]);
         await fixture.CommitAsync(rename, changed, 2);
         await fixture.AssertHealthyAsync(changed, 2, "ContactEmail", "Other", absent: ["Input"]);
         await fixture.Client.RestartAsync();
         await fixture.AssertHealthyAsync(changed, 2, "ContactEmail", "Other", absent: ["Input"]);
+        foreach (string path in fixture.CodePaths)
+        {
+            int usage = changed[path].IndexOf("this.ContactEmail.Text", StringComparison.Ordinal) + 5;
+            var definition = Assert.Single(await fixture.Client.GetDefinitionAsync(new(path, usage, 2)));
+            Assert.Equal(fixture.XamlPath, definition.Path);
+            Assert.Equal("ContactEmail", changed[fixture.XamlPath].Substring(definition.Start, definition.Length));
+        }
         var next = await fixture.RenameAsync(changed, 2, "ContactEmail", "Destination");
-        Assert.Equal(2, Assert.IsType<XamlNameProjectionPlan>(next.NameProjection).Baselines.Select(baseline => baseline.ProjectPath).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        var nextPlan = Assert.IsType<XamlNameProjectionPlan>(next.NameProjection);
+        Assert.True(nextPlan.CurrentSource);
+        foreach (string path in fixture.CodePaths)
+            Assert.Contains(nextPlan.ExpectedDocuments, document => document.Path == path);
+        var destination = fixture.Apply(changed, next);
+        await fixture.CommitAsync(next, destination, 3);
+        await fixture.AssertHealthyAsync(destination, 3, "Destination", "Other", absent: ["Input", "ContactEmail"]);
         await fixture.AssertGeneratedUnchangedAsync();
     }
 
@@ -280,7 +320,7 @@ public sealed class XamlNameProjectionIntegrationTests
     }
 
     [Fact]
-    public async Task CurrentCustomNamescopeMetadataWithholdsProjectedDefinitionUntilMetadataRecovers()
+    public async Task CustomRootNamescopeKeepsCompilerFieldNavigationButWithholdsUnprovenNameRefactoring()
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.SynchronizeAsync(fixture.Initial, 1);
@@ -300,11 +340,18 @@ public sealed class XamlNameProjectionIntegrationTests
         Assert.True(update.Accepted);
         Assert.DoesNotContain(update.Diagnostics, diagnostic => diagnostic.Severity == "Error");
         int usage = code.IndexOf("this.ContactEmail.Text", StringComparison.Ordinal) + 5;
-        Assert.Empty(await fixture.Client.GetDefinitionAsync(new(fixture.CodePath, usage, 3)));
+        // A root implementing INameScope changes runtime name lookup, but WPF
+        // still generates its named child fields. C# F12 uses field provenance.
+        var definition = Assert.Single(await fixture.Client.GetDefinitionAsync(new(fixture.CodePath, usage, 3)));
+        Assert.Equal(fixture.XamlPath, definition.Path);
+        Assert.Equal("ContactEmail", changed[fixture.XamlPath].Substring(definition.Start, definition.Length));
+        Assert.Equal(Hash(Encoding.UTF8.GetBytes(changed[fixture.XamlPath])), definition.ExpectedTextHash);
         var references = await fixture.Client.FindSymbolReferencesAsync(new(fixture.CodePath, usage, 3, code, fixture.Project,
             [new(fixture.XamlPath, changed[fixture.XamlPath], 2)]));
         Assert.DoesNotContain(references.Locations, location => location.Path == fixture.XamlPath);
         Assert.NotEmpty(references.Warnings);
+        await Assert.ThrowsAnyAsync<Exception>(() => fixture.Client.RenameAsync(new(fixture.CodePath, usage, 3, "Destination", code, fixture.Project,
+            [new(fixture.XamlPath, changed[fixture.XamlPath], 2)])));
 
         Assert.True((await fixture.Client.UpdateDocumentAsync(new(fixture.CodePath, changed[fixture.CodePath], 4))).Accepted);
         int recoveredUsage = changed[fixture.CodePath].IndexOf("this.ContactEmail.Text", StringComparison.Ordinal) + 5;
@@ -315,7 +362,7 @@ public sealed class XamlNameProjectionIntegrationTests
     }
 
     [Fact]
-    public async Task CachedReplayRejectsIncomingFieldCollisionWithoutAcceptingItsBufferVersions()
+    public async Task CurrentSourceReplayRejectsIncomingFieldCollisionWithoutAcceptingItsBufferVersions()
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.SynchronizeAsync(fixture.Initial, 1);
@@ -328,9 +375,9 @@ public sealed class XamlNameProjectionIntegrationTests
                 "public System.Windows.Controls.TextBox ContactEmail;\n    public string Read()", StringComparison.Ordinal)
         };
 
-        // The same cached plan is valid, and Replay intentionally accepts current
-        // authored text rather than the review's original expected hashes. Its
-        // final candidate compilation must still prove every field mapping.
+        // Replay intentionally accepts current authored text rather than the
+        // review's original expected hashes. Its final candidate compilation
+        // must still reject a newly introduced generated/authored collision.
         var replay = await fixture.Client.ApplyXamlNameProjectionAsync(new(
             Assert.IsType<XamlNameProjectionPlan>(rename.NameProjection), fixture.Documents(conflicting, 3), Replay: true));
         Assert.False(replay.Accepted);
@@ -402,6 +449,8 @@ public sealed class XamlNameProjectionIntegrationTests
         public async Task CommitAsync(WorkspaceEditResult rename, IReadOnlyDictionary<string, string> state, long version)
         {
             var plan = Assert.IsType<XamlNameProjectionPlan>(rename.NameProjection);
+            Assert.True(plan.CurrentSource);
+            Assert.Empty(plan.Baselines);
             var applied = await Client.ApplyXamlNameProjectionAsync(new(plan, Documents(state, version)));
             Assert.True(applied.Accepted, applied.Status);
         }

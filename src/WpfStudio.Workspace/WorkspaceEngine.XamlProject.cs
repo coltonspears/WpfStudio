@@ -70,7 +70,7 @@ public sealed partial class WorkspaceEngine
             lock (_gate)
             {
                 if (_solution is null) return new(false, false, 0, false, "The language workspace is unavailable.");
-                solution = _solution;
+                solution = _authoredSolution ?? _solution;
                 revision = _semanticRevision;
                 documents = new(_diskDocuments, StringComparer.OrdinalIgnoreCase);
                 pending = new(_diskPending.Where(path => !_syncedTexts.ContainsKey(path)), StringComparer.OrdinalIgnoreCase);
@@ -119,9 +119,10 @@ public sealed partial class WorkspaceEngine
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            RefreshDiskDocumentsResult result;
             lock (_gate)
             {
-                if (!ReferenceEquals(solution, _solution) || revision != _semanticRevision)
+                if (!ReferenceEquals(solution, _authoredSolution) || revision != _semanticRevision)
                     return new(false, false, 0, false, "Project types changed during disk refresh; retry with the current buffers.");
                 bool changed = !ReferenceEquals(solution, updated) || !_diskPending.SetEquals(pending);
                 foreach (var (path, read) in reads)
@@ -139,17 +140,20 @@ public sealed partial class WorkspaceEngine
                 if (reads.Count > 0) _diskCursor = reads.Keys.Last();
                 if (changed)
                 {
-                    _solution = updated;
+                    SetAuthoredSolution(updated);
                     _semanticRevision++;
                     _xamlBatchCache.Clear();
                     _completions.Clear();
                 }
                 bool incomplete = pending.Count > 0 || _diskUnavailable.Count > 0;
-                return new(true, changed, reads.Count, incomplete, pending.Count > 0
+                result = new(true, changed, reads.Count, incomplete, pending.Count > 0
                     ? $"Model refresh is incomplete; {pending.Count} known files remain in this sweep. A subsequent refresh continues it."
                     : _diskUnavailable.Count > 0 ? $"{_diskUnavailable.Count} model source files are missing, unreadable, or exceed the read budget; affected XAML contexts are unavailable." : null,
                     PendingFiles: pending.Count);
             }
+            bool pagesChanged = await RefreshPageProjectionSourcesAsync(request.Paths, cancellationToken).ConfigureAwait(false);
+            await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
+            return result with { Changed = result.Changed || pagesChanged };
         }
         finally { _diskRefreshGate.Release(); }
     }
@@ -157,6 +161,7 @@ public sealed partial class WorkspaceEngine
     public async Task<XamlProjectAnalysisResult> AnalyzeXamlProjectAsync(XamlProjectAnalysisRequest request,
         CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         int maximumFiles = Math.Clamp(request.MaximumFiles, 1, 512);
         int maximumFileCharacters = Math.Clamp(request.MaximumFileCharacters, 1, 1_000_000);
@@ -172,6 +177,7 @@ public sealed partial class WorkspaceEngine
         {
             revision = _semanticRevision;
             if (_solution is null) return new(request.Generation, revision, false, [], 0, Status: "The language workspace is unavailable.");
+            if (_pageProjectionPending) return new(request.Generation, revision, false, [], 0, Status: "Current XAML fields are being synchronized.");
             solution = _solution;
             var projects = solution.Projects.Where(project => project.FilePath is not null
                 && (projectPath is null || string.Equals(project.FilePath, projectPath, StringComparison.OrdinalIgnoreCase))).ToArray();
@@ -272,8 +278,17 @@ public sealed partial class WorkspaceEngine
                         .Concat(events.Diagnostics).Concat(names.Diagnostics).Distinct().Take(2001)
                         .Select(diagnostic => diagnostic with { ProjectPath = project.FilePath, ProjectName = project.Name,
                             Message = diagnostic.Message.Length <= 2048 ? diagnostic.Message : diagnostic.Message[..2048] + "…" }).ToArray();
-                    analysis = new(diagnostics, events.IsComplete && names.IsComplete,
-                        JoinResourceStatus(JoinResourceStatus(events.Status, names.Status), resources.Status));
+                    Xaml.XamlPageProjectionPage? page;
+                    string? pageReadStatus;
+                    lock (_gate)
+                    {
+                        page = _pageProjection?.Pages.FirstOrDefault(item => item.Input.ProjectId == project.Id
+                            && item.Input.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
+                        pageReadStatus = _pageProjectionReadStatuses.GetValueOrDefault(path);
+                    }
+                    analysis = new(diagnostics, events.IsComplete && names.IsComplete && page?.IsComplete != false && pageReadStatus is null,
+                        JoinResourceStatus(JoinResourceStatus(JoinResourceStatus(events.Status, names.Status), resources.Status),
+                            JoinResourceStatus(page?.Status, pageReadStatus)));
                     lock (_gate)
                         if (ReferenceEquals(solution, _solution) && revision == _semanticRevision)
                         {
@@ -300,7 +315,7 @@ public sealed partial class WorkspaceEngine
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            if (!ReferenceEquals(solution, _solution) || revision != _semanticRevision)
+            if (_pageProjectionPending || !ReferenceEquals(solution, _solution) || revision != _semanticRevision)
                 return new(request.Generation, _semanticRevision, false, [], inventory.Length, Status: "Project types changed during XAML analysis; retry with the current buffers.");
             return new(request.Generation, revision, true, files, inventory.Length, truncated, truncated
                 ? "Project XAML analysis has incomplete coverage; see each file's status for analysis limits or unsupported contexts."

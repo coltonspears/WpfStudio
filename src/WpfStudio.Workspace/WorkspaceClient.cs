@@ -13,6 +13,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Dictionary<string, UpdateDocumentRequest> _buffers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _acceptedDocumentTexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, XamlNameProjectionPlan> _nameProjections = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _bufferGate = new();
     private Process? _process;
@@ -28,8 +29,10 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public event EventHandler<string>? WorkerExited;
     /// <summary>Project types or worker availability changed; subscribers must marshal to their UI dispatcher.</summary>
     public event EventHandler? SemanticStateChanged;
-    /// <summary>Accepted generated-name projections changed; C# subscribers must invalidate same-version observations.</summary>
+    /// <summary>Current XAML field semantics or worker availability changed; C# subscribers must invalidate same-version observations.</summary>
     public event EventHandler? NameProjectionChanged;
+    /// <summary>An accepted C# model change affects other editors. The canonical changed path lets its own editor retain the analysis that synchronized it.</summary>
+    public event EventHandler<string>? CSharpModelChanged;
     public int? WorkerProcessId
     {
         get { try { return _process is { HasExited: false } process ? process.Id : null; } catch (InvalidOperationException) { return null; } }
@@ -51,7 +54,6 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            bool hadNameProjections = NameProjectionPlans().Length != 0;
             StopWorker();
             lock (_bufferGate) { _buffers.Clear(); _nameProjections.Clear(); }
             _lastLoad = request;
@@ -59,7 +61,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             // RPC cancellation otherwise waits for the server to acknowledge it. User build tasks may ignore cancellation.
             var snapshot = await Proxy.LoadAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
             SemanticStateChanged?.Invoke(this, EventArgs.Empty);
-            if (hadNameProjections) NameProjectionChanged?.Invoke(this, EventArgs.Empty);
+            NotifyNameProjectionChanged();
             return snapshot;
         }
         catch { StopWorker(); throw; }
@@ -80,7 +82,11 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             var snapshot = await Proxy.LoadAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
             UpdateDocumentRequest[] buffers;
             lock (_bufferGate) buffers = _buffers.Values.ToArray();
-            foreach (var buffer in buffers) await Proxy.UpdateDocumentAsync(buffer, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var buffer in buffers)
+            {
+                var synchronized = await Proxy.UpdateDocumentAsync(buffer, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+                if (synchronized.Accepted && synchronized.Version == buffer.Version) RememberAcceptedDocument(buffer);
+            }
             var replayPlans = NameProjectionPlans();
             foreach (var plan in replayPlans)
             {
@@ -88,7 +94,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
                 if (!result.Accepted) throw new InvalidOperationException("Generated-name projection could not be restored: " + result.Status);
                 if (result.BaselineRefreshed) ForgetNameProjection(plan);
             }
-            if (replayPlans.Length != 0) NameProjectionChanged?.Invoke(this, EventArgs.Empty);
+            NotifyNameProjectionChanged();
             SemanticStateChanged?.Invoke(this, EventArgs.Empty);
             return snapshot;
         }
@@ -113,9 +119,27 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         // already share resource invalidation; firing their own event would
         // cancel the synchronization at the start of every analysis.
         if (semanticChange) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
-        var result = await Proxy.UpdateDocumentAsync(request, cancellationToken).ConfigureAwait(false);
+        var proxy = Proxy;
+        cancellationToken.ThrowIfCancellationRequested();
+        DocumentUpdateResult result;
+        try { result = await proxy.UpdateDocumentAsync(request, cancellationToken).ConfigureAwait(false); }
+        catch
+        {
+            // The worker can commit authored text before cancellable projection
+            // work completes. A failed reply therefore invalidates our last
+            // acknowledged identity, even if the next edit restores that text.
+            ForgetAcceptedDocument(request.Path);
+            throw;
+        }
         if (semanticChange) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
-        if (changed && IsXaml(request.Path) && result.Accepted) NotifyNameProjectionChanged();
+        // Replay buffers remember the latest requested text even if a worker
+        // fails. Notification identity must instead follow accepted text, so a
+        // successful retry after cancellation still refreshes unchanged C#.
+        if (result.Accepted && result.Version == request.Version && RememberAcceptedDocument(request))
+        {
+            if (IsXaml(request.Path)) NotifyNameProjectionChanged();
+            else if (IsCSharp(request.Path)) CSharpModelChanged?.Invoke(this, Path.GetFullPath(request.Path));
+        }
         if (result.Accepted && request.Analyze) DiagnosticsReceived?.Invoke(this, new WorkspaceDiagnosticEvent(request.Path, result.Version, result.Diagnostics));
         return result;
     }
@@ -132,6 +156,23 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         }
     }
 
+    private bool RememberAcceptedDocument(UpdateDocumentRequest request)
+    {
+        if (!IsXaml(request.Path) && !IsCSharp(request.Path)) return false;
+        string path = Path.GetFullPath(request.Path);
+        lock (_bufferGate)
+        {
+            bool changed = !_acceptedDocumentTexts.TryGetValue(path, out var previous) || previous != request.Text;
+            _acceptedDocumentTexts[path] = request.Text;
+            return changed;
+        }
+    }
+
+    private void ForgetAcceptedDocument(string path)
+    {
+        lock (_bufferGate) _acceptedDocumentTexts.Remove(Path.GetFullPath(path));
+    }
+
     public async Task CloseDocumentAsync(string path, CancellationToken cancellationToken = default)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
@@ -141,9 +182,17 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             // Forget discarded text even if the worker is gone or crashes while processing close.
             lock (_bufferGate) _buffers.Remove(path);
-            if (IsConnected) await Proxy.CloseDocumentAsync(path, lifetime.Token).ConfigureAwait(false);
+            if (IsConnected)
+            {
+                var proxy = Proxy;
+                lifetime.Token.ThrowIfCancellationRequested();
+                try { await proxy.CloseDocumentAsync(path, lifetime.Token).ConfigureAwait(false); }
+                catch { ForgetAcceptedDocument(path); throw; }
+            }
+            ForgetAcceptedDocument(path);
             SemanticStateChanged?.Invoke(this, EventArgs.Empty);
             if (IsXaml(path)) NotifyNameProjectionChanged();
+            else if (IsCSharp(path)) CSharpModelChanged?.Invoke(this, Path.GetFullPath(path));
         }
         finally { _lifecycle.Release(); }
     }
@@ -162,7 +211,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             var result = await Proxy.ApplyXamlNameProjectionAsync(request, lifetime.Token).ConfigureAwait(false);
             if (result.Accepted)
             {
-                foreach (var document in request.Documents) RememberBuffer(document);
+                foreach (var document in request.Documents) { RememberBuffer(document); RememberAcceptedDocument(document); }
                 if (result.BaselineRefreshed) ForgetNameProjection(request.Plan);
                 else lock (_bufferGate) _nameProjections[request.Plan.XamlPath] = request.Plan;
                 SemanticStateChanged?.Invoke(this, EventArgs.Empty);
@@ -202,7 +251,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
                 if (!result.Accepted) return result;
                 if (result.BaselineRefreshed) ForgetNameProjection(plan);
                 if (!string.IsNullOrWhiteSpace(result.Status)) statuses.Add(result.Status);
-                foreach (var document in documents) RememberBuffer(document);
+                foreach (var document in documents) { RememberBuffer(document); RememberAcceptedDocument(document); }
             }
             SemanticStateChanged?.Invoke(this, EventArgs.Empty);
             NameProjectionChanged?.Invoke(this, EventArgs.Empty);
@@ -223,9 +272,10 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private void ForgetNameProjection(XamlNameProjectionPlan plan) { lock (_bufferGate) _nameProjections.Remove(plan.XamlPath); }
     private void NotifyNameProjectionChanged()
     {
-        if (NameProjectionPlans().Length != 0) NameProjectionChanged?.Invoke(this, EventArgs.Empty);
+        NameProjectionChanged?.Invoke(this, EventArgs.Empty);
     }
     private static bool IsXaml(string path) => Path.GetExtension(path).Equals(".xaml", StringComparison.OrdinalIgnoreCase);
+    private static bool IsCSharp(string path) => Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase);
 
     public Task<CompletionResult> GetCompletionsAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetCompletionsAsync(request, cancellationToken);
     public Task<XamlAnalysisResult> AnalyzeXamlAsync(XamlDocumentRequest request, CancellationToken cancellationToken = default) => Proxy.AnalyzeXamlAsync(request, cancellationToken);
@@ -297,7 +347,10 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             _proxy.SemanticStateChanged += (_, _) =>
             {
                 if (ReferenceEquals(_rpc, rpc) && ReferenceEquals(_process, process) && !_disposed)
+                {
                     SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+                    NotifyNameProjectionChanged();
+                }
             };
             _rpc.StartListening();
         }
@@ -331,6 +384,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         _proxy = null;
         _rpc?.Dispose(); _rpc = null;
         _pipe?.Dispose(); _pipe = null;
+        lock (_bufferGate) _acceptedDocumentTexts.Clear();
         if (process is not null) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }
         if (process is not null) { ProcessRunner.Kill(process); process.Dispose(); }
     }

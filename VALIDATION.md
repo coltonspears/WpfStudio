@@ -2,6 +2,28 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Current-source XAML fields (2026-09-28)
+
+Direct name, type, insertion and removal edits now update editor-derived C# page declarations from current evaluated XAML. The worker retains authored sources separately from its semantic solution, replaces only positively identified WPF page output, and leaves generated files unchanged on disk. Completion, diagnostics and C# F12 use current source; editor declarations do not establish runtime identity or replace compiling saved XAML. Reviewed name edits synchronize authored buffers and derived fields together without retaining compiler-baseline rename history.
+
+Real-worker fixtures cover .NET 8–10, unbuilt evaluated pages, linked project contexts, independent discard, restart, malformed typing, authored collisions and custom control base changes. Shell cases verify refresh of unchanged C# editors and deterministic cancellation-after-commit notification recovery. The loaded-app workflow changes an unsaved named TextBox into a PasswordBox and observes the unchanged C# editor report CS1061 for `.Text`, then verifies direct rename completion and exact XAML navigation. The [feature tour](docs/xaml-feature-tour.md) includes the actual capture.
+
+Review and regression runs caught and corrected shared synthetic paths across linked projects, an unsafe generated-document dereference, an accepted-text notification cache after cancelled mutations, and unnecessary semantic replacement on the first unchanged XAML synchronization. A smoke-test fixture now restores its unsaved buffers before opening the next workspace; its deliberate Cancel response had correctly prevented that transition. Existing stale-response assertions remain intact.
+
+The final Release solution build passed with **zero warnings and errors** (`artifacts/TestResults/xaml-live-fields/build-final2.log`). The complete affected suites then passed **1,116 distinct checks**, with one opt-in SDK 8 check skipped and no failures:
+
+| Suite | Passed | Result in `artifacts/TestResults/xaml-live-fields` |
+| --- | ---: | --- |
+| Workspace | 607 | `workspace-final2.trx` |
+| Shell | 508 | `shell-final2.trx` |
+| Loaded app UI | 1 | `ui-final2.trx` |
+
+This includes 32 focused page-model cases, 13 new real-worker cases and six new Shell cases. Earlier focused reports overlap these totals. The isolated SDK 8 check was not rerun; the ordinary real-worker fixtures exercise .NET 8, 9 and 10 target metadata. All twelve documentation images were refreshed from the successful final loaded-app run and copied unchanged. These are automated app captures, not physical-input acceptance.
+
+The win-x64 package was refreshed (`publish.log`). All **13 overlapping live-field integration cases passed** with `WPFSTUDIO_TEST_WORKSPACE_HOST` explicitly selecting the published worker (`packaged-live-fields.trx`). All 14 packaged Markdown files, 112 local documentation file links and twelve capture/source/package screenshot triples were verified. No new portable executable startup measurement was collected.
+
+The current model's [coverage and limits](docs/xaml-named-elements.md#current-xaml-fields-while-editing) and the [remaining designer roadmap](docs/xaml-devtools-design.md#full-goal-acceptance-ledger) still apply. This increment adds no physical-input, clean-machine, typing-latency or Visual Studio comparison claims. Earlier performance reports remain tied to their recorded payload hashes.
+
 ## Working XAML milestone for GitHub (2026-09-28)
 
 This snapshot delivers the current authoring, isolated preview and opt-in live inspection workflows in the [feature tour](docs/xaml-feature-tour.md). The [remaining designer roadmap](docs/xaml-devtools-design.md#full-goal-acceptance-ledger) is future work rather than a prerequisite for this delivery. Earlier entries below record incremental development and retain the limitations that applied at each stage.

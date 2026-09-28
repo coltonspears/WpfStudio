@@ -241,14 +241,12 @@ public sealed partial class WorkspaceEngine
                 }
                 expected.Add(new(document.Path, TextHash(ApplySymbolEdits(content, document.Edits))));
             }
-            var model = await XamlNameProjection.CreateAsync(snapshot.Solution, changed, GetNameProjection(selectedFile.Path),
-                selectedFile.Path, selectedFile.Text, selected.Start, newName, after, expected, token).ConfigureAwait(false);
-            projection = model.Plan;
+            projection = new(selectedFile.Path, "", [], [], expected, CurrentSource: true);
         }
         snapshot.Warnings.AddRange(selectedFile.Names.Warnings);
         snapshot.Warnings.Insert(0, "Only verified name declarations, ElementName values and generated-field C# references are renamed. Review runtime RegisterName/FindName, reflection and other string-based consumers.");
         if (projection is not null)
-            snapshot.Warnings.Insert(0, "Generated files are not edited. Applying this reviewed rename projects verified compiler fields in memory; a real build still compiles the saved XAML.");
+            snapshot.Warnings.Insert(0, "Current XAML fields update in memory when this rename is applied. Generated files are not edited; a real build still compiles the saved XAML.");
         EnsureSymbolSnapshotCurrent(snapshot);
         return new(documents.Values.ToArray(), BoundedWarnings(snapshot.Warnings), projection);
     }

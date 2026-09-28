@@ -14,6 +14,7 @@ public sealed partial class WorkspaceEngine
 
     public async Task<XamlAnalysisResult> AnalyzeXamlAsync(XamlDocumentRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         var (project, status) = GetXamlProject(request.Path, request.ProjectPath);
         if (project is null) return new(request.Version, false, [], status);
@@ -37,6 +38,7 @@ public sealed partial class WorkspaceEngine
 
     public async Task<XamlCompletionResult> GetXamlCompletionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         ValidatePosition(request.Position, request.Text.Length);
         var (project, status) = GetXamlProject(request.Path, request.ProjectPath);
@@ -59,6 +61,7 @@ public sealed partial class WorkspaceEngine
 
     public async Task<IReadOnlyList<SourceLocation>> GetXamlDefinitionAsync(XamlCompletionRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         ValidatePosition(request.Position, request.Text.Length);
         var (project, _) = GetXamlProject(request.Path, request.ProjectPath);
         if (project is null || await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false) is not { } compilation) return [];
@@ -84,6 +87,7 @@ public sealed partial class WorkspaceEngine
 
     public async Task<XamlHoverInfo?> GetXamlHoverAsync(XamlCompletionRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         ValidatePosition(request.Position, request.Text.Length);
         var (project, _) = GetXamlProject(request.Path, request.ProjectPath);
         if (project is null || await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false) is not { } compilation) return null;
@@ -100,6 +104,7 @@ public sealed partial class WorkspaceEngine
 
     public async Task<IReadOnlyList<XamlCodeAction>> GetXamlCodeActionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         ValidatePosition(request.Position, request.Text.Length);
         var (project, _) = GetXamlProject(request.Path, request.ProjectPath);
         if (project is null || await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false) is not { } compilation) return [];
@@ -125,6 +130,7 @@ public sealed partial class WorkspaceEngine
         lock (_gate)
         {
             if (_solution is null) return (null, "XAML type analysis is unavailable. Check workspace loading diagnostics.");
+            if (_pageProjectionPending) return (null, "Current XAML fields are being synchronized; retry with current buffers.");
             if (!_xamlProjects.TryGetValue(path, out var owners))
                 return (null, "Open or reload the owning project to enable XAML binding analysis.");
             var projects = owners.Select(_solution.GetProject).OfType<Project>()
@@ -140,7 +146,7 @@ public sealed partial class WorkspaceEngine
         }
     }
 
-    private bool IsCurrentXamlProject(Project project) => ReferenceEquals(project.Solution, _solution)
+    private bool IsCurrentXamlProject(Project project) => !_pageProjectionPending && ReferenceEquals(project.Solution, _solution)
         && !UnavailableModelProjects(project.Solution).Contains(project.Id);
 
     private static string? JoinResourceStatus(string? first, string? second) => first is null ? second : second is null ? first : first + " " + second;

@@ -884,6 +884,52 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
         Assert.Contains(shell.SearchResults, location => location.Path == codePath);
         Assert.Empty(dialogs.Errors);
 
+        // Ordinary XAML typing changes code-behind semantics without a reviewed
+        // rename, save, build, or reload. Keep the C# version unchanged first.
+        long codeVersion = codeEditor.State.Version;
+        editor.State.Content = markup.Replace("<TextBox Name=\"ContactEmail\" Text=\"ada@example.test\" />",
+            "<PasswordBox Name=\"ContactEmail\" />", StringComparison.Ordinal)
+            .Replace("Path=Text", "Path=Password", StringComparison.Ordinal);
+        await editor.SyncAsync();
+        await Idle();
+        await codeEditor.RefreshAnalysisAsync();
+        Assert.Equal(codeVersion, codeEditor.State.Version);
+        Assert.Contains(codeEditor.Diagnostics, diagnostic => diagnostic.Id == "CS1061"
+            && diagnostic.Message.Contains("PasswordBox", StringComparison.Ordinal));
+        shell.ActiveDocument = codeEditor;
+        codeEditor.Navigate(codeEditor.State.Content.IndexOf("ContactEmail.Text", StringComparison.Ordinal) + "ContactEmail.".Length);
+        shell.ShowToolCommand.Execute("Problems");
+        await Idle();
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-live-fields.png"));
+
+        editor.State.Content = editor.State.Content.Replace("ContactEmail", "SecretInput", StringComparison.Ordinal);
+        codeEditor.State.Content = code.Replace("ContactEmail.Text", "SecretInput.Password", StringComparison.Ordinal);
+        await editor.SyncAsync();
+        await codeEditor.SyncAsync();
+        await Idle();
+        await codeEditor.RefreshAnalysisAsync();
+        Assert.DoesNotContain(codeEditor.Diagnostics, diagnostic => diagnostic.Severity == "Error");
+        var directCompletion = await codeEditor.CompleteAsync(codeEditor.State.Content.IndexOf("SecretInput", StringComparison.Ordinal) + "SecretInput".Length);
+        Assert.Contains(directCompletion.Items, item => item.DisplayText == "SecretInput");
+        Assert.DoesNotContain(directCompletion.Items, item => item.DisplayText == "ContactEmail");
+        codeEditor.Navigate(codeEditor.State.Content.IndexOf("SecretInput", StringComparison.Ordinal) + 2);
+        await shell.GoToDefinitionCommand.ExecuteAsync(null);
+        Assert.Same(editor, shell.ActiveDocument);
+        Assert.Equal(editor.State.Content.IndexOf("SecretInput", StringComparison.Ordinal), editor.State.CaretOffset);
+        Assert.Equal(markup, await File.ReadAllTextAsync(view));
+        Assert.Equal(code, await File.ReadAllTextAsync(codePath));
+        foreach (var generatedFile in generatedNameFiles)
+            Assert.Equal(generatedFile.Value, await File.ReadAllBytesAsync(generatedFile.Key));
+
+        // Leave this fixture clean so the next workspace can open without the
+        // smoke-test dialog's deliberate Cancel response to unsaved buffers.
+        editor.State.Content = markup;
+        codeEditor.State.Content = code;
+        await editor.SyncAsync();
+        await codeEditor.SyncAsync();
+        Assert.False(editor.State.IsDirty);
+        Assert.False(codeEditor.State.IsDirty);
+
         async Task<Task> StartRenameAsync()
         {
             dialogs.Prompts.Enqueue("EmailInput");

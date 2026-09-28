@@ -62,9 +62,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         lock (_gate)
         {
             _solution = null;
-            _nameProjectionLoadEpoch++;
-            _nameProjections.Clear();
-            _nameProjectionStatuses.Clear();
+            ResetPageProjection();
             _semanticRevision++;
             ResetProjectAnalysis();
         }
@@ -84,7 +82,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
                 loaded = (await _workspace.OpenProjectAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false)).Solution;
             else loaded = await _workspace.OpenSolutionAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
-            lock (_gate) { _solution = loaded; _semanticRevision++; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _xamlProjects.Clear(); }
+            lock (_gate) { SetAuthoredSolution(loaded); _semanticRevision++; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _xamlProjects.Clear(); }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -150,6 +148,8 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 owners.Add(project.Id);
             }
         }
+        await RefreshPageProjectionSourcesAsync(null, cancellationToken).ConfigureAwait(false);
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         if (configurations.Count == 0) { configurations.Add("Debug"); configurations.Add("Release"); }
         return new WorkspaceSnapshot(path, sdk, models, issues.ToArray(), configurations.OrderBy(value => value == "Debug" ? 0 : value == "Release" ? 1 : 2).ThenBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray());
     }
@@ -161,10 +161,14 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             return await UpdateXamlProjectionDocumentAsync(request, cancellationToken).ConfigureAwait(false);
         Document document;
         var path = Path.GetFullPath(request.Path);
+        // Compiler output can remain visible in the project tree, but page
+        // projection deliberately replaces it in the semantic solution. It is
+        // never an authored replay buffer and must not mutate the input model.
+        if (IsGenerated(path)) return new(false, request.Version, []);
         lock (_gate)
         {
             if (_versions.TryGetValue(path, out var current) && request.Version < current) return new DocumentUpdateResult(false, current, []);
-            var solution = RequireSolution();
+            var solution = _authoredSolution ?? RequireSolution();
             var ids = solution.GetDocumentIdsWithFilePath(path);
             if (ids.IsEmpty) return new DocumentUpdateResult(false, request.Version, []);
             if (_versions.TryGetValue(path, out current) && current == request.Version && _syncedTexts.TryGetValue(path, out var existingText))
@@ -174,7 +178,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             else
             {
                 foreach (var id in ids) solution = solution.WithDocumentText(id, SourceText.From(request.Text), PreservationMode.PreserveIdentity);
-                _solution = solution;
+                SetAuthoredSolution(solution);
                 _semanticRevision++;
                 _xamlBatchCache.Clear();
                 _diskUnavailable.Remove(path);
@@ -185,10 +189,18 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             }
             document = solution.GetDocument(ids[0])!;
         }
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
+        lock (_gate)
+        {
+            if (_pageProjectionPending || _versions.GetValueOrDefault(path) != request.Version
+                || _solution?.GetDocument(document.Id) is not { } currentDocument)
+                return new(false, _versions.GetValueOrDefault(path), []);
+            document = currentDocument;
+        }
         if (!request.Analyze) return new DocumentUpdateResult(true, request.Version, []);
         var diagnostics = await GetDiagnosticsAsync(document, cancellationToken).ConfigureAwait(false);
         lock (_gate)
-            return _versions.TryGetValue(path, out var latest) && latest == request.Version && ReferenceEquals(document.Project.Solution, _solution) ? new DocumentUpdateResult(true, request.Version, diagnostics) : new DocumentUpdateResult(false, _versions.GetValueOrDefault(path), []);
+            return _versions.TryGetValue(path, out var latest) && latest == request.Version && !_pageProjectionPending && ReferenceEquals(document.Project.Solution, _solution) ? new DocumentUpdateResult(true, request.Version, diagnostics) : new DocumentUpdateResult(false, _versions.GetValueOrDefault(path), []);
     }
 
     public async Task CloseDocumentAsync(string path, CancellationToken cancellationToken)
@@ -196,6 +208,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         path = Path.GetFullPath(path);
         if (path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
         { await CloseXamlProjectionDocumentAsync(path, cancellationToken).ConfigureAwait(false); return; }
+        if (IsGenerated(path)) return;
         long? version;
         string? synchronizedText;
         lock (_gate)
@@ -209,7 +222,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             // A new edit/reopen can arrive while disk I/O is pending. It owns the buffer.
             if ((_versions.TryGetValue(path, out var current) ? (long?)current : null) != version
                 || _syncedTexts.GetValueOrDefault(path) != synchronizedText) return;
-            if (_solution is { } solution)
+            if (_authoredSolution is { } solution)
             {
                 if (read.Text is not null || read.State == "Missing")
                     foreach (var id in solution.GetDocumentIdsWithFilePath(path))
@@ -220,17 +233,19 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                     else _diskUnavailable.Remove(path);
                     _diskPending.Remove(path);
                 }
-                _solution = solution;
+                SetAuthoredSolution(solution);
                 _semanticRevision++;
                 _xamlBatchCache.Clear();
             }
             _versions.Remove(path); _syncedTexts.Remove(path);
             _completions.Clear();
         }
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<CompletionResult> GetCompletionsAsync(DocumentPositionRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         Document document;
         long generation;
         lock (_gate)
@@ -249,7 +264,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var items = new List<CompletionEntry>();
         lock (_gate)
         {
-            if (generation != _completionRequest || !ReferenceEquals(document.Project.Solution, _solution))
+            if (generation != _completionRequest || _pageProjectionPending || !ReferenceEquals(document.Project.Solution, _solution))
                 return new CompletionResult(request.Version, request.Position, 0, []);
             foreach (var item in list.ItemsList.Where(i => prefix.Length == 0 || i.FilterText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Take(1500))
             {
@@ -263,16 +278,18 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 
     public async Task<TextEdit?> GetCompletionEditAsync(CompletionEditRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         _ = GetDocument(request.Path, request.Version);
         if (!_completions.TryGetValue(request.ItemId, out var entry) || entry.Version != request.Version || !string.Equals(entry.Document.FilePath, request.Path, StringComparison.OrdinalIgnoreCase)) return null;
         var service = CompletionService.GetService(entry.Document)!;
         var change = await service.GetChangeAsync(entry.Document, entry.Item, cancellationToken: cancellationToken).ConfigureAwait(false);
         lock (_gate)
-            return ReferenceEquals(entry.Document.Project.Solution, _solution) && _completions.ContainsKey(request.ItemId) ? ToEdit(change.TextChange) : null;
+            return !_pageProjectionPending && ReferenceEquals(entry.Document.Project.Solution, _solution) && _completions.ContainsKey(request.ItemId) ? ToEdit(change.TextChange) : null;
     }
 
     public async Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         var document = GetDocument(request.Path, request.Version);
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
         if (root is null || root.FullSpan.IsEmpty) return new SignatureHelpResult(request.Version, 0, []);
@@ -297,6 +314,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 
     public async Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         var document = GetDocument(request.Path, request.Version);
         var symbol = await SymbolFinder.FindSymbolAtPositionAsync(document, request.Position, cancellationToken).ConfigureAwait(false);
         if (symbol is null) return [];
@@ -313,6 +331,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 
     public async Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         var document = GetDocument(request.Path, request.Version);
         var formatted = await Formatter.FormatAsync(document, cancellationToken: cancellationToken).ConfigureAwait(false);
         var changes = await formatted.GetTextChangesAsync(document, cancellationToken).ConfigureAwait(false);
@@ -327,6 +346,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 
     public async Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken)
     {
+        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         var document = GetDocument(request.Path, request.Version);
         var changed = await CSharpRefactorings.ApplyAsync(document, request.Position, request.Action, cancellationToken).ConfigureAwait(false);
         var changes = await changed.GetTextChangesAsync(document, cancellationToken).ConfigureAwait(false);
@@ -337,8 +357,11 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
     private Document GetDocument(string path, long version)
     {
         path = Path.GetFullPath(path);
+        if (IsGenerated(path))
+            throw new InvalidOperationException("Language queries for generated compiler output are unavailable. Open the authored XAML or C# source instead.");
         lock (_gate)
         {
+            if (_pageProjectionPending) throw new InvalidOperationException("Current XAML fields are being synchronized; retry with the current buffers.");
             if (_versions.GetValueOrDefault(path) != version) throw new InvalidOperationException("Document version is stale; synchronize the buffer and retry.");
             var solution = RequireSolution();
             var id = solution.GetDocumentIdsWithFilePath(path).FirstOrDefault() ?? throw new FileNotFoundException("This file is not part of the loaded C# workspace.", path);
@@ -425,6 +448,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             _solution = null;
             _semanticRevision++;
             ResetProjectAnalysis();
+            ResetPageProjection();
         }
         _workspace?.Dispose();
     }
