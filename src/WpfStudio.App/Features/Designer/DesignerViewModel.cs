@@ -88,6 +88,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     }
     private void Invalidate()
     {
+        ClearLayoutEditing();
         _render?.Cancel();
         _revision++; _selectionRevision++;
         ForgetInteraction();
@@ -241,6 +242,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         SelectionBounds = value?.Node.Bounds;
         if (!_picking)
         {
+            ClearLayoutEditing();
             ++_bindingDiagnosticSelection;
             _bindingSelectionRemoved = false;
             _bindingObservedNodeId = null;
@@ -257,6 +259,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     }
     private async Task InspectAsync(string id)
     {
+        ClearLayoutEditing();
         var revision = _revision; var selection = ++_selectionRevision;
         var operationEpoch = _bindingOperationEpoch;
         bool operationIdle = _bindingOperations == 0;
@@ -335,6 +338,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         SelectionBounds = inspection.Node?.Bounds;
         LayoutDetails.Apply(IsCurrent && inspection.Node is not null ? inspection.Layout : null, IsCurrent,
             "Layout details are unavailable for this preview element.");
+        ApplyLayoutEditing(inspection);
         // Replace current binding errors for the inspected target. Historical
         // trace warnings and diagnostics for other targets retain their history.
         if (inspection.Node is { } observed)
@@ -359,6 +363,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         ++_bindingSourceEpoch; RefreshBindingSourceState();
         ClearAppearance("Preview property changing. Appearance will refresh after the edit.");
         LayoutDetails.Clear("Preview property changing. Waiting for updated layout…");
+        ClearLayoutEditing();
         try
         {
             var result = await _client.SetPropertyAsync(new(revision, nodeId, property.Name, submittedValue, reset,
@@ -432,6 +437,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     {
         if (_disposed) return;
         _disposed = true;
+        ClearLayoutEditing();
         ForgetInteraction();
         ++_bindingSourceEpoch; RefreshBindingSourceState();
         ClearAppearance("Preview closed. Open a preview to inspect appearance.");

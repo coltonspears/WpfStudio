@@ -376,7 +376,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
             catch (Exception exception) { diagnostics.Add(new PreviewDiagnostic($"Cannot inspect {property.Name}: {exception.GetBaseException().Message}", "Warning", NodeId: nodeId, Property: property.Name)); }
         }
         return new PreviewInspection(_version, Node(target), properties.OrderBy(p => p.Name, StringComparer.Ordinal).ToArray(), diagnostics,
-            Layout: _viewport is null ? null : Wpf.Diagnostics.LayoutReader.Capture(target, _viewport));
+            Layout: _viewport is null ? null : Wpf.Diagnostics.LayoutReader.Capture(target, _viewport), LayoutEditing: CaptureLayoutEditing(target));
     }
 
     private IEnumerable<PreviewDiagnostic> BindingFailures(string nodeId, DependencyObject target)
@@ -469,6 +469,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
 
     private void ClearPreview()
     {
+        _layoutObservations.Clear();
         ClearNativeSurface();
         foreach (var weak in _edits.GetEditedTargets())
             if (weak.TryGetTarget(out var target)) _edits.ResetAll(target);

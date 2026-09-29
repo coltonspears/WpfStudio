@@ -107,7 +107,12 @@ public sealed partial class DesignerViewModel
         NotifyInteractionState();
     }
 
-    partial void OnIsInteractingChanged(bool value) => NotifyInteractionState();
+    partial void OnIsInteractingChanged(bool value)
+    {
+        if (value) ClearLayoutEditing();
+        NotifyLayoutEditingState();
+        NotifyInteractionState();
+    }
     private void NotifyInteractionState()
     {
         OnPropertyChanged(nameof(CanInteract));

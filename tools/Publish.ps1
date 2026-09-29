@@ -118,6 +118,11 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $staging $relative))) { throw "Published package is incomplete: $relative is missing." }
     }
     Copy-Item -LiteralPath (Join-Path $repository 'README.md'), (Join-Path $repository 'VALIDATION.md'), (Join-Path $repository 'THIRD-PARTY-NOTICES.md'), (Join-Path $PSScriptRoot 'DEBUGGER-NOTICES.md') -Destination $staging
+    # Repository notice links must resolve inside the portable folder too.
+    $packageNoticesText = [IO.File]::ReadAllText((Join-Path $staging 'THIRD-PARTY-NOTICES.md')).Replace(
+        '(tools/DEBUGGER-NOTICES.md)', '(DEBUGGER-NOTICES.md)').Replace(
+        '(src/WpfStudio.Runtime/Assets/Terminal/THIRD-PARTY-NOTICES.md)', '(Assets/Terminal/THIRD-PARTY-NOTICES.md)')
+    [IO.File]::WriteAllText((Join-Path $staging 'THIRD-PARTY-NOTICES.md'), $packageNoticesText)
     $documentationDirectory = Join-Path $staging 'docs'
     New-Item -ItemType Directory -Path $documentationDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'docs/xaml-devtools-design.md'), (Join-Path $repository 'docs/xaml-runtime-bootstrap.md'), (Join-Path $repository 'docs/xaml-preview-scenarios.md'), (Join-Path $repository 'docs/xaml-appearance.md'), (Join-Path $repository 'docs/xaml-binding-navigation.md'), (Join-Path $repository 'docs/xaml-binding-diagnostics.md'), (Join-Path $repository 'docs/xaml-named-elements.md'), (Join-Path $repository 'docs/xaml-preview-interaction.md'), (Join-Path $repository 'docs/xaml-resource-resolution-plan.md'), (Join-Path $repository 'docs/xaml-feature-tour.md'), (Join-Path $repository 'docs/xaml-language-performance.md') -Destination $documentationDirectory

@@ -2,6 +2,29 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Visual layout editing (2026-09-28)
+
+Source previews now offer opt-in movement and eight-handle resizing for verified direct children of framework Canvas and Grid panels. Pointer gestures show draft bounds and snap guides; keyboard gestures support nudging and resizing. One completed gesture produces one reviewed source transaction and one workspace Undo. Canvas anchors and existing Grid tracks are preserved. The host checks source, parent, geometry and property provenance before review and again before applying. Unsupported or stale contexts explain why editing is unavailable.
+
+The Release solution build passed with **zero warnings and errors** (`artifacts/TestResults/xaml-layout-editing/build-final.log`). All six affected suites then passed **1,046 checks**, with no failures or skips:
+
+| Suite | Passed | Report in `artifacts/TestResults/xaml-layout-editing` |
+| --- | ---: | --- |
+| Core | 218 | `core-final.trx` |
+| Shell | 516 | `shell-final.trx` |
+| Preview | 233 | `preview-final.trx` |
+| Native view | 61 | `nativeview-final.trx` |
+| Runtime | 17 | `runtime-final.trx` |
+| Loaded app UI | 1 | `app-final.trx` |
+
+The 86 added cases cover layout calculation and atomic lexical edits (35), Shell review/undo/stale-context guards (8), host provenance plus real WPF rerendered geometry (26), and STA pointer/keyboard/capture/rendering behavior (17). Real rerenders check leading/trailing Canvas anchors, Grid alignments, Auto dimensions and opposite resize anchors. The extended loaded-app workflow verifies the visible draft, snapping, reviewed source change, unchanged disk file, rerendered bounds and exact Undo. The full workflow also passed its binding-error checks.
+
+Initial test runs exposed desktop-pointer synchronization entering the synthetic adapter harness and an animation clock that had not begun ticking. The harness now excludes unrelated routed mouse moves while retaining real capture/lifecycle behavior, and the animation test seeks its controllable clock before asserting an active animation. The final suites retain all assertions. The capture-only follow-up wraps the fixture's Button attributes so the changed width is visible in the review; its build also passed with zero warnings/errors (`capture-build.log`).
+
+The win-x64 package was refreshed (`publish-final.log`). The overlapping layout loaded-app workflow passed with `WPFSTUDIO_PREVIEW_HOST_UNDER_TEST` explicitly selecting its published host (`packaged-layout-ui.trx`), including both validation RPCs, source apply, rerender and Undo. The final packaging-only change repairs two existing notice links for the portable folder; the tested app and preview-host assembly hashes were unchanged by that republish. Fourteen project Markdown files match their source hashes, all fourteen capture/source/package image triples match, and 123 local links across the seventeen packaged Markdown files were verified. No new portable executable startup timing was collected.
+
+The [feature tour](docs/xaml-feature-tour.md#move-and-resize-with-a-source-review) adds actual loaded-app captures of the draft and review. These automated captures and input-adapter checks do not establish physical-input acceptance. [Layout editing limits](docs/xaml-preview-interaction.md#move-and-resize-authored-elements) include reparenting, Grid track reassignment, toolbox insertion, templates, transformed/right-to-left frames and layout expressions. The [remaining roadmap](docs/xaml-devtools-design.md#full-goal-acceptance-ledger) still applies; this milestone does not establish Visual Studio parity or superiority.
+
 ## Current-source XAML fields (2026-09-28)
 
 Direct name, type, insertion and removal edits now update editor-derived C# page declarations from current evaluated XAML. The worker retains authored sources separately from its semantic solution, replaces only positively identified WPF page output, and leaves generated files unchanged on disk. Completion, diagnostics and C# F12 use current source; editor declarations do not establish runtime identity or replace compiling saved XAML. Reviewed name edits synchronize authored buffers and derived fields together without retaining compiler-baseline rename history.

@@ -8,6 +8,20 @@ The native viewport uses actual size (100%). Its surrounding scrollbars move the
 
 Interaction is temporarily hidden when an IDE overlay is open, the designer is auto-hidden or its owner window loses activation. Successful detach closes owned WPF popups and preserves the view for reattachment. Destroying a container with a pending attachment may stop the preview; choose **Refresh** to recreate it when prompted. Closing the preview, editing its source, changing configuration or replacing a render revokes the previous surface.
 
+## Move and resize authored elements
+
+In **Source** preview, choose **Inspect**, select an element, and enable **Edit layout**. Drag the selected frame to move it or one of its eight handles to resize it. A translucent outline shows the proposed bounds without changing the running preview. **Snap to layout** aligns pointer gestures to nearby parent, slot and sibling edges or centers; hold **Alt** to bypass it.
+
+With the preview canvas focused, use arrow keys to nudge by one DIP, **Shift+arrows** for ten DIPs, or **Ctrl+arrows** to resize from the bottom-right corner. Keyboard nudges bypass snapping. **Enter** reviews the keyboard gesture; releasing the pointer reviews a drag. **Escape** cancels the draft.
+
+The review shows one XAML change. **Apply changes** updates the unsaved editor buffer; **Undo workspace edit** restores the whole gesture. Save normally to write the file. With Live preview disabled, choose **Refresh** to render the edited buffer.
+
+This increment supports direct authored children of framework **Canvas** and **Grid** panels. Canvas edits preserve the active leading or trailing anchors. Grid edits retain the existing row, column and spans, updating margins and only assigning explicit dimensions on resized axes. Existing alignment and untouched Auto dimensions are retained. New local values can override styles; the review identifies that consequence.
+
+The preview host verifies the source element, parent, coordinate frame and property observation before review and again before applying. A changed source, selection, preview or layout cancels the operation. Bindings/resources on layout properties, animations, coercion, design-time overrides, template instances, generated containers, transformed elements, right-to-left frames and compiled previews do not provide an editable context. The status explains unavailable selections. Reparenting, changing Grid tracks, toolbox insertion and general composition remain future work.
+
+See the [feature tour](xaml-feature-tour.md#move-and-resize-with-a-source-review) for actual application captures. Automated gesture and loaded-app checks do not establish physical-input acceptance.
+
 ## Process and window lifetime
 
 The preview process and editor verify the named-pipe peer's process ID and a per-launch session ID. Each rendered surface has a separate identity. Every native operation also carries the local container's handle, process ID, unpredictable lease token and an increasing sequence. The host checks the actual window owner, lease property and DPI awareness before parenting its own window. Only the editor creates and destroys the container; only the preview host manipulates the preview window.

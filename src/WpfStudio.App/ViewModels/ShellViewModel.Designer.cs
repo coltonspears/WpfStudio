@@ -57,19 +57,31 @@ public sealed partial class ShellViewModel
         Designer.PropertyChanged -= DesignerSourceChanged;
         await _designerContextClose;
     }
-    private async Task<bool> PreviewDesignerEditAsync(XamlPropertyEditResult proposal)
+    private Task<bool> PreviewDesignerEditAsync(XamlPropertyEditResult proposal) =>
+        ReviewDesignerEditAsync(proposal, Designer.CaptureSourceEditGuard(), "Update XAML from inspector");
+
+    private Task<bool> PreviewDesignerLayoutEditAsync(DesignerLayoutSourceEdit request) =>
+        ReviewDesignerEditAsync(request.Proposal, request.IsCurrent, "Update XAML layout", request.Validate);
+
+    private async Task<bool> ReviewDesignerEditAsync(XamlPropertyEditResult proposal, Func<bool> designerCurrent,
+        string title, Func<CancellationToken, Task<PreviewLayoutValidationResult>>? validate = null)
     {
         if (proposal.Edit == null || IsPreviewOpen) return false;
         var editor = Documents.FirstOrDefault(d => d.State.Path.Equals(proposal.Edit.Path, StringComparison.OrdinalIgnoreCase));
         if (editor == null || editor.IsReadOnly) throw new InvalidOperationException("The designer's source document is no longer editable.");
         var version = editor.State.Version;
-        var designerCurrent = Designer.CaptureSourceEditGuard();
         bool CanApply() => Documents.Contains(editor) && !editor.IsReadOnly && editor.State.Version == version && designerCurrent();
         var changes = await _edits.PrepareAsync(new WorkspaceEditResult([proposal.Edit], []), _lifetime.Token);
         if (changes.All(change => change.Before == change.After)) return false;
-        if (!await PreviewAsync("Update XAML from inspector", changes, proposal.Explanation)) return false;
+        if (!CanApply()) throw new InvalidOperationException("The source or preview changed while preparing the edit. Refresh and try again.");
+        if (!await PreviewAsync(title, changes, proposal.Explanation)) return false;
         if (!CanApply())
             throw new InvalidOperationException("The source document or preview changed while the edit was being reviewed. Refresh the preview and try again.");
+        if (validate is not null)
+        {
+            var result = await validate(_lifetime.Token);
+            if (!result.Success) throw new InvalidOperationException(result.Error ?? "The observed layout changed during review. Update the snapshot and try again.");
+        }
         // The transaction rejects changes made while the diff was being reviewed.
         await _edits.ApplyAsync(changes, _lifetime.Token, CanApply);
         foreach (var change in changes) AddDocument(_store.Find(change.Path)!);

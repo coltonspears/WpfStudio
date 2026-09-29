@@ -221,6 +221,8 @@ public sealed partial class DesignerTests
         public List<PreviewCaptureRequest> Captures { get; } = [];
         public Func<PreviewCaptureRequest, Task<PreviewSnapshot>> Capture { get; set; } = request => Task.FromResult(Snapshot(request.Version));
         public List<PreviewPropertyEdit> Edits { get; } = [];
+        public List<PreviewLayoutValidationRequest> LayoutValidations { get; } = [];
+        public Func<PreviewLayoutValidationRequest, Task<PreviewLayoutValidationResult>> ValidateLayout { get; set; } = request => Task.FromResult(new PreviewLayoutValidationResult(request, true));
         public List<AppearanceRequest> AppearanceRequests { get; } = [];
         public List<CancellationToken> AppearanceTokens { get; } = [];
         public List<BindingSourceRequest> BindingSourceRequests { get; } = [];
@@ -247,6 +249,8 @@ public sealed partial class DesignerTests
         public Task<PreviewEditResult> SetPropertyAsync(PreviewPropertyEdit request, CancellationToken cancellationToken)
         { Edits.Add(request); return Edit(request); }
         public Task<PreviewPropertyValidation> ValidatePropertyAsync(PreviewPropertyEdit request, CancellationToken cancellationToken) => Validate(request);
+        public Task<PreviewLayoutValidationResult> ValidateLayoutEditAsync(PreviewLayoutValidationRequest request, CancellationToken cancellationToken)
+        { LayoutValidations.Add(request); return ValidateLayout(request); }
         public Task<AppearanceResponse> GetAppearanceAsync(AppearanceRequest request, CancellationToken cancellationToken)
         { AppearanceRequests.Add(request); AppearanceTokens.Add(cancellationToken); return Appearance(request); }
         public Task<BindingSourceResponse> GetBindingSourceAsync(BindingSourceRequest request, CancellationToken cancellationToken)

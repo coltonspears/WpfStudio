@@ -2,7 +2,7 @@
 
 WpfStudio connects XAML authoring, an isolated preview, and inspection of a running WPF application. This tour follows the loop from a binding diagnostic to a checked source change.
 
-These are **actual loaded-app captures from automated fixtures**, taken on September 28, 2026. The twelve PNGs were copied unchanged from the screenshot output of the [loaded-shell smoke test in the source repository](https://github.com/coltonspears/WpfStudio/blob/main/tests/WpfStudio.App.Tests/ShellSmokeTests.cs). They show the implemented UI and fixture observations; they are not mockups or proof of physical mouse, keyboard, IME, or accessibility behavior. Current test results and remaining acceptance work are recorded in [VALIDATION.md](../VALIDATION.md).
+These are **actual loaded-app captures from automated fixtures**, taken on September 28, 2026. The fourteen PNGs were copied unchanged from the screenshot output of the [loaded-shell smoke test in the source repository](https://github.com/coltonspears/WpfStudio/blob/main/tests/WpfStudio.App.Tests/ShellSmokeTests.cs) and its layout-editing partial. They show the implemented UI and fixture observations; they are not mockups or proof of physical mouse, keyboard, IME, or accessibility behavior. Current test results and remaining acceptance work are recorded in [VALIDATION.md](../VALIDATION.md).
 
 ## Catch binding mistakes while editing
 
@@ -93,6 +93,22 @@ Select an element and open **Layout** in either inspector. Desired size, render 
 *The selected border renders wider than its parent-assigned slot. Cyan marks the slot, green the render box, orange a supported margin outline, and purple clip bounds.*
 
 These are snapshots; refresh after layout changes. Clip outlines are bounding approximations, and unsupported geometry is reported. Live overlays need a suitable adorner surface.
+
+## Move and resize with a source review
+
+Enable **Edit layout** in the source preview. Select a direct Canvas or Grid child, then drag its frame or resize handles. A draft outline and snap guides show the proposed geometry. Arrow keys nudge, Shift increases the step, Ctrl+arrows resize, Enter reviews and Escape cancels.
+
+![XAML Designer shows a wider draft frame around Create workspace, aligned with the card above it by a snap guide.](images/xaml/layout-editing.png)
+
+*The fixture previews a resize from 160 to 264 DIPs. The original button remains unchanged while the draft is visible.*
+
+Release the pointer or press Enter to review the XAML. Applying updates the unsaved source buffer as one workspace edit, with one Undo restoring the whole gesture.
+
+![The XAML layout review changes the Create workspace button's Width from 160 to 264, with Cancel and Apply changes available.](images/xaml/layout-editing-review.png)
+
+*Canvas anchors are retained. Grid gestures preserve the current row, column and spans; new dimensions are assigned only on resized axes. The host rechecks the observed layout before applying.*
+
+This supports a verified subset of source layout. Templates, generated containers, transformed or right-to-left frames, layout expressions and compiled previews remain unavailable for gestures. See [layout editing and its limits](xaml-preview-interaction.md#move-and-resize-authored-elements).
 
 ## Inspect appearance without guessing the winning setter
 

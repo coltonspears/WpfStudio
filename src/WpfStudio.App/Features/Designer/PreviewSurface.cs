@@ -11,11 +11,11 @@ namespace WpfStudio.App.Features.Designer;
 public sealed record PreviewPoint(double X, double Y);
 
 /// <summary>Draws the remote bitmap and selection; translates mouse coordinates to preview DIPs.</summary>
-public sealed class PreviewSurface : FrameworkElement
+public sealed partial class PreviewSurface : FrameworkElement
 {
     public static readonly DependencyProperty ImageBytesProperty = DependencyProperty.Register(nameof(ImageBytes), typeof(byte[]), typeof(PreviewSurface), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender, ImageChanged));
-    public static readonly DependencyProperty ScaleProperty = DependencyProperty.Register(nameof(Scale), typeof(double), typeof(PreviewSurface), new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender));
-    public static readonly DependencyProperty SelectionProperty = DependencyProperty.Register(nameof(Selection), typeof(PreviewBounds), typeof(PreviewSurface), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty ScaleProperty = DependencyProperty.Register(nameof(Scale), typeof(double), typeof(PreviewSurface), new FrameworkPropertyMetadata(1d, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsRender, GestureContextChanged));
+    public static readonly DependencyProperty SelectionProperty = DependencyProperty.Register(nameof(Selection), typeof(PreviewBounds), typeof(PreviewSurface), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, GestureContextChanged));
     public static readonly DependencyProperty PickCommandProperty = DependencyProperty.Register(nameof(PickCommand), typeof(ICommand), typeof(PreviewSurface));
     public static readonly DependencyProperty LayoutOverlaysProperty = DependencyProperty.Register(nameof(LayoutOverlays), typeof(IReadOnlyList<LayoutOverlay>), typeof(PreviewSurface), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
     private BitmapSource? _bitmap;
@@ -27,7 +27,7 @@ public sealed class PreviewSurface : FrameworkElement
     private double SafeScale => double.IsFinite(Scale) ? Math.Clamp(Scale, .1, 3) : 1;
     private static void ImageChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {
-        var surface = (PreviewSurface)owner; surface._bitmap = null;
+        var surface = (PreviewSurface)owner; surface.CancelLayoutGesture(); surface._bitmap = null;
         if (args.NewValue is not byte[] { Length: > 0 } bytes) return;
         try
         {
@@ -73,6 +73,7 @@ public sealed class PreviewSurface : FrameworkElement
             var rect = new Rect(bounds.X * SafeScale, bounds.Y * SafeScale, bounds.Width * SafeScale, bounds.Height * SafeScale);
             drawing.DrawRectangle(new SolidColorBrush(Color.FromArgb(35, 70, 160, 255)), new Pen(Brushes.DodgerBlue, 2), rect);
         }
+        DrawLayoutEditing(drawing);
         drawing.Pop();
     }
     private static bool TryGeometry(LayoutOverlay overlay, double scale, out StreamGeometry geometry)
@@ -86,11 +87,5 @@ public sealed class PreviewSurface : FrameworkElement
         }
         geometry.Freeze();
         return true;
-    }
-    protected override void OnMouseLeftButtonDown(MouseButtonEventArgs args)
-    {
-        base.OnMouseLeftButtonDown(args);
-        var point = args.GetPosition(this); var request = new PreviewPoint(point.X / SafeScale, point.Y / SafeScale);
-        if (_bitmap != null && PickCommand?.CanExecute(request) == true) { PickCommand.Execute(request); args.Handled = true; }
     }
 }

@@ -102,13 +102,28 @@
    </DockPanel>
    <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}"/>
    <DockPanel Grid.Column="2" Background="{DynamicResource EditorBrush}">
-    <TextBlock DockPanel.Dock="Bottom" Text="{Binding SelectionDescription}" TextWrapping="Wrap" Margin="10,5" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+    <WrapPanel DockPanel.Dock="Top" Margin="10,4">
+     <CheckBox Content="Edit layout" IsChecked="{Binding IsLayoutEditingEnabled}" Margin="0,0,12,0"
+               AutomationProperties.Name="Edit preview layout" ToolTip="Move or resize an authored element, then review one XAML edit. Source preview in Inspect mode only."/>
+     <CheckBox Content="Snap to layout" IsChecked="{Binding SnapToLayout}" IsEnabled="{Binding IsLayoutEditingEnabled}"
+               AutomationProperties.Name="Snap preview layout" ToolTip="Snap pointer gestures to nearby layout edges and centers; hold Alt to bypass. Keyboard nudges do not snap."/>
+    </WrapPanel>
+    <StackPanel DockPanel.Dock="Bottom" Margin="10,5">
+     <TextBlock Text="{Binding SelectionDescription}" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectionDescription}"
+                Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+     <TextBlock Text="{Binding LayoutEditingStatus}" TextWrapping="Wrap" MaxHeight="44" FontSize="11"
+                ToolTip="{Binding LayoutEditingStatus}" AutomationProperties.Name="Preview layout editing status"
+                Visibility="{Binding IsLayoutEditingEnabled, Converter={StaticResource DesignerBoolVisibility}}"/>
+    </StackPanel>
     <Grid>
      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Padding="16">
       <ScrollViewer.Style><Style TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}"><Style.Triggers>
        <DataTrigger Binding="{Binding IsInteracting}" Value="True"><Setter Property="Visibility" Value="Hidden"/></DataTrigger>
       </Style.Triggers></Style></ScrollViewer.Style>
-      <local:PreviewSurface ImageBytes="{Binding Image}" Scale="{Binding Zoom}" Selection="{Binding SelectionBounds}" LayoutOverlays="{Binding LayoutDetails.VisibleOverlays}" PickCommand="{Binding PickElementCommand}" IsEnabled="{Binding IsCurrent}" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+      <local:PreviewSurface ImageBytes="{Binding Image}" Scale="{Binding Zoom}" Selection="{Binding SelectionBounds}" LayoutOverlays="{Binding LayoutDetails.VisibleOverlays}"
+                            PickCommand="{Binding PickElementCommand}" IsEnabled="{Binding IsCurrent}" HorizontalAlignment="Left" VerticalAlignment="Top"
+                            LayoutEditing="{Binding LayoutEditing}" LayoutDraft="{Binding LayoutDraft}" LayoutGestureCommand="{Binding LayoutGestureCommand}"
+                            IsLayoutEditingEnabled="{Binding IsLayoutEditingEnabled}" AutomationProperties.Name="Preview canvas"/>
      </ScrollViewer>
      <!-- Native content is never transformed or placed inside a WPF ScrollViewer. -->
      <local:NativePreviewPane Session="{Binding InteractionSession}" IsActive="{Binding IsInteracting}"

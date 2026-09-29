@@ -53,6 +53,13 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         ExecuteAsync(proxy => proxy.SetPropertyAsync(request, cancellationToken), null, cancellationToken);
     public Task<PreviewPropertyValidation> ValidatePropertyAsync(PreviewPropertyEdit request, CancellationToken cancellationToken = default) =>
         ExecuteAsync(proxy => proxy.ValidatePropertyAsync(request, cancellationToken), null, cancellationToken);
+    public async Task<PreviewLayoutValidationResult> ValidateLayoutEditAsync(PreviewLayoutValidationRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var result = await ExecuteAsync(proxy => proxy.ValidateLayoutEditAsync(request, cancellationToken), null, cancellationToken).ConfigureAwait(false);
+        if (result.Request != request) throw new InvalidDataException("The layout validation response does not match the selected preview observation.");
+        return result;
+    }
 
     public async Task<AppearanceResponse> GetAppearanceAsync(AppearanceRequest request, CancellationToken cancellationToken = default)
     {

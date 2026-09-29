@@ -51,6 +51,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer = designer ?? new(new WpfStudio.Runtime.Design.PreviewClient(), dispatcher);
         Designer.SourceRequested += source => _ = GuardAsync(() => NavigateAsync(source.Path, source.Line, source.Column));
         Designer.SourceEditRequested += PreviewDesignerEditAsync;
+        Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
         InitializeDesignerContext();
         LiveInspection = new(dispatcher);

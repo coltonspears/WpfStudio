@@ -35,7 +35,7 @@ using Xunit.Abstractions;
 
 namespace WpfStudio.App.Tests;
 
-public sealed class ShellSmokeTests(ITestOutputHelper output)
+public sealed partial class ShellSmokeTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task LoadedShellBindsRealWorkspaceAndPreservesDockingDocumentsAndThemes()
@@ -102,6 +102,12 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
             Assert.Contains(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Welcome");
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/welcome.png"));
             Application.Current.MainWindow = window;
+            if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_XAML_LAYOUT_EDITING_ONLY") == "1")
+            {
+                await VerifyXamlLayoutEditingAsync(root, data, window, manager, shell);
+                Assert.Empty(bindingErrors.Messages);
+                return;
+            }
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_XAML_APPEARANCE_ONLY") == "1")
             {
                 await VerifyPreviewAppearanceAsync(root, data, window, manager, shell);
@@ -312,6 +318,7 @@ public sealed class ShellSmokeTests(ITestOutputHelper output)
             await VerifyXamlSymbolsAsync(root, data, window, shell, dialogs);
             await VerifyXamlEditingAsync(root, data, window, shell, dialogs, provider.GetRequiredService<WorkspaceClient>());
             await VerifyDesignerAsync(root, data, window, manager, shell);
+            await VerifyXamlLayoutEditingAsync(root, data, window, manager, shell);
             await VerifyPreviewScenariosAsync(root, data, window, manager, shell);
             await VerifyPreviewAppearanceAsync(root, data, window, manager, shell);
             await VerifyRuntimeInspectionAsync(root, data, window, manager, shell);

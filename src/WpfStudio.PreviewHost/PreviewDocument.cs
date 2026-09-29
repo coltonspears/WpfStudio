@@ -28,6 +28,7 @@ internal sealed partial class PreviewDocument
     public static PreviewDocument Parse(PreviewRequest request, Assembly? projectAssembly)
     {
         var result = new PreviewDocument();
+        result.InitializeLayoutSources(request);
         using var reader = XmlReader.Create(new StringReader(request.Text), new XmlReaderSettings
         {
             DtdProcessing = DtdProcessing.Prohibit,
@@ -64,6 +65,7 @@ internal sealed partial class PreviewDocument
                 string sourceId = result._sources.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 result._sources[sourceId] = GetSource(request, element);
                 result._sourceTypes[sourceId] = type;
+                result.RememberLayoutSource(sourceId, element, type, request, projectAssembly);
                 element.SetAttributeValue(sourceNamespace + "PreviewSource.Id", sourceId);
             }
             foreach (var attribute in element.Attributes().Where(a => !a.IsNamespaceDeclaration).ToArray())

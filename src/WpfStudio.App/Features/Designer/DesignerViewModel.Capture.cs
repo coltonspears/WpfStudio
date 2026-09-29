@@ -93,6 +93,8 @@ public sealed partial class DesignerViewModel
 
     partial void OnIsBusyChanged(bool value)
     {
+        if (value) ClearLayoutEditing();
+        NotifyLayoutEditingState();
         ShowBindingDiagnosticCommand.NotifyCanExecuteChanged();
         UpdateSnapshotCommand.NotifyCanExecuteChanged();
         NotifyInteractionState();

@@ -35,7 +35,7 @@ public sealed record PreviewProperty(string Name, string Type, string Value, str
     WpfStudio.Inspection.Protocol.InspectionBinding? Binding = null);
 public sealed record PreviewInspection(long Version, PreviewNode? Node, IReadOnlyList<PreviewProperty> Properties,
     IReadOnlyList<PreviewDiagnostic> Diagnostics, string? Status = null,
-    WpfStudio.Inspection.Protocol.LayoutSnapshot? Layout = null);
+    WpfStudio.Inspection.Protocol.LayoutSnapshot? Layout = null, PreviewLayoutEditContext? LayoutEditing = null);
 /// <summary>Edits affect only the preview. Reset restores the original local value or binding.</summary>
 public sealed record PreviewPropertyEdit(long Version, string NodeId, string Property, string? Value, bool Reset = false,
     string? OwnerType = null, string? OwnerAssembly = null);
@@ -57,6 +57,8 @@ public interface IPreviewRpc
     Task<PreviewInspection> PickAsync(PreviewPickRequest request, CancellationToken cancellationToken);
     Task<PreviewEditResult> SetPropertyAsync(PreviewPropertyEdit request, CancellationToken cancellationToken);
     Task<PreviewPropertyValidation> ValidatePropertyAsync(PreviewPropertyEdit request, CancellationToken cancellationToken);
+    Task<PreviewLayoutValidationResult> ValidateLayoutEditAsync(PreviewLayoutValidationRequest request, CancellationToken cancellationToken) =>
+        Task.FromResult(new PreviewLayoutValidationResult(request, false, "This preview host does not support layout source editing."));
     Task<WpfStudio.Inspection.Protocol.AppearanceResponse> GetAppearanceAsync(
         WpfStudio.Inspection.Protocol.AppearanceRequest request, CancellationToken cancellationToken);
     Task<WpfStudio.Inspection.Protocol.BindingSourceResponse> GetBindingSourceAsync(
