@@ -2,6 +2,32 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Change review, diff view and Git workbench (2026-09-29)
+
+The before/after review showed two plain text boxes in a fixed-width dialog, without syntax colouring or change markers, and its horizontal scroll bar sat directly under the text. It now fills the window with a list of changed files and their line counts, and a shared diff view:
+
+* `TextDiff` (Core) is a Myers line diff with prefix/suffix trimming and a bounded edit distance. It pairs changed blocks into modified rows and marks the changed words inside them. Line-ending-only differences compare equal.
+* `DiffView` (App) shows a syntax-highlighted side-by-side or inline diff. It uses AvalonEdit's C#, XML/XAML, JSON and SQL definitions. Unchanged regions collapse to three lines of context and expand on click, or **Whole file** shows everything. **F8**/**Shift+F8** and the overview ruler move between changes, and the view opens scrolled to the first one. Both columns scroll together, and their horizontal scroll bars are pinned to the bottom. Views narrower than 720 px switch to inline, and the toolbar compacts to fit. New and deleted files show a single column.
+* The theme's multi-line `TextBox` now stretches its content host, so wrapped and scrolling text boxes keep the horizontal scroll bar at the bottom edge everywhere.
+
+The Git pane was rebuilt around the same view:
+
+* **Changes** lists staged and working files with status letters and hover stage/unstage actions. The selected file's diff loads immediately, against the index or HEAD, with the working-tree file or staged blob as the new side. Selection survives stage, unstage and refresh.
+* **History** shows author avatars, branch and tag chips, relative dates, a filter, and paging beyond the first 50 commits. The selected commit shows its full message, author, parents and changed files with line counts, and a diff of each file against its first parent. Binary, oversized and submodule entries explain why no text is shown.
+* The branch name in the header opens a switch/create picker. All diff reads use `--no-optional-locks`, so they never hold the index lock that a stage or commit needs.
+
+The Release solution build passed with zero warnings and errors. The Release suites below ran on this workstation:
+
+| Suite | Passed | Notes |
+| --- | ---: | --- |
+| Core | 231 | 13 added for `TextDiff`: identical/CRLF input, insertion alignment, word spans, dissimilar lines, unequal blocks, new/deleted files, hunks and context, bounded fallback, line splitting |
+| Shell | 531 | 4 added: staged/working/new/deleted/binary versions, commit decorations/details/renames/root commits, `diff-tree` record parsing, and view-model paging, filtering, selection and restore after staging; the existing diff test now checks both versions |
+| Preview | 241 | Unchanged |
+| Native view | 61 | Unchanged |
+| Loaded app UI | 1 | The change-preview step asserts the split diff and its added line; new captures `git-history*.png`, `git-workbench*.png` |
+
+These checks do not establish physical pointer, wheel or keyboard acceptance of the new views.
+
 ## Designer canvas and live preview continuity (2026-09-28)
 
 The XAML Designer was reorganized around its canvas: one toolbar, an icon outline that folds template parts, a fitted artboard sized from the root's `Width`/`Height` or `d:DesignWidth`/`d:DesignHeight`, zoom and pan controls, hover outlines, a labelled selection adorner, authored-element picking (**Ctrl+click** for template parts), editor selection mirroring, and property search with a set-values filter. See [working on the canvas](docs/xaml-preview-interaction.md#work-on-the-canvas).

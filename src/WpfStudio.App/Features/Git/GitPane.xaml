@@ -1,31 +1,140 @@
 <UserControl x:Class="WpfStudio.App.Features.Git.GitPane"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
- xmlns:local="clr-namespace:WpfStudio.App.Features.Git" xmlns:c="clr-namespace:WpfStudio.App.Controls" MinWidth="320">
+ xmlns:local="clr-namespace:WpfStudio.App.Features.Git" xmlns:c="clr-namespace:WpfStudio.App.Controls"
+ xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff" x:Name="Pane" MinWidth="420">
  <UserControl.Resources>
-  <DataTemplate x:Key="ChangeTemplate" DataType="{x:Type local:GitChange}">
-   <Grid ToolTip="{Binding DisplayPath}">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-    <TextBlock Text="{Binding DisplayPath}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-    <Border Grid.Column="1" Background="{DynamicResource RaisedBrush}" CornerRadius="4" Padding="6,1" Margin="8,0,0,0">
-     <TextBlock Text="{Binding Status}" Foreground="{DynamicResource MutedBrush}" FontSize="10.5"/>
+  <!-- One-letter status coloured by kind: added/new green, deleted/conflict red, renamed accent, modified amber. -->
+  <Style x:Key="StatusLetter" TargetType="TextBlock">
+   <Setter Property="Text" Value="{Binding Letter}"/>
+   <Setter Property="Width" Value="14"/>
+   <Setter Property="TextAlignment" Value="Center"/>
+   <Setter Property="FontFamily" Value="{StaticResource CodeFont}"/>
+   <Setter Property="FontWeight" Value="Bold"/>
+   <Setter Property="FontSize" Value="11.5"/>
+   <Setter Property="VerticalAlignment" Value="Center"/>
+   <Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+   <Style.Triggers>
+    <DataTrigger Binding="{Binding Letter}" Value="A"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+    <DataTrigger Binding="{Binding Letter}" Value="N"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+    <DataTrigger Binding="{Binding Letter}" Value="D"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+    <DataTrigger Binding="{Binding Letter}" Value="!"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+    <DataTrigger Binding="{Binding Letter}" Value="R"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger>
+    <DataTrigger Binding="{Binding Letter}" Value="C"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger>
+   </Style.Triggers>
+  </Style>
+  <!-- Row action that appears on hover or selection, like a code host's file list. -->
+  <Style x:Key="RowAction" TargetType="Button" BasedOn="{StaticResource IconButton}">
+   <Setter Property="Width" Value="22"/>
+   <Setter Property="Height" Value="22"/>
+   <Setter Property="Margin" Value="4,0,0,0"/>
+   <Setter Property="Visibility" Value="Hidden"/>
+   <Style.Triggers>
+    <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+    <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+   </Style.Triggers>
+  </Style>
+  <Style x:Key="EmptyHint" TargetType="TextBlock">
+   <Setter Property="Foreground" Value="{DynamicResource SubtleBrush}"/>
+   <Setter Property="FontSize" Value="11"/>
+   <Setter Property="TextWrapping" Value="Wrap"/>
+   <Setter Property="Margin" Value="22,4,12,8"/>
+  </Style>
+  <Style x:Key="GroupHeading" TargetType="TextBlock" BasedOn="{StaticResource SectionLabel}">
+   <Setter Property="Margin" Value="0"/>
+   <Setter Property="VerticalAlignment" Value="Center"/>
+   <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+  </Style>
+
+  <DataTemplate x:Key="WorkingChangeTemplate" DataType="{x:Type local:GitChange}">
+   <DockPanel ToolTip="{Binding DisplayPath}" Background="Transparent" MinHeight="22">
+    <TextBlock DockPanel.Dock="Left" Style="{StaticResource StatusLetter}" Margin="0,0,6,0" ToolTip="{Binding Status}"/>
+    <Button DockPanel.Dock="Right" Style="{StaticResource RowAction}" c:Ui.Icon="Plus" ToolTip="Stage file" AutomationProperties.Name="Stage file"
+            Command="{Binding DataContext.StageFileCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"/>
+    <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"/>
+    <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center"><Run Text="{Binding Name, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Folder, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="11"/></TextBlock>
+   </DockPanel>
+  </DataTemplate>
+  <DataTemplate x:Key="StagedChangeTemplate" DataType="{x:Type local:GitChange}">
+   <DockPanel ToolTip="{Binding DisplayPath}" Background="Transparent" MinHeight="22">
+    <TextBlock DockPanel.Dock="Left" Style="{StaticResource StatusLetter}" Margin="0,0,6,0" ToolTip="{Binding Status}"/>
+    <Button DockPanel.Dock="Right" Style="{StaticResource RowAction}" c:Ui.Icon="Minus" ToolTip="Unstage file" AutomationProperties.Name="Unstage file"
+            Command="{Binding DataContext.UnstageFileCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"/>
+    <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"/>
+    <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center"><Run Text="{Binding Name, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Folder, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="11"/></TextBlock>
+   </DockPanel>
+  </DataTemplate>
+
+  <!-- Branch and tag decorations: the checked-out branch is filled, tags are amber, remote branches are muted. -->
+  <DataTemplate x:Key="RefChip" DataType="{x:Type local:GitRef}">
+   <Border x:Name="Chip" CornerRadius="4" Padding="5,0,6,1" Margin="0,0,4,0" BorderThickness="1" BorderBrush="{DynamicResource AccentBrush}"
+           TextElement.Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" ToolTip="{Binding Name}">
+    <StackPanel Orientation="Horizontal">
+     <c:Glyph x:Name="Icon" Kind="Git" Width="11" Height="11" Margin="0,1,3,0" VerticalAlignment="Center"/>
+     <TextBlock Text="{Binding Name}" FontSize="10.5" VerticalAlignment="Center" MaxWidth="180" TextTrimming="CharacterEllipsis"/>
+    </StackPanel>
+   </Border>
+   <DataTemplate.Triggers>
+    <DataTrigger Binding="{Binding IsRemote}" Value="True">
+     <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource StrongBorderBrush}"/>
+     <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource MutedBrush}"/>
+    </DataTrigger>
+    <DataTrigger Binding="{Binding IsTag}" Value="True">
+     <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource WarningBrush}"/>
+     <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource WarningBrush}"/>
+     <Setter TargetName="Icon" Property="Kind" Value="Tag"/>
+    </DataTrigger>
+    <DataTrigger Binding="{Binding IsHead}" Value="True">
+     <Setter TargetName="Chip" Property="Background" Value="{DynamicResource AccentFillBrush}"/>
+     <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource AccentFillBrush}"/>
+     <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource OnAccentBrush}"/>
+    </DataTrigger>
+   </DataTemplate.Triggers>
+  </DataTemplate>
+  <ItemsPanelTemplate x:Key="ChipPanel"><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+
+  <DataTemplate x:Key="CommitTemplate" DataType="{x:Type local:GitCommit}">
+   <Grid Margin="0,3" ToolTip="{Binding DisplayDate}">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Border Width="26" Height="26" CornerRadius="13" Background="{Binding AvatarBrush}" VerticalAlignment="Top" Margin="0,1,10,0" ToolTip="{Binding Author}">
+     <TextBlock Text="{Binding Initials}" Foreground="White" FontSize="10.5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
     </Border>
+    <StackPanel Grid.Column="1">
+     <DockPanel>
+      <TextBlock DockPanel.Dock="Right" Text="{Binding ShortId}" FontFamily="{StaticResource CodeFont}" FontSize="11" Foreground="{DynamicResource SubtleBrush}" Margin="8,1,0,0"/>
+      <TextBlock Text="{Binding Subject}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/>
+     </DockPanel>
+     <WrapPanel Margin="0,3,0,0">
+      <ItemsControl ItemsSource="{Binding RefList}" ItemTemplate="{StaticResource RefChip}" ItemsPanel="{StaticResource ChipPanel}" Focusable="False" VerticalAlignment="Center"/>
+      <Border CornerRadius="4" Padding="5,0,6,1" Margin="0,0,4,0" BorderThickness="1" BorderBrush="{DynamicResource StrongBorderBrush}" VerticalAlignment="Center"
+              Visibility="{Binding IsMerge, Converter={StaticResource BooleanToVisibility}}">
+       <TextBlock Text="merge" FontSize="10.5" Foreground="{DynamicResource MutedBrush}"/>
+      </Border>
+      <TextBlock Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center"><Run Text="{Binding Author, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding RelativeDate, Mode=OneWay}"/></TextBlock>
+     </WrapPanel>
+    </StackPanel>
    </Grid>
   </DataTemplate>
+
+  <DataTemplate x:Key="CommitFileTemplate" DataType="{x:Type local:GitCommitFile}">
+   <DockPanel ToolTip="{Binding Path}" Background="Transparent" MinHeight="22">
+    <TextBlock DockPanel.Dock="Left" Style="{StaticResource StatusLetter}" Margin="0,0,6,0"/>
+    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+     <TextBlock Text="{Binding AddedText}" Foreground="{DynamicResource SuccessBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,4,0"/>
+     <TextBlock Text="{Binding RemovedText}" Foreground="{DynamicResource DangerBrush}" FontSize="11" FontWeight="SemiBold"/>
+    </StackPanel>
+    <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"/>
+    <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center"><Run Text="{Binding Name, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Folder, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="11"/></TextBlock>
+   </DockPanel>
+  </DataTemplate>
+
   <Style x:Key="WorkingItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
    <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
    <Setter Property="ContextMenu"><Setter.Value>
     <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
-     <MenuItem Header="View diff" Command="{Binding ViewWorkingDiffCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-     <MenuItem Header="Open file" Command="{Binding OpenFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-     <Separator/><MenuItem Header="Stage file" Command="{Binding StageFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-    </ContextMenu>
-   </Setter.Value></Setter>
-  </Style>
-  <Style x:Key="CommitItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
-   <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
-   <Setter Property="ContextMenu"><Setter.Value>
-    <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
-     <MenuItem Header="View commit" Command="{Binding ViewCommitCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <MenuItem Header="Stage file" c:Ui.Icon="Plus" Command="{Binding StageFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <MenuItem Header="Open file" c:Ui.Icon="File" Command="{Binding OpenFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <Separator/>
+     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
     </ContextMenu>
    </Setter.Value></Setter>
   </Style>
@@ -33,71 +142,294 @@
    <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
    <Setter Property="ContextMenu"><Setter.Value>
     <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
-     <MenuItem Header="View staged diff" Command="{Binding ViewStagedDiffCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-     <MenuItem Header="Open file" Command="{Binding OpenFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-     <Separator/><MenuItem Header="Unstage file" Command="{Binding UnstageFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <MenuItem Header="Unstage file" c:Ui.Icon="Minus" Command="{Binding UnstageFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <MenuItem Header="Open file" c:Ui.Icon="File" Command="{Binding OpenFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <Separator/>
+     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+    </ContextMenu>
+   </Setter.Value></Setter>
+  </Style>
+  <Style x:Key="CommitItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+   <Setter Property="ContextMenu"><Setter.Value>
+    <ContextMenu>
+     <MenuItem Header="Copy commit ID" c:Ui.Icon="Copy" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding Id}"/>
+     <MenuItem Header="Copy subject" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding Subject}"/>
+    </ContextMenu>
+   </Setter.Value></Setter>
+  </Style>
+  <Style x:Key="CommitFileItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+   <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
+   <Setter Property="ContextMenu"><Setter.Value>
+    <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+     <MenuItem Header="Open current version" c:Ui.Icon="File" Command="{Binding OpenCommitFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
     </ContextMenu>
    </Setter.Value></Setter>
   </Style>
  </UserControl.Resources>
+
  <DockPanel Background="{DynamicResource SurfaceBrush}">
-  <StackPanel DockPanel.Dock="Top" Margin="16,12,14,6">
+  <!-- Repository header: branch picker, tracking state and remote actions. -->
+  <Border DockPanel.Dock="Top" Padding="14,10,12,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
    <DockPanel>
-    <WrapPanel DockPanel.Dock="Right" Margin="8,-2,-2,0"><Button Content="Fetch" c:Ui.Icon="Refresh" Command="{Binding FetchCommand}"/><Button Content="Pull" Command="{Binding PullCommand}" ToolTip="Save documents, then pull with fast-forward only. Requires a clean working tree."/><Button Content="Push" Command="{Binding PushCommand}" ToolTip="Push the current branch using its configured remote. Never force pushes."/><Button Style="{StaticResource IconButton}" c:Ui.Icon="Restart" Command="{Binding RefreshCommand}" ToolTip="Refresh" AutomationProperties.Name="Refresh Git repository" Margin="4,0,0,0"/><Button Content="Cancel" Command="{Binding CancelCommand}" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}"/></WrapPanel>
-    <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><c:Glyph Kind="Git" Width="16" Height="16" Margin="0,0,8,0" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="{Binding Branch}" ToolTip="{Binding Branch}" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></StackPanel>
-   </DockPanel>
-   <TextBlock Text="{Binding RepositoryRoot}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding RepositoryRoot}" Margin="24,3,0,2"/>
-   <TextBlock Text="{Binding Tracking}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="24,0,0,0"/>
-  </StackPanel>
-  <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="10,7">
-   <StackPanel><TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding Error}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,5,0,0" Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibility}}"/></StackPanel>
-  </Border>
-  <TabControl SelectedIndex="{Binding SelectedTab}">
-   <TabItem Header="Changes">
-    <DockPanel Margin="8">
-     <Border DockPanel.Dock="Bottom" Margin="0,8,0,0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,5,0,0">
+    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+     <Button Style="{StaticResource ToolbarButton}" Content="Fetch" c:Ui.Icon="Refresh" Command="{Binding FetchCommand}" ToolTip="Download new commits and branches from the remote without changing files."/>
+     <Button Style="{StaticResource ToolbarButton}" Content="Pull" c:Ui.Icon="ArrowDown" Command="{Binding PullCommand}" ToolTip="Save documents, then pull with fast-forward only. Requires a clean working tree."/>
+     <Button Style="{StaticResource ToolbarButton}" Content="Push" c:Ui.Icon="ArrowUp" Command="{Binding PushCommand}" ToolTip="Push the current branch using its configured remote. Never force pushes."/>
+     <Border Width="1" Height="18" Background="{DynamicResource BorderBrush}" Margin="6,0"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="Restart" Command="{Binding RefreshCommand}" ToolTip="Refresh" AutomationProperties.Name="Refresh Git repository"/>
+     <Button Content="Cancel" Command="{Binding CancelCommand}" Margin="6,0,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}"/>
+    </StackPanel>
+    <ToggleButton x:Name="BranchPicker" DockPanel.Dock="Left" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Git" Height="32" Padding="8,0,8,0"
+                  IsEnabled="{Binding HasRepository}" ToolTip="Switch or create a branch" AutomationProperties.Name="Branch">
+     <StackPanel Orientation="Horizontal">
+      <TextBlock Text="{Binding Branch}" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" MaxWidth="320" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+      <c:Glyph Kind="ChevronDown" Width="12" Height="12" Margin="6,1,0,0" VerticalAlignment="Center"/>
+     </StackPanel>
+    </ToggleButton>
+    <Popup PlacementTarget="{Binding ElementName=BranchPicker}" Placement="Bottom" VerticalOffset="4" StaysOpen="False" AllowsTransparency="True"
+           IsOpen="{Binding IsChecked, ElementName=BranchPicker}" PopupAnimation="Fade">
+     <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="8,0,8,12"
+             Width="320" Effect="{StaticResource PopupShadow}">
       <StackPanel>
-       <DockPanel Margin="0,0,0,4"><Button DockPanel.Dock="Right" Content="Commit staged changes" c:Ui.Icon="Check" Command="{Binding CommitCommand}" Style="{StaticResource AccentButton}" Margin="8,0,0,0"/><TextBlock Text="Commit message" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
-       <TextBox Text="{Binding CommitMessage, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Height="52" VerticalContentAlignment="Top" c:Ui.Placeholder="Summarize the staged changes" VerticalScrollBarVisibility="Auto" ToolTip="Describe the staged changes. A summary and optional additional lines are supported." AutomationProperties.Name="Commit message"/>
-       <TextBlock Text="Only staged files are committed. Right-click a file for more actions." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,4,0,0"/>
+       <TextBlock Text="SWITCH BRANCH" Style="{StaticResource SectionLabel}"/>
+       <ListBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" MaxHeight="220" AutomationProperties.Name="Local branches" MouseDoubleClick="SwitchOnDoubleClick">
+        <ListBox.ItemTemplate>
+         <DataTemplate>
+          <StackPanel Orientation="Horizontal">
+           <c:Glyph Kind="Git" Width="13" Height="13" Margin="0,0,6,0" Foreground="{DynamicResource MutedBrush}"/>
+           <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis"/>
+          </StackPanel>
+         </DataTemplate>
+        </ListBox.ItemTemplate>
+       </ListBox>
+       <Button Content="Switch to selected branch" Command="{Binding SwitchBranchCommand}" HorizontalAlignment="Stretch" Margin="0,8,0,0" Click="CloseBranchPicker"/>
+       <TextBlock Text="NEW BRANCH" Style="{StaticResource SectionLabel}" Margin="0,16,0,8"/>
+       <DockPanel>
+        <Button DockPanel.Dock="Right" Content="Create" c:Ui.Icon="Plus" Command="{Binding CreateBranchCommand}" Style="{StaticResource AccentButton}" Margin="8,0,0,0" Click="CloseBranchPicker"/>
+        <TextBox Text="{Binding NewBranchName, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="feature/my-change" AutomationProperties.Name="New branch name"/>
+       </DockPanel>
+       <TextBlock Text="Switching and creating branches require a clean working tree. Your files are never discarded." Style="{StaticResource Caption}" Margin="0,8,0,0"/>
       </StackPanel>
      </Border>
-     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" MinWidth="128"/><ColumnDefinition Width="9"/><ColumnDefinition Width="*" MinWidth="128"/></Grid.ColumnDefinitions>
-      <DockPanel>
-       <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4"><Button Content="Stage all" Command="{Binding StageAllCommand}" DockPanel.Dock="Right" Padding="6,3"/><TextBlock Text="{Binding UnstagedHeading}" ToolTip="{Binding UnstagedHeading}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
-       <WrapPanel DockPanel.Dock="Bottom" Margin="0,4,0,0"><Button Content="Diff" ToolTip="View the selected working file's diff" Command="{Binding ViewWorkingDiffCommand}" CommandParameter="{Binding SelectedUnstaged}" Padding="6,3"/><Button Content="Stage" Command="{Binding StageFileCommand}" CommandParameter="{Binding SelectedUnstaged}" Padding="6,3"/><Button Content="Open" Command="{Binding OpenFileCommand}" CommandParameter="{Binding SelectedUnstaged}" Padding="6,3"/></WrapPanel>
-       <Grid>
-        <ListBox ItemsSource="{Binding Unstaged}" SelectedItem="{Binding SelectedUnstaged}" ItemTemplate="{StaticResource ChangeTemplate}" ItemContainerStyle="{StaticResource WorkingItem}" AutomationProperties.Name="Working changes"/>
-        <TextBlock Text="No working changes" Foreground="{DynamicResource MutedBrush}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding Unstaged.Count}" Value="0"/><Condition Binding="{Binding HasRepository}" Value="True"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-       </Grid>
+    </Popup>
+    <StackPanel VerticalAlignment="Center" Margin="10,0,12,0">
+     <StackPanel Orientation="Horizontal">
+      <Border Style="{StaticResource Badge}" Padding="7,1" Visibility="{Binding Tracking, Converter={StaticResource Presence}}">
+       <TextBlock Text="{Binding Tracking}" Foreground="{DynamicResource AccentBrush}" FontSize="11"/>
+      </Border>
+     </StackPanel>
+     <TextBlock Text="{Binding RepositoryRoot}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding RepositoryRoot}" Margin="1,3,0,0"/>
+    </StackPanel>
+   </DockPanel>
+  </Border>
+
+  <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="14,6">
+   <DockPanel>
+    <TextBlock DockPanel.Dock="Right" Text="Working…" Foreground="{DynamicResource AccentBrush}" FontSize="11" Margin="12,0,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}"/>
+    <StackPanel>
+     <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+     <TextBlock Text="{Binding Error}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibility}}"/>
+    </StackPanel>
+   </DockPanel>
+  </Border>
+
+  <TabControl SelectedIndex="{Binding SelectedTab}">
+   <TabItem AutomationProperties.Name="Changes">
+    <TabItem.Header>
+     <StackPanel Orientation="Horizontal">
+      <TextBlock Text="Changes" VerticalAlignment="Center"/>
+      <Border Style="{StaticResource Badge}" Margin="6,0,0,0" Padding="5,0" Visibility="{Binding ChangeCount, Converter={StaticResource Presence}}">
+       <TextBlock Text="{Binding ChangeCount}" FontSize="10.5" Foreground="{DynamicResource AccentBrush}"/>
+      </Border>
+     </StackPanel>
+    </TabItem.Header>
+    <Grid>
+     <Grid.ColumnDefinitions><ColumnDefinition Width="340" MinWidth="240"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*" MinWidth="320"/></Grid.ColumnDefinitions>
+     <Grid Margin="10,10,8,8">
+      <Grid.RowDefinitions>
+       <RowDefinition Height="Auto"/>
+       <RowDefinition Height="Auto"/>
+       <RowDefinition Height="Auto"/>
+       <RowDefinition Height="Auto"/>
+       <RowDefinition Height="*"/>
+      </Grid.RowDefinitions>
+      <StackPanel>
+       <TextBox Text="{Binding CommitMessage, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="58" MaxHeight="140" VerticalContentAlignment="Top"
+                c:Ui.Placeholder="Commit message (summary, blank line, details)" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Commit message"
+                ToolTip="Describe the staged changes. The first line is the summary."/>
+       <Button Content="{Binding CommitButtonText}" c:Ui.Icon="Check" Command="{Binding CommitCommand}" Style="{StaticResource AccentButton}" HorizontalAlignment="Stretch" Margin="0,8,0,4"
+               ToolTip="Only staged files are committed."/>
+      </StackPanel>
+      <DockPanel Grid.Row="1" Margin="0,12,0,4">
+       <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Minus" Width="24" Height="24" Command="{Binding UnstageAllCommand}" ToolTip="Unstage all" AutomationProperties.Name="Unstage all"/>
+       <TextBlock Text="{Binding StagedHeading}" Style="{StaticResource GroupHeading}"/>
       </DockPanel>
-      <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="{DynamicResource BorderBrush}" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" ShowsPreview="True"/>
-      <DockPanel Grid.Column="2">
-       <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4"><Button Content="Unstage all" Command="{Binding UnstageAllCommand}" DockPanel.Dock="Right" Padding="6,3"/><TextBlock Text="{Binding StagedHeading}" ToolTip="{Binding StagedHeading}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
-       <WrapPanel DockPanel.Dock="Bottom" Margin="0,4,0,0"><Button Content="Diff" ToolTip="View the selected staged file's diff" Command="{Binding ViewStagedDiffCommand}" CommandParameter="{Binding SelectedStaged}" Padding="6,3"/><Button Content="Unstage" Command="{Binding UnstageFileCommand}" CommandParameter="{Binding SelectedStaged}" Padding="6,3"/></WrapPanel>
-       <Grid>
-        <ListBox ItemsSource="{Binding Staged}" SelectedItem="{Binding SelectedStaged}" ItemTemplate="{StaticResource ChangeTemplate}" ItemContainerStyle="{StaticResource StagedItem}" AutomationProperties.Name="Staged changes"/>
-        <TextBlock Text="No staged changes" Foreground="{DynamicResource MutedBrush}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding Staged.Count}" Value="0"/><Condition Binding="{Binding HasRepository}" Value="True"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+      <Grid Grid.Row="2">
+       <ListBox ItemsSource="{Binding Staged}" SelectedItem="{Binding SelectedStaged}" ItemTemplate="{StaticResource StagedChangeTemplate}" ItemContainerStyle="{StaticResource StagedItem}"
+                MaxHeight="240" AutomationProperties.Name="Staged changes" MouseDoubleClick="OpenChangeOnDoubleClick"
+                Visibility="{Binding Staged.Count, Converter={StaticResource Presence}}"/>
+       <TextBlock Text="Stage files to include them in the next commit." Style="{StaticResource EmptyHint}" Visibility="{Binding Staged.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
+      </Grid>
+      <DockPanel Grid.Row="3" Margin="0,10,0,4">
+       <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Plus" Width="24" Height="24" Command="{Binding StageAllCommand}" ToolTip="Stage all" AutomationProperties.Name="Stage all"/>
+       <TextBlock Text="{Binding UnstagedHeading}" Style="{StaticResource GroupHeading}"/>
+      </DockPanel>
+      <Grid Grid.Row="4">
+       <ListBox ItemsSource="{Binding Unstaged}" SelectedItem="{Binding SelectedUnstaged}" ItemTemplate="{StaticResource WorkingChangeTemplate}" ItemContainerStyle="{StaticResource WorkingItem}"
+                AutomationProperties.Name="Working changes" MouseDoubleClick="OpenChangeOnDoubleClick" VerticalAlignment="Top"
+                Visibility="{Binding Unstaged.Count, Converter={StaticResource Presence}}"/>
+       <TextBlock Text="No working changes." Style="{StaticResource EmptyHint}" Visibility="{Binding Unstaged.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
+      </Grid>
+     </Grid>
+     <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+     <Border Grid.Column="1" Width="1" HorizontalAlignment="Center" Background="{DynamicResource BorderBrush}" IsHitTestVisible="False"/>
+     <diff:DiffView Grid.Column="2" x:Name="ChangeDiff" Before="{Binding CurrentDiff.Before}" After="{Binding CurrentDiff.After}" Message="{Binding CurrentDiff.Message}"
+                    FilePath="{Binding CurrentDiff.Path}" OldLabel="{Binding CurrentDiff.OldLabel, TargetNullValue=Before, FallbackValue=Before}"
+                    NewLabel="{Binding CurrentDiff.NewLabel, TargetNullValue=After, FallbackValue=After}" EmptyText="{Binding ChangesPlaceholder}"
+                    AutomationProperties.Name="Selected change diff">
+      <diff:DiffView.Header>
+       <DockPanel Visibility="{Binding SelectedChange, Converter={StaticResource Presence}}">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Plus" Command="{Binding StageFileCommand}" CommandParameter="{Binding SelectedUnstaged}"
+                 Visibility="{Binding SelectedUnstaged, Converter={StaticResource Presence}}" ToolTip="Stage this file" AutomationProperties.Name="Stage this file"/>
+         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Minus" Command="{Binding UnstageFileCommand}" CommandParameter="{Binding SelectedStaged}"
+                 Visibility="{Binding SelectedStaged, Converter={StaticResource Presence}}" ToolTip="Unstage this file" AutomationProperties.Name="Unstage this file"/>
+         <Button Style="{StaticResource IconButton}" c:Ui.Icon="File" Command="{Binding OpenFileCommand}" CommandParameter="{Binding SelectedChange}" ToolTip="Open file" AutomationProperties.Name="Open file"/>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Left" DataContext="{Binding SelectedChange}" Style="{StaticResource StatusLetter}" Margin="0,0,6,0" ToolTip="{Binding Status}"/>
+        <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectedChange.DisplayPath}">
+         <Run Text="{Binding SelectedChange.Name, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding SelectedChange.Folder, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="11"/>
+        </TextBlock>
+       </DockPanel>
+      </diff:DiffView.Header>
+     </diff:DiffView>
+    </Grid>
+   </TabItem>
+
+   <TabItem Header="History" AutomationProperties.Name="History">
+    <Grid>
+     <Grid.ColumnDefinitions><ColumnDefinition Width="340" MinWidth="260"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*" MinWidth="360"/></Grid.ColumnDefinitions>
+     <DockPanel Margin="10,10,8,8">
+      <Grid DockPanel.Dock="Top">
+       <TextBox Text="{Binding HistoryFilter, UpdateSourceTrigger=PropertyChanged, Delay=150}" Padding="26,0,26,0" c:Ui.Placeholder="Filter by message, author, ID or branch" AutomationProperties.Name="Filter commits"/>
+       <c:Glyph Kind="Search" Width="14" Height="14" HorizontalAlignment="Left" Margin="8,0,0,0" Foreground="{DynamicResource SubtleBrush}" IsHitTestVisible="False"/>
+       <Button Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="22" Height="22" HorizontalAlignment="Right" Margin="0,0,3,0" Command="{Binding ClearHistoryFilterCommand}"
+               ToolTip="Clear filter" AutomationProperties.Name="Clear filter" Visibility="{Binding IsHistoryFiltered, Converter={StaticResource BooleanToVisibility}}"/>
+      </Grid>
+      <TextBlock DockPanel.Dock="Top" Text="{Binding HistoryHeading}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="2,8,0,6" TextTrimming="CharacterEllipsis"/>
+      <Button DockPanel.Dock="Bottom" Style="{StaticResource QuietButton}" Content="Load older commits" c:Ui.Icon="ChevronDown" Command="{Binding LoadMoreHistoryCommand}" HorizontalAlignment="Stretch" Margin="0,6,0,0"
+              Visibility="{Binding HasMoreHistory, Converter={StaticResource BooleanToVisibility}}"/>
+      <Grid>
+       <ListBox ItemsSource="{Binding VisibleHistory}" SelectedItem="{Binding SelectedCommit}" ItemTemplate="{StaticResource CommitTemplate}" ItemContainerStyle="{StaticResource CommitItem}"
+                ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Commits"/>
+       <TextBlock Text="No loaded commit matches the filter." Style="{StaticResource EmptyHint}" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0">
+        <TextBlock.Visibility><Binding Path="HistoryFilterHasNoMatches" Converter="{StaticResource BooleanToVisibility}"/></TextBlock.Visibility>
+       </TextBlock>
+      </Grid>
+     </DockPanel>
+     <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+     <Border Grid.Column="1" Width="1" HorizontalAlignment="Center" Background="{DynamicResource BorderBrush}" IsHitTestVisible="False"/>
+     <Grid Grid.Column="2">
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding CommitDetails, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+       <c:Glyph Kind="Commit" Width="28" Height="28" Foreground="{DynamicResource SubtleBrush}"/>
+       <TextBlock Text="Select a commit to see what it changed." Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0"/>
+      </StackPanel>
+      <DockPanel DataContext="{Binding CommitDetails}" Visibility="{Binding Converter={StaticResource Presence}}">
+       <!-- Commit header: author, date, ID, parents and the full message. -->
+       <Border DockPanel.Dock="Top" Padding="18,14,16,12" Background="{DynamicResource EditorBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+        <Grid>
+         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+         <Border Width="36" Height="36" CornerRadius="18" Background="{Binding AvatarBrush}" VerticalAlignment="Top" Margin="0,2,14,0">
+          <TextBlock Text="{Binding Initials}" Foreground="White" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+         </Border>
+         <StackPanel Grid.Column="1">
+          <TextBlock Text="{Binding Subject}" ToolTip="{Binding Subject}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="42"/>
+          <WrapPanel Margin="0,5,0,0">
+           <TextBlock Foreground="{DynamicResource MutedBrush}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,12,0">
+            <Run Text="{Binding Author, Mode=OneWay}" Foreground="{DynamicResource TextBrush}"/><Run Text=" "/><Run Text="{Binding AuthorEmail, Mode=OneWay, StringFormat='&lt;{0}&gt;'}"/><Run Text=" · "/><Run Text="{Binding DisplayDate, Mode=OneWay}"/>
+           </TextBlock>
+           <Button Style="{StaticResource QuietButton}" Padding="6,1" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding Id}" ToolTip="Copy the full commit ID" AutomationProperties.Name="Copy commit ID" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal">
+             <c:Glyph Kind="Commit" Width="13" Height="13" Margin="0,0,5,0"/>
+             <TextBlock Text="{Binding ShortId}" FontFamily="{StaticResource CodeFont}" FontSize="11"/>
+             <c:Glyph Kind="Copy" Width="12" Height="12" Margin="6,0,0,0" Foreground="{DynamicResource SubtleBrush}"/>
+            </StackPanel>
+           </Button>
+           <TextBlock Text="{Binding ParentText}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" FontFamily="{StaticResource CodeFont}" VerticalAlignment="Center" Margin="6,0,0,0"/>
+          </WrapPanel>
+          <!-- A long message starts at three lines so the files and diff keep the space; the toggle reveals the rest. -->
+          <StackPanel Margin="0,8,0,0" Visibility="{Binding Body, Converter={StaticResource Presence}}">
+           <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer.Style>
+             <Style TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}">
+              <Setter Property="MaxHeight" Value="32"/>
+              <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+              <Style.Triggers>
+               <DataTrigger Binding="{Binding IsChecked, ElementName=BodyToggle}" Value="True">
+                <Setter Property="MaxHeight" Value="280"/>
+                <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+               </DataTrigger>
+              </Style.Triggers>
+             </Style>
+            </ScrollViewer.Style>
+            <TextBlock Text="{Binding Body}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="12"/>
+           </ScrollViewer>
+           <ToggleButton x:Name="BodyToggle" HorizontalAlignment="Left" Margin="-6,2,0,0" Height="24" Visibility="{Binding HasLongBody, Converter={StaticResource BooleanToVisibility}}"
+                         AutomationProperties.Name="Show the full commit message">
+            <ToggleButton.Style>
+             <Style TargetType="ToggleButton" BasedOn="{StaticResource ToolbarToggle}">
+              <Setter Property="Content" Value="Show full message"/>
+              <Setter Property="c:Ui.Icon" Value="ChevronDown"/>
+              <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="Content" Value="Show less"/><Setter Property="c:Ui.Icon" Value="ChevronUp"/></Trigger></Style.Triggers>
+             </Style>
+            </ToggleButton.Style>
+           </ToggleButton>
+          </StackPanel>
+         </StackPanel>
+        </Grid>
+       </Border>
+       <!-- Files beside the diff when there is room, above it otherwise (GitPane.LayoutCommitBody). -->
+       <Grid x:Name="CommitBody" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=local:GitPane}}" SizeChanged="LayoutCommitBody">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="280"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="0"/><RowDefinition Height="0"/></Grid.RowDefinitions>
+        <DockPanel x:Name="CommitFilesPanel" Margin="8,8,4,8">
+         <StackPanel DockPanel.Dock="Top" Margin="4,0,0,6">
+          <TextBlock Text="FILES CHANGED" Style="{StaticResource SectionLabel}" Margin="0"/>
+          <TextBlock Text="{Binding CommitDetails.Stats}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,2,0,0"/>
+          <TextBlock Text="Merge commits are compared with their first parent." Foreground="{DynamicResource SubtleBrush}" FontSize="10.5" TextWrapping="Wrap" Margin="0,2,0,0"
+                     Visibility="{Binding SelectedCommit.IsMerge, Converter={StaticResource BooleanToVisibility}, FallbackValue=Collapsed}"/>
+         </StackPanel>
+         <ListBox ItemsSource="{Binding CommitFiles}" SelectedItem="{Binding SelectedCommitFile}" ItemTemplate="{StaticResource CommitFileTemplate}" ItemContainerStyle="{StaticResource CommitFileItem}"
+                  AutomationProperties.Name="Files changed in commit" MouseDoubleClick="OpenCommitFileOnDoubleClick"/>
+        </DockPanel>
+        <GridSplitter x:Name="CommitSplitter" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+        <Border x:Name="CommitDivider" Grid.Column="1" Width="1" HorizontalAlignment="Center" Background="{DynamicResource BorderBrush}" IsHitTestVisible="False"/>
+        <diff:DiffView Grid.Column="2" x:Name="CommitDiffView" Before="{Binding CommitDiff.Before}" After="{Binding CommitDiff.After}" Message="{Binding CommitDiff.Message}"
+                       FilePath="{Binding CommitDiff.Path}" OldLabel="{Binding CommitDiff.OldLabel, TargetNullValue=Before, FallbackValue=Before}"
+                       NewLabel="{Binding CommitDiff.NewLabel, TargetNullValue=After, FallbackValue=After}" EmptyText="This commit has no file changes."
+                       AutomationProperties.Name="Commit file diff">
+         <diff:DiffView.Header>
+          <DockPanel DataContext="{Binding SelectedCommitFile}" Visibility="{Binding Converter={StaticResource Presence}}">
+           <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="File" Margin="8,0,0,0" ToolTip="Open the current version" AutomationProperties.Name="Open current version"
+                   Command="{Binding DataContext.OpenCommitFileCommand, RelativeSource={RelativeSource AncestorType=diff:DiffView}}" CommandParameter="{Binding}"/>
+           <TextBlock DockPanel.Dock="Left" Style="{StaticResource StatusLetter}" Margin="0,0,6,0"/>
+           <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}">
+            <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding Folder, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="11"/>
+           </TextBlock>
+          </DockPanel>
+         </diff:DiffView.Header>
+        </diff:DiffView>
        </Grid>
       </DockPanel>
      </Grid>
-    </DockPanel>
+    </Grid>
    </TabItem>
-   <TabItem Header="History">
-    <DockPanel Margin="8">
-     <StackPanel DockPanel.Dock="Top">
-      <TextBlock Text="LOCAL BRANCHES" Style="{StaticResource SectionLabel}"/>
-      <DockPanel><Button Content="Switch" Command="{Binding SwitchBranchCommand}" DockPanel.Dock="Right"/><ComboBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" AutomationProperties.Name="Git branch"/></DockPanel>
-      <DockPanel Margin="0,4,0,8"><Button Content="Create" Command="{Binding CreateBranchCommand}" DockPanel.Dock="Right"/><TextBox Text="{Binding NewBranchName, UpdateSourceTrigger=PropertyChanged}" ToolTip="New branch name" AutomationProperties.Name="New branch name"/></DockPanel>
-      <TextBlock Text="Switching and creating branches require a clean working tree." FontSize="10" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
-      <TextBlock Text="RECENT COMMITS" Style="{StaticResource SectionLabel}"/>
-     </StackPanel>
-     <Button DockPanel.Dock="Bottom" Content="View selected commit" Command="{Binding ViewCommitCommand}" CommandParameter="{Binding SelectedCommit}"/>
-     <ListBox ItemsSource="{Binding History}" SelectedItem="{Binding SelectedCommit}" ItemContainerStyle="{StaticResource CommitItem}" AutomationProperties.Name="Recent Git commits"><ListBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Subject}" TextWrapping="Wrap"/><TextBlock Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,4,0,0"><Run Text="{Binding ShortId, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding Author, Mode=OneWay}"/></TextBlock><TextBlock Text="{Binding DisplayDate}" ToolTip="{Binding Date}" FontSize="10" Foreground="{DynamicResource MutedBrush}"/></StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
-    </DockPanel>
+
+   <TabItem Header="Output" AutomationProperties.Name="Output">
+    <TextBox Text="{Binding Output, Mode=OneWay}" IsReadOnly="True" FontFamily="{StaticResource CodeFont}" FontSize="11.5" AcceptsReturn="True" TextWrapping="Wrap"
+             VerticalScrollBarVisibility="Auto" Margin="10" VerticalContentAlignment="Top" AutomationProperties.Name="Git output"/>
    </TabItem>
-   <TabItem Header="Diff"><DockPanel Margin="8"><TextBlock DockPanel.Dock="Top" Text="{Binding DiffTitle}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" Margin="0,0,0,6"/><TextBox Text="{Binding DiffText, Mode=OneWay}" IsReadOnly="True" FontFamily="Cascadia Code, Consolas" FontSize="11" AcceptsReturn="True" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/></DockPanel></TabItem>
-   <TabItem Header="Output"><TextBox Text="{Binding Output, Mode=OneWay}" IsReadOnly="True" FontFamily="Cascadia Code, Consolas" FontSize="11" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="8"/></TabItem>
   </TabControl>
  </DockPanel>
 </UserControl>

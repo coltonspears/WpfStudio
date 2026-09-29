@@ -1003,60 +1003,93 @@
     </Grid>
 
     <!-- ============================================================ Change preview -->
+    <!-- Near full-window review: a file list with per-file line counts and a syntax-highlighted
+         split or inline diff focused on the changed lines. -->
     <Grid Grid.RowSpan="4" Panel.ZIndex="40" Background="{DynamicResource OverlayBrush}" Visibility="{Binding IsPreviewOpen, Converter={StaticResource BooleanToVisibility}}">
       <Grid.InputBindings>
         <KeyBinding Key="Escape" Command="{Binding CancelPreviewCommand}" />
+        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding AcceptPreviewCommand}" />
       </Grid.InputBindings>
-      <Border Style="{StaticResource OverlayCard}" Margin="40" MaxWidth="1400" Padding="0">
+      <Border Style="{StaticResource OverlayCard}" Margin="20,16" Padding="0" AutomationProperties.Name="Change review">
         <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="24,20,24,14" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+          <Border DockPanel.Dock="Top" Padding="22,14,14,12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <StackPanel>
-              <TextBlock Text="{Binding PreviewTitle}" FontSize="20" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" />
-              <TextBlock Text="Review the proposed changes and their effects before applying." Style="{StaticResource Caption}" FontSize="12" Margin="0,4,0,0" />
-              <Border Background="{DynamicResource AccentSoftBrush}" CornerRadius="6" Padding="10,8" Margin="0,12,0,0" Visibility="{Binding PreviewWarnings, Converter={StaticResource Presence}}">
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CancelPreviewCommand}" ToolTip="Cancel (Esc)" VerticalAlignment="Top" />
+                <Border DockPanel.Dock="Right" Style="{StaticResource Badge}" Margin="12,0,10,0" Padding="8,2">
+                  <TextBlock Text="{Binding PreviewSummary}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" FontSize="11" />
+                </Border>
+                <c:Glyph DockPanel.Dock="Left" Kind="Diff" Width="20" Height="20" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Center" />
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="{Binding PreviewTitle}" FontSize="18" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="Nothing changes until you apply. Applying edits the open buffers as one undoable step; save normally to write files." Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                </StackPanel>
+              </DockPanel>
+              <Border Background="{DynamicResource WarningSoftBrush}" CornerRadius="6" Padding="10,7" Margin="0,10,0,0" Visibility="{Binding PreviewWarnings, Converter={StaticResource Presence}}">
                 <DockPanel>
-                  <c:Glyph DockPanel.Dock="Left" Kind="Info" Width="16" Height="16" Margin="0,0,8,0" Foreground="{DynamicResource WarningBrush}" VerticalAlignment="Top" />
-                  <TextBlock Text="{Binding PreviewWarnings}" TextWrapping="Wrap" />
+                  <c:Glyph DockPanel.Dock="Left" Kind="Warning" Width="16" Height="16" Margin="0,0,8,0" Foreground="{DynamicResource WarningBrush}" VerticalAlignment="Top" />
+                  <ScrollViewer MaxHeight="72" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <TextBlock Text="{Binding PreviewWarnings}" TextWrapping="Wrap" />
+                  </ScrollViewer>
                 </DockPanel>
               </Border>
             </StackPanel>
           </Border>
-          <Border DockPanel.Dock="Bottom" Padding="24,12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+          <Border DockPanel.Dock="Bottom" Padding="22,10,16,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
             <DockPanel>
               <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button Content="Cancel" Command="{Binding CancelPreviewCommand}" />
-                <Button Content="Apply changes" c:Ui.Icon="Check" Command="{Binding AcceptPreviewCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" />
+                <Button Content="Cancel" Command="{Binding CancelPreviewCommand}" ToolTip="Esc" />
+                <Button Content="Apply changes" c:Ui.Icon="Check" Command="{Binding AcceptPreviewCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" ToolTip="Ctrl+Enter" />
               </StackPanel>
-              <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"><Run Text="{Binding PreviewChanges.Count, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" /><Run Text=" file change(s)" /></TextBlock>
+              <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource SubtleBrush}" FontSize="11" TextTrimming="CharacterEllipsis"
+                         Text="F8 / Shift+F8 moves between changes · click a collapsed region to expand it · Ctrl+Enter applies" />
             </DockPanel>
           </Border>
-          <Grid Margin="16,14,16,14">
+          <Grid>
             <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="250" />
-              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <ListBox ItemsSource="{Binding PreviewChanges}" SelectedItem="{Binding SelectedPreviewChange}" Margin="-4,0,10,0">
-              <ListBox.ItemTemplate>
-                <DataTemplate>
-                  <DockPanel Margin="0,2">
-                    <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Top" />
-                    <StackPanel>
-                      <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontWeight="SemiBold" />
-                      <TextBlock Text="{Binding Path}" TextWrapping="Wrap" Foreground="{DynamicResource SubtleBrush}" FontSize="10.5" Margin="0,3,0,0" />
-                    </StackPanel>
-                  </DockPanel>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-            <DockPanel Grid.Column="1" Margin="0,0,6,0">
-              <TextBlock DockPanel.Dock="Top" Text="BEFORE" Style="{StaticResource SectionLabel}" />
-              <TextBox Text="{Binding SelectedPreviewChange.Before, Mode=OneWay}" IsReadOnly="True" FontFamily="{StaticResource CodeFont}" FontSize="12" AcceptsReturn="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Padding="10,8" />
-            </DockPanel>
-            <DockPanel Grid.Column="2" Margin="6,0,0,0">
-              <TextBlock DockPanel.Dock="Top" Text="AFTER" Style="{StaticResource SectionLabel}" Foreground="{DynamicResource SuccessBrush}" />
-              <TextBox Text="{Binding SelectedPreviewChange.After, Mode=OneWay}" IsReadOnly="True" FontFamily="{StaticResource CodeFont}" FontSize="12" AcceptsReturn="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Padding="10,8" />
-            </DockPanel>
+            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Width="280" Visibility="{Binding PreviewHasManyFiles, Converter={StaticResource BooleanToVisibility}}">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="FILES" Style="{StaticResource SectionLabel}" Margin="14,10,0,4" />
+                <ListBox ItemsSource="{Binding PreviewFiles}" SelectedItem="{Binding SelectedPreviewFile}" AutomationProperties.Name="Changed files">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:ChangeReviewFile}">
+                      <DockPanel ToolTip="{Binding Change.Path}">
+                        <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Change.Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="6,1,0,0">
+                          <TextBlock Text="{Binding AddedText}" Foreground="{DynamicResource SuccessBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,4,0" />
+                          <TextBlock Text="{Binding RemovedText}" Foreground="{DynamicResource DangerBrush}" FontSize="11" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <StackPanel>
+                          <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <Border Style="{StaticResource Badge}" Margin="6,0,0,0" Padding="5,0">
+                              <Border.Visibility><Binding Path="IsNew" Converter="{StaticResource BooleanToVisibility}" /></Border.Visibility>
+                              <TextBlock Text="New" FontSize="10" Foreground="{DynamicResource AccentBrush}" />
+                            </Border>
+                          </StackPanel>
+                          <TextBlock Text="{Binding Folder}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                        </StackPanel>
+                      </DockPanel>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </DockPanel>
+            </Border>
+            <diff:DiffView xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff" Grid.Column="1" x:Name="ReviewDiff"
+                           Before="{Binding SelectedPreviewChange.Before}" After="{Binding SelectedPreviewChange.After}" FilePath="{Binding SelectedPreviewChange.Path}"
+                           OldLabel="Current" NewLabel="After applying" AutomationProperties.Name="Change diff">
+              <diff:DiffView.Header>
+                <StackPanel Orientation="Horizontal" DataContext="{Binding SelectedPreviewFile}">
+                  <c:StudioIcon Kind="{Binding Change.Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Folder}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="8,1,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360" />
+                  <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="12,1,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="320" />
+                </StackPanel>
+              </diff:DiffView.Header>
+            </diff:DiffView>
           </Grid>
         </DockPanel>
       </Border>

@@ -55,6 +55,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
         Designer.SelectionSourceChanged += RevealDesignerSelection;
         InitializeDesignerContext();
+        InitializeChangeReview();
         LiveInspection = new(dispatcher);
         LiveInspection.LaunchRequested += debug => LaunchWithInspectionAsync(debug);
         LiveInspection.SourceRequested += NavigateInspectionSourceAsync;

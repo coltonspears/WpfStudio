@@ -140,7 +140,7 @@ A candidate declaration does not establish an active trigger or the setter curre
 
 Try supported property values temporarily in the inspector, then request a source edit when the authored location can be verified. The review explains the proposed local change and shows the before/after text. Applying changes updates the editor buffer with workspace undo; save normally when ready.
 
-![The Update XAML from inspector review shows a before and after source comparison with Cancel and Apply changes buttons.](images/xaml/source-edit-review.png)
+![The Update XAML from inspector review shows a syntax-highlighted side-by-side diff with the changed Text value marked word by word, collapsed unchanged lines, and Cancel and Apply changes buttons.](images/xaml/source-edit-review.png)
 
 *This preview proposes replacing an authored Text attribute. The change remains a review until Apply changes is chosen.*
 
