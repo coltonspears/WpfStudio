@@ -18,7 +18,7 @@ public sealed class StudioFeatures : IDisposable
     {
         Assistant = assistant;
         Packages = new(packages, dialogs, () => Git?.IsBusy == true ? Task.FromException<bool>(new InvalidOperationException("Wait for the Git operation to finish.")) : SaveBeforeMutation(), () => WorkspaceChanged());
-        Git = new(git, _ => Packages.IsBusy ? Task.FromException<bool>(new InvalidOperationException("Wait for the package operation to finish.")) : SaveBeforeMutation());
+        Git = new(git, _ => Packages.IsBusy ? Task.FromException<bool>(new InvalidOperationException("Wait for the package operation to finish.")) : SaveBeforeMutation()) { AutoSelect = true };
     }
     public Func<Task<bool>> SaveBeforeMutation { get; set; } = () => Task.FromResult(false);
     public Func<Task> WorkspaceChanged { get; set; } = () => Task.CompletedTask;

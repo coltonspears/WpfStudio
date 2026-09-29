@@ -53,7 +53,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.SourceEditRequested += PreviewDesignerEditAsync;
         Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
+        Designer.SelectionSourceChanged += RevealDesignerSelection;
         InitializeDesignerContext();
+        InitializeChangeReview();
         LiveInspection = new(dispatcher);
         LiveInspection.LaunchRequested += debug => LaunchWithInspectionAsync(debug);
         LiveInspection.SourceRequested += NavigateInspectionSourceAsync;
@@ -332,7 +334,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (ReferenceEquals(vm, ActiveDocument))
             {
                 UpdateAssistantContext();
-                if (!_navigatingBindingSource) Designer.SelectSource(vm.State.Path, vm.State.CaretOffset);
+                if (!_navigatingBindingSource && !_revealingDesignerSelection) Designer.SelectSource(vm.State.Path, vm.State.CaretOffset);
             }
         };
         vm.Diagnostics.CollectionChanged += (_, _) => RefreshEditorDiagnostics();

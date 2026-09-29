@@ -1,0 +1,81 @@
+<UserControl x:Class="WpfStudio.App.Controls.Diff.DiffView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls" x:Name="Root" Focusable="True" FocusVisualStyle="{x:Null}">
+ <UserControl.Resources>
+  <Style x:Key="SegmentLeft" TargetType="RadioButton">
+   <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+   <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+    <Border x:Name="Chrome" Background="Transparent" CornerRadius="5" Padding="7,0" Height="24" Margin="1">
+     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+      <c:Glyph Kind="{Binding (c:Ui.Icon), RelativeSource={RelativeSource TemplatedParent}}" Width="14" Height="14"/>
+      <ContentPresenter x:Name="Label" Margin="5,0,0,0" VerticalAlignment="Center"/>
+     </StackPanel>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="Content" Value="{x:Null}"><Setter TargetName="Label" Property="Visibility" Value="Collapsed"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
+     <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource RaisedBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+ </UserControl.Resources>
+ <DockPanel Background="{DynamicResource EditorBrush}">
+  <Border x:Name="Toolbar" DockPanel.Dock="Top" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,4,8,4">
+   <!-- The header shares the row with the controls; a narrow view moves the controls to a second row (see Adapt). -->
+   <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <ContentPresenter x:Name="HeaderPresenter" Content="{Binding Header, ElementName=Root}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+    <StackPanel x:Name="ToolbarControls" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
+     <TextBlock x:Name="AddedText" Foreground="{DynamicResource SuccessBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0" AutomationProperties.Name="Added lines"/>
+     <TextBlock x:Name="RemovedText" Foreground="{DynamicResource DangerBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0" AutomationProperties.Name="Removed lines"/>
+     <Border Width="1" Height="16" Background="{DynamicResource BorderBrush}" Margin="4,0,6,0"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ChevronUp" Command="{Binding PreviousChangeCommand, ElementName=Root}" Width="26" Height="26"
+             ToolTip="Previous change (Shift+F8)" AutomationProperties.Name="Previous change"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ChevronDown" Command="{Binding NextChangeCommand, ElementName=Root}" Width="26" Height="26"
+             ToolTip="Next change (F8)" AutomationProperties.Name="Next change"/>
+     <TextBlock x:Name="ChangeText" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="4,0,8,0"/>
+     <ToggleButton x:Name="WholeFileToggle" IsChecked="{Binding ShowWholeFile, ElementName=Root}" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Expand" Content="Whole file"
+                   ToolTip="Show the whole file instead of changes with 3 lines of context" AutomationProperties.Name="Show whole file"/>
+     <Border Background="{DynamicResource EditorBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Margin="6,0,0,0">
+      <StackPanel Orientation="Horizontal">
+       <RadioButton x:Name="SideBySideOption" Content="Split" c:Ui.Icon="SplitView" Style="{StaticResource SegmentLeft}" ToolTip="Side by side" AutomationProperties.Name="Side by side diff"/>
+       <RadioButton x:Name="InlineOption" Content="Inline" c:Ui.Icon="InlineView" Style="{StaticResource SegmentLeft}" ToolTip="Inline (unified)" AutomationProperties.Name="Inline diff"/>
+      </StackPanel>
+     </Border>
+    </StackPanel>
+   </Grid>
+  </Border>
+  <Grid>
+   <Grid x:Name="SplitHost">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,3">
+     <TextBlock x:Name="OldLabelText" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+    </Border>
+    <Border Grid.Column="2" Grid.ColumnSpan="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,3">
+     <TextBlock x:Name="NewLabelText" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+    </Border>
+    <Border x:Name="LeftHost" Grid.Row="1"/>
+    <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource StrongBorderBrush}"/>
+    <Border x:Name="RightHost" Grid.Row="1" Grid.Column="2"/>
+    <Border x:Name="SplitRulerHost" Grid.Row="1" Grid.Column="3"/>
+   </Grid>
+   <Grid x:Name="InlineHost" Visibility="Collapsed">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <Border Grid.ColumnSpan="2" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="12,3">
+     <TextBlock x:Name="InlineLabelText" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"/>
+    </Border>
+    <Border x:Name="InlineEditorHost" Grid.Row="1"/>
+    <Border x:Name="InlineRulerHost" Grid.Row="1" Grid.Column="1"/>
+   </Grid>
+   <StackPanel x:Name="MessagePanel" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460" Margin="24" Visibility="Collapsed">
+    <c:Glyph x:Name="MessageGlyph" Kind="Diff" Width="30" Height="30" StrokeWeight="1" Foreground="{DynamicResource SubtleBrush}" Margin="0,0,0,10"/>
+    <TextBlock x:Name="MessageText" TextWrapping="Wrap" TextAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+   </StackPanel>
+  </Grid>
+ </DockPanel>
+</UserControl>

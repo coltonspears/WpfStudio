@@ -82,10 +82,12 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         PreviewProcessLease? expectedLease = null, Func<bool>? stillCurrent = null)
     {
         CancellationTokenSource lifetimeSource;
+        CancellationToken epoch;
         Task stopBarrier;
         lock (_lifecycle)
         {
             lifetimeSource = CancellationTokenSource.CreateLinkedTokenSource(token, _shutdown.Token, _requestEpoch.Token);
+            epoch = _requestEpoch.Token;
             stopBarrier = _stopBarrier;
         }
         using var lifetime = lifetimeSource;
@@ -93,6 +95,7 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         // host until that stop has finished cleaning up its predecessor.
         await stopBarrier.WaitAsync(lifetime.Token).ConfigureAwait(false);
         await _gate.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        bool releaseGate = true;
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -120,12 +123,26 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
                 }
                 var proxy = _proxy ?? throw new InvalidOperationException("Refresh the preview before inspecting it.");
                 // WaitAsync bounds RPCs even when project constructors ignore cancellation.
-                var result = await action(proxy).WaitAsync(deadline.Token).ConfigureAwait(false);
+                var call = action(proxy);
+                T result;
+                try { result = await call.WaitAsync(deadline.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (render is not null && token.IsCancellationRequested
+                    && !_shutdown.IsCancellationRequested && !epoch.IsCancellationRequested)
+                {
+                    // A newer render superseded this one (live preview typing). The host
+                    // renders on its dispatcher and cannot abandon that work midway, but it
+                    // is still healthy: let it finish in the background, holding the gate so
+                    // requests stay ordered, instead of killing and cold-starting a process.
+                    releaseGate = false;
+                    _ = DrainSupersededAsync(call);
+                    throw new SupersededRequestException(token);
+                }
                 lifetime.Token.ThrowIfCancellationRequested();
                 if (result is PreviewSnapshot snapshot) RememberSurface(snapshot);
                 else if (result is PreviewEditResult edit) RememberSurface(edit.Snapshot);
                 return result;
             }
+            catch (SupersededRequestException) { throw; }
             catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
             {
                 await StopCoreAsync().ConfigureAwait(false);
@@ -133,8 +150,28 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
             }
             catch { await StopCoreAsync().ConfigureAwait(false); throw; }
         }
+        finally { if (releaseGate) _gate.Release(); }
+    }
+
+    /// <summary>How long a superseded render may keep the host busy before it is treated as hung.</summary>
+    internal static TimeSpan SupersededRequestGrace { get; set; } = TimeSpan.FromSeconds(3);
+
+    private async Task DrainSupersededAsync(Task call)
+    {
+        try
+        {
+            try { await call.WaitAsync(SupersededRequestGrace, _shutdown.Token).ConfigureAwait(false); }
+            // The host acknowledged the cancellation before starting the work.
+            catch (OperationCanceledException) when (!_shutdown.IsCancellationRequested) { }
+            // A host that is still busy after the grace period, disconnected, or failed
+            // is not trusted with the next request.
+            catch (Exception) { await StopCoreAsync().ConfigureAwait(false); }
+        }
         finally { _gate.Release(); }
     }
+
+    private sealed class SupersededRequestException(CancellationToken token)
+        : OperationCanceledException("A newer preview request superseded this one.", token);
 
     private async Task StartAsync(CancellationToken token)
     {

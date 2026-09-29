@@ -2,7 +2,7 @@
 
 WpfStudio connects XAML authoring, an isolated preview, and inspection of a running WPF application. This tour follows the loop from a binding diagnostic to a checked source change.
 
-These are **actual loaded-app captures from automated fixtures**, taken on September 28, 2026. The fourteen PNGs were copied unchanged from the screenshot output of the [loaded-shell smoke test in the source repository](https://github.com/coltonspears/WpfStudio/blob/main/tests/WpfStudio.App.Tests/ShellSmokeTests.cs) and its layout-editing partial. They show the implemented UI and fixture observations; they are not mockups or proof of physical mouse, keyboard, IME, or accessibility behavior. Current test results and remaining acceptance work are recorded in [VALIDATION.md](../VALIDATION.md).
+These are **actual loaded-app captures from automated fixtures**, taken on September 28, 2026. The sixteen PNGs were copied unchanged from the screenshot output of the [loaded-shell smoke test in the source repository](https://github.com/coltonspears/WpfStudio/blob/main/tests/WpfStudio.App.Tests/ShellSmokeTests.cs) and its layout-editing partial. They show the implemented UI and fixture observations; they are not mockups or proof of physical mouse, keyboard, IME, or accessibility behavior. Current test results and remaining acceptance work are recorded in [VALIDATION.md](../VALIDATION.md).
 
 ## Catch binding mistakes while editing
 
@@ -59,6 +59,22 @@ Open **XAML Designer**, select a configured **Scenario**, and choose **Refresh**
 *This fixture's Error factory supplies “Unable to load orders.” The Properties tab shows the resulting Text value.*
 
 Scenarios are explicitly configured in `wpfstudio.preview.json`; WpfStudio does not invent Loading, Empty, or Error data. Factories can execute application code and have external effects. **Update snapshot** observes the existing view; **Refresh** recreates it. See [preview scenarios](xaml-preview-scenarios.md).
+
+## Work on the designer canvas
+
+The designer arranges an **Outline**, the canvas and the inspector under one toolbar. The artboard takes its size from the root element (or its `d:DesignWidth`/`d:DesignHeight`) and is fitted to the canvas; the zoom bar, **Ctrl+wheel** and middle-button panning adjust the view. A click selects the authored element under the pointer and selects its start tag in the XAML editor. The outline folds template parts under their authored element.
+
+![XAML Designer with an outline of icons and names, a fitted artboard on a dotted canvas, a labelled TextBlock selection, and a searchable property grid emphasizing the local Text value.](images/xaml/designer-canvas.png)
+
+*The selected `Greeting` TextBlock carries its type, name and size on the canvas; the matching start tag is selected in the editor above.*
+
+Live preview keeps the last successful frame on the canvas while newer XAML renders. When the edited markup cannot render, the error appears over that frame, and **Go to error** opens its line.
+
+![The designer keeps the last successful render dimmed behind a red banner that reports the XAML parse error and offers Go to error.](images/xaml/designer-render-error.png)
+
+*The fixture's source was reduced to an unterminated `<Grid`. After the source is repaired, the next render selects the same `Greeting` element again.*
+
+See [working on the canvas](xaml-preview-interaction.md#work-on-the-canvas) for zoom, selection and property search details.
 
 ## Follow a runtime binding back to XAML
 
@@ -124,7 +140,7 @@ A candidate declaration does not establish an active trigger or the setter curre
 
 Try supported property values temporarily in the inspector, then request a source edit when the authored location can be verified. The review explains the proposed local change and shows the before/after text. Applying changes updates the editor buffer with workspace undo; save normally when ready.
 
-![The Update XAML from inspector review shows a before and after source comparison with Cancel and Apply changes buttons.](images/xaml/source-edit-review.png)
+![The Update XAML from inspector review shows a syntax-highlighted side-by-side diff with the changed Text value marked word by word, collapsed unchanged lines, and Cancel and Apply changes buttons.](images/xaml/source-edit-review.png)
 
 *This preview proposes replacing an authored Text attribute. The change remains a review until Apply changes is chosen.*
 
@@ -154,5 +170,9 @@ Visual drag-and-drop authoring, complete runtime resource attribution, arbitrary
 | `layout-observation.png` | `artifacts/screenshots/xaml-designer-layout-details.png` |
 | `appearance-observation.png` | `artifacts/screenshots/xaml-preview-appearance.png` |
 | `source-edit-review.png` | `artifacts/screenshots/xaml-designer-source-diff.png` |
+| `layout-editing.png` | `artifacts/screenshots/xaml-layout-editing.png` |
+| `layout-editing-review.png` | `artifacts/screenshots/xaml-layout-editing-review.png` |
+| `designer-canvas.png` | `artifacts/screenshots/xaml-designer.png` |
+| `designer-render-error.png` | `artifacts/screenshots/xaml-designer-render-error.png` |
 
 The copies under `docs/images/xaml/` remain available on GitHub independently of the ignored `artifacts/` directory.

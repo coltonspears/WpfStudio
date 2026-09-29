@@ -44,6 +44,10 @@ public static class ThemeService
         ("EditorLineBrush",       "#22242A", "#F4F5F8"),
         ("EditorSelectionBrush",  "#33386A", "#CFD4F8"),
         ("GutterTextBrush",       "#555A64", "#A3A7B0"),
+        ("CanvasBrush",           "#111215", "#E8E9ED"), // designer pasteboard around the artboard
+        ("CanvasDotBrush",        "#24262D", "#D2D4DB"), // designer pasteboard grid dots
+        ("DangerSoftBrush",       "#3A2327", "#FCEBEA"), // error banners
+        ("WarningSoftBrush",      "#3A3223", "#FBF2DE"),
         ("SyntaxKeyword",         "#A3AAFF", "#4B3DC9"),
         ("SyntaxString",          "#E2B883", "#955A12"),
         ("SyntaxComment",         "#6E7681", "#6B7280"),

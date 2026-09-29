@@ -2,6 +2,57 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Change review, diff view and Git workbench (2026-09-29)
+
+The before/after review showed two plain text boxes in a fixed-width dialog, without syntax colouring or change markers, and its horizontal scroll bar sat directly under the text. It now fills the window with a list of changed files and their line counts, and a shared diff view:
+
+* `TextDiff` (Core) is a Myers line diff with prefix/suffix trimming and a bounded edit distance. It pairs changed blocks into modified rows and marks the changed words inside them. Line-ending-only differences compare equal.
+* `DiffView` (App) shows a syntax-highlighted side-by-side or inline diff. It uses AvalonEdit's C#, XML/XAML, JSON and SQL definitions. Unchanged regions collapse to three lines of context and expand on click, or **Whole file** shows everything. **F8**/**Shift+F8** and the overview ruler move between changes, and the view opens scrolled to the first one. Both columns scroll together, and their horizontal scroll bars are pinned to the bottom. Views narrower than 720 px switch to inline, and the toolbar compacts to fit. New and deleted files show a single column.
+* The theme's multi-line `TextBox` now stretches its content host, so wrapped and scrolling text boxes keep the horizontal scroll bar at the bottom edge everywhere.
+
+The Git pane was rebuilt around the same view:
+
+* **Changes** lists staged and working files with status letters and hover stage/unstage actions. The selected file's diff loads immediately, against the index or HEAD, with the working-tree file or staged blob as the new side. Selection survives stage, unstage and refresh.
+* **History** shows author avatars, branch and tag chips, relative dates, a filter, and paging beyond the first 50 commits. The selected commit shows its full message, author, parents and changed files with line counts, and a diff of each file against its first parent. Binary, oversized and submodule entries explain why no text is shown.
+* The branch name in the header opens a switch/create picker. All diff reads use `--no-optional-locks`, so they never hold the index lock that a stage or commit needs.
+
+The Release solution build passed with zero warnings and errors. The Release suites below ran on this workstation:
+
+| Suite | Passed | Notes |
+| --- | ---: | --- |
+| Core | 231 | 13 added for `TextDiff`: identical/CRLF input, insertion alignment, word spans, dissimilar lines, unequal blocks, new/deleted files, hunks and context, bounded fallback, line splitting |
+| Shell | 531 | 4 added: staged/working/new/deleted/binary versions, commit decorations/details/renames/root commits, `diff-tree` record parsing, and view-model paging, filtering, selection and restore after staging; the existing diff test now checks both versions |
+| Preview | 241 | Unchanged |
+| Native view | 61 | Unchanged |
+| Loaded app UI | 1 | The change-preview step asserts the split diff and its added line; new captures `git-history*.png`, `git-workbench*.png` |
+
+These checks do not establish physical pointer, wheel or keyboard acceptance of the new views.
+
+## Designer canvas and live preview continuity (2026-09-28)
+
+The XAML Designer was reorganized around its canvas: one toolbar, an icon outline that folds template parts, a fitted artboard sized from the root's `Width`/`Height` or `d:DesignWidth`/`d:DesignHeight`, zoom and pan controls, hover outlines, a labelled selection adorner, authored-element picking (**Ctrl+click** for template parts), editor selection mirroring, and property search with a set-values filter. See [working on the canvas](docs/xaml-preview-interaction.md#work-on-the-canvas).
+
+Exercising the previous designer on the CounterApp sample reproduced four live-preview defects, now fixed:
+
+* Every keystroke cleared the canvas, outline and properties for the 650 ms debounce plus the render. The last successful frame now stays visible, dimmed, until the new render lands; picking and inspection still require the current render.
+* Unrenderable XAML left an empty canvas with the error only in the Diagnostics tab. A banner now shows the first error over the last frame, with **Go to error**.
+* Each re-render dropped the selection. It is restored by unique `x:Name`, then authored position, then visual position, together with the selected property row, without moving the editor caret.
+* A render superseded by newer typing terminated the preview process, so the next render cold-started a new one. The client now lets the healthy host finish in the background for up to three seconds, holding request order, and replaces only a host that is still busy.
+
+The designer's TreeView item style also lacked `BasedOn`, which dropped the theme's full-row selection and chevrons; Live XAML had the same omission. Both now use the theme. The live-preview scenario list is no longer rebuilt on each render while its configuration is unchanged. The theme's `ActivityBar` starts its animation on `Loaded`, which throws for a bar that is collapsed before its template is built, so the designer creates its busy bar only while busy.
+
+The Release solution build passed with zero warnings and errors. The Debug suites below ran on this workstation:
+
+| Suite | Passed | Notes |
+| --- | ---: | --- |
+| Shell | 527 | 11 added: last frame, error banner and navigation, document switch, selection and property restore (named and unnamed), editor-mirroring echo guards, pick preference, outline folding, fit zoom, artboard presets, property search |
+| Preview | 241 | 8 added: root/design-time artboard sizing and clamping, authored versus exact picking, superseded render keeps its host process |
+| Native view | 61 | Unchanged surface gesture tests pass with hover and exact picking added |
+| Loaded app UI | 1 | Extended: the broken-source step asserts the retained frame, visible error banner and restored `Greeting` selection against the real preview host |
+| Runtime | 16 of 17 | `TerminalIntegrationTests.UnicodeAndControlCTravelThroughThePseudoconsole` times out in this automation session; it fails identically on unmodified `main` and does not involve the designer |
+
+The [feature tour](docs/xaml-feature-tour.md#work-on-the-designer-canvas) adds two captures from this run and refreshes the designer and Live XAML captures. The portable package was not republished for this change. These automated checks do not establish physical pointer, wheel or keyboard acceptance of hover, zoom, panning or selection mirroring.
+
 ## Visual layout editing (2026-09-28)
 
 Source previews now offer opt-in movement and eight-handle resizing for verified direct children of framework Canvas and Grid panels. Pointer gestures show draft bounds and snap guides; keyboard gestures support nudging and resizing. One completed gesture produces one reviewed source transaction and one workspace Undo. Canvas anchors and existing Grid tracks are preserved. The host checks source, parent, geometry and property provenance before review and again before applying. Unsupported or stale contexts explain why editing is unavailable.

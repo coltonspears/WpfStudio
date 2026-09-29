@@ -82,8 +82,7 @@ public sealed class EditorSurface : TextEditor
         _syncing = true;
         Document = Buffers.GetValue(ViewModel.State, s => new TextDocument(s.Content));
         SyncText();
-        var extension = ViewModel.State.Extension;
-        SyntaxHighlighting = HighlightingManager.Instance.GetDefinition(extension == ".cs" ? "C#" : extension is ".xaml" or ".xml" or ".csproj" or ".props" or ".targets" ? "XML" : extension == ".json" ? "JavaScript" : extension == ".sql" ? "SQL" : null);
+        SyntaxHighlighting = SyntaxHighlightingSelector.For(ViewModel.State.Path);
         IsReadOnly = ViewModel.State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
         ViewModel.State.PropertyChanged += StateChanged; ViewModel.PropertyChanged += ModelChanged;
         ViewModel.NavigationRequested += Navigate; ViewModel.Diagnostics.CollectionChanged += DiagnosticsChanged; ViewModel.BreakpointLines.CollectionChanged += BreakpointsChanged;

@@ -8,11 +8,16 @@ public sealed record PreviewScenario(string Name, PreviewFactory? ViewFactory = 
 public sealed record PreviewScenarioProvenance(PreviewScenario Configuration, string AssemblyPath,
     string AssemblySha256, string ModuleVersionId, string ViewTypeName);
 
-/// <summary>Compiled mode explicitly activates the built view, never the project application startup path.</summary>
+/// <summary>
+/// Compiled mode explicitly activates the built view, never the project application startup path.
+/// <paramref name="SizeToRoot"/> sizes the artboard from the root element's explicit Width/Height
+/// (including applied d:DesignWidth/d:DesignHeight); <paramref name="Width"/> and
+/// <paramref name="Height"/> remain the fallback for a dimension the root leaves automatic.
+/// </summary>
 public sealed record PreviewRequest(string Path, string Text, long Version, double Width = 960, double Height = 640,
     string? AssemblyPath = null, string? ProjectDirectory = null, PreviewMode Mode = PreviewMode.Source,
     string? ViewTypeName = null, string? ApplicationResourcePath = "App.xaml",
-    PreviewScenario? Scenario = null, bool UseDesignTimeValues = true);
+    PreviewScenario? Scenario = null, bool UseDesignTimeValues = true, bool SizeToRoot = false);
 public sealed record PreviewBuildProvenance(string AssemblyPath, string AssemblyName, string AssemblySha256,
     string ModuleVersionId, string ViewTypeName, string? ApplicationResourcePath);
 public sealed record PreviewBounds(double X, double Y, double Width, double Height);
@@ -26,7 +31,9 @@ public sealed record PreviewSnapshot(long Version, bool Success, byte[]? PngByte
 /// <summary>Observes the existing preview instance without reloading source, recreating the view, or applying scenario data.</summary>
 public sealed record PreviewCaptureRequest(long Version);
 public sealed record PreviewNodeRequest(long Version, string NodeId);
-public sealed record PreviewPickRequest(long Version, double X, double Y);
+/// <summary><paramref name="PreferAuthored"/> selects the deepest element declared in the source
+/// rather than a template or framework part under the point, when one contains it.</summary>
+public sealed record PreviewPickRequest(long Version, double X, double Y, bool PreferAuthored = false);
 public sealed record PreviewProperty(string Name, string Type, string Value, string ValueSource, bool IsExpression,
     bool IsAnimated, bool IsCoerced, bool CanEdit, string? BindingPath = null, string? BindingStatus = null,
     string? DataContextType = null, bool IsOverridden = false, string? OwnerType = null,

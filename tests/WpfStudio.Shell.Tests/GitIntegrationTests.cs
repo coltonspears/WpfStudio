@@ -115,8 +115,156 @@ public sealed class GitIntegrationTests
         await model.ViewWorkingDiffCommand.ExecuteAsync(model.Unstaged.Single());
         Assert.NotNull(opened);
         Assert.Contains("+pending changes", opened.Text);
-        Assert.Equal(2, model.SelectedTab);
+        Assert.Equal("original\n", opened.Before);
+        Assert.Equal("pending changes\n", opened.After);
+        Assert.Equal("Working tree", opened.NewLabel);
+        Assert.Same(opened, model.CurrentDiff);
+        Assert.Equal(model.Unstaged.Single(), model.SelectedUnstaged);
+        Assert.Equal(GitViewModel.ChangesTab, model.SelectedTab);
         Assert.False(model.IsBusy);
+    }
+
+    [Fact]
+    public async Task StagedWorkingNewAndDeletedDiffsCarryBothFileVersions()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        await File.WriteAllTextAsync(fixture.File("gone.cs"), "remove me\n");
+        await fixture.Service.StageAsync(fixture.Root, null);
+        await fixture.Service.CommitAsync(fixture.Root, "Add a file to delete");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "staged\n");
+        await fixture.RunAsync("add", "file.cs");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "working\n");
+        await File.WriteAllTextAsync(fixture.File("new λ.txt"), "brand new\n");
+        File.Delete(fixture.File("gone.cs"));
+        await File.WriteAllBytesAsync(fixture.File("blob.bin"), [1, 0, 2, 0]);
+        var changes = (await fixture.Service.LoadAsync(fixture.Root)).Changes;
+
+        var file = changes.Single(x => x.Path == "file.cs");
+        var staged = await fixture.Service.GetDiffAsync(fixture.Root, file, staged: true);
+        Assert.Equal(("original\n", "staged\n"), (staged.Before, staged.After));
+        Assert.Equal(("Last commit (HEAD)", "Staged"), (staged.OldLabel, staged.NewLabel));
+        var working = await fixture.Service.GetDiffAsync(fixture.Root, file, staged: false);
+        Assert.Equal(("staged\n", "working\n"), (working.Before, working.After));
+        Assert.Equal("Staged", working.OldLabel);
+
+        var added = await fixture.Service.GetDiffAsync(fixture.Root, changes.Single(x => x.Path == "new λ.txt"), staged: false);
+        Assert.Null(added.Before);
+        Assert.Equal("brand new\n", added.After);
+        Assert.Equal("N", changes.Single(x => x.Path == "new λ.txt").Letter);
+
+        var deleted = await fixture.Service.GetDiffAsync(fixture.Root, changes.Single(x => x.Path == "gone.cs"), staged: false);
+        Assert.Equal("remove me\n", deleted.Before);
+        Assert.Null(deleted.After);
+
+        var binary = await fixture.Service.GetDiffAsync(fixture.Root, changes.Single(x => x.Path == "blob.bin"), staged: false);
+        Assert.Contains("Binary", binary.Message);
+        Assert.False(binary.HasVersions);
+    }
+
+    [Fact]
+    public async Task HistoryCarriesDecorationsAndCommitDetailsListFilesWithBothVersions()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "original\nsecond line\n");
+        await File.WriteAllTextAsync(fixture.File("added λ.txt"), "hello\n");
+        await File.WriteAllBytesAsync(fixture.File("image.bin"), [0, 1, 2, 3]);
+        await fixture.Service.StageAsync(fixture.Root, null);
+        await fixture.Service.CommitAsync(fixture.Root, "Second commit\n\nExplains the change.");
+        await fixture.RunAsync("tag", "v1.0");
+        await fixture.RunAsync("mv", "added λ.txt", "renamed λ.txt");
+        await fixture.Service.CommitAsync(fixture.Root, "Rename");
+
+        var history = (await fixture.Service.LoadAsync(fixture.Root)).History;
+        Assert.Equal(new[] { "Rename", "Second commit", "Initial commit" }, history.Select(x => x.Subject));
+        Assert.Contains(history[0].RefList, x => x is { Name: "main", IsHead: true });
+        Assert.Contains(history[1].RefList, x => x is { Name: "v1.0", IsTag: true });
+        Assert.All(history, x => Assert.False(x.IsMerge));
+        Assert.Equal(2, (await fixture.Service.LoadHistoryAsync(fixture.Root, 1, 5)).Count);
+
+        var second = await fixture.Service.GetCommitDetailsAsync(fixture.Root, history[1].Id);
+        Assert.Equal(("Second commit", "Explains the change."), (second.Subject, second.Body));
+        Assert.Equal(history[2].Id, Assert.Single(second.Parents));
+        var modified = second.Files.Single(x => x.Path == "file.cs");
+        Assert.Equal<(char, int?, int?)>(('M', 1, 0), (modified.Status, modified.Added, modified.Deleted));
+        Assert.Equal('A', second.Files.Single(x => x.Path == "added λ.txt").Status);
+        Assert.True(second.Files.Single(x => x.Path == "image.bin").IsBinary);
+        var diff = await fixture.Service.GetCommitFileDiffAsync(fixture.Root, second, modified);
+        Assert.Equal(("original\n", "original\nsecond line\n"), (diff.Before, diff.After));
+        var binary = await fixture.Service.GetCommitFileDiffAsync(fixture.Root, second, second.Files.Single(x => x.Path == "image.bin"));
+        Assert.Contains("Binary", binary.Message);
+
+        var rename = Assert.Single((await fixture.Service.GetCommitDetailsAsync(fixture.Root, history[0].Id)).Files);
+        Assert.Equal(('R', "added λ.txt", "renamed λ.txt"), (rename.Status, rename.OriginalPath, rename.Path));
+        Assert.Equal<(int?, int?)>((0, 0), (rename.Added, rename.Deleted));
+
+        var root = await fixture.Service.GetCommitDetailsAsync(fixture.Root, history[2].Id);
+        Assert.Empty(root.Parents);
+        var first = Assert.Single(root.Files);
+        var rootDiff = await fixture.Service.GetCommitFileDiffAsync(fixture.Root, root, first);
+        Assert.Null(rootDiff.Before);
+        Assert.Equal("original\n", rootDiff.After);
+    }
+
+    [Fact]
+    public void CommitFileRecordsJoinStatusesWithLineCounts()
+    {
+        var files = GitService.ParseCommitFiles("M\0src/a b.cs\0R087\0old.cs\0new.cs\0A\0logo.png\0",
+            "3\t1\tsrc/a b.cs\0" + "2\t2\t\0old.cs\0new.cs\0" + "-\t-\tlogo.png\0");
+        Assert.Equal(3, files.Count);
+        Assert.Equal<(string, char, int?, int?)>(("src/a b.cs", 'M', 3, 1), (files[0].Path, files[0].Status, files[0].Added, files[0].Deleted));
+        Assert.Equal<(string, string?, char, int?)>(("new.cs", "old.cs", 'R', 2), (files[1].Path, files[1].OriginalPath, files[1].Status, files[1].Added));
+        Assert.True(files[2].IsBinary);
+        Assert.Equal("binary", files[2].AddedText);
+    }
+
+    [Fact]
+    public async Task ViewModelPagesFiltersAndLoadsSelectedCommitsAndChanges()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        for (var index = 1; index <= GitViewModel.HistoryPageSize + 2; index++)
+            await fixture.RunAsync("commit", "--allow-empty", "--quiet", "-m", $"Empty commit {index}");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "changed\n");
+        await File.WriteAllTextAsync(fixture.File("staged.cs"), "staged\n");
+        await fixture.RunAsync("add", "staged.cs");
+        using var model = new GitViewModel(fixture.Service);
+        await model.SetWorkspaceAsync(fixture.Root);
+        Assert.Equal(GitViewModel.HistoryPageSize, model.History.Count);
+        Assert.True(model.HasMoreHistory);
+        await model.LoadMoreHistoryCommand.ExecuteAsync(null);
+        Assert.Equal(GitViewModel.HistoryPageSize + 3, model.History.Count);
+        Assert.False(model.HasMoreHistory);
+        Assert.Equal(model.History.Count, model.VisibleHistory.Count);
+
+        model.HistoryFilter = "commit 5";
+        Assert.Equal(new[] { "Empty commit 52", "Empty commit 51", "Empty commit 50", "Empty commit 5" }, model.VisibleHistory.Select(x => x.Subject));
+        model.HistoryFilter = "no such commit";
+        Assert.True(model.HistoryFilterHasNoMatches);
+        model.ClearHistoryFilterCommand.Execute(null);
+        Assert.Equal(model.History.Count, model.VisibleHistory.Count);
+
+        model.SelectedCommit = model.VisibleHistory[^1];
+        await model.WhenLoadedAsync();
+        Assert.Equal("Initial commit", model.CommitDetails?.Subject);
+        Assert.Equal("file.cs", Assert.Single(model.CommitFiles).Path);
+        Assert.Equal("original\n", model.CommitDiff?.After);
+
+        model.SelectedStaged = model.Staged.Single();
+        await model.WhenLoadedAsync();
+        Assert.Equal("staged\n", model.CurrentDiff?.After);
+        model.SelectedUnstaged = model.Unstaged.Single(x => x.Path == "file.cs");
+        Assert.Null(model.SelectedStaged);
+        await model.WhenLoadedAsync();
+        Assert.Equal(("original\n", "changed\n"), (model.CurrentDiff?.Before, model.CurrentDiff?.After));
+
+        // Staging keeps the reader on the same file, now in the staged list, with its diff reloaded.
+        await model.StageFileCommand.ExecuteAsync(model.SelectedUnstaged);
+        await model.WhenLoadedAsync();
+        Assert.Equal("file.cs", model.SelectedStaged?.Path);
+        Assert.Equal("Staged", model.CurrentDiff?.NewLabel);
+        Assert.Equal("Initial commit", model.CommitDetails?.Subject);
     }
 
     [Fact]

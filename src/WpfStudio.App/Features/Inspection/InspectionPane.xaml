@@ -42,7 +42,7 @@
   <Grid>
    <Grid.ColumnDefinitions><ColumnDefinition Width="310" MinWidth="180"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*" MinWidth="300"/></Grid.ColumnDefinitions>
    <TreeView ItemsSource="{Binding Tree}" b:Interaction.SelectedNode="{Binding SelectedNode}" b:Interaction.FollowSelection="True" BorderThickness="0">
-    <TreeView.ItemContainerStyle><Style TargetType="TreeViewItem"><Setter Property="IsExpanded" Value="True"/><Setter Property="IsSelected" Value="{Binding IsSelected,Mode=TwoWay}"/></Style></TreeView.ItemContainerStyle>
+    <TreeView.ItemContainerStyle><Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}"><Setter Property="IsExpanded" Value="True"/><Setter Property="IsSelected" Value="{Binding IsSelected,Mode=TwoWay}"/></Style></TreeView.ItemContainerStyle>
    </TreeView>
    <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}"/>
    <TabControl Grid.Column="2" SelectedIndex="{Binding SelectedTabIndex}">

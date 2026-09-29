@@ -38,6 +38,10 @@
  <SolidColorBrush x:Key="EditorLineBrush" Color="#22242A"/>
  <SolidColorBrush x:Key="EditorSelectionBrush" Color="#33386A"/>
  <SolidColorBrush x:Key="GutterTextBrush" Color="#555A64"/>
+ <SolidColorBrush x:Key="CanvasBrush" Color="#111215"/>
+ <SolidColorBrush x:Key="CanvasDotBrush" Color="#24262D"/>
+ <SolidColorBrush x:Key="DangerSoftBrush" Color="#3A2327"/>
+ <SolidColorBrush x:Key="WarningSoftBrush" Color="#3A3223"/>
 
  <FontFamily x:Key="UiFont">Segoe UI</FontFamily>
  <FontFamily x:Key="CodeFont">Cascadia Code, Cascadia Mono, Consolas</FontFamily>
@@ -241,6 +245,31 @@
   <Setter Property="MinHeight" Value="0"/>
   <Setter Property="Margin" Value="1,0"/>
  </Style>
+ <!-- Toolbar toggle (CheckBox or ToggleButton) rendered as a chip: a glyph from c:Ui.Icon and an optional short label. -->
+ <Style x:Key="ToolbarToggle" TargetType="ToggleButton">
+  <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+  <Setter Property="Background" Value="Transparent"/>
+  <Setter Property="Height" Value="28"/>
+  <Setter Property="Margin" Value="1,0"/>
+  <Setter Property="Padding" Value="7,0,9,0"/>
+  <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+  <Setter Property="VerticalAlignment" Value="Center"/>
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
+   <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent">
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+     <c:Glyph x:Name="Icon" Kind="{Binding (c:Ui.Icon), RelativeSource={RelativeSource TemplatedParent}}" Width="16" Height="16"/>
+     <ContentPresenter x:Name="Label" Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+    </StackPanel>
+   </Border>
+   <ControlTemplate.Triggers>
+    <Trigger Property="Content" Value="{x:Null}"><Setter TargetName="Label" Property="Visibility" Value="Collapsed"/><Setter Property="Padding" Value="6,0"/></Trigger>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource HoverBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
+    <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AccentSoftBrush}"/><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></Trigger>
+    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+   </ControlTemplate.Triggers>
+  </ControlTemplate></Setter.Value></Setter>
+ </Style>
  <!-- Selectable tile (theme picker, segmented choices). -->
  <Style x:Key="ChoiceTile" TargetType="RadioButton">
   <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
@@ -310,6 +339,9 @@
        <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
       </MultiTrigger>
       <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+      <!-- Multi-line text starts at the top and its scroll bars sit at the box edges,
+           not directly under the last line of a short text. -->
+      <Trigger Property="AcceptsReturn" Value="True"><Setter TargetName="PART_ContentHost" Property="VerticalAlignment" Value="Stretch"/></Trigger>
      </ControlTemplate.Triggers>
     </ControlTemplate>
    </Setter.Value>

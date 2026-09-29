@@ -268,7 +268,11 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             shell.PreviewChanges.Add(new FileChange("CustomerView.xaml", "<Grid />", "<Grid><TextBlock Text=\"Hello\" /></Grid>", "Add customer view"));
             shell.SelectedPreviewChange = shell.PreviewChanges[0]; shell.IsPreviewOpen = true;
             await Idle();
-            Assert.Contains(Descendants<TextBox>(window), box => box.Text == shell.SelectedPreviewChange.After && box.IsVisible);
+            var reviewDiff = Descendants<WpfStudio.App.Controls.Diff.DiffView>(window).Single(view => view.Name == "ReviewDiff");
+            Assert.True(reviewDiff.IsVisible);
+            Assert.Equal(shell.SelectedPreviewChange.After, reviewDiff.After);
+            Assert.True(reviewDiff.ShowsSplit);
+            Assert.Contains(reviewDiff.Layout!.Right, line => line.Kind == WpfStudio.App.Controls.Diff.DiffLineKind.Added && line.Text.Contains("Hello"));
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/change-preview.png"));
             shell.CancelPreviewCommand.Execute(null);
             var performanceFixture = Path.Combine(root, "artifacts/performance/fixture/Performance.slnx");
@@ -404,7 +408,18 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var git = manager.Layout.Descendents().OfType<LayoutDocument>().Single(d => d.ContentId == "Git");
         Assert.Null(shell.ActiveDocument);
         Assert.Equal("Git", shell.ActiveWorkbench);
-        foreach (var tab in new[] { 1, 2, 3, 0 }) { shell.Features.Git.SelectedTab = tab; await Idle(); }
+        foreach (var tab in new[] { 2, 1 }) { shell.Features.Git.SelectedTab = tab; await Idle(); }
+        await shell.Features.Git.WhenLoadedAsync(); await Idle();
+        Assert.NotEmpty(shell.Features.Git.VisibleHistory);
+        Assert.Equal(shell.Features.Git.VisibleHistory[0], shell.Features.Git.SelectedCommit);
+        Assert.Equal(shell.Features.Git.SelectedCommit!.Id, shell.Features.Git.CommitDetails?.Id);
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git-history.png"));
+        shell.ToggleThemeCommand.Execute(null); await Idle();
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git-history-light.png"));
+        shell.ToggleThemeCommand.Execute(null); await Idle();
+        shell.Features.Git.SelectedTab = 0; await Idle();
+        await shell.Features.Git.WhenLoadedAsync(); await Idle();
+        if (shell.Features.Git.ChangeCount > 0) Assert.NotNull(shell.Features.Git.CurrentDiff);
         shell.SaveLayoutCommand.Execute(null); await Idle();
         Assert.Same(git.Content, manager.ActiveContent);
         Assert.True(git.IsSelected);
@@ -412,6 +427,20 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         shell.ToggleThemeCommand.Execute(null); await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git-light.png"));
         shell.ToggleThemeCommand.Execute(null); await Idle();
+        // The same workbench at document size, as it appears with the tool panes closed.
+        var gitWorkbench = new WpfStudio.App.Features.Git.GitPane { DataContext = shell.Features.Git };
+        var gitWindow = new Window { Width = 1480, Height = 900, Content = gitWorkbench, ShowInTaskbar = false, ShowActivated = false, Opacity = 0 };
+        try
+        {
+            gitWindow.Show(); await Idle();
+            foreach (var (tab, name) in new[] { (1, "git-workbench-history"), (0, "git-workbench") })
+            {
+                shell.Features.Git.SelectedTab = tab; await Idle();
+                await shell.Features.Git.WhenLoadedAsync(); await Idle();
+                Screenshot(gitWorkbench, Path.Combine(root, $"artifacts/screenshots/{name}.png"));
+            }
+        }
+        finally { gitWindow.Close(); }
         await shell.OpenSettingsCommand.ExecuteAsync(null); await Idle();
         Assert.True(shell.IsSettingsOpen);
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/settings.png"));
@@ -1928,15 +1957,28 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         await shell.UndoWorkspaceEditCommand.ExecuteAsync(null);
         Assert.Equal(source, document.State.Content);
 
+        var lastFrame = model.DisplayImage;
+        Assert.NotNull(lastFrame);
         document.State.Content = "<Grid";
         Assert.False(model.IsCurrent);
         Assert.Null(model.Image);
+        // The canvas keeps showing the last successful render while the source is broken.
+        Assert.Same(lastFrame, model.DisplayImage);
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.False(model.IsCurrent);
         Assert.NotEmpty(model.Diagnostics);
+        Assert.True(model.HasRenderError, model.Status);
+        Assert.Same(lastFrame, model.DisplayImage);
+        await Idle();
+        var errorBanner = Descendants<Border>(paneView).Single(item => System.Windows.Automation.AutomationProperties.GetName(item) == "Preview render error");
+        Assert.True(errorBanner.IsVisible);
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-designer-render-error.png"));
         document.State.Content = source;
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.True(model.IsCurrent, model.Status);
+        Assert.False(model.HasRenderError);
+        // The element picked before the edits is selected again in the new render.
+        Assert.Equal("Greeting", model.SelectedNode?.Node.Name);
 
         model.AssemblyPath = Path.Combine(AppContext.BaseDirectory, "CompiledFixture", "WpfStudio.PreviewFixture.dll");
         model.ProjectDirectory = AppContext.BaseDirectory;
