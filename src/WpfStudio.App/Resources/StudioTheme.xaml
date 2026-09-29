@@ -38,6 +38,10 @@
  <SolidColorBrush x:Key="EditorLineBrush" Color="#22242A"/>
  <SolidColorBrush x:Key="EditorSelectionBrush" Color="#33386A"/>
  <SolidColorBrush x:Key="GutterTextBrush" Color="#555A64"/>
+ <SolidColorBrush x:Key="CanvasBrush" Color="#111215"/>
+ <SolidColorBrush x:Key="CanvasDotBrush" Color="#24262D"/>
+ <SolidColorBrush x:Key="DangerSoftBrush" Color="#3A2327"/>
+ <SolidColorBrush x:Key="WarningSoftBrush" Color="#3A3223"/>
 
  <FontFamily x:Key="UiFont">Segoe UI</FontFamily>
  <FontFamily x:Key="CodeFont">Cascadia Code, Cascadia Mono, Consolas</FontFamily>

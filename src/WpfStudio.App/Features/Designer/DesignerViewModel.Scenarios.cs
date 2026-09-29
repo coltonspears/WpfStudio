@@ -22,6 +22,7 @@ public sealed partial class DesignerViewModel
     private string? _scenarioFingerprint;
     private bool _updatingScenarios;
     private bool _scenarioSelectionPending;
+    private bool _scenariosLoaded;
     public ObservableCollection<DesignerScenario> Scenarios { get; } = [DefaultScenario];
     public ObservableCollection<string> ScenarioWarnings { get; } = [];
     [ObservableProperty] public partial DesignerScenario? SelectedScenario { get; set; } = DefaultScenario;
@@ -93,7 +94,7 @@ public sealed partial class DesignerViewModel
             && string.Equals(_scenarioProjectDirectory, projectDirectory, StringComparison.OrdinalIgnoreCase)) return;
         _scenarioWatcher?.Dispose(); _scenarioWatcher = null;
         _scenarioSourcePath = sourcePath; _scenarioProjectDirectory = projectDirectory;
-        _scenarioFingerprint = null;
+        _scenarioFingerprint = null; _scenariosLoaded = false;
         _scenarioSelectionPending = false;
         _updatingScenarios = true;
         try { Scenarios.Clear(); Scenarios.Add(DefaultScenario); SelectedScenario = DefaultScenario; }
@@ -180,6 +181,9 @@ public sealed partial class DesignerViewModel
         var selected = SelectedScenario?.Configuration;
         var catalog = await PreviewScenarioCatalog.LoadAsync(_scenarioProjectDirectory, _document.Path, token);
         if (!Current(revision)) return false;
+        // Live preview reloads the catalog on every render. An unchanged catalog keeps its
+        // items so an open scenario list and its selection are not reset while typing.
+        if (_scenariosLoaded && catalog.Fingerprint == _scenarioFingerprint && SelectedScenario is not null) return true;
         _scenarioFingerprint = catalog.Fingerprint;
         ScenarioWarnings.Clear();
         foreach (var warning in catalog.Warnings) ScenarioWarnings.Add(warning);
@@ -194,6 +198,7 @@ public sealed partial class DesignerViewModel
         finally { _updatingScenarios = false; }
         NotifyScenarioConfiguration();
         OnPropertyChanged(nameof(ScenarioDescription));
+        _scenariosLoaded = selected is null || SelectedScenario?.Configuration is not null;
         if (selected is not null && SelectedScenario?.Configuration is null)
         {
             var message = $"Scenario '{selected.Name}' is no longer available. Choose a scenario and Refresh.";
@@ -206,7 +211,7 @@ public sealed partial class DesignerViewModel
     private void ClearScenarios()
     {
         _scenarioWatcher?.Dispose(); _scenarioWatcher = null;
-        _scenarioSourcePath = null; _scenarioProjectDirectory = null; _scenarioFingerprint = null;
+        _scenarioSourcePath = null; _scenarioProjectDirectory = null; _scenarioFingerprint = null; _scenariosLoaded = false;
         _scenarioSelectionPending = false;
         ScenarioConfigurationPath = null;
         _updatingScenarios = true;

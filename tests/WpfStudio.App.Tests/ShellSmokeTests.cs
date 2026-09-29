@@ -1928,15 +1928,28 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         await shell.UndoWorkspaceEditCommand.ExecuteAsync(null);
         Assert.Equal(source, document.State.Content);
 
+        var lastFrame = model.DisplayImage;
+        Assert.NotNull(lastFrame);
         document.State.Content = "<Grid";
         Assert.False(model.IsCurrent);
         Assert.Null(model.Image);
+        // The canvas keeps showing the last successful render while the source is broken.
+        Assert.Same(lastFrame, model.DisplayImage);
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.False(model.IsCurrent);
         Assert.NotEmpty(model.Diagnostics);
+        Assert.True(model.HasRenderError, model.Status);
+        Assert.Same(lastFrame, model.DisplayImage);
+        await Idle();
+        var errorBanner = Descendants<Border>(paneView).Single(item => System.Windows.Automation.AutomationProperties.GetName(item) == "Preview render error");
+        Assert.True(errorBanner.IsVisible);
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-designer-render-error.png"));
         document.State.Content = source;
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.True(model.IsCurrent, model.Status);
+        Assert.False(model.HasRenderError);
+        // The element picked before the edits is selected again in the new render.
+        Assert.Equal("Greeting", model.SelectedNode?.Node.Name);
 
         model.AssemblyPath = Path.Combine(AppContext.BaseDirectory, "CompiledFixture", "WpfStudio.PreviewFixture.dll");
         model.ProjectDirectory = AppContext.BaseDirectory;

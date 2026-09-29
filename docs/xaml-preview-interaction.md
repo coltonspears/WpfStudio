@@ -8,6 +8,20 @@ The native viewport uses actual size (100%). Its surrounding scrollbars move the
 
 Interaction is temporarily hidden when an IDE overlay is open, the designer is auto-hidden or its owner window loses activation. Successful detach closes owned WPF popups and preserves the view for reattachment. Destroying a container with a pending attachment may stop the preview; choose **Refresh** to recreate it when prompted. Closing the preview, editing its source, changing configuration or replacing a render revokes the previous surface.
 
+## Work on the canvas
+
+The designer is laid out as **Outline**, **canvas** and **inspector**. One toolbar holds the document, the Source/Compiled mode, **Refresh**, **Live**, **Interact**/**Inspect**, **Edit layout**, snapping, the scenario and design-time (`d:`) values. **Update snapshot**, **Restart**, **Stop** and the settings toggle sit at its right edge; settings hold the artboard size, compiled view type, application resources and scenario configuration.
+
+**Artboard.** The rendered view sits on a dotted pasteboard with its file name and size above it. **Auto** size uses the root's explicit `Width`/`Height`, including an applied `d:DesignWidth`/`d:DesignHeight`, so a `Window Width="500" Height="350"` previews at 500 × 350. A dimension the root leaves automatic uses the settings size. Choose a preset such as 1280 × 720, or type a custom size in settings; with Live preview on, a new size renders immediately in Source mode.
+
+**Zoom.** The canvas fits the artboard by default without enlarging small artboards past 100%. Use the zoom bar, **Ctrl+wheel** (anchored at the pointer), **Ctrl+plus/minus**, **Ctrl+0** to fit and **Ctrl+1** for actual size. Zooming by hand leaves fit mode until **Fit** is chosen again. Drag with the middle mouse button to pan.
+
+**Selecting.** Hovering outlines the authored element under the pointer. A click selects the deepest element written in the XAML, so clicking a button's text selects the `Button`; **Ctrl+click** selects the exact template or framework part. The selection shows its type, name and size. Selecting in the canvas or outline also selects that element's start tag in the XAML editor without moving keyboard focus; moving the editor caret selects the element in the designer. The outline shows element icons and names, folds template internals under their authored element and dims template parts; selecting a hidden part expands its branch.
+
+**Live preview continuity.** While a newer render is pending, the previous frame stays on the canvas, dimmed, with an *Updating preview* notice; picking and inspection wait for the current render. If the edited XAML cannot render, an error banner shows the first error over the last successful frame, and **Go to error** opens its line. After each re-render, the selection returns to the same element — by unique `x:Name`, then by its position among authored elements — together with the selected property row. Restoring a selection never moves the editor caret. When typing supersedes an in-flight render, the preview process finishes that render in the background instead of being restarted; a host still busy after three seconds is replaced.
+
+**Properties.** Search filters by name, value or binding path. **Set** limits the grid to values set on the element (local values, bindings, styles, templates, triggers and animations). Set values are emphasized, bound values carry a link marker, and the selected property always stays visible.
+
 ## Move and resize authored elements
 
 In **Source** preview, choose **Inspect**, select an element, and enable **Edit layout**. Drag the selected frame to move it or one of its eight handles to resize it. A translucent outline shows the proposed bounds without changing the running preview. **Snap to layout** aligns pointer gestures to nearby parent, slot and sibling edges or centers; hold **Alt** to bypass it.

@@ -57,6 +57,40 @@ public sealed partial class ShellViewModel
         Designer.PropertyChanged -= DesignerSourceChanged;
         await _designerContextClose;
     }
+    private bool _revealingDesignerSelection;
+
+    /// <summary>
+    /// Mirrors a selection made in the designer canvas or outline in the XAML editor: the
+    /// element's start tag is selected and scrolled into view without moving keyboard focus,
+    /// so designer shortcuts such as layout nudges keep working.
+    /// </summary>
+    private void RevealDesignerSelection(SourceLocation source)
+    {
+        var editor = Documents.FirstOrDefault(d => d.State.Path.Equals(source.Path, StringComparison.OrdinalIgnoreCase));
+        if (editor is null) return;
+        var text = editor.State.Content;
+        if (source.Start < 0 || source.Start >= text.Length || source.Length <= 0) return;
+        int end = StartTagEnd(text, source.Start, source.Length);
+        _revealingDesignerSelection = true;
+        try { editor.RestoreSelection(source.Start, source.Start, end - source.Start); }
+        finally { _revealingDesignerSelection = false; }
+    }
+
+    /// <summary>End offset (exclusive) of the start tag beginning at <paramref name="start"/>, ignoring '>' inside quotes.</summary>
+    internal static int StartTagEnd(string text, int start, int length)
+    {
+        int limit = Math.Min(text.Length, start + length);
+        char quote = '\0';
+        for (int i = start; i < limit; i++)
+        {
+            char c = text[i];
+            if (quote != '\0') { if (c == quote) quote = '\0'; }
+            else if (c is '"' or '\'') quote = c;
+            else if (c == '>') return i + 1;
+        }
+        return limit;
+    }
+
     private Task<bool> PreviewDesignerEditAsync(XamlPropertyEditResult proposal) =>
         ReviewDesignerEditAsync(proposal, Designer.CaptureSourceEditGuard(), "Update XAML from inspector");
 

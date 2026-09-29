@@ -49,6 +49,25 @@ public sealed class PreviewClientTests
     }
 
     [Fact]
+    public async Task SupersededRenderLetsTheHostFinishInsteadOfRestartingIt()
+    {
+        await using var client = new PreviewClient(HostPath);
+        Assert.True((await client.RenderAsync(WithAssembly(Request()))).Success);
+        int processId = client.ProcessId!.Value;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        var slow = WithAssembly(Request(2)) with
+        {
+            Text = "<probe:SlowPreviewControl xmlns:probe='clr-namespace:WpfStudio.Preview.Tests;assembly=WpfStudio.Preview.Tests'/>"
+        };
+        // Live preview cancels a render when newer text arrives. The healthy host is kept.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.RenderAsync(slow, cancellation.Token));
+        var next = await client.RenderAsync(WithAssembly(Request(3)));
+        Assert.True(next.Success, string.Join("\n", next.Diagnostics.Select(d => d.Message)));
+        Assert.Equal(3, next.Version);
+        Assert.Equal(processId, client.ProcessId);
+    }
+
+    [Fact]
     public async Task TimeoutTerminatesHungConstructorAndAllowsRecovery()
     {
         await using var client = new PreviewClient(HostPath, TimeSpan.FromSeconds(4));
@@ -333,6 +352,12 @@ public sealed class PreviewClientTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         while (!File.Exists(path)) await Task.Delay(20, timeout.Token);
     }
+}
+
+/// <summary>A constructor that is slow but finishes, like a heavy view during live preview.</summary>
+public sealed class SlowPreviewControl : FrameworkElement
+{
+    public SlowPreviewControl() => Thread.Sleep(900);
 }
 
 /// <summary>Instantiated exclusively in a child preview host to exercise hung user constructors.</summary>

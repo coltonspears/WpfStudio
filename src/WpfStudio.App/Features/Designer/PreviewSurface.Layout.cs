@@ -30,7 +30,7 @@ public sealed partial class PreviewSurface
     private XamlLayoutHandle _handle;
     private Point _pointerOrigin;
     private Vector _delta;
-    private bool _pointerArmed, _gestureStarted, _keyboardGesture, _bypassSnap;
+    private bool _pointerArmed, _gestureStarted, _keyboardGesture, _bypassSnap, _exactPick;
 
     public PreviewSurface()
     {
@@ -113,7 +113,7 @@ public sealed partial class PreviewSurface
         if (HandlePointerUp(args.GetPosition(this), Keyboard.Modifiers)) args.Handled = true;
     }
     protected override void OnLostMouseCapture(MouseEventArgs args) { base.OnLostMouseCapture(args); if (_pointerArmed) CancelLayoutGesture(); }
-    protected override void OnMouseLeave(MouseEventArgs args) { base.OnMouseLeave(args); if (!_pointerArmed) Cursor = null; }
+    protected override void OnMouseLeave(MouseEventArgs args) { base.OnMouseLeave(args); SetHover(null); if (!_pointerArmed) Cursor = null; }
     protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs args) { base.OnLostKeyboardFocus(args); CancelLayoutGesture(); }
 
     // View-only input adapters are shared by routed input and STA regressions.
@@ -128,16 +128,18 @@ public sealed partial class PreviewSurface
             _gestureCommand = LayoutGestureCommand; _handle = handle; _pointerOrigin = point;
             _bypassSnap = modifiers.HasFlag(ModifierKeys.Alt);
             _pointerArmed = true;
+            _exactPick = modifiers.HasFlag(ModifierKeys.Control);
             if (CaptureMouse()) return true;
             ClearGesture();
         }
-        return Pick(point);
+        return Pick(point, modifiers.HasFlag(ModifierKeys.Control));
     }
 
     internal bool HandlePointerMove(Point point, ModifierKeys modifiers)
     {
         if (!_pointerArmed)
         {
+            UpdateHover(point);
             Cursor = LayoutHandleAt(point) switch
             {
                 XamlLayoutHandle.Move => Cursors.SizeAll,
@@ -169,9 +171,9 @@ public sealed partial class PreviewSurface
         }
         else
         {
-            bool pick = _handle == XamlLayoutHandle.Move;
+            bool pick = _handle == XamlLayoutHandle.Move, exact = _exactPick;
             ClearGesture();
-            if (pick) Pick(point);
+            if (pick) Pick(point, exact);
         }
         return true;
     }
@@ -202,9 +204,10 @@ public sealed partial class PreviewSurface
         return true;
     }
 
-    private bool Pick(Point point)
+    private bool Pick(Point point, bool exact = false)
     {
-        var request = new PreviewPoint(point.X / SafeScale, point.Y / SafeScale);
+        SetHover(null);
+        var request = new PreviewPoint(point.X / SafeScale, point.Y / SafeScale, exact);
         if (PickCommand?.CanExecute(request) != true) return false;
         PickCommand.Execute(request); return true;
     }
@@ -234,7 +237,7 @@ public sealed partial class PreviewSurface
     }
     private void ClearGesture()
     {
-        _pointerArmed = _gestureStarted = _keyboardGesture = false;
+        _pointerArmed = _gestureStarted = _keyboardGesture = _exactPick = false;
         _delta = default; _bypassSnap = false; _gestureCommand = null; Cursor = null;
         if (IsMouseCaptured) ReleaseMouseCapture();
     }
@@ -244,6 +247,6 @@ public sealed partial class PreviewSurface
         protected override string GetClassNameCore() => nameof(PreviewSurface);
         protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Pane;
         protected override string GetNameCore() => "Preview canvas";
-        protected override string GetHelpTextCore() => "Enable Edit layout to move or resize the selected element. Arrow keys nudge, Shift uses ten DIPs, Control resizes, Enter reviews, Escape cancels. Keyboard nudges bypass snapping.";
+        protected override string GetHelpTextCore() => "Click selects the authored element under the pointer; Ctrl+click selects the exact template part. Enable Edit layout to move or resize the selected element. Arrow keys nudge, Shift uses ten DIPs, Control resizes, Enter reviews, Escape cancels. Keyboard nudges bypass snapping.";
     }
 }
