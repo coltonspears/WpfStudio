@@ -2,6 +2,27 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Multi-project preview dependencies (2026-09-29)
+
+A new application → WPF control library → model library → NuGet package fixture reproduced three cold-source failures before the fix: an unknown custom XML namespace type, an unsuppressed referenced-control event handler, and a missing transitive package when previewing the control library's ordinary SDK output. A further test reproduced an assembly-qualified resource dictionary being resolved as a drive-rooted file path.
+
+The preview now resolves referenced control types before preprocessing, discovers libraries that publish the requested XML namespaces, and fills missing output dependencies from the built runtime manifest and evaluated restore package folders. Runtime identifier selection excludes incompatible assets and compile references. Copies remain in the client-owned shadow directory. Source dictionary pack URIs are normalized without changing authored files. Dependency and manifest changes invalidate the host even when the main DLL is unchanged. Missing restored packages produce an actionable diagnostic and a later restore recovers on the next render. See [dependency loading and limits](docs/xaml-preview-dependencies.md).
+
+The final Release solution build passed with zero warnings and errors. Verification on this workstation:
+
+| Check | Result |
+| --- | --- |
+| Preview suite | 247 passed before the final restore-recovery case was added |
+| Final dependency regression group | All 7 passed: cold CLR/XML namespace controls, transitive package, both dictionary URI forms, dependency rebuild without output locking, and missing-package recovery |
+| Runtime suite | 21 passed initially, including all 5 dependency-catalog cases; the terminal-rendering case timed out during the parallel run and passed when rerun alone |
+| Shell suite | 531 passed, including evaluated restore-path forwarding |
+| Workspace suite | 607 passed, 1 SDK-specific case skipped; custom assets paths and worker transport covered |
+| Portable publish | Passed with `-Configuration Release -SkipTests -SkipDebuggerDownload` after the tests |
+| Exact packaged preview host | All 14 dependency and compiled-preview cases passed |
+| Loaded designer UI | Passed against the packaged workspace and preview hosts |
+
+Local build/test evidence is under `artifacts/TestResults/preview-dependencies/`, including the failing reproductions, `fix-build4.log`, full-suite TRX files, `dependencies-final.trx`, `terminal-retry.trx`, `packaged-preview.trx`, and `designer-ui.trx`. The multi-project fixtures establish these regressions; the user's specific failing solution has not yet been supplied. Native package selection is covered at the manifest level, not by a new native-DLL integration fixture. These checks do not expand runtime/architecture or physical-input acceptance.
+
 ## Change review, diff view and Git workbench (2026-09-29)
 
 The before/after review showed two plain text boxes in a fixed-width dialog, without syntax colouring or change markers, and its horizontal scroll bar sat directly under the text. It now fills the window with a list of changed files and their line counts, and a shared diff view:

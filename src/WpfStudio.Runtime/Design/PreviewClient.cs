@@ -7,6 +7,7 @@ using Microsoft.Win32.SafeHandles;
 using StreamJsonRpc;
 using WpfStudio.Contracts;
 using WpfStudio.Inspection.Protocol;
+using WpfStudio.PreviewDependencies;
 
 namespace WpfStudio.Runtime.Design;
 
@@ -32,7 +33,7 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
     private JsonRpc? _rpc;
     private IPreviewRpc? _proxy;
     private string? _assembly;
-    private (long Length, long LastWriteTicks)? _assemblyStamp;
+    private string? _assemblyStamp;
     private string? _projectDirectory;
     private PreviewMode _mode;
     private string? _applicationResourcePath;
@@ -109,15 +110,16 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
             try
             {
                 if (render is not null) await PrepareRenderAsync(deadline.Token, lifetime.Token).ConfigureAwait(false);
+                string? assemblyStamp = render is null ? null : await Task.Run(() => PreviewDependencyCatalog.Read(render).Fingerprint(), deadline.Token).ConfigureAwait(false);
                 if (render != null && (_proxy == null || ProcessId == null || render.Mode == PreviewMode.Compiled || render.Scenario is not null || _scenarioActive ||
                     !string.Equals(_assembly, render.AssemblyPath, StringComparison.OrdinalIgnoreCase) ||
-                    _assemblyStamp != GetAssemblyStamp(render.AssemblyPath) ||
+                    _assemblyStamp != assemblyStamp ||
                     _mode != render.Mode || !string.Equals(_applicationResourcePath, render.ApplicationResourcePath, StringComparison.Ordinal) ||
                     !string.Equals(_projectDirectory, render.ProjectDirectory, StringComparison.OrdinalIgnoreCase)))
                 {
                     await StopCoreAsync().ConfigureAwait(false);
                     await StartAsync(deadline.Token).ConfigureAwait(false);
-                    _assembly = render.AssemblyPath; _assemblyStamp = GetAssemblyStamp(render.AssemblyPath); _projectDirectory = render.ProjectDirectory;
+                    _assembly = render.AssemblyPath; _assemblyStamp = assemblyStamp; _projectDirectory = render.ProjectDirectory;
                     _mode = render.Mode; _applicationResourcePath = render.ApplicationResourcePath;
                     _scenarioActive = render.Scenario is not null;
                 }
@@ -265,13 +267,6 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
                     File.Exists(Path.Combine(folder, "WpfStudio.PreviewHost.deps.json"))) return candidate;
             }
         return Path.Combine(AppContext.BaseDirectory, "PreviewHost", "WpfStudio.PreviewHost.exe");
-    }
-
-    private static (long Length, long LastWriteTicks)? GetAssemblyStamp(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var file = new FileInfo(path);
-        return file.Exists ? (file.Length, file.LastWriteTimeUtc.Ticks) : null;
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default)

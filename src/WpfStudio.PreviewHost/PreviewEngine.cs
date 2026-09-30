@@ -114,6 +114,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
                 else if (request.Mode == PreviewMode.Source)
                 {
                 if (_scenarioActivation is not null) CompiledPreview.PrepareApplication(request, assembly!);
+                _assemblies.PrepareXamlNamespaces(request.Text);
                 _document = PreviewDocument.Parse(request, assembly);
                 lock (_diagnostics) _diagnostics.AddRange(_document.Diagnostics);
                 // The secure source parse retains the original base URI and XML

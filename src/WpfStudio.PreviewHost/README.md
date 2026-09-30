@@ -30,10 +30,26 @@ are not recursively terminated based on parent PID relationships.
 In source mode, `x:Class` and event handlers are omitted with diagnostics.
 Standard WPF design mode is enabled before custom control construction. Project assemblies
 must be local DLLs within the caller's selected project directory. The host copies
-the complete output subtree to a client-owned temporary directory before loading;
-managed, satellite and native dependencies resolve from that copy so loaded code
-does not lock project build outputs. A rebuilt entry assembly triggers a fresh
-host. The client removes only its verified temporary copy after the host exits.
+the complete output subtree to a client-owned temporary directory before loading.
+The built `.deps.json` also supplies runtime package assets missing from ordinary
+class-library output. The evaluated `ProjectAssetsFile` supplies the restored
+package folders, including custom locations; only exact versions from the built
+runtime target are considered. Copy-local output wins. Runtime-specific managed
+and native assets use the host's compatible runtime identifiers, and satellite
+culture directories are preserved. Compiler reference assemblies are not loaded.
+All selected assets are copied into the owned directory so loaded code does not
+lock project outputs or package-cache files. A change to output files, manifests,
+restore metadata or selected package assets triggers a fresh host on the next
+render, including when the entry DLL itself is unchanged. The client removes only
+its verified temporary copy after the host exits.
+
+Before parsing source, explicit `clr-namespace` assembly references are resolved
+and referenced libraries with matching `XmlnsDefinition` attributes are discovered
+from assembly metadata. This covers XAML-only references and lets event suppression
+and source mapping recognize custom controls on the first render. Assembly-qualified
+resource-dictionary sources such as `/Controls;component/Themes/Colors.xaml` use
+the pack scheme; ordinary relative sources retain the authored file's base URI.
+See [multi-project dependency loading](../../docs/xaml-preview-dependencies.md).
 This is process isolation, not a security sandbox: custom constructors,
 markup extensions, converters and XAML resources still execute or load in the
 host.

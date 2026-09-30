@@ -58,6 +58,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     private long _sourceVersion;
     private string? _sourceHash;
     private string? _sourceAssembly;
+    private string? _projectAssetsPath;
     private bool _disposed;
     private bool _picking;
     public DesignerViewModel(IPreviewClient client, IUiDispatcher dispatcher)
@@ -96,14 +97,14 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         : string.IsNullOrWhiteSpace(AssemblyPath) || !File.Exists(AssemblyPath) ? "Source preview · framework controls"
         : "Source preview · built assembly · code-behind and application startup are not run";
 
-    public async Task OpenAsync(DocumentState document, string? assemblyPath = null, string? projectDirectory = null, string? sourceAssembly = null)
+    public async Task OpenAsync(DocumentState document, string? assemblyPath = null, string? projectDirectory = null, string? sourceAssembly = null, string? projectAssetsPath = null)
     {
         if (_disposed) return;
         if (document.Extension != ".xaml") throw new ArgumentException("The designer requires a XAML document.", nameof(document));
         if (!string.Equals(_document?.Path, document.Path, StringComparison.OrdinalIgnoreCase)) ResetCanvasForDocument();
         if (_document != null) _document.ContentChanged -= ContentChanged;
         _document = document; _document.ContentChanged += ContentChanged;
-        DocumentName = document.Name; AssemblyPath = assemblyPath; ProjectDirectory = projectDirectory; _sourceAssembly = sourceAssembly;
+        DocumentName = document.Name; AssemblyPath = assemblyPath; ProjectDirectory = projectDirectory; _sourceAssembly = sourceAssembly; _projectAssetsPath = projectAssetsPath;
         ConfigureScenarios(document.Path, projectDirectory);
         ViewTypeName = ReadViewType(document.Content);
         OnPropertyChanged(nameof(SourcePath));
@@ -173,7 +174,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
                 assembly, ProjectDirectory, Mode,
                 string.IsNullOrWhiteSpace(ViewTypeName) ? null : ViewTypeName,
                 string.IsNullOrWhiteSpace(ApplicationResourcePath) ? null : ApplicationResourcePath,
-                scenario, UseDesignTimeValues, AutoSize), token);
+                scenario, UseDesignTimeValues, AutoSize, _projectAssetsPath), token);
             if (!Current(revision) || document.Version != sourceVersion || snapshot.Version != revision) return;
             if (!await VerifyScenarioConfigurationAsync(revision, token) || !Current(revision) || document.Version != sourceVersion) return;
             if (snapshot.Success && snapshot.Scenario?.Configuration != scenario)

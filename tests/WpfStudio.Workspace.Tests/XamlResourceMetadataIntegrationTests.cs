@@ -19,6 +19,7 @@ public sealed class XamlResourceMetadataIntegrationTests
                     <TargetFramework>net10.0</TargetFramework>
                     <EnableDefaultItems>false</EnableDefaultItems>
                     <AliasRoot>Pages</AliasRoot>
+                    <ProjectAssetsFile>$(MSBuildProjectDirectory)/custom-obj/project.assets.json</ProjectAssetsFile>
                   </PropertyGroup>
                   <ItemGroup>
                     <Page Include="Views/Page.xaml" Link="Ignored.xaml" LogicalName="$(AliasRoot)/Alias.xaml" />
@@ -31,6 +32,7 @@ public sealed class XamlResourceMetadataIntegrationTests
                 </Project>
                 """);
             var evaluated = await ProjectDiscovery.EvaluateAsync(project, "Release", null, default);
+            Assert.Equal(Path.Combine(projectDirectory, "custom-obj", "project.assets.json"), evaluated.ProjectAssetsPath);
             Assert.Equal("Pages/Alias.xaml", Resource("Page.xaml").ResourcePath);
             Assert.Equal("Themes/Linked.xaml", Resource("Linked.xaml").ResourcePath);
             Assert.Equal("External.xaml", Resource("External.xaml").ResourcePath);

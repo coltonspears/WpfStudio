@@ -57,6 +57,17 @@ internal sealed partial class PreviewDocument
                 }
             }
             Type? type = ResolveType(element.Name, projectAssembly);
+            if (type is not null && typeof(ResourceDictionary).IsAssignableFrom(type)
+                && element.Attribute("Source") is { } dictionarySource)
+            {
+                // Loose XAML keeps a file base URI for neighboring source dictionaries.
+                // An assembly-qualified resource still belongs to WPF's pack scheme,
+                // otherwise /Library;component/... becomes a drive-rooted file path.
+                string uri = dictionarySource.Value;
+                int component = uri.IndexOf(";component/", StringComparison.OrdinalIgnoreCase);
+                if (uri.StartsWith('/') && component > 1 && !uri[1..component].Contains('/'))
+                    dictionarySource.Value = "pack://application:,,," + uri;
+            }
             if (type is not null && typeof(DependencyObject).IsAssignableFrom(type))
             {
                 // Attached identity does not change NameScope behavior. It survives
@@ -207,14 +218,19 @@ internal sealed partial class PreviewDocument
         {
             string[] parts = name.NamespaceName[14..].Split(';');
             string? assemblyName = parts.FirstOrDefault(p => p.StartsWith("assembly=", StringComparison.Ordinal))?[9..];
-            Assembly? assembly = assemblyName is null ? projectAssembly : AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == assemblyName);
+            Assembly? assembly = assemblyName is null ? projectAssembly : Assembly.Load(new AssemblyName(assemblyName));
             return assembly?.GetType(parts[0] + "." + name.LocalName);
+        }
+        else if (!name.LocalName.Contains('.'))
+        {
+            // XmlnsDefinition libraries are discovered before preprocessing.
+            return new System.Xaml.XamlSchemaContext().GetXamlType(new System.Xaml.Schema.XamlTypeName(name.NamespaceName, name.LocalName))?.UnderlyingType;
         }
         return null;
     }
 }
 
-internal sealed class PreviewAssemblyResolver : IDisposable
+internal sealed partial class PreviewAssemblyResolver : IDisposable
 {
     private readonly string? _shadowDirectory;
     private readonly string? _shadowToken;
@@ -248,6 +264,7 @@ internal sealed class PreviewAssemblyResolver : IDisposable
             throw new InvalidOperationException("The project output directory cannot contain the preview's temporary directory.");
         _directory = Path.Combine(shadowRoot, "output");
         CopyOutputTree(sourceDirectory, _directory);
+        StageDependencies(request);
         string shadowAssembly = Path.Combine(_directory, Path.GetFileName(path));
         _dependencies = new AssemblyDependencyResolver(shadowAssembly);
         _assemblyPath = path;
@@ -262,7 +279,10 @@ internal sealed class PreviewAssemblyResolver : IDisposable
         if (candidate is not null && IsShadowPath(candidate) && File.Exists(candidate)) return context.LoadFromAssemblyPath(candidate);
         candidate = string.IsNullOrWhiteSpace(name.CultureName) ? Path.Combine(_directory, name.Name + ".dll") :
             Path.Combine(_directory, name.CultureName, name.Name + ".dll");
-        return IsShadowPath(candidate) && File.Exists(candidate) ? context.LoadFromAssemblyPath(candidate) : null;
+        if (IsShadowPath(candidate) && File.Exists(candidate)) return context.LoadFromAssemblyPath(candidate);
+        if (_missingDependencies.TryGetValue(name.Name, out var missing))
+            throw new FileNotFoundException($"Preview dependency '{name.Name}' is missing from the built output and restored package cache. Restore and rebuild the selected project. Expected: {missing}", missing);
+        return null;
     }
 
     private IntPtr ResolveNative(Assembly assembly, string name)

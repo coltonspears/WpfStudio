@@ -17,7 +17,8 @@ public sealed record PreviewScenarioProvenance(PreviewScenario Configuration, st
 public sealed record PreviewRequest(string Path, string Text, long Version, double Width = 960, double Height = 640,
     string? AssemblyPath = null, string? ProjectDirectory = null, PreviewMode Mode = PreviewMode.Source,
     string? ViewTypeName = null, string? ApplicationResourcePath = "App.xaml",
-    PreviewScenario? Scenario = null, bool UseDesignTimeValues = true, bool SizeToRoot = false);
+    PreviewScenario? Scenario = null, bool UseDesignTimeValues = true, bool SizeToRoot = false,
+    string? ProjectAssetsPath = null);
 public sealed record PreviewBuildProvenance(string AssemblyPath, string AssemblyName, string AssemblySha256,
     string ModuleVersionId, string ViewTypeName, string? ApplicationResourcePath);
 public sealed record PreviewBounds(double X, double Y, double Width, double Height);

@@ -134,7 +134,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             files.TryAdd(projectPath, new WorkspaceFile(projectPath, Path.GetFileName(projectPath), "Project"));
             models.Add(new WorkspaceProject(project?.Id.ToString() ?? projectPath, project?.Name ?? Path.GetFileNameWithoutExtension(projectPath), projectPath,
                 evaluated?.TargetFramework, evaluated?.OutputPath ?? project?.OutputFilePath, evaluated?.OutputType is "Exe" or "WinExe",
-                files.Values.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToArray(), evaluated?.AssemblyName));
+                files.Values.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToArray(), evaluated?.AssemblyName, evaluated?.ProjectAssetsPath));
         }
         lock (_gate)
         {

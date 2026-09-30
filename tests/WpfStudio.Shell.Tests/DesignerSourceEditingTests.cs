@@ -168,7 +168,7 @@ public sealed partial class DesignerTests
         await using var model = new DesignerViewModel(client, new InlineDispatcher());
         var document = new DocumentState(Path.Combine(Path.GetTempPath(), "Compiled.xaml"),
             "<Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:lang='http://schemas.microsoft.com/winfx/2006/xaml' lang:Class='Demo.View' />");
-        await model.OpenAsync(document, "C:/project/bin/View.dll", "C:/project");
+        await model.OpenAsync(document, "C:/project/bin/View.dll", "C:/project", projectAssetsPath: "C:/project/custom-obj/project.assets.json");
         model.Mode = PreviewMode.Compiled;
         Assert.False(model.IsCurrent);
         Assert.Equal("Demo.View", model.ViewTypeName);
@@ -177,6 +177,7 @@ public sealed partial class DesignerTests
         Assert.Equal(PreviewMode.Compiled, request.Mode);
         Assert.Equal("Demo.View", request.ViewTypeName);
         Assert.Equal("App.xaml", request.ApplicationResourcePath);
+        Assert.Equal("C:/project/custom-obj/project.assets.json", request.ProjectAssetsPath);
         Assert.False(model.SupportsLivePreview);
         Assert.False(model.WritePropertyToSourceCommand.CanExecute(null));
         document.Content += " ";

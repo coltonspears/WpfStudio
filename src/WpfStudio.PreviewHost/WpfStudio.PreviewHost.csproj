@@ -8,6 +8,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/PreviewDependencyCatalog.cs" Link="PreviewDependencyCatalog.cs" />
     <ProjectReference Include="../WpfStudio.Contracts/WpfStudio.Contracts.csproj" />
     <ProjectReference Include="../WpfStudio.Wpf.PropertyEditing/WpfStudio.Wpf.PropertyEditing.csproj" />
     <ProjectReference Include="../WpfStudio.Wpf.Diagnostics/WpfStudio.Wpf.Diagnostics.csproj" />

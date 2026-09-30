@@ -24,7 +24,7 @@ public static partial class ProjectDiscovery
 
     internal static async Task<EvaluatedProject> EvaluateAsync(string projectPath, string configuration, string? framework, CancellationToken cancellationToken)
     {
-        var arguments = new List<string> { "msbuild", projectPath, "-nologo", $"-p:Configuration={configuration}", "-getProperty:TargetFramework,TargetFrameworks,OutputType,TargetPath,AssemblyName,Configurations", "-getItem:Compile,Page,ApplicationDefinition,Resource,Content,None" };
+        var arguments = new List<string> { "msbuild", projectPath, "-nologo", $"-p:Configuration={configuration}", "-getProperty:TargetFramework,TargetFrameworks,OutputType,TargetPath,AssemblyName,Configurations,ProjectAssetsFile", "-getItem:Compile,Page,ApplicationDefinition,Resource,Content,None" };
         if (!string.IsNullOrWhiteSpace(framework)) arguments.Add($"-p:TargetFramework={framework}");
         var result = await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(System.IO.Path.GetDirectoryName(projectPath)!, arguments.ToArray()), cancellationToken);
         if (result.ExitCode != 0) throw new InvalidOperationException($"Project evaluation failed for {projectPath}: {result.Error} {result.Output}");
@@ -63,7 +63,8 @@ public static partial class ProjectDiscovery
                     identity is null ? "The evaluated resource output path is unavailable or unsupported." : null));
             }
         }
-        return new EvaluatedProject(Property("TargetFramework"), Property("TargetFrameworks"), Property("TargetPath"), Property("OutputType"), files.Values.ToArray(), Property("AssemblyName"), Property("Configurations"), resources.ToArray());
+        return new EvaluatedProject(Property("TargetFramework"), Property("TargetFrameworks"), Property("TargetPath"), Property("OutputType"), files.Values.ToArray(), Property("AssemblyName"), Property("Configurations"), resources.ToArray(),
+            string.IsNullOrWhiteSpace(Property("ProjectAssetsFile")) ? null : System.IO.Path.GetFullPath(Property("ProjectAssetsFile"), System.IO.Path.GetDirectoryName(projectPath)!));
     }
 
     private static string? NormalizeResourcePath(string? path)
@@ -117,5 +118,5 @@ public static partial class ProjectDiscovery
     }
 
     internal sealed record EvaluatedXamlResource(string Path, string? ResourcePath, string Kind, string? Status);
-    internal sealed record EvaluatedProject(string TargetFramework, string TargetFrameworks, string OutputPath, string OutputType, IReadOnlyList<WorkspaceFile> Files, string AssemblyName, string Configurations, IReadOnlyList<EvaluatedXamlResource> XamlResources);
+    internal sealed record EvaluatedProject(string TargetFramework, string TargetFrameworks, string OutputPath, string OutputType, IReadOnlyList<WorkspaceFile> Files, string AssemblyName, string Configurations, IReadOnlyList<EvaluatedXamlResource> XamlResources, string? ProjectAssetsPath = null);
 }

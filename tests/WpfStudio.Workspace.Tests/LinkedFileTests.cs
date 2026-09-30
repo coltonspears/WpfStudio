@@ -23,6 +23,8 @@ public sealed class LinkedFileTests
             await using var client = new WorkspaceClient();
             var snapshot = await client.LoadAsync(new LoadWorkspaceRequest(project));
             var files = Assert.Single(snapshot.Projects).Files;
+            Assert.Equal(Path.Combine(app, "obj", "project.assets.json"), snapshot.Projects[0].ProjectAssetsPath);
+            Assert.True(File.Exists(snapshot.Projects[0].ProjectAssetsPath));
             Assert.Equal("Models/Shared.cs", Assert.Single(files, file => file.Path == code).LogicalPath?.Replace('\\', '/'));
             Assert.Equal("Images/logo.png", Assert.Single(files, file => file.Path == image).LogicalPath?.Replace('\\', '/'));
             var update = await client.UpdateDocumentAsync(new UpdateDocumentRequest(code, await File.ReadAllTextAsync(code), 1));

@@ -14,9 +14,9 @@ public sealed partial class ShellViewModel
     private EditorViewModel? _designerEditor;
     private DesignerProjectIdentity? _designerProjectIdentity;
     private Task _designerContextClose = Task.CompletedTask;
-    private sealed record DesignerProjectIdentity(string? Path, string? Framework, string? Output, string? Assembly);
+    private sealed record DesignerProjectIdentity(string? Path, string? Framework, string? Output, string? Assembly, string? Assets = null);
     private static DesignerProjectIdentity DesignerIdentity(EditorViewModel editor) => editor.XamlProjectPath is { } path
-        ? new(path, editor.XamlProject?.TargetFramework, editor.XamlProject?.OutputPath, editor.XamlProject?.AssemblyName)
+        ? new(path, editor.XamlProject?.TargetFramework, editor.XamlProject?.OutputPath, editor.XamlProject?.AssemblyName, editor.XamlProject?.ProjectAssetsPath)
         : new(null, null, null, null);
     private void InitializeDesignerContext() => Designer.PropertyChanged += DesignerSourceChanged;
     private void TrackDesignerEditor(EditorViewModel editor)
@@ -142,6 +142,6 @@ public sealed partial class ShellViewModel
         // then discover the new assembly without requiring the designer to reopen.
         TrackDesignerEditor(document);
         await Designer.OpenAsync(document.State, assembly,
-            project == null ? Path.GetDirectoryName(document.State.Path) : Path.GetDirectoryName(project.ProjectPath), project?.AssemblyName);
+            project == null ? Path.GetDirectoryName(document.State.Path) : Path.GetDirectoryName(project.ProjectPath), project?.AssemblyName, project?.ProjectAssetsPath);
     });
 }

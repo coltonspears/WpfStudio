@@ -24,6 +24,13 @@
     </ItemGroup>
     <Copy SourceFiles="@(CompiledFixtureFiles)" DestinationFiles="@(CompiledFixtureFiles->'$(OutDir)CompiledFixture/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
+  <Target Name="CopyDependencyPreviewFixture" AfterTargets="Build">
+    <ItemGroup>
+      <DependencyControlFiles Include="$(MSBuildProjectDirectory)/Fixtures/Dependencies/Controls/bin/$(Configuration)/net10.0-windows/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DependencyControlFiles)" DestinationFiles="@(DependencyControlFiles->'$(OutDir)DependencyFixture/bin/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/Fixtures/Dependencies/Controls/obj/project.assets.json" DestinationFiles="$(OutDir)DependencyFixture/obj/project.assets.json" />
+  </Target>
   <Target Name="CopyCounterAppPreviewFixture" AfterTargets="Build">
     <ItemGroup>
       <CounterAppOutputFiles Include="$(MSBuildProjectDirectory)/../../samples/CounterApp/bin/$(Configuration)/net10.0-windows/**/*" />

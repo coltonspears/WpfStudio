@@ -8,6 +8,7 @@
     <XamlDebuggingInformation>true</XamlDebuggingInformation>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../Dependencies/Controls/Controls.csproj" />
     <Resource Include="Theme/PackProbe.txt" />
   </ItemGroup>
 </Project>

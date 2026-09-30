@@ -2,7 +2,7 @@ namespace WpfStudio.Contracts;
 
 public sealed record LoadWorkspaceRequest(string Path, string Configuration = "Debug", string? TargetFramework = null);
 public sealed record WorkspaceSnapshot(string Path, string SdkVersion, IReadOnlyList<WorkspaceProject> Projects, IReadOnlyList<WorkspaceIssue> Issues, IReadOnlyList<string>? Configurations = null);
-public sealed record WorkspaceProject(string Id, string Name, string ProjectPath, string? TargetFramework, string? OutputPath, bool IsExecutable, IReadOnlyList<WorkspaceFile> Files, string? AssemblyName = null);
+public sealed record WorkspaceProject(string Id, string Name, string ProjectPath, string? TargetFramework, string? OutputPath, bool IsExecutable, IReadOnlyList<WorkspaceFile> Files, string? AssemblyName = null, string? ProjectAssetsPath = null);
 public sealed record WorkspaceFile(string Path, string Name, string Kind, bool IsGenerated = false, string? DocumentId = null, string? LogicalPath = null);
 public sealed record WorkspaceIssue(string Message, string Severity = "Warning");
 public sealed record UpdateDocumentRequest(string Path, string Text, long Version, bool Analyze = true);
