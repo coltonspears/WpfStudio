@@ -28,6 +28,10 @@ terminates only the pinned preview process; programs started by project code
 are not recursively terminated based on parent PID relationships.
 
 In source mode, `x:Class` and event handlers are omitted with diagnostics.
+Source Windows retain their real `Window` type on a hidden native surface, so
+Window-only attached behaviors, `WindowChrome` and `AncestorType=Window` bindings
+work. The project's view constructor and code-behind are still omitted. Page
+navigation remains omitted through the content-only adaptation.
 Standard WPF design mode is enabled before custom control construction. Project assemblies
 must be local DLLs within the caller's selected project directory. The host copies
 the complete output subtree to a client-owned temporary directory before loading.
@@ -64,8 +68,14 @@ starts a fresh host. Returned build provenance includes the loaded assembly SHA2
 and module version ID. Unsaved source is not included and compiled nodes expose
 no current-buffer source locations or source-write capabilities.
 
-The optional `ApplicationResourcePath` defaults to `App.xaml`; clear it for a
-view without application resources. The host extracts the compiled
+The optional `ApplicationResourcePath` defaults to `App.xaml` and now applies to
+ordinary source previews as well as compiled previews and named scenarios. Clear
+it to omit application resources. A default source preview with no matching
+compiled application resource continues with an informational diagnostic, allowing
+control libraries and applications with empty resources. A malformed resource
+still fails, and compiled/scenario requests still require the selected resource.
+Source refreshes can reuse the same application assembly identity and reload its
+resources without constructing `App`. The host extracts the compiled
 `Application.Resources` BAML subtree using public WPF reader APIs, including
 merged resource dictionaries. It does not instantiate the project's `App`.
 Avoiding `App.Run` alone is insufficient: the official WPF implementation queues
@@ -78,6 +88,11 @@ entry and WPF resource assembly using public .NET/WPF APIs. This lets absolute
 `pack://application:,,,/` references and `Application.GetResourceStream` resolve
 against the project. This process-wide identity is another reason each compiled
 render requires a fresh host; the project entry point is never invoked.
+
+When a view has no root DataContext and observed binding sources are unavailable,
+the preview status explains how to provide a scenario data factory. Individual
+binding failures remain available; the notice does not hide errors or fabricate
+application data by running startup.
 
 Property validation converts values without applying setters. Property identities
 include declaring owner type and assembly, and ambiguous display names are

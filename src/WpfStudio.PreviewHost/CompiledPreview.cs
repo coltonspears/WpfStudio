@@ -35,19 +35,25 @@ internal static class CompiledPreview
             hash, assembly.ManifestModule.ModuleVersionId.ToString("D"), view.GetType().FullName!, resourcePath));
     }
 
-    internal static void PrepareApplication(PreviewRequest request, Assembly assembly)
+    internal static bool PrepareApplication(PreviewRequest request, Assembly assembly, bool optionalResources = false)
     {
         ConfigureApplicationAssembly(assembly);
         string? resourcePath = string.IsNullOrWhiteSpace(request.ApplicationResourcePath) ? null : request.ApplicationResourcePath;
         if (resourcePath is not null)
         {
             var application = Application.Current ?? throw new InvalidOperationException("The preview host application is unavailable.");
-            application.Resources = LoadApplicationResources(assembly, resourcePath);
+            var resources = LoadApplicationResources(assembly, resourcePath, optionalResources);
+            application.Resources = resources ?? new ResourceDictionary();
+            return resources is not null;
         }
+        return false;
     }
 
     private static void ConfigureApplicationAssembly(Assembly assembly)
     {
+        // Source renders reuse their isolated host. The resource identity is
+        // immutable, but reapplying that same identity is safe.
+        if (Assembly.GetEntryAssembly() == assembly && Application.ResourceAssembly == assembly) return;
         var hostAssembly = typeof(CompiledPreview).Assembly;
         if (Assembly.GetEntryAssembly() != hostAssembly)
             throw new InvalidOperationException("Compiled preview requires a fresh isolated preview host before setting application resource identity.");
@@ -66,14 +72,18 @@ internal static class CompiledPreview
         Assembly.SetEntryAssembly(assembly);
     }
 
-    private static ResourceDictionary LoadApplicationResources(Assembly assembly, string resourcePath)
+    private static ResourceDictionary? LoadApplicationResources(Assembly assembly, string resourcePath, bool optional)
     {
         string normalized = resourcePath.Replace('\\', '/').TrimStart('/');
         if (normalized.Split('/').Any(p => p is ".." or ".") || !normalized.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Application resources must name a compiled application XAML path within the assembly, such as App.xaml.");
         string bamlName = normalized[..^5].ToLowerInvariant() + ".baml";
-        using var manifest = assembly.GetManifestResourceStream(assembly.GetName().Name + ".g.resources")
-            ?? throw new InvalidOperationException("The built assembly has no compiled WPF resources. Clear the application resource path for a view without App.xaml.");
+        using var manifest = assembly.GetManifestResourceStream(assembly.GetName().Name + ".g.resources");
+        if (manifest is null)
+        {
+            if (optional) return null;
+            throw new InvalidOperationException("The built assembly has no compiled WPF resources. Clear the application resource path for a view without App.xaml.");
+        }
         using var resources = new ResourceReader(manifest);
         using var baml = new MemoryStream();
         bool found = false;
@@ -85,7 +95,11 @@ internal static class CompiledPreview
             found = true;
             break;
         }
-        if (!found) throw new InvalidOperationException($"The build contains no '{normalized}' application resource. Rebuild the project or clear the application resource path.");
+        if (!found)
+        {
+            if (optional) return null;
+            throw new InvalidOperationException($"The build contains no '{normalized}' application resource. Rebuild the project or clear the application resource path.");
+        }
         baml.Position = 0;
         var baseUri = new Uri($"pack://application:,,,/{assembly.GetName().Name};component/{normalized}", UriKind.Absolute);
         using var reader = new Baml2006Reader(baml, new XamlReaderSettings { LocalAssembly = assembly, BaseUri = baseUri });

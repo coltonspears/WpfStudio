@@ -52,7 +52,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
     private readonly Dictionary<Type, IReadOnlyList<DependencyProperty>> _propertyCache = [];
     private HwndSource? _surface;
     private FrameworkElement? _viewport;
-    private Window? _compiledWindow;
+    private Window? _previewWindow;
     private FrameworkElement? _root;
     private PreviewDocument? _document;
     private long _version;
@@ -113,7 +113,14 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
                 }
                 else if (request.Mode == PreviewMode.Source)
                 {
-                if (_scenarioActivation is not null) CompiledPreview.PrepareApplication(request, assembly!);
+                if (assembly is not null)
+                {
+                    bool loadedResources = CompiledPreview.PrepareApplication(request, assembly, optionalResources: _scenarioActivation is null);
+                    if (!string.IsNullOrWhiteSpace(request.ApplicationResourcePath))
+                        _diagnostics.Add(new(loadedResources
+                            ? $"Built application resources '{request.ApplicationResourcePath}' loaded; App construction and startup are not executed. Rebuild to update those resources."
+                            : $"The build contains no '{request.ApplicationResourcePath}' application resource; source preview uses the view's own resources.", "Information"));
+                }
                 _assemblies.PrepareXamlNamespaces(request.Text);
                 _document = PreviewDocument.Parse(request, assembly);
                 lock (_diagnostics) _diagnostics.AddRange(_document.Diagnostics);
@@ -139,7 +146,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
                 }
                 if (_root is Window window)
                 {
-                    _compiledWindow = window;
+                    _previewWindow = window;
                     _viewport = window;
                     window.WindowStartupLocation = WindowStartupLocation.Manual;
                     window.Left = -32000; window.Top = -32000;
@@ -284,9 +291,14 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = new MemoryStream();
         encoder.Save(stream);
-        var bindingFailures = _objects.SelectMany(pair => BindingFailures(pair.Key, pair.Value));
-        return new(_version, true, stream.ToArray(), _width, _height, nodes, Diagnostics().Concat(bindingFailures).Distinct().ToArray(), _status ??
-            "Isolated XAML preview. Code-behind and application startup are not executed. Source navigation tracks authored elements, including template instances.", _build, _scenario, _surfaceIdentity);
+        var bindingFailures = _objects.SelectMany(pair => BindingFailures(pair.Key, pair.Value)).ToArray();
+        string? dataNotice = _root?.DataContext is null && bindingFailures.Any(failure => failure.UnavailableDataContext)
+            ? "The preview has no root DataContext, and some binding sources are unavailable. Choose a preview scenario with a data factory to supply application data; application startup is not run." : null;
+        var diagnostics = Diagnostics().Concat(bindingFailures.Select(failure => failure.Diagnostic));
+        if (dataNotice is not null) diagnostics = diagnostics.Prepend(new PreviewDiagnostic(dataNotice, "Information"));
+        string status = _status ?? "Isolated XAML preview. Code-behind and application startup are not executed. Source navigation tracks authored elements, including template instances.";
+        return new(_version, true, stream.ToArray(), _width, _height, nodes, diagnostics.Distinct().ToArray(),
+            dataNotice is null ? status : dataNotice + " " + status, _build, _scenario, _surfaceIdentity);
     }
 
     private IReadOnlyList<PreviewNode> CollectNodes()
@@ -396,7 +408,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
             Layout: _viewport is null ? null : Wpf.Diagnostics.LayoutReader.Capture(target, _viewport), LayoutEditing: CaptureLayoutEditing(target));
     }
 
-    private IEnumerable<PreviewDiagnostic> BindingFailures(string nodeId, DependencyObject target)
+    private IEnumerable<(PreviewDiagnostic Diagnostic, bool UnavailableDataContext)> BindingFailures(string nodeId, DependencyObject target)
     {
         foreach (var property in Properties(target))
         {
@@ -405,7 +417,8 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
             var observation = BindingReader.Read(expression, _bindingEvidence);
             if (!IsBindingFailure(observation)) continue;
             string id = _bindingSources.Capture(expression, maximumDeclarations: 0, maximumCharacters: 0).BindingId;
-            yield return BindingDiagnostic(nodeId, PropertyName(property, target), observation, id);
+            yield return (BindingDiagnostic(nodeId, PropertyName(property, target), observation, id),
+                observation.Category == "SourceUnavailable" && observation.Details?.SourceKind == "DataContextOrNullSource");
         }
     }
 
@@ -491,10 +504,10 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
         foreach (var weak in _edits.GetEditedTargets())
             if (weak.TryGetTarget(out var target)) _edits.ResetAll(target);
         _edits = new();
-        if (_compiledWindow is not null)
+        if (_previewWindow is not null)
         {
-            _compiledWindow.Close();
-            _compiledWindow = null;
+            _previewWindow.Close();
+            _previewWindow = null;
         }
         if (_surface is not null)
         {

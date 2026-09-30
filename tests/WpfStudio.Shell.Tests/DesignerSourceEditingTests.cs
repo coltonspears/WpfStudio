@@ -169,6 +169,10 @@ public sealed partial class DesignerTests
         var document = new DocumentState(Path.Combine(Path.GetTempPath(), "Compiled.xaml"),
             "<Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:lang='http://schemas.microsoft.com/winfx/2006/xaml' lang:Class='Demo.View' />");
         await model.OpenAsync(document, "C:/project/bin/View.dll", "C:/project", projectAssetsPath: "C:/project/custom-obj/project.assets.json");
+        Assert.True(model.UsesApplicationResources);
+        model.ApplicationResourcePath = "Resources/Application.xaml";
+        Assert.False(model.IsCurrent);
+        model.ApplicationResourcePath = "App.xaml";
         model.Mode = PreviewMode.Compiled;
         Assert.False(model.IsCurrent);
         Assert.Equal("Demo.View", model.ViewTypeName);

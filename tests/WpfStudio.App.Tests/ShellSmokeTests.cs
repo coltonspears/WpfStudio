@@ -102,6 +102,11 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.Contains(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Welcome");
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/welcome.png"));
             Application.Current.MainWindow = window;
+            if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_PREVIEW_SOLUTION") is { Length: > 0 } previewSolution)
+            {
+                await VerifyExternalPreviewSolutionAsync(root, window, shell, previewSolution);
+                return;
+            }
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_XAML_LAYOUT_EDITING_ONLY") == "1")
             {
                 await VerifyXamlLayoutEditingAsync(root, data, window, manager, shell);

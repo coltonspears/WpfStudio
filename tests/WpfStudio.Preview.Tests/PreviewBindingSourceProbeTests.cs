@@ -116,6 +116,7 @@ public sealed class PreviewBindingSourceProbeTests(PreviewFixture fixture, ITest
                 }
                 var model = new ProbeModel();
                 root.DataContext = model;
+                using var windowSurface = new ProbeWindowSurface(root as Window);
                 root.Measure(new Size(600, 600)); root.Arrange(new Rect(0, 0, 600, 600)); root.UpdateLayout();
                 var rows = new List<ProbeRow>();
                 var identities = new ConditionalWeakTable<object, Identity>();
@@ -195,6 +196,26 @@ public sealed class PreviewBindingSourceProbeTests(PreviewFixture fixture, ITest
             });
         }
         finally { directory.Delete(recursive: true); }
+    }
+
+    private sealed class ProbeWindowSurface : IDisposable
+    {
+        private readonly Window? _window;
+        public ProbeWindowSurface(Window? window)
+        {
+            _window = window;
+            if (window is null) return;
+            // Production now retains the Window root. Its templates require a
+            // presentation source, just like the hidden surface in PreviewEngine.
+            window.ShowActivated = false;
+            window.ShowInTaskbar = false;
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            window.Left = -32000; window.Top = -32000;
+            window.Width = 600; window.Height = 600;
+            window.Opacity = 0;
+            window.Show();
+        }
+        public void Dispose() => _window?.Close();
     }
 
     private void Dump(string title, string text)

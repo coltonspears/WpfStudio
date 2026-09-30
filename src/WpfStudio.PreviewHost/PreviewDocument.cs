@@ -100,10 +100,10 @@ internal sealed partial class PreviewDocument
 
         result.ApplyDesignTimeValues(root, request, projectAssembly, sourceNamespace);
 
-        // A top-level Window cannot be parented into an offscreen visual. A
-        // ContentControl preserves root resources, bindings and content while
-        // deliberately omitting window chrome and navigation behavior.
-        if (root.Name == Presentation + "Window" || root.Name == Presentation + "Page")
+        // Windows retain their real type and use the engine's hidden Window
+        // surface, preserving Window ancestor bindings and attached behaviors.
+        // Pages still omit navigation by previewing their content.
+        if (root.Name == Presentation + "Page")
         {
             string oldType = root.Name.LocalName;
             var presentationOnly = new HashSet<string>(StringComparer.Ordinal)

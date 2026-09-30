@@ -14,7 +14,7 @@ public sealed partial class DesignerViewModel
     [ObservableProperty] public partial string ApplicationResourcePath { get; set; } = "App.xaml";
     public bool IsCompiledPreview => Mode == PreviewMode.Compiled;
     public bool SupportsLivePreview => !IsCompiledPreview;
-    public bool UsesApplicationResources => IsCompiledPreview || SelectedScenario?.Configuration is not null;
+    public bool UsesApplicationResources => IsCompiledPreview || SelectedScenario?.Configuration is not null || !string.IsNullOrWhiteSpace(AssemblyPath);
     public string BuildDescription => _snapshot?.Build is { } build
         ? $"{build.ViewTypeName} · {Path.GetFileName(build.AssemblyPath)} · SHA-256 {build.AssemblySha256[..Math.Min(12, build.AssemblySha256.Length)]} · module {build.ModuleVersionId}"
         : IsCompiledPreview ? "Build the project before loading a compiled view. Unsaved source changes are not in that build." : "";

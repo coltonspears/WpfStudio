@@ -241,6 +241,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     partial void OnShowLogicalTreeChanged(bool value) => RebuildTree();
     partial void OnAssemblyPathChanged(string? value)
     {
+        OnPropertyChanged(nameof(UsesApplicationResources));
         _scenarioSelectionPending = true;
         Invalidate();
         OnPropertyChanged(nameof(SessionDescription));

@@ -2,6 +2,26 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Real-solution application resources and Window ancestry (2026-09-29)
+
+Loading the user's ColtonStack solution and `Views/MainWindow.xaml` through the actual WPF shell reproduced `Cannot find resource named 'Brush.Background'` in Source mode. Compiled mode rendered successfully. Source mode was not loading the compiled `App.xaml` dictionary, which merges the application's theme. After enabling those resources, the source preview also reported unavailable `AncestorType=Window` bindings because the root Window had been replaced with a ContentControl.
+
+Ordinary source previews now load the selected built application resources without constructing or starting the project's App. Libraries with no application resource continue with an informational diagnostic. Source Windows retain a real hidden Window surface, preserving attached behaviors, chrome objects, ancestor bindings and authored source mapping. The existing source host can refresh with the same application resource identity. Settings expose the application resource path for source previews and invalidate the preview when it changes.
+
+The real solution was loaded from both `.sln` and `.slnx`. Final verification used the exact packaged workspace and preview hosts: Source and Compiled modes both rendered, with zero missing-resource and zero missing-Window-ancestor diagnostics. Both modes still have 42 binding diagnostics with unavailable runtime sources because the application assigns its root DataContext during startup. The preview now explains missing root data in its status; it neither starts application services nor hides individual binding failures. ColtonStack source files were not edited or saved.
+
+The desktop Computer Use helper failed to initialize (`failed to write kernel assets`), including after reset. Reproduction instead used the real loaded-shell integration harness, its normal workspace/open-document/designer commands, and rendered UI captures. This verifies application behavior, not physical mouse/keyboard input. The reusable opt-in check is documented in [preview dependency troubleshooting](docs/xaml-preview-dependencies.md#reproduce-a-real-solution-locally).
+
+Final checks:
+
+- Release solution build: zero warnings and errors (`final-build2.log`).
+- Preview suite: 253 passed with process tests targeting the packaged host (`preview-packaged-final.trx`). Five new cases cover default application resources, host reuse and opt-out, libraries without App resources, Window-specific behavior and ancestor binding, and the distinction between absent preview data and a misspelled property on a real source. Two binding-origin probes now create the required hidden Window presentation surface.
+- Shell suite: 531 passed (`shell-final.trx`), including source resource-setting invalidation and existing scenario behavior.
+- Actual ColtonStack loaded-shell check: passed against the packaged hosts (`coltonstack-packaged-final.trx`).
+- Portable publish: passed (`publish.log`).
+
+Logs and failing/passing reproductions are under `artifacts/TestResults/coltonstack-preview`. Local screenshots and detailed observations are under `artifacts/external-preview`; these captures have not been published. Application resource changes still require a rebuild, and application data still requires a preview scenario or a supported explicitly supplied DataContext.
+
 ## Multi-project preview dependencies (2026-09-29)
 
 A new application → WPF control library → model library → NuGet package fixture reproduced three cold-source failures before the fix: an unknown custom XML namespace type, an unsuppressed referenced-control event handler, and a missing transitive package when previewing the control library's ordinary SDK output. A further test reproduced an assembly-qualified resource dictionary being resolved as a drive-rooted file path.
