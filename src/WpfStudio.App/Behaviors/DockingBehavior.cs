@@ -68,6 +68,8 @@ public static class DockingBehavior
             // views here so closing/reopening tabs preserves feature state.
             staticContent["Packages"] = new Features.Packages.PackagesPane { DataContext = shell.Features?.Packages };
             staticContent["Git"] = new Features.Git.GitPane { DataContext = shell.Features?.Git };
+            staticContent["Profiler"] = new Features.Profiling.MemoryProfilerPane { DataContext = shell.MemoryProfiler };
+            staticTitles["Profiler"] = "Memory profiler";
             staticContent["Designer"] = new Features.Designer.DesignerPane { DataContext = shell.Designer };
             staticTitles["Designer"] = "XAML Designer";
             staticContent["LiveInspection"] = new Features.Inspection.InspectionPane { DataContext = shell.LiveInspection };
@@ -102,7 +104,7 @@ public static class DockingBehavior
                 if (!ReferenceEquals(shell.ActiveDocument, editor)) shell.ActiveDocument = editor;
             }
             else if (manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => ReferenceEquals(d.Content, manager.ActiveContent)) is { } document)
-                shell.ActivateWorkbench(document.ContentId is "Packages" or "Git" ? document.ContentId : null);
+                shell.ActivateWorkbench(document.ContentId is "Packages" or "Git" or "Profiler" ? document.ContentId : null);
         }
         private void DocumentsChanged(object? sender, NotifyCollectionChangedEventArgs args) => manager.Dispatcher.BeginInvoke(SynchronizeDocuments);
         private void SynchronizeDocuments()
@@ -134,7 +136,7 @@ public static class DockingBehavior
         {
             if (args.Document.Content is not EditorViewModel document)
             {
-                if (args.Document.ContentId is "Packages" or "Git")
+                if (args.Document.ContentId is "Packages" or "Git" or "Profiler")
                 {
                     var workbench = args.Document;
                     var pane = workbench.Parent as LayoutDocumentPane;
@@ -164,12 +166,12 @@ public static class DockingBehavior
             var selected = pane?.Children.FirstOrDefault(d => d.IsSelected)
                 ?? manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.IsSelected);
             if (selected?.Content is EditorViewModel editor) shell.ActiveDocument = editor;
-            else shell.ActivateWorkbench(selected?.ContentId is "Packages" or "Git" ? selected.ContentId : null);
+            else shell.ActivateWorkbench(selected?.ContentId is "Packages" or "Git" or "Profiler" ? selected.ContentId : null);
         }
         private void ShowTool(string name)
         {
             var aliases = name is "WPF" or "Resources" ? "WpfTools" : name is "Database" or "SQL Server" ? "Database" : name;
-            if (aliases is "Packages" or "Git")
+            if (aliases is "Packages" or "Git" or "Profiler")
             {
                 Capture();
                 var document = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.ContentId == aliases);

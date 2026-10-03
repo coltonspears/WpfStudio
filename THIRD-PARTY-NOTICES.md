@@ -10,6 +10,8 @@ WpfStudio combines the following packages. Their licenses remain with their resp
 | Microsoft.CodeAnalysis / Roslyn | 5.9.0 | [dotnet/roslyn](https://github.com/dotnet/roslyn), MIT |
 | Microsoft.Build.Locator | 1.11.2 | [microsoft/MSBuildLocator](https://github.com/microsoft/MSBuildLocator), MIT |
 | StreamJsonRpc | 2.25.29 | [microsoft/vs-streamjsonrpc](https://github.com/microsoft/vs-streamjsonrpc), MIT |
+| Microsoft.Diagnostics.Runtime (ClrMD) | 4.1.745802 | [microsoft/clrmd](https://github.com/microsoft/clrmd), MIT; managed dump/snapshot analysis in the isolated profiling worker |
+| Microsoft.Diagnostics.NETCore.Client | 0.2.661903 | [dotnet/diagnostics](https://github.com/dotnet/diagnostics), MIT; transitive profiling dependency |
 | Microsoft.Extensions libraries | 10.0.12 and transitive versions | [dotnet/runtime](https://github.com/dotnet/runtime), MIT |
 | Microsoft.Data.SqlClient | 7.1.0 | [dotnet/SqlClient](https://github.com/dotnet/SqlClient), MIT |
 | Microsoft.Web.WebView2 SDK | 1.0.4191.47 | [Microsoft WebView2](https://developer.microsoft.com/microsoft-edge/webview2/), Microsoft software license terms included in the SDK package |

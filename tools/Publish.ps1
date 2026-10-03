@@ -30,7 +30,7 @@ function Export-PackageNotices {
     New-Item -ItemType Directory -Path $noticeDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses/AvalonEdit-LICENSE.txt') -Destination $noticeDirectory
     $inventory = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($project in @('WpfStudio.App', 'WpfStudio.WorkspaceHost', 'WpfStudio.PreviewHost')) {
+    foreach ($project in @('WpfStudio.App', 'WpfStudio.WorkspaceHost', 'WpfStudio.PreviewHost', 'WpfStudio.ProfilingHost')) {
         $assetsPath = Join-Path $repository "src/$project/obj/project.assets.json"
         $assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
         foreach ($library in $assets.libraries.PSObject.Properties) {
@@ -87,6 +87,10 @@ try {
     # Preserve the entire worker publication, including Roslyn BuildHost-netcore and its dependency files.
     Invoke-DotNet @('publish', 'src/WpfStudio.WorkspaceHost/WpfStudio.WorkspaceHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'WorkspaceHost'))
     Invoke-DotNet @('publish', 'src/WpfStudio.PreviewHost/WpfStudio.PreviewHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'PreviewHost'))
+    Invoke-DotNet @('publish', 'src/WpfStudio.ProfilingHost/WpfStudio.ProfilingHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'ProfilingHost'))
+    # A self-contained x86 worker supports legacy 32-bit Framework dumps even when
+    # the machine has only the x64 .NET runtime installed.
+    Invoke-DotNet @('publish', 'src/WpfStudio.ProfilingHost/WpfStudio.ProfilingHost.csproj', '-c', $Configuration, '-r', 'win-x86', '--self-contained', 'true', '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'ProfilingHost/x86'))
     $inspectionDirectory = Join-Path $staging 'Inspection'
     New-Item -ItemType Directory -Path $inspectionDirectory -Force | Out-Null
     # Injected libraries run on the target's .NET/WPF runtime. Publish them
@@ -100,6 +104,8 @@ try {
         'PreviewHost/WpfStudio.PreviewHost.exe',
         'PreviewHost/WpfStudio.PreviewHost.dll',
         'PreviewHost/WpfStudio.PreviewHost.deps.json',
+        'ProfilingHost/WpfStudio.ProfilingHost.dll',
+        'ProfilingHost/x86/WpfStudio.ProfilingHost.exe',
         'PreviewHost/WpfStudio.PreviewHost.runtimeconfig.json',
         'PreviewHost/WpfStudio.Wpf.PropertyEditing.dll',
         'PreviewHost/WpfStudio.Wpf.Diagnostics.dll',
@@ -126,6 +132,7 @@ try {
     $documentationDirectory = Join-Path $staging 'docs'
     New-Item -ItemType Directory -Path $documentationDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'docs/xaml-devtools-design.md'), (Join-Path $repository 'docs/xaml-runtime-bootstrap.md'), (Join-Path $repository 'docs/xaml-preview-scenarios.md'), (Join-Path $repository 'docs/xaml-appearance.md'), (Join-Path $repository 'docs/xaml-binding-navigation.md'), (Join-Path $repository 'docs/xaml-binding-diagnostics.md'), (Join-Path $repository 'docs/xaml-named-elements.md'), (Join-Path $repository 'docs/xaml-preview-interaction.md'), (Join-Path $repository 'docs/xaml-resource-resolution-plan.md'), (Join-Path $repository 'docs/xaml-feature-tour.md'), (Join-Path $repository 'docs/xaml-language-performance.md') -Destination $documentationDirectory
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/memory-profiler.md'), (Join-Path $repository 'docs/profiling-suite-design.md') -Destination $documentationDirectory
     $imageDirectory = Join-Path $documentationDirectory 'images'
     New-Item -ItemType Directory -Path $imageDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'docs/images/xaml') -Destination $imageDirectory -Recurse

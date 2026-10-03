@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup><ProjectReference Include="../../src/WpfStudio.App/WpfStudio.App.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WpfStudio.Profiling.Tests/Fixtures/RetentionFixture/RetentionFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../WpfStudio.Profiling.Tests/Fixtures/RetentionFixture32/RetentionFixture32.csproj" ReferenceOutputAssembly="false" SetTargetFramework="TargetFramework=net48" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />

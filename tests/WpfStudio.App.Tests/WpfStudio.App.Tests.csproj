@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\WpfStudio.App\WpfStudio.App.csproj" />
+    <ProjectReference Include="../WpfStudio.Profiling.Tests/Fixtures/RetentionFixture/RetentionFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfStudio.Preview.Tests\Fixtures\Compiled\WpfStudio.PreviewFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfStudio.Inspection.Tests\Fixtures\App\WpfStudio.InspectionFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

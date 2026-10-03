@@ -37,6 +37,8 @@ public static class StudioFeatureRegistration
 {
     public static IServiceCollection AddStudioFeatures(this IServiceCollection services)
     {
+        services.AddSingleton<WpfStudio.Contracts.Profiling.IMemoryProfiler, WpfStudio.Runtime.Profiling.MemoryProfilerClient>();
+        services.AddSingleton<Features.Profiling.MemoryProfilerViewModel>();
         services.AddSingleton<INuGetPackageService, NuGetPackageService>();
         services.AddSingleton<GitService>();
         services.AddSingleton<AssistantSettingsStore>();

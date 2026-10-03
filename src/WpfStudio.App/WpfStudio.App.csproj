@@ -8,6 +8,7 @@
     <ProjectReference Include="..\WpfStudio.Runtime\WpfStudio.Runtime.csproj" />
     <ProjectReference Include="..\WpfStudio.WorkspaceHost\WpfStudio.WorkspaceHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfStudio.PreviewHost\WpfStudio.PreviewHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\WpfStudio.ProfilingHost\WpfStudio.ProfilingHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfStudio.Inspection.StartupHook\WpfStudio.Inspection.StartupHook.csproj" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
     <ProjectReference Include="..\WpfStudio.Inspection.Agent\WpfStudio.Inspection.Agent.csproj" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
   </ItemGroup>
@@ -60,5 +61,11 @@
       <InspectionFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.Inspection.Agent\bin\$(Configuration)\net8.0-windows\WpfStudio.Wpf.Diagnostics.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(InspectionFiles)" DestinationFolder="$(OutDir)Inspection" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyProfilingHost" AfterTargets="Build">
+    <ItemGroup>
+      <ProfilingHostFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.ProfilingHost\bin\$(Configuration)\net10.0\**\*" Exclude="$(MSBuildProjectDirectory)\..\WpfStudio.ProfilingHost\bin\$(Configuration)\net10.0\win-*\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ProfilingHostFiles)" DestinationFiles="@(ProfilingHostFiles->'$(OutDir)ProfilingHost\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 </Project>

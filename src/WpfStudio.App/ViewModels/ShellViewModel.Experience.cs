@@ -282,6 +282,7 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Terminal", ShowToolCommand, "Terminal", shortcut: "Ctrl+`", icon: "Terminal");
         yield return Command("View", "Debugger", ShowToolCommand, "Debugger", icon: "Bug");
         yield return Command("View", "SQL Server", ShowToolCommand, "Database", icon: "Database");
+        yield return Command("Tools", "Memory profiler", ShowToolCommand, "Profiler", icon: "Layers", detail: "Dumps, live snapshots, GC roots and reference-removal estimates");
         yield return Command("View", "Dark theme", SetThemeCommand, "Dark", icon: "Moon");
         yield return Command("View", "Light theme", SetThemeCommand, "Light", icon: "Sun");
         yield return Command("View", "Save window layout", SaveLayoutCommand, icon: "Sidebar");

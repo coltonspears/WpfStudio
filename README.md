@@ -2,6 +2,8 @@
 
 A native Windows IDE focused on WPF, C#, CommunityToolkit.Mvvm, and SQL Server. It combines a dockable editor with an isolated Roslyn/MSBuild worker, debugging, an embedded terminal, WPF navigation, NuGet packages, Git, a SQL workbench, and the ColtonGPT assistant.
 
+The **Memory profiler** adds full-dump and live-snapshot investigations for modern .NET and .NET Framework: object fields, GC-root paths, retained-size analysis, a draggable relationship map, snapshot comparison, and reference-removal estimates that preserve shared ownership. Open it from **Tools > Memory profiler**. See the [memory guide](docs/memory-profiler.md) and [broader profiling suite roadmap](docs/profiling-suite-design.md).
+
 See the [XAML feature tour](docs/xaml-feature-tour.md) for screenshots of diagnostics, preview scenarios, live binding inspection, layout, appearance, and reviewed source edits.
 
 The current XAML milestone includes the implemented authoring, preview, and inspection workflows below. [Validation results](VALIDATION.md) record the tested scope; the [remaining designer roadmap](docs/xaml-devtools-design.md#full-goal-acceptance-ledger) tracks future work, including broader XAML language coverage, reparenting and toolbox composition.

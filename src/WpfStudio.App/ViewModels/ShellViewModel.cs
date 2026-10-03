@@ -44,10 +44,11 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null, Features.Profiling.MemoryProfilerViewModel? memoryProfiler = null)
     {
         _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger;
         Debugger = debugger; Terminal = terminal; Database = database;
+        MemoryProfiler = memoryProfiler ?? new(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(), files);
         Designer = designer ?? new(new WpfStudio.Runtime.Design.PreviewClient(), dispatcher);
         Designer.SourceRequested += source => _ = GuardAsync(() => NavigateAsync(source.Path, source.Line, source.Column));
         Designer.SourceEditRequested += PreviewDesignerEditAsync;
@@ -77,6 +78,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public DebuggerViewModel Debugger { get; }
     public TerminalViewModel Terminal { get; }
     public DatabasePaneViewModel Database { get; }
+    public Features.Profiling.MemoryProfilerViewModel MemoryProfiler { get; }
     public ObservableCollection<EditorViewModel> Documents { get; } = [];
     public ObservableCollection<ExplorerNode> Explorer { get; } = [];
     public ObservableCollection<WorkspaceProject> Projects { get; } = [];
@@ -797,6 +799,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         await DisposeDesignerContextAsync();
         await Designer.DisposeAsync();
         await LiveInspection.DisposeAsync();
+        await MemoryProfiler.DisposeAsync();
         await _workspace.DisposeAsync(); _operation?.Dispose(); _lifetime.Dispose();
     }
 }

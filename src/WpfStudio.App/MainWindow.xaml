@@ -381,6 +381,7 @@
           <MenuItem Header="_Tools">
             <MenuItem Header="NuGet packages…" c:Ui.Icon="Package" Command="{Binding OpenPackagesCommand}" />
             <MenuItem Header="Git changes…" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" />
+            <MenuItem Header="Memory profiler…" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="Profiler" />
             <Separator />
             <MenuItem Header="Reload workspace" c:Ui.Icon="Refresh" Command="{Binding ReloadWorkspaceCommand}" />
             <MenuItem Header="Restart language service" c:Ui.Icon="Restart" Command="{Binding RestartWorkspaceCommand}" />

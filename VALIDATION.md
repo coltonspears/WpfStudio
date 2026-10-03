@@ -2,6 +2,33 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Memory investigations (2026-10-02)
+
+The first profiling update adds an independent **Tools > Memory profiler** workbench: full Windows dump loading, immutable live snapshots, type/baseline comparison, captured fields and delegate targets, GC-root paths, dominating owners, a draggable/zoomable object map, exact-slot and all-removable-owner cleanup simulations, and JSON investigation export. The [memory guide](docs/memory-profiler.md) records the supported inputs, semantics and budgets; the [suite design](docs/profiling-suite-design.md) keeps counters, CPU, async, database, File I/O and Windows-event collectors in the remaining roadmap.
+
+Real fixtures establish modern .NET 10 x64 and .NET Framework 4.8 x64/x86 live capture and full-dump analysis. The x86 worker is also published self-contained and exercised through the same client routing used by the application. Native 64-bit WOW64 subsystem dumps of 32-bit targets receive explicit recapture instructions; they are not accepted as ordinary x86 managed dumps.
+
+Graph tests cover shared ownership, parallel slots, multiple roots, cycles, dependent handles, permanent frozen roots/fields, incomplete data, a 100,000-object chain, and 100 randomized graphs against an independent reachability oracle. The real modern fixture confirms that frozen string literals remain rooted and are excluded from reclamation. Worker shutdown waits for native snapshot/file-handle cleanup and leaves the target running; the IPC tests delete an opened dump immediately after session disposal. Failed/cancelled replacement captures retain the previous successful investigation.
+
+Regression verification used the solution suites and targeted reruns after corrections:
+
+| Suite | Result |
+| --- | --- |
+| Core | 231 passed |
+| Database | 41 passed |
+| Workspace | 607 passed, 1 SDK-specific case skipped |
+| Runtime | 22 passed |
+| Native view | 61 passed |
+| Preview | 253 passed |
+| Inspection | 216 passed |
+| Shell | 538 passed; all 7 memory cases also rerun with packaged workers |
+| Profiling | 14 passed |
+| Loaded WPF app | Passed, with zero binding errors |
+
+The WPF check uses real capture, shared-root and exclusive-release estimates, field/root display, fit/zoom/focus commands, baseline growth, docking reuse, and both themes. It verifies the inspector in a short docked workbench; the focused branch constrains the pane to 460 DIPs to reproduce that case. Captures are under `artifacts/screenshots/memory-*.png`. These automated rendering/command checks do not establish physical pointer/keyboard gesture acceptance.
+
+The Release self-contained portable publish includes x64 and x86 profiling workers, their dependencies and license inventory, and the new guides. Graph estimates describe managed collection eligibility, preserve shared/permanent ownership, and do not forecast OS working-set reductions. Large-heap performance, native allocations, saved heap-index reloading and automated lifetime-based leak ranking remain future acceptance work.
+
 ## Real-solution application resources and Window ancestry (2026-09-29)
 
 Loading the user's ColtonStack solution and `Views/MainWindow.xaml` through the actual WPF shell reproduced `Cannot find resource named 'Brush.Background'` in Source mode. Compiled mode rendered successfully. Source mode was not loading the compiled `App.xaml` dictionary, which merges the application's theme. After enabling those resources, the source preview also reported unavailable `AncestorType=Window` bindings because the root Window had been replaced with a ContentControl.
