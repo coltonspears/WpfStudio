@@ -1,0 +1,73 @@
+<UserControl x:Class="WpfStudio.App.Features.Profiling.MemoryRetentionView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:p="clr-namespace:WpfStudio.App.Features.Profiling" xmlns:v="clr-namespace:WpfStudio.App.Features.Profiling.Visuals"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="MemoryStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <Grid>
+  <Grid.ColumnDefinitions><ColumnDefinition Width="450" MinWidth="300"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*" MinWidth="280"/></Grid.ColumnDefinitions>
+
+  <Grid>
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <StackPanel Margin="14,12,14,8">
+    <TextBlock Text="Dominator tree" Style="{StaticResource SectionTitle}"/>
+    <TextBlock Style="{StaticResource Note}" Margin="0,3,0,0" Text="Each object owns everything nested under it: if it became unreachable, all of that would be freed. Sibling instances of one type are grouped."/>
+   </StackPanel>
+   <TreeView x:Name="Tree" Grid.Row="1" ItemsSource="{Binding DominatorRoots}" SelectedItemChanged="TreeSelectionChanged" AutomationProperties.Name="Dominator tree"
+    VirtualizingPanel.ScrollUnit="Pixel">
+    <TreeView.ItemContainerStyle>
+     <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+      <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+      <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+      <EventSetter Event="MouseDoubleClick" Handler="TreeItemDoubleClick"/>
+     </Style>
+    </TreeView.ItemContainerStyle>
+    <TreeView.ItemTemplate>
+     <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+      <Grid Margin="0,3,8,3" ToolTip="{Binding Node.Type}">
+       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="46"/></Grid.ColumnDefinitions>
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <TextBlock TextTrimming="CharacterEllipsis">
+        <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding Via, Mode=OneWay}" Foreground="{DynamicResource WarningBrush}" FontSize="10.5"/>
+       </TextBlock>
+       <TextBlock Grid.Column="1" Text="{Binding RetainedText}" Margin="8,0,0,0" FontSize="11.5" Foreground="{DynamicResource AccentBrush}"/>
+       <TextBlock Grid.Column="2" Text="{Binding PercentText}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+       <v:RatioBar Grid.Row="1" Grid.ColumnSpan="3" Height="2" Margin="0,4,0,0" Value="{Binding Ratio}" Maximum="1"/>
+      </Grid>
+     </HierarchicalDataTemplate>
+    </TreeView.ItemTemplate>
+   </TreeView>
+   <TextBlock Grid.Row="1" Text="Building the dominator tree…" Style="{StaticResource Note}" Margin="14,6" Visibility="{Binding IsLoadingDominators, Converter={StaticResource BooleanToVisibility}}"/>
+  </Grid>
+
+  <GridSplitter Grid.Column="1" Style="{StaticResource SplitterH}"/>
+
+  <Grid Grid.Column="2">
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <!-- Breadcrumbs: Heap > owner > … -->
+   <StackPanel Orientation="Horizontal" Margin="10,10,10,0">
+    <Button Content="Heap" Style="{StaticResource LinkButton}" Command="{Binding RetentionHomeCommand}" ToolTip="Back to the GC roots"/>
+    <ItemsControl ItemsSource="{Binding RetentionTrail}" Focusable="False">
+     <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+     <ItemsControl.ItemTemplate>
+      <DataTemplate>
+       <StackPanel Orientation="Horizontal">
+        <c:Glyph Kind="ChevronRight" Width="12" Height="12" Foreground="{DynamicResource SubtleBrush}" VerticalAlignment="Center"/>
+        <Button Content="{Binding Title}" Style="{StaticResource LinkButton}" MaxWidth="180" Command="{Binding DataContext.FocusDominatorCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+       </StackPanel>
+      </DataTemplate>
+     </ItemsControl.ItemTemplate>
+    </ItemsControl>
+   </StackPanel>
+   <StackPanel Grid.Row="1" Margin="16,4,16,8">
+    <TextBlock Text="{Binding RetentionMapTitle}" Style="{StaticResource SectionTitle}" FontSize="15" TextTrimming="CharacterEllipsis"/>
+    <TextBlock Text="{Binding RetentionMapDetail}" Style="{StaticResource Note}" Margin="0,2,0,0"/>
+   </StackPanel>
+   <v:MemoryTreemap Grid.Row="2" Margin="12,0,12,12" Items="{Binding RetentionMapItems}" SelectedKey="{Binding SelectedRetentionKey}"
+    SelectCommand="{Binding SelectRetentionItemCommand}" OpenCommand="{Binding OpenRetentionItemCommand}" EmptyText="Nothing retained here." AutomationProperties.Name="Retention treemap"/>
+  </Grid>
+ </Grid>
+</UserControl>

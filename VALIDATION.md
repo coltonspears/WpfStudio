@@ -2,6 +2,22 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Memory profiler redesign (2026-10-03)
+
+The memory workbench now has four linked views and a docked object browser. **Overview** shows headline numbers, heap generations, automatic findings, a namespace/type treemap, the largest owners and baseline growth. **Types** has a grouped type list and, for each type, a retention-path Sankey and its instances. **Retention** pairs a dominator tree with a drill-down treemap. **Graph** is a vertical retention graph with on-demand expansion and a full minimap. The browser has an expandable, collection-aware field tree, back/forward history, why-alive chains, keeps-alive breakdowns and the cleanup simulations. The [memory guide](docs/memory-profiler.md) describes each view, finding and bound.
+
+The worker adds bounded queries for dominator pages, retained composition, retention flows, object children and graph neighbours. Insights are computed at capture. These cover closed WPF windows, disposed-but-referenced objects, objects held only by event handlers, finalizer-only objects, duplicate strings, sparse reference arrays, LOH usage and fragmentation, and pinning. Growth since the baseline is computed in the UI. Static fields are presented as roots throughout, instead of the runtime holder arrays that store them. Two statics stored in the same holder now produce two separate root paths, so the fixture's page reports both the cache and the event subscription.
+
+| Suite | Result |
+| --- | --- |
+| Profiling | 23 passed (9 new exploration/insight cases) |
+| Shell | 541 passed (3 new memory view-model cases) |
+| Loaded WPF app (full) | Passed, with zero binding errors |
+| Loaded WPF app (`WPFSTUDIO_TEST_MEMORY_ONLY`) | Passed; screenshots at 1880×1120 |
+| Runtime | 21 passed; `UnicodeAndControlCTravelThroughThePseudoconsole` timed out (known non-interactive-session issue, also on `main`) |
+
+The WPF check covers real capture, every view in both themes, the static-cache and static-event Sankey branches, collection expansion in the field tree, graph expansion and focus, both cleanup estimates, baseline growth and a 460-DIP docked height. Screenshots are `artifacts/screenshots/memory-*.png`. These automated rendering and command checks do not establish physical pointer or keyboard gesture acceptance. Large-heap layout and inspection timings have not been measured yet.
+
 ## Memory investigations (2026-10-02)
 
 The first profiling update adds an independent **Tools > Memory profiler** workbench: full Windows dump loading, immutable live snapshots, type/baseline comparison, captured fields and delegate targets, GC-root paths, dominating owners, a draggable/zoomable object map, exact-slot and all-removable-owner cleanup simulations, and JSON investigation export. The [memory guide](docs/memory-profiler.md) records the supported inputs, semantics and budgets; the [suite design](docs/profiling-suite-design.md) keeps counters, CPU, async, database, File I/O and Windows-event collectors in the remaining roadmap.

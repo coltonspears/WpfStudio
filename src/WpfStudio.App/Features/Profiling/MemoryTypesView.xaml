@@ -1,0 +1,177 @@
+<UserControl x:Class="WpfStudio.App.Features.Profiling.MemoryTypesView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:p="clr-namespace:WpfStudio.App.Features.Profiling" xmlns:v="clr-namespace:WpfStudio.App.Features.Profiling.Visuals"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="MemoryStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+   <Style x:Key="GrowthText" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+    <Setter Property="FontSize" Value="11.5"/>
+    <Setter Property="HorizontalAlignment" Value="Right"/>
+    <Style.Triggers>
+     <DataTrigger Binding="{Binding IsGrowing}" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+    </Style.Triggers>
+   </Style>
+   <Style x:Key="BaselineColumn" TargetType="FrameworkElement">
+    <Setter Property="Visibility" Value="Collapsed"/>
+    <Style.Triggers><DataTrigger Binding="{Binding DataContext.HasBaseline, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+   </Style>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <Grid>
+  <Grid.ColumnDefinitions><ColumnDefinition Width="380" MinWidth="260"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*" MinWidth="300"/></Grid.ColumnDefinitions>
+
+  <!-- Type list -->
+  <Grid>
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <TextBox Margin="10,10,10,6" Text="{Binding TypeFilter, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter types, namespaces or assemblies"
+    ToolTip="Up to 5,000 matching types are shown" AutomationProperties.Name="Filter memory types"/>
+   <DockPanel Grid.Row="1" Margin="10,0,10,6" LastChildFill="False">
+    <ComboBox ItemsSource="{Binding TypeSortOptions}" SelectedItem="{Binding TypeSort}" Width="160" Margin="0,0,6,0" AutomationProperties.Name="Memory type sort" ToolTip="Sort"/>
+    <ComboBox ItemsSource="{Binding TypeGroupings}" SelectedItem="{Binding TypeGrouping}" Width="120" AutomationProperties.Name="Memory type grouping" ToolTip="Group"/>
+    <CheckBox DockPanel.Dock="Right" Content="My code" c:Ui.Icon="Filter" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding OnlyApplicationTypes}" ToolTip="Hide runtime, BCL and WPF framework types"/>
+   </DockPanel>
+   <Grid Grid.Row="2" Margin="14,2,22,4" TextElement.FontSize="10.5" TextElement.Foreground="{DynamicResource MutedBrush}">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="58"/><ColumnDefinition Width="78"/><ColumnDefinition Width="72"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <TextBlock Text="TYPE" FontWeight="SemiBold"/>
+    <TextBlock Grid.Column="1" Text="OBJECTS" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+    <TextBlock Grid.Column="2" Text="OWN" FontWeight="SemiBold" HorizontalAlignment="Right" ToolTip="Bytes of the instances themselves"/>
+    <TextBlock Grid.Column="3" Text="RETAINED" FontWeight="SemiBold" HorizontalAlignment="Right" ToolTip="Bytes all instances keep alive together"/>
+    <TextBlock Grid.Column="4" Text="GROWTH" FontWeight="SemiBold" Width="66" TextAlignment="Right" Style="{StaticResource BaselineColumn}"/>
+   </Grid>
+   <ListBox x:Name="TypeList" Grid.Row="3" ItemsSource="{Binding Types}" SelectedItem="{Binding SelectedType}" HorizontalContentAlignment="Stretch"
+    VirtualizingPanel.IsVirtualizingWhenGrouping="True" VirtualizingPanel.ScrollUnit="Pixel" AutomationProperties.Name="Memory types">
+    <ListBox.GroupStyle>
+     <GroupStyle>
+      <GroupStyle.HeaderTemplate>
+       <DataTemplate>
+        <DockPanel Margin="10,10,10,4">
+         <TextBlock DockPanel.Dock="Right" Text="{Binding Items, Converter={StaticResource GroupBytes}}" Style="{StaticResource Note}" VerticalAlignment="Center"/>
+         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="11.5" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+        </DockPanel>
+       </DataTemplate>
+      </GroupStyle.HeaderTemplate>
+     </GroupStyle>
+    </ListBox.GroupStyle>
+    <ListBox.ItemTemplate>
+     <DataTemplate>
+      <Grid ToolTip="{Binding ToolTipText}">
+       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="58"/><ColumnDefinition Width="78"/><ColumnDefinition Width="72"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <StackPanel Margin="0,0,6,0">
+        <TextBlock Text="{Binding ShortName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Namespace}" Style="{StaticResource SubtleNote}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+       </StackPanel>
+       <TextBlock Grid.Column="1" Text="{Binding CountText}" HorizontalAlignment="Right" VerticalAlignment="Top" FontSize="11.5"/>
+       <StackPanel Grid.Column="2" Margin="8,0,0,0">
+        <TextBlock Text="{Binding BytesText}" HorizontalAlignment="Right" FontSize="11.5"/>
+        <v:RatioBar Value="{Binding BytesRatio}" Maximum="1" Height="3" Margin="0,5,0,0" Fill="{DynamicResource MutedBrush}"/>
+       </StackPanel>
+       <StackPanel Grid.Column="3" Margin="8,0,0,0">
+        <TextBlock Text="{Binding RetainedText}" HorizontalAlignment="Right" FontSize="11.5" Foreground="{DynamicResource AccentBrush}"/>
+        <v:RatioBar Value="{Binding RetainedRatio}" Maximum="1" Height="3" Margin="0,5,0,0"/>
+       </StackPanel>
+       <TextBlock Grid.Column="4" Text="{Binding Growth}" Width="62" Margin="4,0,0,0" TextAlignment="Right">
+        <TextBlock.Style>
+         <Style TargetType="TextBlock" BasedOn="{StaticResource GrowthText}">
+          <Setter Property="Visibility" Value="Collapsed"/>
+          <Style.Triggers>
+           <DataTrigger Binding="{Binding HasBaseline}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+           <DataTrigger Binding="{Binding IsGrowing}" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+          </Style.Triggers>
+         </Style>
+        </TextBlock.Style>
+       </TextBlock>
+      </Grid>
+     </DataTemplate>
+    </ListBox.ItemTemplate>
+   </ListBox>
+  </Grid>
+
+  <GridSplitter Grid.Column="1" Style="{StaticResource SplitterH}"/>
+
+  <!-- Selected type -->
+  <Grid Grid.Column="2">
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <StackPanel Margin="14,12,14,6">
+    <TextBlock Text="{Binding SelectedTypeTitle}" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectedType.Name}"/>
+    <TextBlock Text="{Binding SelectedTypeDetail}" Style="{StaticResource Note}" Margin="0,3,0,0" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectedTypeDetail}"/>
+    <TextBlock Text="Select a type to see what keeps its instances alive." Style="{StaticResource Note}" FontSize="12"
+     Visibility="{Binding HasSelectedType, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
+   </StackPanel>
+   <TabControl Grid.Row="2" SelectedIndex="{Binding TypeDetailTab}" Margin="6,0,6,0">
+    <TabItem Header="Retention paths">
+     <Grid Margin="6,8,6,6">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <DockPanel LastChildFill="False">
+       <TextBlock DockPanel.Dock="Left" Text="Roots on the left, this type on the right. Band width is how many instances are held through each owner." Style="{StaticResource Note}" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" MaxWidth="460"/>
+       <Border DockPanel.Dock="Right" Style="{StaticResource SegmentHost}" Margin="6,0,0,0">
+        <StackPanel Orientation="Horizontal">
+         <RadioButton Content="Instances" Style="{StaticResource Segment}" IsChecked="{Binding FlowUsesBytes, Converter={StaticResource EqualsText}, ConverterParameter=False, Mode=OneWay}" Checked="CountChecked"/>
+         <RadioButton Content="Bytes" Style="{StaticResource Segment}" IsChecked="{Binding FlowUsesBytes, Mode=OneWay}" Checked="BytesChecked"/>
+        </StackPanel>
+       </Border>
+       <CheckBox DockPanel.Dock="Right" Content="Stack" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Stack" IsChecked="{Binding ShowStackRoots}" ToolTip="Include roots from thread stacks"/>
+       <CheckBox DockPanel.Dock="Right" Content="Finalizer queue" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Clock" IsChecked="{Binding ShowFinalizerRoots}" ToolTip="Include objects held only by the finalizer queue"/>
+      </DockPanel>
+      <TextBlock Grid.Row="1" Text="{Binding FlowDescription}" TextWrapping="Wrap" FontSize="12.5" Margin="0,8,0,8"/>
+      <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Focusable="False">
+       <v:MemorySankey Flow="{Binding Flow}" UseBytes="{Binding FlowUsesBytes}" SelectCommand="{Binding SelectFlowNodeCommand}" OpenCommand="{Binding OpenFlowNodeCommand}"
+        MinHeight="180" AutomationProperties.Name="Retention paths"/>
+      </ScrollViewer>
+      <ContentControl Grid.Row="2" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,6,0" Focusable="False">
+       <ContentControl.Style>
+        <Style TargetType="ContentControl">
+         <Setter Property="Visibility" Value="Collapsed"/>
+         <Style.Triggers>
+          <DataTrigger Binding="{Binding IsLoadingFlow}" Value="True">
+           <Setter Property="Visibility" Value="Visible"/>
+           <Setter Property="ContentTemplate"><Setter.Value><DataTemplate><Border Style="{StaticResource Pill}"><TextBlock Text="Tracing retention paths…" FontSize="11" Foreground="{DynamicResource MutedBrush}"/></Border></DataTemplate></Setter.Value></Setter>
+          </DataTrigger>
+         </Style.Triggers>
+        </Style>
+       </ContentControl.Style>
+      </ContentControl>
+      <WrapPanel Grid.Row="3" Margin="0,8,0,0" TextElement.FontSize="11" TextElement.Foreground="{DynamicResource MutedBrush}">
+       <StackPanel Orientation="Horizontal" Margin="0,0,14,2"><Border Width="10" Height="10" CornerRadius="2" Background="{DynamicResource WarningBrush}" Margin="0,0,5,0"/><TextBlock Text="GC root or static field"/></StackPanel>
+       <StackPanel Orientation="Horizontal" Margin="0,0,14,2"><Border Width="10" Height="10" CornerRadius="2" Background="{DynamicResource MutedBrush}" Margin="0,0,5,0"/><TextBlock Text="Owner type"/></StackPanel>
+       <StackPanel Orientation="Horizontal" Margin="0,0,14,2"><Border Width="10" Height="10" CornerRadius="2" Background="{DynamicResource AccentBrush}" Margin="0,0,5,0"/><TextBlock Text="Selected type"/></StackPanel>
+       <StackPanel Orientation="Horizontal" Margin="0,0,14,2"><Border Width="10" Height="10" CornerRadius="2" Background="{DynamicResource SuccessBrush}" Margin="0,0,5,0"/><TextBlock Text="No root: collectible"/></StackPanel>
+       <TextBlock Text="Click a node to inspect its largest example · double-click an owner to open its type" Foreground="{DynamicResource SubtleBrush}" Margin="0,0,0,2"/>
+      </WrapPanel>
+     </Grid>
+    </TabItem>
+    <TabItem Header="Instances">
+     <Grid Margin="6,8,6,6">
+      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+      <DockPanel Margin="0,0,0,6">
+       <Button DockPanel.Dock="Right" Content="All types" Style="{StaticResource QuietButton}" Command="{Binding ShowAllTypesCommand}" ToolTip="Search every object, not just this type"/>
+       <TextBox Text="{Binding ObjectFilter, UpdateSourceTrigger=PropertyChanged, Delay=200}" c:Ui.Placeholder="Find by type name or hexadecimal address" AutomationProperties.Name="Filter heap objects"/>
+      </DockPanel>
+      <ListBox Grid.Row="1" ItemsSource="{Binding Objects}" SelectedItem="{Binding SelectedObject}" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Heap objects">
+       <ListBox.ItemTemplate>
+        <DataTemplate>
+         <Grid ToolTip="{Binding Type}">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <TextBlock TextTrimming="CharacterEllipsis"><Run Text="{Binding Address, Mode=OneWay}" FontFamily="{StaticResource CodeFont}" FontSize="11.5"/><Run Text="   "/><Run Text="{Binding Generation, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="10.5"/></TextBlock>
+          <TextBlock Grid.Column="1" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" Margin="10,0,0,0"><Run Text="own "/><Run Text="{Binding ShallowBytes, Mode=OneWay, Converter={StaticResource Bytes}}" Foreground="{DynamicResource TextBrush}"/></TextBlock>
+          <TextBlock Grid.Column="2" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" Margin="14,0,0,0" MinWidth="110" TextAlignment="Right"><Run Text="retains "/><Run Text="{Binding RetainedBytes, Mode=OneWay, Converter={StaticResource Bytes}}" Foreground="{DynamicResource AccentBrush}"/></TextBlock>
+          <v:RatioBar Grid.Row="1" Grid.ColumnSpan="3" Height="3" Margin="0,5,0,1" Value="{Binding RetainedBytes}" Maximum="{Binding DataContext.MaxObjectRetained, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+         </Grid>
+        </DataTemplate>
+       </ListBox.ItemTemplate>
+      </ListBox>
+      <DockPanel Grid.Row="2" Margin="0,6,0,0">
+       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="ChevronLeft" Command="{Binding PreviousObjectsCommand}" ToolTip="Previous page" AutomationProperties.Name="Previous objects"/>
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="ChevronRight" Command="{Binding NextObjectsCommand}" ToolTip="Next page" AutomationProperties.Name="Next objects"/>
+       </StackPanel>
+       <TextBlock Text="{Binding ObjectPageDescription}" Style="{StaticResource Note}" VerticalAlignment="Center"/>
+      </DockPanel>
+     </Grid>
+    </TabItem>
+   </TabControl>
+  </Grid>
+ </Grid>
+</UserControl>

@@ -116,6 +116,11 @@ public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfi
         public Task<MemoryObjectDetails> InspectAsync(int objectId, CancellationToken cancellationToken = default) => CallAsync(p => p.InspectAsync(objectId, cancellationToken), cancellationToken);
         public Task<MemoryGraph> GetGraphAsync(MemoryGraphRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.GetGraphAsync(request, cancellationToken), cancellationToken);
         public Task<MemoryReleaseEstimate> EstimateReleaseAsync(MemoryReleaseRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.EstimateReleaseAsync(request, cancellationToken), cancellationToken);
+        public Task<MemoryGraph> GetNeighborsAsync(MemoryNeighborRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.GetNeighborsAsync(request, cancellationToken), cancellationToken);
+        public Task<MemoryDominatorPage> GetDominatorsAsync(MemoryDominatorQuery query, CancellationToken cancellationToken = default) => CallAsync(p => p.GetDominatorsAsync(query, cancellationToken), cancellationToken);
+        public Task<MemoryRetainedComposition> GetRetainedAsync(int objectId, CancellationToken cancellationToken = default) => CallAsync(p => p.GetRetainedAsync(objectId, cancellationToken), cancellationToken);
+        public Task<MemoryRetentionFlow> GetRetentionFlowAsync(MemoryFlowRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.GetRetentionFlowAsync(request, cancellationToken), cancellationToken);
+        public Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.GetChildrenAsync(request, cancellationToken), cancellationToken);
         public ValueTask DisposeAsync()
         {
             lock (_lifetime)

@@ -1,0 +1,49 @@
+<UserControl x:Class="WpfStudio.App.Features.Profiling.MemoryGraphView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:p="clr-namespace:WpfStudio.App.Features.Profiling" xmlns:c="clr-namespace:WpfStudio.App.Controls">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="MemoryStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <Grid>
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+  <Border Style="{StaticResource PaneToolbar}" Padding="8,4">
+   <DockPanel LastChildFill="True">
+    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+     <CheckBox Content="Finalizer queue" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Clock" IsChecked="{Binding ShowFinalizerRoots}" ToolTip="Show roots from the finalizer queue. Hidden by default so long-lived owners such as static fields stand out."/>
+     <CheckBox Content="Stack" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Stack" IsChecked="{Binding ShowStackRoots}" ToolTip="Show roots held by thread stacks"/>
+     <Border Width="1" Height="18" Background="{DynamicResource BorderBrush}" Margin="6,0"/>
+     <ToggleButton Style="{StaticResource IconButton}" c:Ui.Icon="Minimap" IsChecked="{Binding ShowMinimap}" ToolTip="Minimap (M)" AutomationProperties.Name="Toggle minimap"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ZoomOut" Command="{x:Static p:MemoryGraphSurface.ZoomOutCommand}" CommandTarget="{Binding ElementName=ObjectGraph}" ToolTip="Zoom out (−)" AutomationProperties.Name="Zoom object graph out"/>
+     <TextBlock Text="{Binding ElementName=ObjectGraph, Path=Zoom, StringFormat={}{0:P0}}" VerticalAlignment="Center" Width="40" TextAlignment="Center" FontSize="11.5" Foreground="{DynamicResource MutedBrush}"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ZoomIn" Command="{x:Static p:MemoryGraphSurface.ZoomInCommand}" CommandTarget="{Binding ElementName=ObjectGraph}" ToolTip="Zoom in (+)" AutomationProperties.Name="Zoom object graph in"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="Fit" Command="{x:Static p:MemoryGraphSurface.FitGraphCommand}" CommandTarget="{Binding ElementName=ObjectGraph}" ToolTip="Fit (Ctrl+0)" AutomationProperties.Name="Fit object graph"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="Target" Command="{x:Static p:MemoryGraphSurface.CenterFocusCommand}" CommandTarget="{Binding ElementName=ObjectGraph}" ToolTip="Center on the inspected object"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="Restart" Command="{Binding ResetGraphCommand}" ToolTip="Reset: reload the graph without expansions"/>
+     <ToggleButton Style="{StaticResource IconButton}" c:Ui.Icon="Expand" IsChecked="{Binding FocusGraph, Mode=OneWay}" Command="{Binding ToggleGraphFocusCommand}" ToolTip="{Binding GraphFocusLabel}" AutomationProperties.Name="Focus graph" Margin="2,0,0,0"/>
+    </StackPanel>
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowLeft" Command="{Binding BackCommand}" IsEnabled="{Binding CanGoBack}" ToolTip="Back" AutomationProperties.Name="Back"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowRight" Command="{Binding ForwardCommand}" IsEnabled="{Binding CanGoForward}" ToolTip="Forward" AutomationProperties.Name="Forward"/>
+     <TextBlock VerticalAlignment="Center" Margin="8,0,0,0" TextTrimming="CharacterEllipsis">
+      <Run Text="{Binding ObjectTitle, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding GraphSummary, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+     </TextBlock>
+    </StackPanel>
+   </DockPanel>
+  </Border>
+  <p:MemoryGraphSurface x:Name="ObjectGraph" Grid.Row="1" Graph="{Binding Graph}" FocusMode="{Binding FocusGraph}" InspectObjectCommand="{Binding InspectObjectCommand}"
+   ExpandCommand="{Binding ExpandGraphCommand}" SelectedReference="{Binding SelectedReference}" ReleasedObjects="{Binding ReleasedObjects}"
+   SelectedObjectId="{Binding GraphSelectedObjectId}" ShowMinimap="{Binding ShowMinimap}"/>
+  <Border Grid.Row="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" Padding="10,6" CornerRadius="6" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Opacity="0.94" IsHitTestVisible="False">
+   <StackPanel>
+    <WrapPanel TextElement.FontSize="11" TextElement.Foreground="{DynamicResource MutedBrush}">
+     <Border Width="9" Height="9" CornerRadius="5" Background="{DynamicResource WarningBrush}" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="GC root" Margin="0,0,12,0"/>
+     <Border Width="9" Height="9" CornerRadius="5" Background="{DynamicResource AccentBrush}" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Inspected" Margin="0,0,12,0"/>
+     <Border Width="9" Height="9" CornerRadius="5" Background="{DynamicResource SuccessBrush}" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Freed by estimate"/>
+    </WrapPanel>
+    <TextBlock Text="Double-click to inspect · +N shows more neighbours · drag to pan" FontSize="10.5" Foreground="{DynamicResource SubtleBrush}" Margin="0,3,0,0"/>
+   </StackPanel>
+  </Border>
+ </Grid>
+</UserControl>

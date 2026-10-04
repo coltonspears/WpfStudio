@@ -137,7 +137,7 @@ public sealed class HeapAnalysisTests
     {
         var analysis = Analyze(Enumerable.Repeat(10L, 1000).ToArray(),
             Enumerable.Range(1, 999).Select(i => (0, i)).ToArray(), [0]);
-        var graph = analysis.BuildGraph(new(0, MaxNodes: 20));
+        var graph = analysis.BuildGraph(new(0, MaxNodes: 20, MaxChildren: 64));
         Assert.Equal(20, graph.Nodes.Count); Assert.True(graph.IsTruncated);
         Assert.All(graph.References, r => Assert.Contains(graph.Nodes, n => n.Object.Id == r.ToId));
         Assert.Equal(500, analysis.GetObjects(new(Take: int.MaxValue)).Objects.Count);

@@ -1,0 +1,304 @@
+<UserControl x:Class="WpfStudio.App.Features.Profiling.MemoryObjectBrowser"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:p="clr-namespace:WpfStudio.App.Features.Profiling" xmlns:v="clr-namespace:WpfStudio.App.Features.Profiling.Visuals"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="MemoryStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+   <Style x:Key="ValueRun" TargetType="Run">
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+    <Style.Triggers>
+     <DataTrigger Binding="{Binding IsString}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SyntaxString}"/></DataTrigger>
+     <DataTrigger Binding="{Binding IsNumeric}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SyntaxNumber}"/></DataTrigger>
+     <DataTrigger Binding="{Binding IsKeyword}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SyntaxKeyword}"/></DataTrigger>
+     <DataTrigger Binding="{Binding IsReference}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SyntaxType}"/></DataTrigger>
+     <DataTrigger Binding="{Binding IsNull}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SubtleBrush}"/></DataTrigger>
+    </Style.Triggers>
+   </Style>
+   <Style x:Key="InfoBadge" TargetType="Border" BasedOn="{StaticResource Pill}">
+    <Setter Property="Background" Value="{DynamicResource RaisedBrush}"/>
+   </Style>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <Grid Background="{DynamicResource SurfaceBrush}">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+  <!-- History: back, forward and a breadcrumb of recently visited objects -->
+  <Border Style="{StaticResource PaneToolbar}" Padding="6,4">
+   <DockPanel>
+    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowLeft" Command="{Binding BackCommand}" IsEnabled="{Binding CanGoBack}" ToolTip="Back (Alt+Left)" AutomationProperties.Name="Browser back"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowRight" Command="{Binding ForwardCommand}" IsEnabled="{Binding CanGoForward}" ToolTip="Forward (Alt+Right)" AutomationProperties.Name="Browser forward"/>
+    </StackPanel>
+    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Nodes" Command="{Binding ShowViewCommand}" CommandParameter="3" ToolTip="Show this object in the retention graph"/>
+    <ItemsControl ItemsSource="{Binding Trail}" Focusable="False" VerticalAlignment="Center" Margin="4,0" ClipToBounds="True">
+     <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+     <ItemsControl.ItemTemplate>
+      <DataTemplate>
+       <StackPanel Orientation="Horizontal">
+        <c:Glyph x:Name="Sep" Kind="ChevronRight" Width="11" Height="11" Foreground="{DynamicResource SubtleBrush}" VerticalAlignment="Center"/>
+        <Button x:Name="Crumb" Content="{Binding Label}" Style="{StaticResource LinkButton}" Foreground="{DynamicResource MutedBrush}" Padding="4,2" MaxWidth="110"
+         Command="{Binding DataContext.NavigateTrailCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Label}"/>
+       </StackPanel>
+       <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding IsCurrent}" Value="True"><Setter TargetName="Crumb" Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter TargetName="Crumb" Property="FontWeight" Value="SemiBold"/></DataTrigger>
+        <DataTrigger Binding="{Binding RelativeSource={RelativeSource PreviousData}}" Value="{x:Null}"><Setter TargetName="Sep" Property="Visibility" Value="Collapsed"/></DataTrigger>
+       </DataTemplate.Triggers>
+      </DataTemplate>
+     </ItemsControl.ItemTemplate>
+    </ItemsControl>
+   </DockPanel>
+  </Border>
+
+  <!-- Object header -->
+  <StackPanel Grid.Row="1" Margin="12,10,12,6">
+   <TextBlock Text="Select an object anywhere in the profiler to browse it here." Style="{StaticResource Note}" FontSize="12" Visibility="{Binding Details, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
+   <StackPanel Visibility="{Binding Details, Converter={StaticResource Presence}}">
+    <DockPanel>
+     <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Copy" Command="{Binding CopyAddressCommand}" ToolTip="Copy address" Width="24" Height="24"/>
+     <TextBlock Text="{Binding ObjectTitle}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Details.Object.Type}"/>
+    </DockPanel>
+    <TextBlock Text="{Binding ObjectNamespace}" Style="{StaticResource SubtleNote}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="0,1,0,6"/>
+    <WrapPanel Margin="0,0,0,6">
+     <Border Style="{StaticResource InfoBadge}"><TextBlock Text="{Binding Details.Object.Address}" FontFamily="{StaticResource CodeFont}" FontSize="10.5"/></Border>
+     <Border Style="{StaticResource InfoBadge}" ToolTip="{Binding ObjectState}">
+      <Border.Resources>
+       <Style TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+        <Style.Triggers>
+         <DataTrigger Binding="{Binding ReachabilityTone}" Value="Accent"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger>
+         <DataTrigger Binding="{Binding ReachabilityTone}" Value="Success"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+        </Style.Triggers>
+       </Style>
+      </Border.Resources>
+      <TextBlock Text="{Binding ReachabilityBadge}" FontSize="10.5" FontWeight="SemiBold"/>
+     </Border>
+     <Border Style="{StaticResource InfoBadge}"><TextBlock Text="{Binding GenerationBadge}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}"/></Border>
+     <Border Style="{StaticResource InfoBadge}" Visibility="{Binding IsPinnedObject, Converter={StaticResource BooleanToVisibility}}"><TextBlock Text="pinned" FontSize="10.5" Foreground="{DynamicResource WarningBrush}"/></Border>
+    </WrapPanel>
+    <TextBlock Text="{Binding ObjectPreview}" Style="{StaticResource Note}" FontFamily="{StaticResource CodeFont}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding ObjectPreview}" Margin="0,0,0,8"
+     Visibility="{Binding ObjectPreview, Converter={StaticResource Presence}}"/>
+    <Grid>
+     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+     <StackPanel ToolTip="{Binding Details.Object.ShallowBytes, StringFormat={}{0:N0} bytes for the object itself}">
+      <TextBlock Text="Own" Style="{StaticResource Eyebrow}"/>
+      <TextBlock Text="{Binding OwnSize}" FontSize="16" FontWeight="SemiBold"/>
+     </StackPanel>
+     <StackPanel Grid.Column="1" ToolTip="{Binding Details.Object.RetainedBytes, StringFormat={}{0:N0} bytes freed if this object became unreachable}">
+      <TextBlock Text="Retained" Style="{StaticResource Eyebrow}"/>
+      <TextBlock Text="{Binding RetainedSize}" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"/>
+     </StackPanel>
+    </Grid>
+    <v:RatioBar Value="{Binding RetainedShare}" Maximum="1" Margin="0,6,0,3"/>
+    <TextBlock Text="{Binding RetainedShareText}" Style="{StaticResource Note}"/>
+    <TextBlock Text="Reading fields and root paths…" Style="{StaticResource Note}" Margin="0,4,0,0" Visibility="{Binding IsInspecting, Converter={StaticResource BooleanToVisibility}}"/>
+   </StackPanel>
+  </StackPanel>
+
+  <TabControl Grid.Row="2" SelectedIndex="{Binding InspectorTab}" Visibility="{Binding Details, Converter={StaticResource Presence}}">
+   <!-- Fields: an expandable object browser; collections show their elements -->
+   <TabItem Header="Fields">
+    <TreeView ItemsSource="{Binding FieldNodes}" AutomationProperties.Name="Object fields" Margin="0,4,0,0" VirtualizingPanel.ScrollUnit="Pixel">
+     <TreeView.ItemContainerStyle>
+      <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+       <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+       <EventSetter Event="MouseDoubleClick" Handler="FieldDoubleClick"/>
+       <EventSetter Event="KeyDown" Handler="FieldKeyDown"/>
+      </Style>
+     </TreeView.ItemContainerStyle>
+     <TreeView.ItemTemplate>
+      <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+       <Grid ToolTip="{Binding ToolTipText}" Margin="0,1,6,1">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <TextBlock x:Name="Line" TextTrimming="CharacterEllipsis" FontSize="11.5">
+         <Run Text="{Binding Name, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}"/><Run Text=": " Foreground="{DynamicResource SubtleBrush}"/><Run Text="{Binding Value, Mode=OneWay}" Style="{StaticResource ValueRun}"/>
+        </TextBlock>
+        <TextBlock x:Name="Loading" Text="Loading…" FontSize="11.5" Foreground="{DynamicResource SubtleBrush}" Visibility="Collapsed"/>
+        <TextBlock Grid.Column="1" Text="{Binding RetainedText}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+        <Button Grid.Column="2" x:Name="Go" Style="{StaticResource IconButton}" Width="20" Height="20" c:Ui.Icon="ArrowRight" Margin="4,0,0,0" Visibility="Collapsed"
+         Command="{Binding DataContext.OpenNodeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="Open this object"/>
+        <Button Grid.ColumnSpan="3" x:Name="More" Style="{StaticResource LinkButton}" Content="{Binding Name}" Visibility="Collapsed" Padding="0,2"
+         Command="{Binding DataContext.LoadMoreCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+       </Grid>
+       <HierarchicalDataTemplate.Triggers>
+        <DataTrigger Binding="{Binding IsReference}" Value="True"><Setter TargetName="Go" Property="Visibility" Value="Visible"/></DataTrigger>
+        <DataTrigger Binding="{Binding IsMore}" Value="True"><Setter TargetName="More" Property="Visibility" Value="Visible"/><Setter TargetName="Line" Property="Visibility" Value="Collapsed"/></DataTrigger>
+        <DataTrigger Binding="{Binding IsRaw}" Value="True"><Setter TargetName="Line" Property="FontStyle" Value="Italic"/><Setter TargetName="Line" Property="Foreground" Value="{DynamicResource SubtleBrush}"/><Setter TargetName="Go" Property="Visibility" Value="Collapsed"/></DataTrigger>
+        <DataTrigger Binding="{Binding IsPlaceholder}" Value="True"><Setter TargetName="Line" Property="Visibility" Value="Collapsed"/><Setter TargetName="Loading" Property="Visibility" Value="Visible"/></DataTrigger>
+       </HierarchicalDataTemplate.Triggers>
+      </HierarchicalDataTemplate>
+     </TreeView.ItemTemplate>
+    </TreeView>
+   </TabItem>
+
+   <!-- Why is it alive? -->
+   <TabItem Header="Why alive">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+     <StackPanel Margin="10,8,10,10">
+      <TextBlock Text="{Binding WhyAliveSummary}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,10"/>
+      <ItemsControl ItemsSource="{Binding RootPaths}" Focusable="False">
+       <ItemsControl.ItemTemplate>
+        <DataTemplate>
+         <Border Style="{StaticResource Panel}" Padding="10,8" Margin="0,0,0,8">
+          <StackPanel>
+           <DockPanel Margin="0,0,0,6" ToolTip="{Binding FullTitle}">
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Summary}" Style="{StaticResource Note}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+            <Border DockPanel.Dock="Left" Style="{StaticResource Pill}" Background="{DynamicResource WarningSoftBrush}" HorizontalAlignment="Left">
+             <TextBlock Text="{Binding KindText}" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}"/>
+            </Border>
+            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+           </DockPanel>
+           <ItemsControl ItemsSource="{Binding Steps}" Focusable="False">
+            <ItemsControl.ItemTemplate>
+             <DataTemplate>
+              <Grid>
+               <Grid.ColumnDefinitions><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+               <Border x:Name="Rail" Width="2" Background="{DynamicResource StrongBorderBrush}" HorizontalAlignment="Center"/>
+               <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{DynamicResource StrongBorderBrush}" VerticalAlignment="Bottom" Margin="0,0,0,9"/>
+               <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                <TextBlock x:Name="Via" Text="{Binding Via}" FontSize="10.5" Foreground="{DynamicResource WarningBrush}" Margin="4,2,0,0" TextTrimming="CharacterEllipsis"/>
+                <Button x:Name="Target" Content="{Binding TargetShort}" Style="{StaticResource RowButton}" Padding="4,2" HorizontalContentAlignment="Left"
+                 Command="{Binding DataContext.OpenPathStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Target}"/>
+               </StackPanel>
+              </Grid>
+              <DataTemplate.Triggers>
+               <DataTrigger Binding="{Binding Via}" Value=""><Setter TargetName="Via" Property="Visibility" Value="Collapsed"/><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+               <DataTrigger Binding="{Binding IsTarget}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Target" Property="FontWeight" Value="SemiBold"/></DataTrigger>
+              </DataTemplate.Triggers>
+             </DataTemplate>
+            </ItemsControl.ItemTemplate>
+           </ItemsControl>
+          </StackPanel>
+         </Border>
+        </DataTemplate>
+       </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <TextBlock Text="The root search reached a display or traversal limit; other paths may exist." Style="{StaticResource Note}" Foreground="{DynamicResource WarningBrush}" Visibility="{Binding Details.PathsTruncated, Converter={StaticResource BooleanToVisibility}}" Margin="0,0,0,8"/>
+      <TextBlock Text="Exclusive owners" Style="{StaticResource SectionTitle}" Margin="0,6,0,2"/>
+      <TextBlock Text="Every root path passes through these objects, nearest first. Releasing any of them releases this object too." Style="{StaticResource Note}" Margin="0,0,0,6"/>
+      <ItemsControl ItemsSource="{Binding Details.Dominators}" Focusable="False">
+       <ItemsControl.ItemTemplate>
+        <DataTemplate>
+         <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,0,0" Command="{Binding DataContext.InspectObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Id}" ToolTip="{Binding Type}">
+          <DockPanel>
+           <TextBlock DockPanel.Dock="Right" Text="{Binding RetainedBytes, Converter={StaticResource Bytes}}" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"/>
+           <TextBlock Text="{Binding Type}" TextTrimming="CharacterEllipsis"/>
+          </DockPanel>
+         </Button>
+        </DataTemplate>
+       </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <TextBlock Text="Observations" Style="{StaticResource SectionTitle}" Margin="0,10,0,4"/>
+      <ItemsControl ItemsSource="{Binding Details.Evidence}" Focusable="False">
+       <ItemsControl.ItemTemplate>
+        <DataTemplate>
+         <DockPanel Margin="0,0,0,6">
+          <Ellipse Width="4" Height="4" Fill="{DynamicResource MutedBrush}" VerticalAlignment="Top" Margin="2,6,8,0"/>
+          <TextBlock Text="{Binding}" Style="{StaticResource Note}"/>
+         </DockPanel>
+        </DataTemplate>
+       </ItemsControl.ItemTemplate>
+      </ItemsControl>
+     </StackPanel>
+    </ScrollViewer>
+   </TabItem>
+
+   <!-- What it keeps alive, and what removing a reference would free -->
+   <TabItem Header="Keeps alive">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+     <StackPanel Margin="10,8,10,10">
+      <TextBlock Text="{Binding RetainedHeading}" Style="{StaticResource SectionTitle}"/>
+      <TextBlock Text="Everything below would be freed if this object became unreachable." Style="{StaticResource Note}" Margin="0,2,0,8"/>
+      <ItemsControl ItemsSource="{Binding RetainedTypes}" Focusable="False">
+       <ItemsControl.ItemTemplate>
+        <DataTemplate>
+         <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,-6,0" Command="{Binding DataContext.OpenRetainedTypeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Type.Type}">
+          <Grid>
+           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+           <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+           <TextBlock Grid.Column="1" Text="{Binding CountText}" Style="{StaticResource Note}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+           <TextBlock Grid.Column="2" Text="{Binding BytesText}" Margin="8,0,0,0" FontWeight="SemiBold"/>
+           <v:RatioBar Grid.Row="1" Grid.ColumnSpan="3" Value="{Binding Ratio}" Maximum="1" Height="3" Margin="0,4,0,1"/>
+          </Grid>
+         </Button>
+        </DataTemplate>
+       </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <Border Style="{StaticResource Panel}" Margin="0,12,0,0" Padding="12,10">
+       <StackPanel>
+        <TextBlock Text="What if a reference went away?" Style="{StaticResource SectionTitle}"/>
+        <TextBlock Style="{StaticResource Note}" Margin="0,2,0,8" Text="Model removing every owner of this object, or just one slot (pick it in References, the graph, or a root path). Nothing in the app changes."/>
+        <WrapPanel>
+         <Button Content="Remove all owners" c:Ui.Icon="Target" Command="{Binding EstimateObjectCommand}" ToolTip="Model removing every owner and root to this object"/>
+         <Button Content="Remove selected slot" c:Ui.Icon="Link" Command="{Binding EstimateReferenceCommand}" ToolTip="Model removing just the selected reference slot"/>
+        </WrapPanel>
+        <TextBlock Text="{Binding SelectedReference.Label, StringFormat='Selected slot: {0}'}" Style="{StaticResource Note}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" Margin="2,4,0,0"
+         ToolTip="{Binding SelectedReference.Owner}" Visibility="{Binding SelectedReference, Converter={StaticResource Presence}}"/>
+        <StackPanel Margin="0,10,0,0" Visibility="{Binding ReleaseEstimate, Converter={StaticResource Presence}}">
+         <TextBlock Text="{Binding EstimateHeading}" Style="{StaticResource Eyebrow}"/>
+         <TextBlock Text="{Binding EstimateSize}" FontSize="24" FontWeight="SemiBold" Foreground="{DynamicResource SuccessBrush}" ToolTip="{Binding ReleaseEstimate.ReclaimableBytes, StringFormat={}{0:N0} bytes}"/>
+         <TextBlock Text="{Binding ReleaseEstimate.ReclaimableObjects, StringFormat={}{0:N0} objects become eligible for collection}" Style="{StaticResource Note}" Margin="0,0,0,8"/>
+         <Border Background="{DynamicResource WarningSoftBrush}" CornerRadius="6" Padding="8,6" Margin="0,0,0,8" Visibility="{Binding ReleaseEstimate.SelectedObjectRemainsReachable, Converter={StaticResource BooleanToVisibility}}">
+          <StackPanel>
+           <TextBlock Text="The object would still be alive through another path:" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}" FontWeight="SemiBold" FontSize="11.5"/>
+           <ItemsControl ItemsSource="{Binding ReleaseEstimate.RemainingRootPath.References}" Focusable="False" Margin="0,4,0,0">
+            <ItemsControl.ItemTemplate>
+             <DataTemplate>
+              <TextBlock FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding Target}"><Run Text="{Binding Label, Mode=OneWay}" Foreground="{DynamicResource WarningBrush}"/><Run Text=" → "/><Run Text="{Binding Target, Mode=OneWay}"/></TextBlock>
+             </DataTemplate>
+            </ItemsControl.ItemTemplate>
+           </ItemsControl>
+          </StackPanel>
+         </Border>
+         <ItemsControl ItemsSource="{Binding ReleasedTypes}" Focusable="False">
+          <ItemsControl.ItemTemplate>
+           <DataTemplate>
+            <Grid Margin="0,0,0,6">
+             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+             <TextBlock TextTrimming="CharacterEllipsis"><Run Text="{Binding Title, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding CountText, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}" FontSize="11"/></TextBlock>
+             <TextBlock Grid.Column="1" Text="{Binding BytesText}" Margin="8,0,0,0"/>
+             <v:RatioBar Grid.Row="1" Grid.ColumnSpan="2" Value="{Binding Ratio}" Maximum="1" Height="3" Fill="{DynamicResource SuccessBrush}" Margin="0,3,0,0"/>
+            </Grid>
+           </DataTemplate>
+          </ItemsControl.ItemTemplate>
+         </ItemsControl>
+         <TextBlock Text="{Binding ReleaseDescription}" Style="{StaticResource SubtleNote}" Margin="0,6,0,0"/>
+        </StackPanel>
+        <Button Content="Cancel estimate" Style="{StaticResource QuietButton}" Command="{Binding EstimateObjectCancelCommand}" Visibility="{Binding EstimateObjectCommand.IsRunning, Converter={StaticResource BooleanToVisibility}}"/>
+        <Button Content="Cancel slot estimate" Style="{StaticResource QuietButton}" Command="{Binding EstimateReferenceCancelCommand}" Visibility="{Binding EstimateReferenceCommand.IsRunning, Converter={StaticResource BooleanToVisibility}}"/>
+       </StackPanel>
+      </Border>
+     </StackPanel>
+    </ScrollViewer>
+   </TabItem>
+
+   <!-- Raw references for advanced users -->
+   <TabItem Header="References">
+    <Grid Margin="4,6">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <TextBlock Text="{Binding ReferenceCoverage}" Style="{StaticResource Note}"/>
+     <TextBlock Grid.Row="1" Text="Incoming owners and roots" Style="{StaticResource SectionTitle}" FontSize="12" Margin="0,8,0,4"/>
+     <DataGrid Grid.Row="2" ItemsSource="{Binding Details.Incoming}" SelectedItem="{Binding SelectedIncomingReference}" IsReadOnly="True" AutoGenerateColumns="False" MinColumnWidth="60" ScrollViewer.HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="Incoming memory references">
+      <DataGrid.Columns>
+       <DataGridTextColumn Header="Slot" Binding="{Binding Label}" Width="*"/>
+       <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="150"/>
+       <DataGridTemplateColumn Header="" Width="34"><DataGridTemplateColumn.CellTemplate><DataTemplate><Button Style="{StaticResource IconButton}" Width="22" Height="22" c:Ui.Icon="ArrowRight" ToolTip="Open owner" Command="{Binding DataContext.OpenReferenceOwnerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+       <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="100"/>
+      </DataGrid.Columns>
+     </DataGrid>
+     <TextBlock Grid.Row="3" Text="Outgoing references" Style="{StaticResource SectionTitle}" FontSize="12" Margin="0,8,0,4"/>
+     <DataGrid Grid.Row="4" ItemsSource="{Binding Details.Outgoing}" SelectedItem="{Binding SelectedOutgoingReference}" IsReadOnly="True" AutoGenerateColumns="False" MinColumnWidth="60" ScrollViewer.HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="Outgoing memory references">
+      <DataGrid.Columns>
+       <DataGridTextColumn Header="Slot" Binding="{Binding Label}" Width="*"/>
+       <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="150"/>
+       <DataGridTemplateColumn Header="" Width="34"><DataGridTemplateColumn.CellTemplate><DataTemplate><Button Style="{StaticResource IconButton}" Width="22" Height="22" c:Ui.Icon="ArrowRight" ToolTip="Open target" Command="{Binding DataContext.OpenReferenceTargetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+      </DataGrid.Columns>
+     </DataGrid>
+    </Grid>
+   </TabItem>
+  </TabControl>
+ </Grid>
+</UserControl>

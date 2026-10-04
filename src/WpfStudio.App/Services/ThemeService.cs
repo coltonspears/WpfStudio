@@ -54,6 +54,16 @@ public static class ThemeService
         ("SyntaxNumber",          "#EFA07C", "#B2481A"),
         ("SyntaxType",            "#5FCDBE", "#0B7A6E"),
         ("SyntaxAttribute",       "#9CC7FF", "#1F5FB8"),
+        // Categorical data colours (profiler treemaps, generation bars). Fixed order, validated for colour-vision
+        // deficiency on both surfaces; use them for identity only and never for status.
+        ("Chart1Brush",           "#3987E5", "#2A78D6"),
+        ("Chart2Brush",           "#D95926", "#EB6834"),
+        ("Chart3Brush",           "#199E70", "#1BAF7A"),
+        ("Chart4Brush",           "#C98500", "#EDA100"),
+        ("Chart5Brush",           "#D55181", "#E87BA4"),
+        ("Chart6Brush",           "#008300", "#008300"),
+        ("Chart7Brush",           "#9085E9", "#4A3AA7"),
+        ("Chart8Brush",           "#E66767", "#E34948"),
     ];
 
     public static void Apply(string name)

@@ -35,6 +35,16 @@ public sealed class MemoryProfilerEngine : IMemoryProfilerRpc, IDisposable
         Run(() => Snapshot.Analysis.BuildGraph(request, cancellationToken), cancellationToken);
     public Task<MemoryReleaseEstimate> EstimateReleaseAsync(MemoryReleaseRequest request, CancellationToken cancellationToken = default) =>
         Run(() => Snapshot.Analysis.EstimateRelease(request, cancellationToken), cancellationToken);
+    public Task<MemoryGraph> GetNeighborsAsync(MemoryNeighborRequest request, CancellationToken cancellationToken = default) =>
+        Run(() => Snapshot.Analysis.GetNeighbors(request, cancellationToken), cancellationToken);
+    public Task<MemoryDominatorPage> GetDominatorsAsync(MemoryDominatorQuery query, CancellationToken cancellationToken = default) =>
+        Run(() => Snapshot.Analysis.GetDominators(query, cancellationToken), cancellationToken);
+    public Task<MemoryRetainedComposition> GetRetainedAsync(int objectId, CancellationToken cancellationToken = default) =>
+        Run(() => Snapshot.Analysis.GetRetained(objectId, cancellationToken), cancellationToken);
+    public Task<MemoryRetentionFlow> GetRetentionFlowAsync(MemoryFlowRequest request, CancellationToken cancellationToken = default) =>
+        Run(() => Snapshot.Analysis.GetRetentionFlow(request, cancellationToken), cancellationToken);
+    public Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default) =>
+        Run(() => Snapshot.GetChildren(request, cancellationToken), cancellationToken);
     private ClrHeapSnapshot Snapshot => _snapshot ?? throw new InvalidOperationException("Open a memory capture first.");
     private async Task<T> Run<T>(Func<T> action, CancellationToken token)
     {

@@ -7,6 +7,7 @@ using AvalonDock;
 using AvalonDock.Layout;
 using WpfStudio.App;
 using WpfStudio.App.Features.Profiling;
+using WpfStudio.App.Features.Profiling.Visuals;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 
@@ -20,8 +21,9 @@ public sealed partial class ShellSmokeTests
         var tab = manager.Layout.Descendents().OfType<LayoutDocument>().Single(d => d.ContentId == "Profiler");
         var pane = Assert.IsType<MemoryProfilerPane>(tab.Content);
         Assert.Same(shell.MemoryProfiler, pane.DataContext); Assert.Equal("Profiler", shell.ActiveWorkbench);
-        // Exercise the shorter space left by docked tools even in the focused test branch.
-        if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_MEMORY_ONLY") == "1") { pane.Height = 460; await Idle(); }
+        var focused = Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_MEMORY_ONLY") == "1";
+        // The focused run gives the docked workbench a desktop-sized document area for review screenshots.
+        if (focused) { window.Width = 1880; window.Height = 1120; await Idle(); }
         Assert.True(pane.ActualHeight > 300);
         Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-empty.png"));
         var configuration = typeof(ShellSmokeTests).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()!.Configuration;
@@ -34,49 +36,104 @@ public sealed partial class ShellSmokeTests
         {
             Assert.Equal("READY", await fixture.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(20)));
             var model = shell.MemoryProfiler;
+            // Three pages make the fixture's growth and grouping visible.
+            for (var i = 0; i < 2; i++) await Command(fixture, "grow");
             await model.RefreshProcessesCommand.ExecuteAsync(null);
             model.SelectedProcess = model.Processes.Single(p => p.Id == fixture.Id);
             await model.CaptureCommand.ExecuteAsync(null);
             Assert.True(model.HasCapture, model.Status); Assert.True(model.Summary!.IsComplete, model.Status);
-            var pageType = model.Types.Single(t => t.Name == "WpfStudio.RetentionFixture.RetainedPageModel");
-            model.SelectedType = pageType;
-            using var selectionDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            while (model.Details?.Object.Type != pageType.Name || model.IsInspecting) await Task.Delay(20, selectionDeadline.Token);
-            Assert.NotEmpty(model.RootPaths); Assert.Contains(model.Details.Fields, f => f.Name == "CustomerId");
+            Assert.Equal(5, model.Kpis.Count); Assert.NotEmpty(model.GenerationSegments); Assert.NotEmpty(model.CompositionItems);
+            Assert.NotEmpty(model.Summary.TopRetainers!);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            while (model.DominatorRoots.Count == 0 || model.IsInspecting) await Task.Delay(20, deadline.Token);
             await Idle();
+            Assert.Equal(MemoryProfilerViewModel.OverviewView, model.SelectedView);
+            Assert.True(Descendants<MemoryTreemap>(pane).First(t => t.IsVisible).ActualHeight > 200);
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-overview.png"));
+
+            // Types: the Sankey shows the static cache and the static event that keep the pages alive.
+            var pageType = model.Types.Single(t => t.Name == "WpfStudio.RetentionFixture.RetainedPageModel");
+            Assert.Equal(3, pageType.Count);
+            model.OpenTypeCommand.Execute(pageType.Key);
+            Assert.Equal(MemoryProfilerViewModel.TypesView, model.SelectedView);
+            while (model.Details?.Object.Type != pageType.Name || model.IsInspecting || model.Flow is null || model.IsLoadingFlow) await Task.Delay(20, deadline.Token);
+            Assert.Contains(model.Flow!.Nodes, n => n.Kind == "Static" && n.Label.Contains("Cache.Pages"));
+            Assert.Equal(3, model.Flow.Nodes.Single(n => n.Kind == "Target").Count);
+            Assert.NotEmpty(model.RootPaths); Assert.Contains(model.FieldNodes, f => f.Name == "CustomerId");
+            await Idle();
+            var sankey = Descendants<MemorySankey>(pane).Single();
+            Assert.True(sankey.ActualWidth > 300 && sankey.ActualHeight > 150, $"Sankey is {sankey.ActualWidth} × {sankey.ActualHeight}");
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-types.png"));
+            var fields = Descendants<System.Windows.Controls.TreeView>(pane).Single(g => System.Windows.Automation.AutomationProperties.GetName(g) == "Object fields");
+            Assert.True(fields.ActualHeight > 60, $"Object fields tree height is {fields.ActualHeight}");
+            var payload = model.FieldNodes.Single(f => f.Name == "Payload");
+            Assert.True(payload.IsReference);
+            payload.IsExpanded = true;
+            while (payload.IsLoading || payload.Children.Any(c => c.IsPlaceholder)) await Task.Delay(20, deadline.Token);
+            Assert.Contains(payload.Children, c => c.Name == "[0]");
+
+            // Graph: vertical layout with roots on top and a minimap.
+            model.SelectedView = MemoryProfilerViewModel.GraphView; await Idle();
             var graph = Descendants<MemoryGraphSurface>(pane).Single();
-            Assert.True(graph.ActualWidth > 150 && graph.ActualHeight > 120, $"Inline graph is {graph.ActualWidth} × {graph.ActualHeight}");
+            Assert.True(graph.ActualWidth > 300 && graph.ActualHeight > 200, $"Graph is {graph.ActualWidth} × {graph.ActualHeight}");
+            Assert.Contains(model.Graph!.References, r => r.Label.StartsWith("Static "));
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-graph.png"));
+            var owners = model.Graph.Nodes.Count;
+            var focusNode = model.Graph.Nodes.Single(n => n.IsFocus);
+            await model.ExpandGraphCommand.ExecuteAsync(new GraphExpandRequest(focusNode.Object.Id, false));
+            Assert.True(model.Graph.Nodes.Count >= owners);
+            var inlineWidth = graph.ActualWidth;
             model.ToggleGraphFocusCommand.Execute(null); await Idle();
-            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-map.png"));
-            Assert.True(graph.ActualWidth > 650 && graph.ActualHeight > 160, $"Focused graph is {graph.ActualWidth} × {graph.ActualHeight}");
+            Assert.False(model.IsBrowserVisible);
+            Assert.True(graph.ActualWidth >= inlineWidth + 250, $"Focused graph is {graph.ActualWidth} wide; inline it was {inlineWidth}");
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-graph-focus.png"));
             model.ToggleGraphFocusCommand.Execute(null); await Idle();
-            Assert.True(MemoryGraphSurface.FitGraphCommand.CanExecute(null, graph));
             MemoryGraphSurface.FitGraphCommand.Execute(null, graph); await Idle();
             var initialZoom = graph.Zoom;
             MemoryGraphSurface.ZoomInCommand.Execute(null, graph); Assert.True(graph.Zoom > initialZoom);
+
+            // Retention: dominator tree and treemap.
+            model.SelectedView = MemoryProfilerViewModel.RetentionView; await Idle();
+            Assert.NotEmpty(model.RetentionMapItems);
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-retention.png"));
+
+            // Why alive, then the shared-root and exclusive-release estimates.
+            model.SelectedView = MemoryProfilerViewModel.TypesView;
+            await model.InspectObjectCommand.ExecuteAsync(model.Objects[0].Id);
+            model.InspectorTab = MemoryProfilerViewModel.RootsTab; await Idle();
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-roots.png"));
-            model.InspectorTab = 1; await Idle();
-            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-fields.png"));
-            var fields = Descendants<System.Windows.Controls.DataGrid>(pane).Single(g => System.Windows.Automation.AutomationProperties.GetName(g) == "Object fields");
-            Assert.True(fields.ActualHeight > 60, $"Object fields grid height is {fields.ActualHeight}");
-            model.SelectedReference = model.Details.Incoming.First(r => !r.IsRoot && r.Owner.Contains("[]"));
+            model.SelectedReference = model.Details!.Incoming.First(r => !r.IsRoot && r.Owner.Contains("[]"));
             await model.EstimateReferenceCommand.ExecuteAsync(null); await Idle();
             Assert.True(model.ReleaseEstimate!.SelectedObjectRemainsReachable);
             Assert.NotNull(model.ReleaseEstimate.RemainingRootPath);
+            Assert.Equal(MemoryProfilerViewModel.KeepsAliveTab, model.InspectorTab);
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-shared-root.png"));
             await model.EstimateObjectCommand.ExecuteAsync(null); await Idle();
             Assert.True(model.ReleaseEstimate.ReclaimableBytes >= 65_536); Assert.False(model.ReleaseEstimate.SelectedObjectRemainsReachable);
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-release.png"));
-            ThemeService.Apply("Light"); await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-release-light.png"));
+            ThemeService.Apply("Light"); await Idle();
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-release-light.png"));
+            model.SelectedView = MemoryProfilerViewModel.OverviewView; await Idle();
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-overview-light.png"));
+            model.SelectedView = MemoryProfilerViewModel.GraphView; await Idle();
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-graph-light.png"));
             ThemeService.Apply(shell.ThemeName);
+
+            // Baseline comparison: growth shows up as a finding and in the Overview.
             model.SetBaselineCommand.Execute(null);
-            await fixture.StandardInput.WriteLineAsync("grow"); await fixture.StandardInput.FlushAsync();
-            Assert.Equal("DONE", await fixture.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+            await Command(fixture, "grow");
             await model.CaptureCommand.ExecuteAsync(null);
             Assert.Equal(1, model.Types.Single(t => t.Key == pageType.Key).Count - pageType.Count);
-            model.TypeSort = "Growth since baseline"; model.TypeFilter = "RetentionFixture";
+            Assert.Contains(model.Findings, f => f.Insight.Id == "baseline-growth");
+            Assert.Contains(model.GrowthRows, g => g.Type.Key == pageType.Key);
+            model.SelectedView = MemoryProfilerViewModel.OverviewView;
+            while (model.IsInspecting) await Task.Delay(20, deadline.Token);
             await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-comparison.png"));
+            model.TypeSort = "Growth since baseline"; model.TypeFilter = "RetentionFixture"; model.SelectedView = MemoryProfilerViewModel.TypesView;
+            await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-comparison-types.png"));
             model.TypeFilter = "";
+            // A short docked workbench still leaves room for the views and the browser.
+            if (focused) { pane.Height = 460; await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-short.png")); pane.Height = double.NaN; await Idle(); }
             await model.CloseCaptureCommand.ExecuteAsync(null);
             Assert.False(model.HasCapture); Assert.False(fixture.HasExited);
             // Closing/reopening the docked workbench preserves its view model and pinned baseline.
@@ -85,5 +142,11 @@ public sealed partial class ShellSmokeTests
             Assert.Same(pane, manager.Layout.Descendents().OfType<LayoutDocument>().Single(d => d.ContentId == "Profiler").Content);
         }
         finally { if (!fixture.HasExited) fixture.Kill(); }
+
+        static async Task Command(Process process, string command)
+        {
+            await process.StandardInput.WriteLineAsync(command); await process.StandardInput.FlushAsync();
+            Assert.Equal("DONE", await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        }
     }
 }

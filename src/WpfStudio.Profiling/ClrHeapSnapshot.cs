@@ -6,8 +6,10 @@ using WpfStudio.Contracts.Profiling;
 namespace WpfStudio.Profiling;
 
 /// <summary>Owns one immutable OS snapshot or dump and its DAC. Must be accessed serially, in the profiling worker.</summary>
-public sealed class ClrHeapSnapshot : IDisposable
+public sealed partial class ClrHeapSnapshot : IDisposable
 {
+    private static readonly string[] DisposedFieldNames =
+        ["_disposed", "disposed", "_isDisposed", "isDisposed", "m_disposed", "m_isDisposed", "_disposedValue", "disposedValue", "<IsDisposed>k__BackingField", "<Disposed>k__BackingField"];
     private readonly DataTarget _target;
     private readonly ClrRuntime _runtime;
     private readonly Dictionary<ulong, int> _addresses;
@@ -70,19 +72,31 @@ public sealed class ClrHeapSnapshot : IDisposable
             if (target.ClrVersions.Length > 1)
                 notes.Add($"This capture contains {target.ClrVersions.Length} runtimes. The analysis covers runtime index {request.RuntimeIndex} only.");
             var types = new List<HeapType>(); var typeIds = new Dictionary<string, int>(StringComparer.Ordinal);
-            var objects = new List<HeapObject>(); var addresses = new Dictionary<ulong, int>(); long freeBytes = 0;
+            var objects = new List<HeapObject>(); var addresses = new Dictionary<ulong, int>();
+            var extras = new HeapExtras { PointerSize = target.DataReader.PointerSize };
+            var probes = new Dictionary<ulong, TypeProbe>();
+            long stringChars = 0; var stringsScanned = 0;
             foreach (var obj in heap.EnumerateObjects(carefully: true))
             {
                 token.ThrowIfCancellationRequested();
                 if (!obj.IsValid) { Incomplete("Some object headers are missing or invalid."); continue; }
-                if (obj.IsFree) { freeBytes = checked(freeBytes + (long)obj.Size); continue; }
+                if (obj.IsFree)
+                {
+                    extras.FreeBytes = checked(extras.FreeBytes + (long)obj.Size);
+                    if (heap.GetSegmentByAddress(obj.Address)?.GetGeneration(obj.Address) == Generation.Large) extras.LargeFreeBytes += (long)obj.Size;
+                    continue;
+                }
                 if (objects.Count >= request.MaxObjects) { Incomplete($"Object limit reached ({request.MaxObjects:N0}). Increase the analysis budget to include the rest of the heap."); break; }
                 var type = obj.Type!; var name = type.Name ?? "<unknown type>";
                 var module = Path.GetFileName(type.Module.Name ?? "<unknown module>"); var key = module + "|" + name;
                 if (!typeIds.TryGetValue(key, out var typeId)) { typeId = types.Count; typeIds.Add(key, typeId); types.Add(new(key, name, module, obj.IsDelegate)); }
-                addresses.Add(obj.Address, objects.Count);
+                var id = objects.Count;
+                addresses.Add(obj.Address, id);
                 objects.Add(new(obj.Address, typeId, checked((long)obj.Size), heap.GetSegmentByAddress(obj.Address)?.GetGeneration(obj.Address).ToString() ?? "Unknown"));
                 if (heap.IsObjectCorrupted(obj.Address, out _)) Incomplete("Missing or inconsistent object/reference data was detected. Use a full dump for reliable retention estimates.");
+                if (!probes.TryGetValue(type.MethodTable, out var probe)) probes[type.MethodTable] = probe = TypeProbe.For(type, target.DataReader.PointerSize);
+                try { Observe(obj, id, probe); }
+                catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException) { }
             }
             if (objects.Count == 0) notes.Add("No allocated managed objects were enumerated.");
             var staticNames = ReadStaticNames(runtime, token, notes);
@@ -99,7 +113,7 @@ public sealed class ClrHeapSnapshot : IDisposable
                     if (!addresses.TryGetValue(reference.Object.Address, out var to))
                     { if (reference.Object.Address != 0) Incomplete("Some referenced objects were outside the enumerated heap."); continue; }
                     var slot = reference.Offset >= 0 ? obj.Address + (ulong)target.DataReader.PointerSize + (ulong)reference.Offset : 0;
-                    var label = staticNames.TryGetValue(slot, out var staticName) ? staticName : ReferenceLabel(reference);
+                    var label = staticNames.TryGetValue(slot, out var staticName) ? staticName : ReferenceLabel(reference, obj.IsArray, target.DataReader.PointerSize);
                     if (!labelIds.TryGetValue(label, out var labelId)) { labelId = labels.Count; labelIds.Add(label, labelId); labels.Add(label); }
                     edges.Add(new(i, to, labelId, reference.IsDependentHandle));
                 }
@@ -128,21 +142,76 @@ public sealed class ClrHeapSnapshot : IDisposable
             }
             if (runtimeRootCount == 0 && objects.Any(o => o.Generation != nameof(Generation.Frozen)))
                 Incomplete("No runtime GC roots were available. This capture cannot establish collection eligibility for ordinary heap objects.");
+            if (extras.StringsTruncated) notes.Add("Duplicate-string detection compared a bounded sample of strings.");
             var graph = new HeapGraph(objects.ToArray(), types.ToArray(), edges.ToArray(), labels.ToArray(), roots.ToArray(), complete);
             var analysis = new HeapAnalysis(graph, token);
             long reachableBytes = 0, unreachableBytes = 0;
             for (var i = 0; i < objects.Count; i++)
                 if (analysis.Reachable[i]) reachableBytes = checked(reachableBytes + objects[i].Size);
                 else unreachableBytes = checked(unreachableBytes + objects[i].Size);
+            var insights = HeapInsights.Compute(graph, analysis, extras, token);
             var family = info.Flavor == ClrFlavor.Desktop ? ".NET Framework" : ".NET";
             var summary = new HeapSummary(source, $"{family} {info.Version}", target.DataReader.Architecture.ToString(),
                 DateTimeOffset.UtcNow, objects.Count, checked(reachableBytes + unreachableBytes), reachableBytes, unreachableBytes,
-                freeBytes, edges.Count, roots.Count, complete, notes.ToArray(), analysis.SummarizeTypes());
+                extras.FreeBytes, edges.Count, roots.Count, complete, notes.ToArray(), analysis.SummarizeTypes(),
+                analysis.SummarizeGenerations(), analysis.SummarizeRootKinds(), insights, analysis.GetTopRetainers());
             return new(target, runtime, addresses, analysis, summary);
 
             void Incomplete(string note) { complete = false; notes.Add(note); }
+
+            void Observe(ClrObject obj, int id, TypeProbe probe)
+            {
+                if (probe.IsString)
+                {
+                    if (obj.Size > 4096 || stringsScanned >= 2_000_000 || stringChars > 64_000_000 || extras.Strings.Count >= 500_000)
+                    { if (obj.Size > 4096 || extras.Strings.Count >= 500_000 || stringsScanned >= 2_000_000) extras.StringsTruncated = true; return; }
+                    var text = obj.AsString(2048);
+                    if (text is null) return;
+                    stringsScanned++; stringChars += text.Length;
+                    if (!extras.Strings.TryGetValue(text, out var group)) extras.Strings[text] = group = new() { Sample = id };
+                    group.Count++; group.Bytes += (long)obj.Size;
+                }
+                else if (probe.IsReferenceArray)
+                {
+                    var length = obj.AsArray().Length;
+                    if (length >= 32) extras.ReferenceArrayLengths[id] = length;
+                }
+                else if (probe.Disposed is { } field && field.Read<bool>(obj.Address, false))
+                {
+                    extras.Disposed.Add(id);
+                    if (probe.IsWindow) extras.ClosedWindows.Add(id);
+                }
+            }
         }
         catch { runtime?.Dispose(); target.Dispose(); throw; }
+    }
+
+    private sealed class TypeProbe
+    {
+        public ClrInstanceField? Disposed { get; private init; }
+        public bool IsWindow { get; private init; }
+        public bool IsString { get; private init; }
+        public bool IsReferenceArray { get; private init; }
+
+        public static TypeProbe For(ClrType type, int pointerSize)
+        {
+            if (type.IsString) return new() { IsString = true };
+            if (type.IsArray)
+                return new() { IsReferenceArray = type.ComponentType?.IsObjectReference ?? (type.ContainsPointers && type.ComponentSize == pointerSize) };
+            ClrInstanceField? disposed = null;
+            foreach (var name in DisposedFieldNames)
+                if (FindField(type, name) is { ElementType: ClrElementType.Boolean } field) { disposed = field; break; }
+            var window = false;
+            for (var t = type; t is not null && !window; t = t.BaseType) window = t.Name == "System.Windows.Window";
+            return new() { Disposed = disposed, IsWindow = window };
+        }
+    }
+
+    internal static ClrInstanceField? FindField(ClrType? type, string name)
+    {
+        for (var t = type; t is not null; t = t.BaseType)
+            if (t.GetFieldByName(name) is { } field) return field;
+        return null;
     }
 
     private static void ValidateDumpArchitecture(DataTarget target, ClrInfo info)
@@ -185,9 +254,12 @@ public sealed class ClrHeapSnapshot : IDisposable
         return names;
     }
 
-    private static string ReferenceLabel(ClrReference reference)
+    private static string ReferenceLabel(ClrReference reference, bool isArray, int pointerSize)
     {
         if (reference.IsDependentHandle) return "Dependent handle: value retained while key is alive";
+        // Reference-array elements start after the method table and the (pointer-sized) length.
+        if (reference.Field is null && isArray && reference.Offset >= pointerSize && (reference.Offset - pointerSize) % pointerSize == 0)
+            return $"[{(reference.Offset - pointerSize) / pointerSize}]";
         if (reference.Field is null) return $"Array/reference slot +0x{reference.Offset:X}";
         var names = new List<string> { reference.Field.Name ?? "<field>" }; var inner = reference.InnerField;
         while (inner is ClrReference child && names.Count < 8)
@@ -218,7 +290,7 @@ public sealed class ClrHeapSnapshot : IDisposable
                     fields.Add(new(field.Name ?? "<field>", field.Type?.Name ?? field.ElementType.ToString(), text,
                         _addresses.TryGetValue(value.Address, out var childId) ? childId : null));
                 }
-                else fields.Add(new(field.Name ?? "<field>", field.Type?.Name ?? field.ElementType.ToString(), ReadScalar(field, obj.Address)));
+                else fields.Add(new(field.Name ?? "<field>", field.Type?.Name ?? field.ElementType.ToString(), ReadScalar(field, obj.Address, false)));
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
             { fields.Add(new(field.Name ?? "<field>", field.ElementType.ToString(), "<unreadable in this capture>")); }
@@ -226,24 +298,40 @@ public sealed class ClrHeapSnapshot : IDisposable
         return Analysis.Inspect(id, preview, fields, allFields.Length > 128, token);
     }
 
-    private static string ReadScalar(ClrInstanceField field, ulong address) => field.ElementType switch
+    private static string ReadScalar(ClrInstanceField field, ulong address, bool interior)
     {
-        ClrElementType.Boolean => field.Read<bool>(address, false).ToString(),
-        ClrElementType.Char => "'" + field.Read<char>(address, false) + "'",
-        ClrElementType.Int8 => field.Read<sbyte>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.UInt8 => field.Read<byte>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.Int16 => field.Read<short>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.UInt16 => field.Read<ushort>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.Int32 => field.Read<int>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.UInt32 => field.Read<uint>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.Int64 => field.Read<long>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.UInt64 => field.Read<ulong>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.Float => field.Read<float>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.Double => field.Read<double>(address, false).ToString(CultureInfo.InvariantCulture),
-        ClrElementType.NativeInt => "0x" + field.Read<nint>(address, false).ToString("X", CultureInfo.InvariantCulture),
-        ClrElementType.NativeUInt => "0x" + field.Read<nuint>(address, false).ToString("X", CultureInfo.InvariantCulture),
-        _ => "<inline value; reference members appear in outgoing references>"
-    };
+        var text = field.ElementType switch
+        {
+            ClrElementType.Boolean => field.Read<bool>(address, interior) ? "true" : "false",
+            ClrElementType.Char => "'" + field.Read<char>(address, interior) + "'",
+            ClrElementType.Int8 => field.Read<sbyte>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.UInt8 => field.Read<byte>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.Int16 => field.Read<short>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.UInt16 => field.Read<ushort>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.Int32 => field.Read<int>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.UInt32 => field.Read<uint>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.Int64 => field.Read<long>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.UInt64 => field.Read<ulong>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.Float => field.Read<float>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.Double => field.Read<double>(address, interior).ToString(CultureInfo.InvariantCulture),
+            ClrElementType.NativeInt or ClrElementType.Pointer or ClrElementType.FunctionPointer => "0x" + field.Read<nint>(address, interior).ToString("X", CultureInfo.InvariantCulture),
+            ClrElementType.NativeUInt => "0x" + field.Read<nuint>(address, interior).ToString("X", CultureInfo.InvariantCulture),
+            _ => "<inline value; reference members appear in outgoing references>"
+        };
+        return field.Type?.IsEnum == true ? EnumName(field.Type, text) : text;
+    }
+
+    private static string EnumName(ClrType type, string numeric)
+    {
+        try
+        {
+            if (!long.TryParse(numeric, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)) return numeric;
+            foreach (var (name, raw) in type.AsEnum().EnumerateValues())
+                if (raw is not null && Convert.ToInt64(raw, CultureInfo.InvariantCulture) == value) return $"{name} ({numeric})";
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { }
+        return numeric;
+    }
 
     public void Dispose() { _runtime.Dispose(); _target.Dispose(); }
 }

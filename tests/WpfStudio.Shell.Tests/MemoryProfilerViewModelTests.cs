@@ -26,7 +26,7 @@ public sealed class MemoryProfilerViewModelTests
         model.SelectedReference = second.Reference;
         await model.EstimateReferenceCommand.ExecuteAsync(null);
         Assert.Equal(second.Reference.Id, second.LastRelease!.ReferenceId);
-        Assert.Equal(3, model.InspectorTab); Assert.NotNull(model.ReleaseEstimate);
+        Assert.Equal(MemoryProfilerViewModel.KeepsAliveTab, model.InspectorTab); Assert.NotNull(model.ReleaseEstimate);
         await model.EstimateObjectCommand.ExecuteAsync(null);
         Assert.Null(second.LastRelease.ReferenceId);
         model.ClearBaselineCommand.Execute(null);
@@ -104,6 +104,83 @@ public sealed class MemoryProfilerViewModelTests
         Assert.Equal(model.DacPath, profiler.LastCapture.DacPath);
     }
 
+    [Fact]
+    public async Task BrowserHistoryWalksBackAndForwardAndFieldsLoadLazily()
+    {
+        var session = new Session(Summary([Type("Page", 1, 10)]));
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
+        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        Assert.Equal(0, model.Details!.Object.Id);
+        Assert.Equal(2, model.FieldNodes.Count);
+        var owner = model.FieldNodes[1];
+        Assert.True(owner.IsReference); Assert.Single(owner.Children); Assert.True(owner.Children[0].IsPlaceholder);
+        owner.IsExpanded = true;
+        while (owner.IsLoading) await Task.Delay(5);
+        Assert.Equal(new[] { "Name", "Owner" }, owner.Children.Select(c => c.Name));
+        await model.OpenNodeCommand.ExecuteAsync(owner);
+        Assert.Equal(1, model.Details!.Object.Id);
+        await model.InspectObjectCommand.ExecuteAsync(5);
+        Assert.True(model.CanGoBack); Assert.False(model.CanGoForward);
+        Assert.Equal(new[] { 0, 1, 5 }, model.Trail.Select(t => t.Id));
+        await model.BackCommand.ExecuteAsync(null);
+        Assert.Equal(1, model.Details!.Object.Id); Assert.True(model.CanGoForward);
+        await model.BackCommand.ExecuteAsync(null);
+        Assert.Equal(0, model.Details!.Object.Id); Assert.False(model.CanGoBack);
+        await model.ForwardCommand.ExecuteAsync(null);
+        Assert.Equal(1, model.Details!.Object.Id);
+        await model.InspectObjectCommand.ExecuteAsync(9);
+        Assert.False(model.CanGoForward);
+        Assert.NotNull(model.RetainedComposition); Assert.Single(model.RetainedTypes);
+    }
+
+    [Fact]
+    public async Task OverviewFlowAndGraphExpansionFollowTheCapture()
+    {
+        var insight = new MemoryInsight("closed-windows", "Leak", "High", "A closed window is still in memory", "summary", "guidance", 1, 4000,
+            [new("MainWindow", "0x1", 1, 4000, "Page", 3)]);
+        var first = new Session(Summary([Type("Page", 2, 20)]) with { Insights = [insight], Generations = [new("Generation2", 2, 20)] });
+        var second = new Session(Summary([Type("Page", 6, 60)]));
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(first); profiler.Sessions.Enqueue(second);
+        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        Assert.Equal(5, model.Kpis.Count);
+        Assert.Single(model.GenerationSegments);
+        Assert.Equal("closed-windows", Assert.Single(model.Findings).Insight.Id);
+        Assert.NotEmpty(model.CompositionItems);
+        while (model.Flow is null) await Task.Delay(5);
+        Assert.Equal("Page", first.FlowRequests[^1].TypeKey);
+        Assert.Contains("FinalizerQueue", first.FlowRequests[^1].HiddenRootKinds!);
+        model.OpenFindingItemCommand.Execute(model.Findings[0].Items[0]);
+        while (model.Details?.Object.Id != 3) await Task.Delay(5);
+        await model.ExpandGraphCommand.ExecuteAsync(new GraphExpandRequest(3, true));
+        Assert.Contains(model.Graph!.Nodes, n => n.Object.Id == 103);
+        Assert.Single(model.Graph.Nodes, n => n.IsFocus);
+        model.SetBaselineCommand.Execute(null);
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        var growth = Assert.Single(model.Findings, f => f.Insight.Id == "baseline-growth");
+        Assert.Equal(40, growth.Insight.Bytes);
+        Assert.Single(model.GrowthRows);
+        model.OpenGrowthCommand.Execute(model.GrowthRows[0]);
+        Assert.Equal(MemoryProfilerViewModel.TypesView, model.SelectedView);
+        Assert.Equal("Page", model.SelectedType!.Key);
+        model.ShowFinalizerRoots = true;
+        while (second.FlowRequests.Count == 0 || second.FlowRequests[^1].HiddenRootKinds is not null) await Task.Delay(5);
+    }
+
+    [Fact]
+    public void MergedGraphsKeepOneFocusAndOnlyConnectedReferences()
+    {
+        MemoryObjectInfo Obj(int id) => new(id, "0x1", "T", "T", "m", 1, 1, true, "Generation2", false);
+        var current = new MemoryGraph([new(Obj(1), 0, true, false)], [], false, "");
+        var more = new MemoryGraph([new(Obj(1), 0, true, false), new(Obj(2), -1, false, true)],
+            [new(10, 2, 1, "a", "b", "f", "Strong", false, false), new(11, 3, 1, "x", "b", "g", "Strong", false, false)], true, "");
+        var merged = MemoryProfilerViewModel.Merge(current, more);
+        Assert.Equal(2, merged.Nodes.Count); Assert.Single(merged.Nodes, n => n.IsFocus);
+        Assert.Equal(10, Assert.Single(merged.References).Id);
+        Assert.True(merged.IsTruncated);
+    }
+
     private static MemoryTypeSummary Type(string key, int count, long bytes) => new(key, key, "fixture", count, bytes, count, bytes);
     private static HeapSummary Summary(IReadOnlyList<MemoryTypeSummary> types) => new("fixture.dmp", ".NET 10", "X64", DateTimeOffset.UtcNow,
         types.Sum(t => t.Count), types.Sum(t => t.Bytes), types.Sum(t => t.Bytes), 0, 0, 1, 1, true, [], types);
@@ -125,12 +202,35 @@ public sealed class MemoryProfilerViewModelTests
         public Func<MemoryObjectQuery, Task<MemoryObjectPage>>? Query { get; set; }
         public MemoryReferenceInfo Reference { get; } = new(3, 1, 0, "owner", "page", "field", "Strong", false, false);
         public MemoryObjectDetails Detail(int id) => new(Object(id), "value", [], [Reference], [], [], [], [], 1, 0, false, false);
-        private MemoryObjectInfo Object(int id) => new(id, "0x123", "Page", "Page", "fixture", 10, 10, true, "Generation2", false);
+        public MemoryObjectInfo Object(int id) => new(id, "0x123", "Page", "Page", "fixture", 10, 10, true, "Generation2", false);
         public Task<MemoryObjectPage> GetObjectsAsync(MemoryObjectQuery query, CancellationToken cancellationToken = default) => Query?.Invoke(query) ?? Task.FromResult(new MemoryObjectPage(1, [Object(0)]));
         public Task<MemoryObjectDetails> InspectAsync(int objectId, CancellationToken cancellationToken = default) => Inspection?.Invoke(objectId) ?? Task.FromResult(Detail(objectId));
         public Task<MemoryGraph> GetGraphAsync(MemoryGraphRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new MemoryGraph([new(Object(request.ObjectId), 0, true, true)], [], false, "fixture"));
         public Task<MemoryReleaseEstimate> EstimateReleaseAsync(MemoryReleaseRequest request, CancellationToken cancellationToken = default)
         { LastRelease = request; return Task.FromResult(new MemoryReleaseEstimate(10, 1, true, false, "model", [], [0], null)); }
+        public List<MemoryNeighborRequest> NeighborRequests { get; } = [];
+        public Task<MemoryGraph> GetNeighborsAsync(MemoryNeighborRequest request, CancellationToken cancellationToken = default)
+        {
+            NeighborRequests.Add(request);
+            var owner = Object(request.ObjectId + 100);
+            return Task.FromResult(new MemoryGraph([new(Object(request.ObjectId), 0, false, false), new(owner, -1, false, false)],
+                [new(500 + request.ObjectId, owner.Id, request.ObjectId, "owner", "page", "_page", "Strong reference", false, false)], false, "1 owner"));
+        }
+        public Task<MemoryDominatorPage> GetDominatorsAsync(MemoryDominatorQuery query, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MemoryDominatorPage(query.ParentId, query.TypeKey, 1, 10,
+                [new MemoryDominatorNode("Page", "Page", 1, 10, 10, query.ParentId is null ? 1 : 0, Object(query.ParentId is null ? 0 : 7))], 0, 0));
+        public Task<MemoryRetainedComposition> GetRetainedAsync(int objectId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MemoryRetainedComposition(objectId, 10, 1, [new("Page", 1, 10, "Page")], false));
+        public List<MemoryFlowRequest> FlowRequests { get; } = [];
+        public Task<MemoryRetentionFlow> GetRetentionFlowAsync(MemoryFlowRequest request, CancellationToken cancellationToken = default)
+        {
+            FlowRequests.Add(request);
+            return Task.FromResult(new MemoryRetentionFlow("flow", [new(0, 0, "Page", "Page", "Target", 1, 10, "Page", 0), new(1, 1, "Cache.Pages", "Static Cache.Pages", "Static", 1, 10)],
+                [new(1, 0, "", 1, 10)], 1, 1, 0, false));
+        }
+        public Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new MemoryObjectChildren(request.ObjectId, "Object", "{Page}", 2, request.Skip,
+                [new("Name", "System.String", "\"page\"", "Field"), new("Owner", "Owner", "{Owner}", "Field", request.ObjectId + 1, 20, 10, HasChildren: true)]));
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
     }
     private sealed class Files : IFileDialogService

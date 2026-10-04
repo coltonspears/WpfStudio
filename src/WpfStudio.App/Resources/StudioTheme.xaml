@@ -42,6 +42,14 @@
  <SolidColorBrush x:Key="CanvasDotBrush" Color="#24262D"/>
  <SolidColorBrush x:Key="DangerSoftBrush" Color="#3A2327"/>
  <SolidColorBrush x:Key="WarningSoftBrush" Color="#3A3223"/>
+ <SolidColorBrush x:Key="Chart1Brush" Color="#3987E5"/>
+ <SolidColorBrush x:Key="Chart2Brush" Color="#D95926"/>
+ <SolidColorBrush x:Key="Chart3Brush" Color="#199E70"/>
+ <SolidColorBrush x:Key="Chart4Brush" Color="#C98500"/>
+ <SolidColorBrush x:Key="Chart5Brush" Color="#D55181"/>
+ <SolidColorBrush x:Key="Chart6Brush" Color="#008300"/>
+ <SolidColorBrush x:Key="Chart7Brush" Color="#9085E9"/>
+ <SolidColorBrush x:Key="Chart8Brush" Color="#E66767"/>
 
  <FontFamily x:Key="UiFont">Segoe UI</FontFamily>
  <FontFamily x:Key="CodeFont">Cascadia Code, Cascadia Mono, Consolas</FontFamily>
