@@ -18,6 +18,9 @@ public sealed class ShellExperienceTests
         Assert.Equal("Rebuild", test.Shell.PaletteResults.First().Label);
         test.Shell.PaletteQuery = ">zzzz";
         Assert.Empty(test.Shell.PaletteResults);
+        test.Shell.PaletteQuery = ">compare snapshots";
+        Assert.Contains(test.Shell.PaletteResults, entry => entry.Label == "Compare memory snapshots" && entry.Category == "Memory");
+        Assert.Contains(test.Shell.PaletteResults.Take(3), entry => entry.Label == "Compare memory snapshots");
 
         test.Shell.PaletteQuery = "";
         Assert.False(test.Shell.IsCommandPalette);

@@ -10,8 +10,9 @@ namespace WpfStudio.App.Features.Profiling;
 
 /// <summary>Memory investigations are snapshot based. The target is never mutated by an estimate or field inspection.
 /// This file owns capture lifetime; the Overview, Types, Retention, Graph and Browser partials own their views.</summary>
-public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IFileDialogService files) : ObservableObject, IAsyncDisposable
+public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IFileDialogService files, IProcessMemorySampler? sampler = null) : ObservableObject, IAsyncDisposable
 {
+    private readonly IProcessMemorySampler _sampler = sampler ?? new ProcessMemorySampler();
     public const int OverviewView = 0, TypesView = 1, RetentionView = 2, GraphView = 3;
     public const int FieldsTab = 0, RootsTab = 1, KeepsAliveTab = 2, ReferencesTab = 3;
     private readonly CancellationTokenSource _lifetime = new();
@@ -31,7 +32,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     [ObservableProperty] public partial int MaxObjects { get; set; } = 1_000_000;
     [ObservableProperty] public partial int MaxReferences { get; set; } = 6_000_000;
     [ObservableProperty] public partial bool ShowOptions { get; set; }
-    /// <summary>Overview, Types, Retention or Graph.</summary>
+    /// <summary>Overview, Types, Retention, Graph or Snapshots.</summary>
     [ObservableProperty] public partial int SelectedView { get; set; }
     /// <summary>Gives the graph the whole workbench by hiding the object browser.</summary>
     [ObservableProperty, NotifyPropertyChangedFor(nameof(GraphFocusLabel), nameof(IsBrowserVisible))] public partial bool FocusGraph { get; set; }
@@ -55,7 +56,9 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     public string ManagedSize => Summary is { } s ? MemorySize.Format(s.ManagedBytes) : "—";
     public string ReachableSize => Summary is { } s ? MemorySize.Format(s.ReachableBytes) : "—";
     public string UnreachableSize => Summary is { } s ? MemorySize.Format(s.UnreachableBytes) : "—";
-    public string BaselineDescription => _baseline is null ? "No baseline" : $"Baseline {MemorySize.Format(_baseline.ManagedBytes)} · {_baseline.CapturedAt.LocalDateTime:t}";
+    public string BaselineDescription => BaselineSnapshot is { } b
+        ? ReferenceEquals(b, CurrentSnapshot) ? $"Baseline {b.Title} (this snapshot)" : $"vs {b.Title}: {MemorySize.Signed((Summary?.ManagedBytes ?? 0) - b.Summary.ManagedBytes)}"
+        : _baseline is null ? "No baseline" : $"Baseline {MemorySize.Format(_baseline.ManagedBytes)} · {_baseline.CapturedAt.LocalDateTime:t}";
 
     partial void OnSummaryChanged(HeapSummary? value)
     {
@@ -91,6 +94,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
         IMemorySession? pending = null;
         IsBusy = true; BusyMessage = request.DumpPath is null ? "Capturing an immutable heap snapshot…" : "Reading objects, references, and GC roots…";
+        PrepareSnapshotSource(request);
         Status = "Analyzing memory in an isolated worker. Cancel stops this analysis.";
         try
         {
@@ -102,11 +106,11 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
             try
             {
                 Objects.Clear(); SelectedObject = null; SelectedType = null; Details = null; Graph = null; Flow = null; ResetEstimate(); ResetBrowser();
-                DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear(); Summary = _session.Summary;
+                DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear(); Sunburst = null; ResetGroups(); Summary = _session.Summary;
             }
             finally { _updating = false; }
             if (old is not null) await old.DisposeAsync();
-            RefreshTypes(); UpdateComparison(); RefreshOverview();
+            RecordSnapshot(Summary!);
             Status = Summary!.IsComplete ? $"{Summary.ObjectCount:N0} objects and {Summary.RootCount:N0} roots analyzed." +
                 (Summary.Insights is { Count: > 0 } found ? $" {found.Count} finding{(found.Count == 1 ? "" : "s")} to review." : " Select a type or explore what retains the most memory.")
                 : "Analysis completed with incomplete heap coverage. Read the coverage notes before interpreting estimates.";
@@ -123,10 +127,12 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
             _ = LoadDominatorRootsAsync(_lifetime.Token);
             _updating = true; SelectedType = Types.FirstOrDefault(); _updating = false;
             if (SelectedType is not null) _ = LoadFlowAsync(SelectedType.Key, _lifetime.Token);
+            if (IsGrouped) _ = LoadGroupsAsync(_lifetime.Token);
             await QueryObjectsAsync(_lifetime.Token);
             // Start the browser on the biggest owner rather than an arbitrary instance of the largest type.
+            // Prefer an application type: a runtime cache is rarely what someone opening a snapshot wants to see first.
             if (Summary?.TopRetainers is { Count: > 0 } owners && _session is not null)
-                await NavigateAsync(owners[0].Id, Navigation.Replace, _lifetime.Token);
+                await NavigateAsync((owners.FirstOrDefault(o => !MemoryLabels.IsFrameworkModule(o.Module)) ?? owners[0]).Id, Navigation.Replace, _lifetime.Token);
         }
     }
 
@@ -149,7 +155,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     [RelayCommand] private void ToggleOptions() => ShowOptions = !ShowOptions;
     [RelayCommand] private void ToggleGraphFocus() => FocusGraph = !FocusGraph;
     [RelayCommand] private void ToggleBrowser() { if (FocusGraph) FocusGraph = false; else ShowBrowser = !ShowBrowser; }
-    [RelayCommand] private void ShowView(string? view) { if (int.TryParse(view, out var index)) SelectedView = Math.Clamp(index, 0, 3); }
+    [RelayCommand] private void ShowView(string? view) { if (int.TryParse(view, out var index)) SelectedView = Math.Clamp(index, 0, SnapshotsView); }
     [ObservableProperty] public partial string GoToText { get; set; } = "";
 
     /// <summary>Jumps to an object by hexadecimal address, or filters the type list by name.</summary>
@@ -182,16 +188,11 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     [RelayCommand(CanExecute = nameof(CanUseCapture))]
     private void SetBaseline()
     {
-        _baseline = Summary; RefreshTypes(); UpdateComparison(); RefreshOverview();
-        OnPropertyChanged(nameof(HasBaseline)); OnPropertyChanged(nameof(Baseline)); OnPropertyChanged(nameof(BaselineDescription)); ClearBaselineCommand.NotifyCanExecuteChanged();
+        ApplyComparison(CurrentSnapshot, pinned: true);
         Status = "Baseline set. Repeat the workload, then capture again or open a second dump. Comparison uses type counts and bytes, not object addresses.";
     }
     [RelayCommand(CanExecute = nameof(CanClearBaseline))]
-    private void ClearBaseline()
-    {
-        _baseline = null; RefreshTypes(); UpdateComparison(); RefreshOverview();
-        OnPropertyChanged(nameof(HasBaseline)); OnPropertyChanged(nameof(Baseline)); OnPropertyChanged(nameof(BaselineDescription)); ClearBaselineCommand.NotifyCanExecuteChanged();
-    }
+    private void ClearBaseline() => ApplyComparison(null, pinned: false);
     private void UpdateComparison()
     {
         ComparisonDescription = _baseline is null ? "Set a baseline, repeat a workload, then capture again to compare type growth."
@@ -201,15 +202,28 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
                 "Growth highlights candidates; it does not establish a leak or track individual objects across collections.";
     }
 
+    /// <summary>Exports a shareable HTML report, or the raw investigation as JSON when a .json name is chosen.</summary>
     [RelayCommand(CanExecute = nameof(CanUseCapture))]
     private async Task ExportReportAsync()
     {
-        var path = await files.SaveFileAsync("Export memory investigation", "JSON reports|*.json", "memory-investigation.json");
-        if (path is null) return;
+        var path = await files.SaveFileAsync("Export memory investigation", "HTML report|*.html|JSON data|*.json", "memory-report.html");
+        if (path is null || Summary is not { } summary) return;
         try
         {
-            var report = new { Version = 2, Summary, Baseline = _baseline, Object = Details, Graph, Estimate = ReleaseEstimate, Retained = RetainedComposition, Flow };
-            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), _lifetime.Token);
+            string content;
+            if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                var report = new { Version = 3, Summary, Baseline = _baseline, Snapshots = Snapshots.Select(s => new { s.Number, s.SourceName, s.Summary.CapturedAt, s.Summary.ManagedBytes, s.Summary.ReachableBytes, s.Summary.ObjectCount }),
+                    Comparison = ComparisonRows, Object = Details, Graph, Estimate = ReleaseEstimate, Retained = RetainedComposition, Flow, Groups = InstanceGroups };
+                content = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+            }
+            else
+            {
+                var types = Summary.Types.Select(t => new MemoryTypeRow(t, null, null)).ToArray();
+                content = MemoryReport.Html(new(summary, CurrentSnapshot?.SourceName ?? SourceName, Findings.ToArray(), types, Snapshots.ToArray(), CurrentSnapshot,
+                    HasComparison ? BaselineSnapshot : null, HasComparison ? ComparisonRows : [], ComparisonHeadline));
+            }
+            await File.WriteAllTextAsync(path, content, _lifetime.Token);
             Status = "Memory investigation exported to " + path;
         }
         catch (OperationCanceledException) { }
@@ -226,9 +240,10 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         {
             Summary = null; Types.Clear(); Objects.Clear(); SelectedType = null; SelectedObject = null; SelectedReference = null; SelectedIncomingReference = null;
             SelectedOutgoingReference = null; Details = null; Graph = null; Flow = null; ResetEstimate(); ResetBrowser(); TotalObjects = 0;
-            DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear();
+            DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear(); Sunburst = null; ResetGroups();
         }
         finally { _updating = false; }
+        CurrentSnapshot = null; RefreshSnapshotCards(); RefreshComparison();
         if (session is not null) await session.DisposeAsync();
         Status = "Memory capture closed. The target application keeps running.";
     }
@@ -238,7 +253,8 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
-        _disposed = true; _revision++; _lifetime.Cancel(); CancelSelection();
+        _disposed = true; _revision++; StopMonitor(); _lifetime.Cancel(); CancelSelection();
+        if (_sampler is IDisposable owned && sampler is null) owned.Dispose();
         if (_session is not null) await _session.DisposeAsync();
         _session = null; _lifetime.Dispose();
     }

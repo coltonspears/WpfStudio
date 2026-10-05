@@ -45,6 +45,10 @@ public sealed class MemoryProfilerEngine : IMemoryProfilerRpc, IDisposable
         Run(() => Snapshot.Analysis.GetRetentionFlow(request, cancellationToken), cancellationToken);
     public Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default) =>
         Run(() => Snapshot.GetChildren(request, cancellationToken), cancellationToken);
+    public Task<MemoryInstanceGroups> GetInstanceGroupsAsync(MemoryGroupRequest request, CancellationToken cancellationToken = default) =>
+        Run(() => Snapshot.GetInstanceGroups(request, cancellationToken), cancellationToken);
+    public Task<MemorySunburst> GetDominatorTreeAsync(MemoryDominatorTreeRequest request, CancellationToken cancellationToken = default) =>
+        Run(() => Snapshot.Analysis.GetDominatorTree(request, cancellationToken), cancellationToken);
     private ClrHeapSnapshot Snapshot => _snapshot ?? throw new InvalidOperationException("Open a memory capture first.");
     private async Task<T> Run<T>(Func<T> action, CancellationToken token)
     {

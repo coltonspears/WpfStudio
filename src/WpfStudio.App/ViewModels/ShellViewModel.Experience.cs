@@ -230,6 +230,16 @@ public sealed partial class ShellViewModel
             else command.Execute(parameter);
         }, category, shortcut, icon);
 
+    /// <summary>A memory-profiler command: shows the profiler first so the result is visible.</summary>
+    private PaletteEntry MemoryCommand(string label, ICommand command, object? parameter = null, string icon = "", string detail = "")
+        => new(label, detail, async () =>
+        {
+            ShowToolCommand.Execute("Profiler");
+            if (!command.CanExecute(parameter)) { Status = label + " isn't available right now"; return; }
+            if (command is IAsyncRelayCommand asyncCommand) await asyncCommand.ExecuteAsync(parameter);
+            else command.Execute(parameter);
+        }, "Memory", "", icon);
+
     /// <summary>Every shell command, grouped the same way as the menus.</summary>
     private IEnumerable<PaletteEntry> CommandEntries()
     {
@@ -283,6 +293,12 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Debugger", ShowToolCommand, "Debugger", icon: "Bug");
         yield return Command("View", "SQL Server", ShowToolCommand, "Database", icon: "Database");
         yield return Command("Tools", "Memory profiler", ShowToolCommand, "Profiler", icon: "Layers", detail: "Dumps, live snapshots, GC roots and reference-removal estimates");
+        yield return MemoryCommand("Capture memory snapshot", MemoryProfiler.CaptureCommand, icon: "Camera", detail: "Snapshot the selected process's managed heap");
+        yield return MemoryCommand("Open memory dump…", MemoryProfiler.OpenDumpCommand, icon: "FolderOpen");
+        yield return MemoryCommand("Compare memory snapshots", MemoryProfiler.ShowViewCommand, "4", icon: "Timeline", detail: "Live memory, snapshot history and type growth");
+        yield return MemoryCommand("Set memory baseline", MemoryProfiler.SetBaselineCommand, icon: "Baseline");
+        yield return MemoryCommand("Memory: go to type or address", MemoryProfiler.FocusGoToCommand, icon: "Search");
+        yield return MemoryCommand("Export memory report…", MemoryProfiler.ExportReportCommand, icon: "Export", detail: "HTML report or JSON data");
         yield return Command("View", "Dark theme", SetThemeCommand, "Dark", icon: "Moon");
         yield return Command("View", "Light theme", SetThemeCommand, "Light", icon: "Sun");
         yield return Command("View", "Save window layout", SaveLayoutCommand, icon: "Sidebar");

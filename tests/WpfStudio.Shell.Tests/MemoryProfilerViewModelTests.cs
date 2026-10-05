@@ -169,6 +169,91 @@ public sealed class MemoryProfilerViewModelTests
     }
 
     [Fact]
+    public async Task SnapshotHistoryComparesWithThePreviousCaptureAndFlagsSteadyGrowth()
+    {
+        var profiler = new Profiler();
+        foreach (var count in new[] { 2, 4, 7 }) profiler.Sessions.Enqueue(new Session(Summary([Type("Page", count, count * 10L), Type("Stable", 5, 50)])));
+        profiler.Sessions.Enqueue(new Session(Summary([Type("Page", 9, 90), Type("Fresh", 1, 8)])));
+        var files = new Files();
+        await using var model = new MemoryProfilerViewModel(profiler, files, new Sampler());
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        Assert.Single(model.Snapshots); Assert.False(model.HasComparison); Assert.False(model.HasBaseline);
+        Assert.True(model.LeakSteps[1].IsNext);
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        Assert.Same(model.Snapshots[0], model.BaselineSnapshot); Assert.True(model.HasComparison);
+        Assert.Equal(20, Assert.Single(model.ComparisonRows).BytesDelta);
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        // The newest snapshot is compared with the previous one and Page grew in all three.
+        Assert.Same(model.Snapshots[1], model.BaselineSnapshot);
+        var page = Assert.Single(model.ComparisonRows);
+        Assert.True(page.GrowsEveryTime); Assert.Equal("Grows every time", page.Badge); Assert.Equal([20d, 40, 70], page.Trend);
+        var steady = model.Findings[0];
+        Assert.Equal("steady-growth", steady.Insight.Id); Assert.Equal("High", steady.Severity);
+        Assert.Equal("Danger", model.ComparisonTiles.Single(t => t.Label == "Steady growth").Tone);
+        Assert.Equal(3, model.TimelineMarkers.Count);
+        Assert.True(model.Snapshots[2].IsCurrent); Assert.True(model.Snapshots[1].IsBaseline); Assert.True(model.Snapshots[2].IsGrowth);
+
+        // A baseline picked by the user sticks for later captures.
+        model.CompareWithCommand.Execute(model.Snapshots[0]);
+        Assert.Same(model.Snapshots[0], model.BaselineSnapshot);
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        Assert.Same(model.Snapshots[0], model.BaselineSnapshot);
+        Assert.Contains(model.ComparisonRows, r => r.Key == "Fresh" && r.IsNew);
+        Assert.Contains(model.ComparisonRows, r => r.Key == "Stable" && r.IsGone);
+        model.ComparisonFilter = "New";
+        Assert.Equal("Fresh", Assert.Single(model.ComparisonRows).Key);
+        model.RemoveSnapshotCommand.Execute(model.Snapshots[0]);
+        Assert.Null(model.BaselineSnapshot); Assert.Equal(3, model.Snapshots.Count);
+
+        var report = Path.Combine(Path.GetTempPath(), $"memory-report-{Guid.NewGuid():N}.html");
+        try
+        {
+            files.SavePath = report;
+            await model.ExportReportCommand.ExecuteAsync(null);
+            var html = await File.ReadAllTextAsync(report);
+            Assert.Contains("Memory report", html); Assert.Contains("Managed heap across snapshots", html);
+        }
+        finally { File.Delete(report); }
+    }
+
+    [Fact]
+    public async Task GroupsSunburstAndLiveMemoryFollowTheSelection()
+    {
+        var session = new Session(Summary([Type("Page", 3, 30)]));
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
+        var sampler = new Sampler();
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), sampler);
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        model.InstanceGrouping = "Retention";
+        while (model.GroupRows.Count == 0) await Task.Delay(5);
+        Assert.Equal(("Page", "Retention"), (session.GroupRequests[^1].TypeKey, session.GroupRequests[^1].By));
+        Assert.Contains("FinalizerQueue", session.GroupRequests[^1].HiddenRootKinds!);
+        Assert.Equal(["List<Page> · _items"], model.GroupRows[0].Steps);
+        Assert.True(model.GroupRows[0].IsRoot); Assert.True(model.GroupRows[1].IsCollectible);
+        model.InspectGroupCommand.Execute(model.GroupRows[0]);
+        while (model.Details?.Object.Id != 0) await Task.Delay(5);
+        model.InstanceGrouping = "None";
+        Assert.Empty(model.GroupRows);
+
+        while (model.DominatorRoots.Count == 0) await Task.Delay(5);
+        model.RetentionChart = "Sunburst";
+        while (model.Sunburst is null) await Task.Delay(5);
+        Assert.Null(session.TreeRequests[^1].ParentId);
+        await model.OpenSunburstNodeCommand.ExecuteAsync(model.Sunburst.Root.Children);
+        Assert.Equal("o0", model.RetentionFocus!.Key);
+        while (session.TreeRequests.Count < 2) await Task.Delay(5);
+        Assert.Equal(0, session.TreeRequests[^1].ParentId);
+        await model.RetentionUpCommand.ExecuteAsync(null);
+        Assert.Null(model.RetentionFocus);
+
+        await model.RefreshProcessesCommand.ExecuteAsync(null);
+        Assert.NotNull(model.SelectedProcess);
+        model.SampleMemory(); sampler.PrivateBytes = 200 << 20; model.SampleMemory();
+        Assert.Equal(2, model.LiveSamples.Count); Assert.True(model.HasLiveSamples);
+        Assert.Contains("200.00 MiB", model.LiveMemoryText);
+    }
+
+    [Fact]
     public void MergedGraphsKeepOneFocusAndOnlyConnectedReferences()
     {
         MemoryObjectInfo Obj(int id) => new(id, "0x1", "T", "T", "m", 1, 1, true, "Generation2", false);
@@ -184,6 +269,11 @@ public sealed class MemoryProfilerViewModelTests
     private static MemoryTypeSummary Type(string key, int count, long bytes) => new(key, key, "fixture", count, bytes, count, bytes);
     private static HeapSummary Summary(IReadOnlyList<MemoryTypeSummary> types) => new("fixture.dmp", ".NET 10", "X64", DateTimeOffset.UtcNow,
         types.Sum(t => t.Count), types.Sum(t => t.Bytes), types.Sum(t => t.Bytes), 0, 0, 1, 1, true, [], types);
+    private sealed class Sampler : IProcessMemorySampler
+    {
+        public long PrivateBytes { get; set; } = 100 << 20;
+        public ProcessMemorySample? Sample(int processId, long startTimeUtcTicks) => new(DateTimeOffset.Now, PrivateBytes, PrivateBytes / 2);
+    }
     private sealed class Profiler : IMemoryProfiler
     {
         public Queue<IMemorySession> Sessions { get; } = [];
@@ -231,12 +321,29 @@ public sealed class MemoryProfilerViewModelTests
         public Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default) =>
             Task.FromResult(new MemoryObjectChildren(request.ObjectId, "Object", "{Page}", 2, request.Skip,
                 [new("Name", "System.String", "\"page\"", "Field"), new("Owner", "Owner", "{Owner}", "Field", request.ObjectId + 1, 20, 10, HasChildren: true)]));
+        public List<MemoryGroupRequest> GroupRequests { get; } = [];
+        public Task<MemoryInstanceGroups> GetInstanceGroupsAsync(MemoryGroupRequest request, CancellationToken cancellationToken = default)
+        {
+            GroupRequests.Add(request);
+            return Task.FromResult(new MemoryInstanceGroups(request.TypeKey, request.By, 3, 3,
+                [new("Static|Cache.Pages", "Cache.Pages", "Static App.Cache.Pages", "Static", 2, 20, 20, ["Cache.Pages", "List<Page> · _items"], [Object(0), Object(1)]),
+                 new("unrooted", "No GC root", "", "Unrooted", 1, 10, 10, [], [Object(2)])], 0, 0, false, "2 distinct retention paths across 3 instances"));
+        }
+        public List<MemoryDominatorTreeRequest> TreeRequests { get; } = [];
+        public Task<MemorySunburst> GetDominatorTreeAsync(MemoryDominatorTreeRequest request, CancellationToken cancellationToken = default)
+        {
+            TreeRequests.Add(request);
+            var leaf = new MemorySunburstNode("o7", "Page", "Page", "Page", 1, 5, 7, []);
+            var top = new MemorySunburstNode("o0", "Page", "Page", "Page", 1, 10, 0, [leaf]);
+            return Task.FromResult(new MemorySunburst(new("heap", "", "Heap", "", 1, 10, null, [top]), 10, false));
+        }
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
     }
     private sealed class Files : IFileDialogService
     {
         public Task<string?> OpenFileAsync(string title, string filter, string? initialDirectory = null) => Task.FromResult<string?>("fixture.dmp");
         public Task<string?> OpenFolderAsync(string title, string? initialDirectory = null) => Task.FromResult<string?>(null);
-        public Task<string?> SaveFileAsync(string title, string filter, string? suggestedFileName = null) => Task.FromResult<string?>(null);
+        public string? SavePath { get; set; }
+        public Task<string?> SaveFileAsync(string title, string filter, string? suggestedFileName = null) => Task.FromResult(SavePath);
     }
 }

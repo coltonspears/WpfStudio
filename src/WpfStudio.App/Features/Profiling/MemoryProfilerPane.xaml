@@ -1,12 +1,14 @@
 <UserControl x:Class="WpfStudio.App.Features.Profiling.MemoryProfilerPane"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:p="clr-namespace:WpfStudio.App.Features.Profiling" xmlns:c="clr-namespace:WpfStudio.App.Controls"
+ xmlns:v="clr-namespace:WpfStudio.App.Features.Profiling.Visuals"
  Background="{DynamicResource SurfaceBrush}">
  <UserControl.InputBindings>
   <KeyBinding Key="D1" Modifiers="Control" Command="{Binding ShowViewCommand}" CommandParameter="0"/>
   <KeyBinding Key="D2" Modifiers="Control" Command="{Binding ShowViewCommand}" CommandParameter="1"/>
   <KeyBinding Key="D3" Modifiers="Control" Command="{Binding ShowViewCommand}" CommandParameter="2"/>
   <KeyBinding Key="D4" Modifiers="Control" Command="{Binding ShowViewCommand}" CommandParameter="3"/>
+  <KeyBinding Key="D5" Modifiers="Control" Command="{Binding ShowViewCommand}" CommandParameter="4"/>
  </UserControl.InputBindings>
  <UserControl.Resources>
   <ResourceDictionary>
@@ -57,7 +59,7 @@
      <Button Content="Cancel" Command="{Binding CaptureCancelCommand}" Style="{StaticResource QuietButton}" Visibility="{Binding CaptureCommand.IsRunning, Converter={StaticResource BooleanToVisibility}}"/>
     </StackPanel>
     <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
-     <Button Style="{StaticResource IconButton}" c:Ui.Icon="Export" Command="{Binding ExportReportCommand}" ToolTip="Export the investigation as JSON" AutomationProperties.Name="Export report"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="Export" Command="{Binding ExportReportCommand}" ToolTip="Export the investigation as a shareable HTML report, or as JSON data" AutomationProperties.Name="Export report"/>
      <ToggleButton Style="{StaticResource IconButton}" c:Ui.Icon="Settings" IsChecked="{Binding ShowOptions}" ToolTip="Capture options: runtime index, analysis budgets and DAC" AutomationProperties.Name="Capture options"/>
      <Button Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CloseCaptureCommand}" ToolTip="Close the capture (the target keeps running)" AutomationProperties.Name="Close capture"/>
     </StackPanel>
@@ -72,6 +74,7 @@
      <RadioButton Content="Types" c:Ui.Icon="List" Style="{StaticResource ViewTab}" GroupName="MemoryView" IsChecked="{Binding SelectedView, Converter={StaticResource EqualsText}, ConverterParameter=1, Mode=OneWay}" Command="{Binding ShowViewCommand}" CommandParameter="1" ToolTip="Every type, its instances and what keeps them alive (Ctrl+2)"/>
      <RadioButton Content="Retention" c:Ui.Icon="Tree" Style="{StaticResource ViewTab}" GroupName="MemoryView" IsChecked="{Binding SelectedView, Converter={StaticResource EqualsText}, ConverterParameter=2, Mode=OneWay}" Command="{Binding ShowViewCommand}" CommandParameter="2" ToolTip="Dominator tree: which objects own which memory (Ctrl+3)"/>
      <RadioButton Content="Graph" c:Ui.Icon="Nodes" Style="{StaticResource ViewTab}" GroupName="MemoryView" IsChecked="{Binding SelectedView, Converter={StaticResource EqualsText}, ConverterParameter=3, Mode=OneWay}" Command="{Binding ShowViewCommand}" CommandParameter="3" ToolTip="Retention graph of the inspected object (Ctrl+4)"/>
+     <RadioButton Content="{Binding SnapshotsTabText}" c:Ui.Icon="Timeline" Style="{StaticResource ViewTab}" GroupName="MemoryView" IsChecked="{Binding SelectedView, Converter={StaticResource EqualsText}, ConverterParameter=4, Mode=OneWay}" Command="{Binding ShowViewCommand}" CommandParameter="4" ToolTip="Live memory, snapshot history and what changed between snapshots (Ctrl+5)" AutomationProperties.Name="Snapshots"/>
     </StackPanel>
     <TextBox DockPanel.Dock="Left" Width="230" Margin="12,0,0,0" VerticalAlignment="Center" Padding="7,3" MinHeight="26" Text="{Binding GoToText, UpdateSourceTrigger=PropertyChanged}"
      c:Ui.Placeholder="Go to type or 0x address" ToolTip="Type a name to filter types, or a hexadecimal address to open that object (Ctrl+G)" AutomationProperties.Name="Go to type or address" x:Name="GoToBox">
@@ -82,7 +85,7 @@
      <Border Style="{StaticResource Pill}" ToolTip="{Binding CoverageDescription}" Margin="0,0,8,0">
       <StackPanel Orientation="Horizontal">
        <c:Glyph Kind="Warning" Width="12" Height="12" Foreground="{DynamicResource WarningBrush}" Margin="0,0,5,0" Visibility="{Binding IsIncomplete, Converter={StaticResource BooleanToVisibility}}"/>
-       <TextBlock FontSize="11" Foreground="{DynamicResource MutedBrush}"><Run Text="{Binding SourceName, Mode=OneWay}" Foreground="{DynamicResource TextBrush}"/><Run Text=" · "/><Run Text="{Binding SourceDescription, Mode=OneWay}"/></TextBlock>
+       <TextBlock FontSize="11" Foreground="{DynamicResource MutedBrush}" MaxWidth="300" TextTrimming="CharacterEllipsis"><Run Text="{Binding SourceName, Mode=OneWay}" Foreground="{DynamicResource TextBrush}"/><Run Text=" · "/><Run Text="{Binding SourceDescription, Mode=OneWay}"/></TextBlock>
       </StackPanel>
      </Border>
      <Button Content="Set baseline" c:Ui.Icon="Baseline" Style="{StaticResource ToolbarButton}" Command="{Binding SetBaselineCommand}" ToolTip="Pin type totals; capture again after repeating a workload to see what grew"
@@ -90,7 +93,7 @@
      <Border Style="{StaticResource Pill}" Background="{DynamicResource AccentSoftBrush}" Padding="8,1,2,1" Visibility="{Binding HasBaseline, Converter={StaticResource BooleanToVisibility}}" ToolTip="{Binding ComparisonDescription}">
       <StackPanel Orientation="Horizontal">
        <c:Glyph Kind="Baseline" Width="12" Height="12" Foreground="{DynamicResource AccentBrush}" Margin="0,0,5,0"/>
-       <TextBlock Text="{Binding BaselineDescription}" FontSize="11" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"/>
+       <TextBlock Text="{Binding BaselineDescription}" FontSize="11" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" MaxWidth="220" TextTrimming="CharacterEllipsis"/>
        <Button Style="{StaticResource IconButton}" Width="20" Height="20" c:Ui.Icon="Close" Command="{Binding ClearBaselineCommand}" ToolTip="Clear baseline" Margin="4,0,0,0"/>
       </StackPanel>
      </Border>
@@ -124,6 +127,18 @@
    <StackPanel MaxWidth="760" Margin="32,28" HorizontalAlignment="Center" VerticalAlignment="Center">
     <TextBlock Text="Find what keeps memory alive" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap"/>
     <TextBlock Text="Snapshot a running .NET app or open a dump. WpfStudio finds likely leaks, shows what each object keeps alive, and lets you follow any object back to the GC roots that hold it." Foreground="{DynamicResource MutedBrush}" FontSize="13.5" TextWrapping="Wrap" Margin="0,10,0,22"/>
+    <Border Style="{StaticResource Panel}" Margin="0,0,0,18" Padding="14,10,14,8" Visibility="{Binding IsLiveSource, Converter={StaticResource BooleanToVisibility}}">
+     <StackPanel>
+      <DockPanel>
+       <CheckBox DockPanel.Dock="Right" Content="Live" c:Ui.Icon="Eye" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding MonitorMemory}" ToolTip="Sample private bytes and working set every second"/>
+       <c:Glyph Kind="Timeline" Width="16" Height="16" Foreground="{DynamicResource AccentBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+       <TextBlock Text="{Binding TimelineTitle}" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+       <TextBlock Text="{Binding LiveMemoryText}" Style="{StaticResource Note}" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+      </DockPanel>
+      <v:MemoryTimeline Height="120" Margin="0,6,0,0" Samples="{Binding LiveSamples}" Markers="{Binding TimelineMarkers}" WindowSeconds="{Binding TimelineSeconds}" EmptyText="Sampling process memory…" AutomationProperties.Name="Live process memory"/>
+      <TextBlock Style="{StaticResource SubtleNote}" Margin="0,4,0,0" Text="Watch memory while you use the app. If it climbs with each repetition of an action, capture before and after to see which types grew."/>
+     </StackPanel>
+    </Border>
     <UniformGrid Columns="3" Margin="0,0,0,18">
      <Border Style="{StaticResource Panel}" Margin="0,0,8,0">
       <StackPanel>
@@ -152,7 +167,7 @@
       <c:Glyph Kind="Bulb" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Top" DockPanel.Dock="Left"/>
       <StackPanel>
        <TextBlock Text="Hunting a leak?" Style="{StaticResource SectionTitle}"/>
-       <TextBlock Style="{StaticResource Note}" FontSize="12" Margin="0,4,0,0" Text="Capture once and choose Set baseline. Repeat the action you suspect (open and close a window a few times), then capture again. Types that keep growing appear under Findings with the paths that retain them."/>
+       <TextBlock Style="{StaticResource Note}" FontSize="12" Margin="0,4,0,0" Text="Capture once, repeat the action you suspect (open and close a window a few times), then capture again. Each capture is compared with the previous one automatically: Snapshots (Ctrl+5) shows what grew, and types that grow in every snapshot are flagged under Findings with the paths that retain them."/>
       </StackPanel>
      </DockPanel>
     </Border>
@@ -172,6 +187,7 @@
     <p:MemoryTypesView x:Name="TypesView" Visibility="Collapsed"/>
     <p:MemoryRetentionView x:Name="RetentionView" Visibility="Collapsed"/>
     <p:MemoryGraphView x:Name="GraphView" Visibility="Collapsed"/>
+    <p:MemorySnapshotsView x:Name="SnapshotsView" Visibility="Collapsed"/>
    </Grid>
    <GridSplitter Grid.Column="1" Style="{StaticResource SplitterH}" x:Name="BrowserSplitter"/>
    <p:MemoryObjectBrowser Grid.Column="2" x:Name="Browser"/>

@@ -20,17 +20,6 @@
      <DataTrigger Binding="{Binding Severity}" Value="Low"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger>
     </Style.Triggers>
    </Style>
-   <Style x:Key="KpiValue" TargetType="TextBlock">
-    <Setter Property="FontSize" Value="22"/>
-    <Setter Property="FontWeight" Value="SemiBold"/>
-    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-    <Setter Property="Margin" Value="0,3,0,1"/>
-    <Style.Triggers>
-     <DataTrigger Binding="{Binding Tone}" Value="Accent"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger>
-     <DataTrigger Binding="{Binding Tone}" Value="Success"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
-     <DataTrigger Binding="{Binding Tone}" Value="Warning"><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
-    </Style.Triggers>
-   </Style>
   </ResourceDictionary>
  </UserControl.Resources>
  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" x:Name="Scroller">
@@ -109,7 +98,7 @@
               <ItemsControl ItemsSource="{Binding Items}" Focusable="False">
                <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                 <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,0,0" IsEnabled="{Binding CanOpen}"
+                 <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,0,0" IsEnabled="{Binding CanOpen}" p:MemoryMenus.Target="{Binding}"
                   Command="{Binding DataContext.OpenFindingItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="Open">
                   <Grid>
                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -163,7 +152,7 @@
       <ItemsControl ItemsSource="{Binding TopRetainers}" Focusable="False">
        <ItemsControl.ItemTemplate>
         <DataTemplate>
-         <Button Style="{StaticResource RowButton}" Margin="-8,0,-8,0" Command="{Binding DataContext.OpenRetainerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Object.Type}">
+         <Button Style="{StaticResource RowButton}" Margin="-8,0,-8,0" Command="{Binding DataContext.OpenRetainerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Object.Type}" p:MemoryMenus.Target="{Binding}">
           <Grid>
            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -188,7 +177,7 @@
        <ItemsControl ItemsSource="{Binding GrowthRows}" Focusable="False">
         <ItemsControl.ItemTemplate>
          <DataTemplate>
-          <Button Style="{StaticResource RowButton}" Margin="-8,0,-8,0" Command="{Binding DataContext.OpenGrowthCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Type.ToolTipText}">
+          <Button Style="{StaticResource RowButton}" Margin="-8,0,-8,0" Command="{Binding DataContext.OpenGrowthCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Type.ToolTipText}" p:MemoryMenus.Target="{Binding}">
            <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

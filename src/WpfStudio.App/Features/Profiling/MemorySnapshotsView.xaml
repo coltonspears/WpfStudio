@@ -1,0 +1,247 @@
+<UserControl x:Class="WpfStudio.App.Features.Profiling.MemorySnapshotsView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:p="clr-namespace:WpfStudio.App.Features.Profiling" xmlns:v="clr-namespace:WpfStudio.App.Features.Profiling.Visuals"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="MemoryStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+   <Style x:Key="ComparisonOnly" TargetType="FrameworkElement">
+    <Setter Property="Visibility" Value="Collapsed"/>
+    <Style.Triggers><DataTrigger Binding="{Binding HasComparison}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+   </Style>
+   <Style x:Key="DeltaText" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="11.5"/>
+    <Setter Property="HorizontalAlignment" Value="Right"/>
+    <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+    <Style.Triggers>
+     <DataTrigger Binding="{Binding IsGrowing}" Value="True"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger>
+     <DataTrigger Binding="{Binding IsShrinking}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+    </Style.Triggers>
+   </Style>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <Grid>
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+
+  <!-- Live process memory with snapshot markers -->
+  <Border Style="{StaticResource Panel}" Margin="14,12,14,8" Padding="14,8,14,6">
+   <Grid>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <DockPanel>
+     <Border DockPanel.Dock="Right" Style="{StaticResource SegmentHost}" Margin="6,0,0,0" Visibility="{Binding HasLiveSamples, Converter={StaticResource BooleanToVisibility}}" ToolTip="Longest stretch of time to show">
+      <StackPanel Orientation="Horizontal">
+       <RadioButton Content="1 min" Style="{StaticResource Segment}" IsChecked="{Binding TimelineWindow, Converter={StaticResource EqualsText}, ConverterParameter='1 min', Mode=OneWay}" Command="{Binding SetTimelineWindowCommand}" CommandParameter="1 min"/>
+       <RadioButton Content="5 min" Style="{StaticResource Segment}" IsChecked="{Binding TimelineWindow, Converter={StaticResource EqualsText}, ConverterParameter='5 min', Mode=OneWay}" Command="{Binding SetTimelineWindowCommand}" CommandParameter="5 min"/>
+       <RadioButton Content="15 min" Style="{StaticResource Segment}" IsChecked="{Binding TimelineWindow, Converter={StaticResource EqualsText}, ConverterParameter='15 min', Mode=OneWay}" Command="{Binding SetTimelineWindowCommand}" CommandParameter="15 min"/>
+       <RadioButton Content="1 hour" Style="{StaticResource Segment}" IsChecked="{Binding TimelineWindow, Converter={StaticResource EqualsText}, ConverterParameter='1 hour', Mode=OneWay}" Command="{Binding SetTimelineWindowCommand}" CommandParameter="1 hour"/>
+      </StackPanel>
+     </Border>
+     <CheckBox DockPanel.Dock="Right" Content="Live" c:Ui.Icon="Eye" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding MonitorMemory}" Visibility="{Binding IsLiveSource, Converter={StaticResource BooleanToVisibility}}"
+      ToolTip="Sample the selected process's private bytes and working set every second while this pane is visible"/>
+     <c:Glyph Kind="Timeline" Width="16" Height="16" Foreground="{DynamicResource AccentBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+     <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis"><Run Text="{Binding TimelineTitle, Mode=OneWay}" FontSize="13" FontWeight="SemiBold"/><Run Text="   "/><Run Text="{Binding LiveMemoryText, Mode=OneWay}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
+    </DockPanel>
+    <v:MemoryTimeline Grid.Row="1" Height="118" MinHeight="100" Margin="0,4,0,0" Samples="{Binding LiveSamples}" Markers="{Binding TimelineMarkers}" WindowSeconds="{Binding TimelineSeconds}"
+     SelectCommand="{Binding CompareWithCommand}" EmptyText="Choose a running process above to watch its memory live, or capture snapshots to see a trend." AutomationProperties.Name="Memory timeline"/>
+    <WrapPanel Grid.Row="2" Margin="58,0,0,0" TextElement.FontSize="10.5" TextElement.Foreground="{DynamicResource MutedBrush}">
+     <StackPanel Orientation="Horizontal" Margin="0,0,14,0" Visibility="{Binding HasLiveSamples, Converter={StaticResource BooleanToVisibility}}"><Border Width="10" Height="8" CornerRadius="2" Background="{DynamicResource AccentBrush}" Opacity="0.5" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Private bytes"/></StackPanel>
+     <StackPanel Orientation="Horizontal" Margin="0,0,14,0" Visibility="{Binding HasLiveSamples, Converter={StaticResource BooleanToVisibility}}"><Border Width="12" Height="2" Background="{DynamicResource MutedBrush}" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Working set"/></StackPanel>
+     <StackPanel Orientation="Horizontal" Margin="0,0,14,0"><Ellipse Width="8" Height="8" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Snapshot: managed heap"/></StackPanel>
+     <StackPanel Orientation="Horizontal"><Ellipse Width="8" Height="8" Stroke="{DynamicResource WarningBrush}" StrokeThickness="2" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Baseline · click a snapshot to compare with it"/></StackPanel>
+    </WrapPanel>
+   </Grid>
+  </Border>
+
+  <!-- Snapshot history -->
+  <Grid Grid.Row="1" Margin="14,0,14,8">
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+   <DockPanel Margin="0,0,0,6">
+    <CheckBox DockPanel.Dock="Right" Content="Compare with previous capture" c:Ui.Icon="Baseline" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding AutoCompare}"
+     ToolTip="When you capture the same process again, compare the new snapshot with the one before it (unless you picked a baseline)"/>
+    <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis"><Run Text="Snapshots" FontSize="13" FontWeight="SemiBold"/><Run Text="   Click an earlier snapshot to compare the current one with it." FontSize="11" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
+   </DockPanel>
+   <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Focusable="False">
+    <ItemsControl ItemsSource="{Binding Snapshots}" Focusable="False" AutomationProperties.Name="Snapshot history">
+     <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+     <ItemsControl.ItemTemplate>
+      <DataTemplate>
+       <Grid x:Name="Root" Margin="0,0,8,2" Width="156">
+        <Button x:Name="Card" Style="{StaticResource RowButton}" Padding="0" Command="{Binding DataContext.CompareWithCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+         ToolTip="{Binding ToolTipText}" AutomationProperties.Name="{Binding Title}">
+         <Border x:Name="Frame" Background="{DynamicResource EditorBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,7,10,8">
+          <StackPanel>
+           <DockPanel>
+            <Border DockPanel.Dock="Right" x:Name="Tag" CornerRadius="8" Padding="6,0,6,1" Background="{DynamicResource RaisedBrush}" Visibility="Collapsed" VerticalAlignment="Center">
+             <TextBlock x:Name="TagText" FontSize="10" Foreground="{DynamicResource MutedBrush}"/>
+            </Border>
+            <TextBlock FontWeight="SemiBold" FontSize="12"><Run Text="{Binding Title, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding TimeText, Mode=OneWay}" FontWeight="Normal" FontSize="10.5" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
+           </DockPanel>
+           <TextBlock Text="{Binding SizeText}" FontSize="15" FontWeight="SemiBold" Margin="0,3,0,0"/>
+           <TextBlock x:Name="Delta" Text="{Binding DeltaText}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,5" TextTrimming="CharacterEllipsis"/>
+           <v:RatioBar Value="{Binding SizeRatio}" Maximum="1" Height="3" Fill="{DynamicResource MutedBrush}" x:Name="Bar"/>
+          </StackPanel>
+         </Border>
+        </Button>
+        <Button x:Name="Remove" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="20" Height="20" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,5,5,0" Visibility="Collapsed"
+         Command="{Binding DataContext.RemoveSnapshotCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="Remove from history" AutomationProperties.Name="Remove snapshot"/>
+       </Grid>
+       <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding IsGrowth}" Value="True"><Setter TargetName="Delta" Property="Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+        <DataTrigger Binding="{Binding IsBaseline}" Value="True">
+         <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource WarningBrush}"/>
+         <Setter TargetName="Tag" Property="Visibility" Value="Visible"/>
+         <Setter TargetName="TagText" Property="Text" Value="Baseline"/>
+         <Setter TargetName="TagText" Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsCurrent}" Value="True">
+         <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+         <Setter TargetName="Frame" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+         <Setter TargetName="Tag" Property="Visibility" Value="Visible"/>
+         <Setter TargetName="Tag" Property="Background" Value="{DynamicResource AccentBrush}"/>
+         <Setter TargetName="TagText" Property="Text" Value="Viewing"/>
+         <Setter TargetName="TagText" Property="Foreground" Value="{DynamicResource OnAccentBrush}"/>
+         <Setter TargetName="Bar" Property="Fill" Value="{DynamicResource AccentBrush}"/>
+         <Setter TargetName="Card" Property="Cursor" Value="Arrow"/>
+        </DataTrigger>
+        <MultiDataTrigger>
+         <MultiDataTrigger.Conditions>
+          <Condition Binding="{Binding IsMouseOver, ElementName=Root}" Value="True"/>
+          <Condition Binding="{Binding CanCompare}" Value="True"/>
+         </MultiDataTrigger.Conditions>
+         <Setter TargetName="Remove" Property="Visibility" Value="Visible"/>
+         <Setter TargetName="Tag" Property="Visibility" Value="Collapsed"/>
+        </MultiDataTrigger>
+       </DataTemplate.Triggers>
+      </DataTemplate>
+     </ItemsControl.ItemTemplate>
+    </ItemsControl>
+   </ScrollViewer>
+  </Grid>
+
+  <!-- Guided leak hunt until there is something to compare -->
+  <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Visibility="{Binding HasComparison, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+   <Border Style="{StaticResource Panel}" Margin="14,0,14,14" VerticalAlignment="Top">
+    <StackPanel>
+     <DockPanel>
+      <c:Glyph Kind="Leak" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+      <TextBlock Text="Find a leak in four steps" Style="{StaticResource SectionTitle}" FontSize="15" VerticalAlignment="Center"/>
+     </DockPanel>
+     <TextBlock Style="{StaticResource Note}" FontSize="12" Margin="0,6,0,12" Text="Leaks show up as memory that grows every time you repeat an action and never comes back down. Capture before and after repeating it; WpfStudio compares the snapshots type by type and flags anything that grows every time."/>
+     <ItemsControl ItemsSource="{Binding LeakSteps}" Focusable="False">
+      <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+       <DataTemplate>
+        <Border x:Name="Step" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,8,0">
+         <StackPanel>
+          <Grid Width="24" Height="24" HorizontalAlignment="Left">
+           <Ellipse x:Name="Dot" Fill="{DynamicResource RaisedBrush}"/>
+           <TextBlock x:Name="Number" Text="{Binding Number}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+           <c:Glyph x:Name="Done" Kind="Check" Width="14" Height="14" Foreground="{DynamicResource OnAccentBrush}" Visibility="Collapsed"/>
+          </Grid>
+          <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitle}" Margin="0,8,0,3"/>
+          <TextBlock Text="{Binding Detail}" Style="{StaticResource Note}"/>
+         </StackPanel>
+        </Border>
+        <DataTemplate.Triggers>
+         <DataTrigger Binding="{Binding IsNext}" Value="True">
+          <Setter TargetName="Step" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+          <Setter TargetName="Step" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+          <Setter TargetName="Number" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+         </DataTrigger>
+         <DataTrigger Binding="{Binding IsDone}" Value="True">
+          <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource SuccessBrush}"/>
+          <Setter TargetName="Number" Property="Visibility" Value="Collapsed"/>
+          <Setter TargetName="Done" Property="Visibility" Value="Visible"/>
+         </DataTrigger>
+        </DataTemplate.Triggers>
+       </DataTemplate>
+      </ItemsControl.ItemTemplate>
+     </ItemsControl>
+     <TextBlock Style="{StaticResource SubtleNote}" Margin="0,12,0,0" Text="Snapshots never force a garbage collection. Growth in Kept alive (reachable bytes) matters most; uncollected garbage is reported separately."/>
+    </StackPanel>
+   </Border>
+  </ScrollViewer>
+
+  <!-- Comparison -->
+  <Grid Grid.Row="2" Style="{StaticResource ComparisonOnly}" Margin="14,0,14,10">
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <TextBlock Text="{Binding ComparisonHeadline}" FontSize="12.5" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,6"/>
+   <ItemsControl Grid.Row="1" ItemsSource="{Binding ComparisonTiles}" Focusable="False">
+    <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+    <ItemsControl.ItemTemplate>
+     <DataTemplate>
+      <Border Style="{StaticResource Panel}" Margin="0,0,8,8" Padding="11,6,11,7" ToolTip="{Binding ToolTip}">
+       <StackPanel>
+        <DockPanel>
+         <TextBlock Text="{Binding Value}" Style="{StaticResource KpiValue}" FontSize="16" Margin="0" DockPanel.Dock="Right"/>
+         <TextBlock Text="{Binding Label}" Style="{StaticResource Eyebrow}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+        </DockPanel>
+        <TextBlock Text="{Binding Detail}" Style="{StaticResource Note}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+       </StackPanel>
+      </Border>
+     </DataTemplate>
+    </ItemsControl.ItemTemplate>
+   </ItemsControl>
+   <DockPanel Grid.Row="2" LastChildFill="False" Margin="0,2,0,6">
+    <Border DockPanel.Dock="Left" Style="{StaticResource SegmentHost}">
+     <StackPanel Orientation="Horizontal">
+      <RadioButton Content="Changed" Style="{StaticResource Segment}" IsChecked="{Binding ComparisonFilter, Converter={StaticResource EqualsText}, ConverterParameter=Changed, Mode=OneWay}" Command="{Binding SetComparisonFilterCommand}" CommandParameter="Changed" ToolTip="Types whose count or size changed"/>
+      <RadioButton Content="Growing" Style="{StaticResource Segment}" IsChecked="{Binding ComparisonFilter, Converter={StaticResource EqualsText}, ConverterParameter=Growing, Mode=OneWay}" Command="{Binding SetComparisonFilterCommand}" CommandParameter="Growing" ToolTip="Types that gained objects or bytes"/>
+      <RadioButton Content="New" Style="{StaticResource Segment}" IsChecked="{Binding ComparisonFilter, Converter={StaticResource EqualsText}, ConverterParameter=New, Mode=OneWay}" Command="{Binding SetComparisonFilterCommand}" CommandParameter="New" ToolTip="Types that did not exist in the baseline"/>
+      <RadioButton Content="All" Style="{StaticResource Segment}" IsChecked="{Binding ComparisonFilter, Converter={StaticResource EqualsText}, ConverterParameter=All, Mode=OneWay}" Command="{Binding SetComparisonFilterCommand}" CommandParameter="All"/>
+     </StackPanel>
+    </Border>
+    <CheckBox DockPanel.Dock="Left" Content="My code" c:Ui.Icon="Filter" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding ComparisonOnlyMyCode}" Margin="8,0,0,0" ToolTip="Hide runtime, BCL and WPF framework types"/>
+    <TextBox DockPanel.Dock="Left" Width="200" Margin="8,0,0,0" Padding="7,3" MinHeight="26" Text="{Binding ComparisonSearch, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter types" AutomationProperties.Name="Filter compared types" VerticalAlignment="Center"/>
+    <TextBlock DockPanel.Dock="Right" Text="{Binding ComparisonCountText}" Style="{StaticResource Note}" VerticalAlignment="Center"/>
+   </DockPanel>
+   <Grid Grid.Row="3" Margin="12,2,24,4" TextElement.FontSize="10.5" TextElement.Foreground="{DynamicResource MutedBrush}">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="130"/><ColumnDefinition Width="150"/><ColumnDefinition Width="92"/><ColumnDefinition Width="76"/></Grid.ColumnDefinitions>
+    <TextBlock Text="TYPE" FontWeight="SemiBold"/>
+    <TextBlock Grid.Column="1" Text="OBJECTS" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+    <TextBlock Grid.Column="2" Text="CHANGE" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+    <TextBlock Grid.Column="3" Text="BYTES" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+    <TextBlock Grid.Column="4" Text="TREND" FontWeight="SemiBold" HorizontalAlignment="Right" ToolTip="Bytes in each snapshot of this process"/>
+   </Grid>
+   <ListBox Grid.Row="4" x:Name="ComparisonList" ItemsSource="{Binding ComparisonRows}" HorizontalContentAlignment="Stretch" VirtualizingPanel.ScrollUnit="Pixel" AutomationProperties.Name="Type changes"
+    MouseDoubleClick="ComparisonDoubleClick" KeyDown="ComparisonKeyDown">
+    <ListBox.ItemTemplate>
+     <DataTemplate>
+      <Grid ToolTip="{Binding ToolTipText}" p:MemoryMenus.Target="{Binding}">
+       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="130"/><ColumnDefinition Width="150"/><ColumnDefinition Width="92"/><ColumnDefinition Width="76"/></Grid.ColumnDefinitions>
+       <StackPanel Margin="0,0,8,0">
+        <StackPanel Orientation="Horizontal">
+         <TextBlock Text="{Binding ShortName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="360"/>
+         <Border x:Name="Badge" CornerRadius="8" Padding="6,0,6,1" Margin="8,0,0,0" Background="{DynamicResource RaisedBrush}" VerticalAlignment="Center">
+          <TextBlock x:Name="BadgeText" Text="{Binding Badge}" FontSize="10" Foreground="{DynamicResource MutedBrush}"/>
+         </Border>
+        </StackPanel>
+        <TextBlock Text="{Binding Namespace}" Style="{StaticResource SubtleNote}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+       </StackPanel>
+       <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+        <TextBlock Text="{Binding CountDeltaText}" Style="{StaticResource DeltaText}"/>
+        <TextBlock Text="{Binding CountsText}" Style="{StaticResource SubtleNote}" HorizontalAlignment="Right" TextWrapping="NoWrap"/>
+       </StackPanel>
+       <v:DeltaBar Grid.Column="2" Value="{Binding DeltaRatio}" Height="8" Margin="10,0" VerticalAlignment="Center"/>
+       <TextBlock Grid.Column="3" Text="{Binding BytesDeltaText}" Style="{StaticResource DeltaText}" VerticalAlignment="Center"/>
+       <v:Sparkline Grid.Column="4" Values="{Binding Trend}" Width="60" Height="18" HorizontalAlignment="Right" VerticalAlignment="Center" x:Name="Trend"/>
+      </Grid>
+      <DataTemplate.Triggers>
+       <DataTrigger Binding="{Binding Badge}" Value=""><Setter TargetName="Badge" Property="Visibility" Value="Collapsed"/></DataTrigger>
+       <DataTrigger Binding="{Binding Badge}" Value="Grows every time">
+        <Setter TargetName="Badge" Property="Background" Value="{DynamicResource DangerSoftBrush}"/>
+        <Setter TargetName="BadgeText" Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+       </DataTrigger>
+       <DataTrigger Binding="{Binding Badge}" Value="New">
+        <Setter TargetName="Badge" Property="Background" Value="{DynamicResource AccentSoftBrush}"/>
+        <Setter TargetName="BadgeText" Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+       </DataTrigger>
+       <DataTrigger Binding="{Binding IsGrowing}" Value="True"><Setter TargetName="Trend" Property="Stroke" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+       <DataTrigger Binding="{Binding IsShrinking}" Value="True"><Setter TargetName="Trend" Property="Stroke" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+      </DataTemplate.Triggers>
+     </DataTemplate>
+    </ListBox.ItemTemplate>
+   </ListBox>
+  </Grid>
+ </Grid>
+</UserControl>

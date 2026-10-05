@@ -408,7 +408,7 @@ public sealed class MemoryGraphSurface : FrameworkElement
             }
             else _panning = true;
         }
-        else if (e.ChangedButton is MouseButton.Middle or MouseButton.Right) _panning = true;
+        else if (e.ChangedButton is MouseButton.Middle or MouseButton.Right) { _panning = true; _rightDown = point; }
         else return;
         CaptureMouse(); e.Handled = true; InvalidateVisual();
     }
@@ -463,7 +463,19 @@ public sealed class MemoryGraphSurface : FrameworkElement
     }
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
-    { base.OnMouseUp(e); _dragNode = null; _panning = false; _minimapDragging = false; ReleaseMouseCapture(); }
+    {
+        base.OnMouseUp(e);
+        if (e.ChangedButton == MouseButton.Right)
+        {
+            // A right-click without dragging opens the object menu; a right-drag only pans.
+            var point = e.GetPosition(this);
+            var node = (point - _rightDown).Length > 4 ? null : HitNode(World(point));
+            if (node?.Node is { } target) MemoryMenus.SetTarget(this, target.Object);
+            else { MemoryMenus.SetTarget(this, null); e.Handled = true; }
+        }
+        _dragNode = null; _panning = false; _minimapDragging = false; ReleaseMouseCapture();
+    }
+    private Point _rightDown;
     protected override void OnLostMouseCapture(MouseEventArgs e) { base.OnLostMouseCapture(e); _dragNode = null; _panning = false; _minimapDragging = false; }
     protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); if (_hoverNode is not null) { _hoverNode = null; InvalidateVisual(); } }
     protected override void OnMouseWheel(MouseWheelEventArgs e) { base.OnMouseWheel(e); ZoomAt(e.GetPosition(this), e.Delta > 0 ? 1.15 : 1 / 1.15); e.Handled = true; }

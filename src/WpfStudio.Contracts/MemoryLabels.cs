@@ -95,6 +95,12 @@ public static class MemoryLabels
         return dot < 0 ? "<global>" : head[..dot];
     }
 
+    public static string GenerationName(string generation) => generation switch
+    {
+        "Generation0" => "Gen 0", "Generation1" => "Gen 1", "Generation2" => "Gen 2", "Large" => "Large object heap",
+        "Pinned" => "Pinned object heap", "Frozen" => "Frozen", _ => generation
+    };
+
     /// <summary>True for runtime, BCL and WPF assemblies. Leak inspections focus on application types.</summary>
     public static bool IsFrameworkModule(string module)
     {

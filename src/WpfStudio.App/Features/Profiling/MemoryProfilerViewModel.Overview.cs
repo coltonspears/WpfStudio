@@ -49,6 +49,7 @@ public sealed partial class MemoryProfilerViewModel
         foreach (var insight in summary.Insights ?? []) Findings.Add(new(insight));
         var growth = BaselineGrowthInsight();
         if (growth is not null) Findings.Insert(Findings.TakeWhile(f => f.Severity == "High").Count(), new(growth));
+        if (SteadyGrowthInsight() is { } steady) Findings.Insert(0, new(steady));
         var top = summary.TopRetainers ?? [];
         var max = top.Count == 0 ? 1 : Math.Max(1, top.Max(r => r.RetainedBytes));
         TopRetainers = top.Select(r => new RetainerRow(r, (double)r.RetainedBytes / max)).ToArray();

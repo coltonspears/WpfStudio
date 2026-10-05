@@ -50,6 +50,12 @@ public sealed class ClrHeapSnapshotTests
         await Command(fixture, "grow");
         using var grown = ClrHeapSnapshot.Open(request);
         Assert.Equal(2, grown.Summary.Types.Single(t => t.Key == pageType.Key).Count);
+        // Both pages are kept by the same static path; their payloads are identical zero-filled arrays.
+        Assert.Equal(2, Assert.Single(grown.GetInstanceGroups(new(pageType.Key)).Groups).Count);
+        var bytesKey = grown.Summary.Types.Single(t => t.Name == "System.Byte[]").Key;
+        var payloads = Assert.Single(grown.GetInstanceGroups(new(bytesKey, "Value")).Groups, g => g.Kind == "Value" && g.Samples.All(s => s.ShallowBytes >= 65_536));
+        Assert.Equal(2, payloads.Count); Assert.True(payloads.WastedBytes >= 65_536);
+        Assert.Equal("Unique", Assert.Single(grown.GetInstanceGroups(new(pageType.Key, "Value")).Groups).Kind);
         await Command(fixture, "clear");
         using var cleared = ClrHeapSnapshot.Open(request);
         Assert.DoesNotContain(cleared.Summary.Types, t => t.Key == pageType.Key);

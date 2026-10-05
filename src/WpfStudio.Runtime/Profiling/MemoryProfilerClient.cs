@@ -121,6 +121,8 @@ public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfi
         public Task<MemoryRetainedComposition> GetRetainedAsync(int objectId, CancellationToken cancellationToken = default) => CallAsync(p => p.GetRetainedAsync(objectId, cancellationToken), cancellationToken);
         public Task<MemoryRetentionFlow> GetRetentionFlowAsync(MemoryFlowRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.GetRetentionFlowAsync(request, cancellationToken), cancellationToken);
         public Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.GetChildrenAsync(request, cancellationToken), cancellationToken);
+        public Task<MemoryInstanceGroups> GetInstanceGroupsAsync(MemoryGroupRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.GetInstanceGroupsAsync(request, cancellationToken), cancellationToken);
+        public Task<MemorySunburst> GetDominatorTreeAsync(MemoryDominatorTreeRequest request, CancellationToken cancellationToken = default) => CallAsync(p => p.GetDominatorTreeAsync(request, cancellationToken), cancellationToken);
         public ValueTask DisposeAsync()
         {
             lock (_lifetime)

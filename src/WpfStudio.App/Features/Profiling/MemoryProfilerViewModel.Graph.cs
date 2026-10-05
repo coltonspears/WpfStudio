@@ -42,6 +42,7 @@ public sealed partial class MemoryProfilerViewModel
         if (_session is null) return;
         if (Details?.Object.Id is int id) _ = ReloadGraphAsync(id, _lifetime.Token);
         if (SelectedType is { } type) _ = LoadFlowAsync(type.Key, _lifetime.Token);
+        if (InstanceGrouping == "Retention") _ = LoadGroupsAsync(_lifetime.Token);
     }
 
     private void CancelGraph() { _graphRevision++; _graphLoad?.Cancel(); _graphLoad?.Dispose(); _graphLoad = null; IsExpandingGraph = false; }

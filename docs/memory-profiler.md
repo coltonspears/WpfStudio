@@ -10,7 +10,9 @@ Choose **Open dump…** for a full managed-process `.dmp`, or pick a process in 
 
 The process selector shows the **OS working set**. The workbench shows **managed object bytes**. These measure different things: native allocations, mapped files, GC free space, and reserved/committed heap space are not included in managed object sizes. Root reachability describes the captured instant, not a promise about the next collection or the operating system's memory return policy.
 
-After a capture, the second toolbar row switches between four views (**Ctrl+1–4**), shows the snapshot's source, runtime and load time, and holds the baseline controls. **Go to type or 0x address** (**Ctrl+G**) filters the type list by name, or opens the object at a hexadecimal address. Incomplete coverage is shown as a warning banner with the coverage notes. The object browser docks on the right of every view; the sidebar button hides it.
+While a process is selected, the empty workbench shows its **private bytes** and **working set** live (sampled once a second while the profiler is visible; **Live** pauses it), so you can watch memory climb as you use the app before capturing anything.
+
+After a capture, the second toolbar row switches between five views (**Ctrl+1–5**), shows the snapshot's source, runtime and load time, and holds the baseline controls. **Go to type or 0x address** (**Ctrl+G**) filters the type list by name, or opens the object at a hexadecimal address. Incomplete coverage is shown as a warning banner with the coverage notes. The object browser docks on the right of every view; the sidebar button hides it.
 
 ## Overview: findings first
 
@@ -25,7 +27,8 @@ The Overview is the starting point for people new to memory work.
 | Closed windows still in memory | WPF `Window` instances (including subclasses) whose `_disposed` flag is set but that are still reachable. |
 | Disposed objects still referenced | Application types with a set disposed flag (`_disposed`, `disposed`, `_isDisposed`, `disposedValue`, …) that a root still reaches. |
 | Kept alive only by event handlers | Application objects whose immediate dominator is a delegate or a delegate's invocation list: an event subscription is the only owner. |
-| Types that grew since the baseline | Computed in the UI from the pinned baseline: types that gained objects and bytes. |
+| Types that grew in every snapshot | Computed in the UI from three or more snapshots of the same process: types whose instance count rose every time. Application types make it a likely leak. |
+| Types that grew since the baseline | Computed in the UI from the snapshot being compared with: types that gained objects and bytes. |
 | Duplicate strings | String values that occur more than once, with the bytes the extra copies waste. Strings over 4 KB and those beyond the scan budget are not compared. |
 | Mostly empty arrays | Reference arrays of 32+ slots with at most 25% used (oversized or never-trimmed collections). |
 | Finalization only | Objects reachable only through the finalizer queue. |
@@ -45,13 +48,21 @@ The type list can be filtered, sorted (own bytes, retained bytes, largest retain
 Select a type to see:
 
 - **Retention paths**: a Sankey diagram with GC roots and static fields on the left and the type on the right. Each band's width is how many instances (or retained bytes) are held through that owner, and field names label the bands. Every instance contributes its shortest path to each distinct root (up to three; the 1,000 largest instances), so an object held by both a cache and an event subscription shows on both branches. Static fields appear as roots in their own right instead of the runtime `object[]` that stores them. Columns fold to the seven largest owners plus an "other types" node, paths longer than six owners end in "More owners…", and instances with no root are shown in green. Hover a node or band to trace the flow; click a node to open its largest example in the browser; double-click an owner to open its type. The finalizer queue is hidden by default; the **Finalizer queue** and **Stack** toggles include or exclude those roots.
-- **Instances**: objects of the type, largest retained first, with address or type search and paging.
+- **Instances**: objects of the type, largest retained first, with address or type search and paging. **Group by** turns thousands of instances into a handful of groups that are alive for the same reason:
+  - **Retention path**: instances that reach a GC root the same way, shown as a chain (`Cache.Pages › List<Page> · _items › Page[] · […]`). Repeated links (linked lists, trees) collapse into one step marked *repeated*, so lists of any length share a group; very deep chains keep both ends. The group holding the most memory is where a leak accumulates.
+  - **Owner**: the object that exclusively owns each instance (its immediate dominator) and the field it uses.
+  - **Generation**: Gen 0/1/2, the large and pinned object heaps.
+  - **Value**: identical strings, arrays with the same contents, or objects whose fields are all equal (references compare by identity). Each duplicate group shows the bytes the extra copies waste.
+
+  Groups show their count and retained bytes; expand one to see its largest instances. The 20,000 largest instances are grouped.
 
 ## Retention: the dominator tree
 
 The dominator tree answers "who owns this memory?": each object owns everything nested under it, so if it became unreachable all of that would be freed. Sibling instances of one type are grouped (`12 × Byte[]`), each row shows the field or root it is held through, its retained size and share of the heap. At the top level the runtime's statics arrays are replaced by the static fields they store.
 
 The treemap beside the tree shows what the selected node keeps alive. Double-click a rectangle (or a tree row) to drill in; the breadcrumb returns to the heap. Colours follow the type, so the same type keeps its colour as you drill.
+
+**Sunburst** shows the same ownership several levels deep: the focused owner in the centre, what it keeps alive in the first ring, what those keep alive in the next, up to four rings. A segment's angle is its share of its parent's retained bytes, so the gap left in a ring is the parent's own size; owners below 0.4% of the centre fold into a *smaller* segment. Hover a segment to highlight its path, click to inspect it, double-click to drill in (the tree and breadcrumb follow), and click the centre to step back out.
 
 ## Graph: the retention graph
 
@@ -93,13 +104,29 @@ Both operations are simulations. They never change the running application's fie
 
 The estimate concerns managed collection eligibility. Finalization, resurrection, later application activity, unmanaged ownership, and the CLR's heap policy can change eventual reclamation and working-set behavior.
 
-## Compare snapshots and export evidence
+## Snapshots: history, live memory and comparison
 
-Choose **Set baseline**, repeat a workload (for example, open and close a page several times), and capture again or open a second dump. Comparison uses type/module identity, counts, and own bytes. It does not treat addresses as stable object identities across moving collections. Types that disappear remain visible with negative count/byte deltas. Baselines keep aggregate data; the previous worker and native snapshot are released when the new capture succeeds.
+Every capture is kept in the session's snapshot history (up to 30). Only the newest snapshot keeps its worker and native snapshot; earlier ones keep their totals, type counts and findings for comparison. The **Snapshots** view (**Ctrl+5**) is the leak-hunting hub:
 
-Growth appears as a finding, in the Overview's growth list and as a column in the type list (sort by **Growth since baseline**). Open a growing type and check its retention paths; confirm that the operation's expected owner lifetime has ended before treating persistent growth as a leak.
+- **Process memory**: a live chart of the selected process's private bytes (area) and working set (line) with every snapshot marked by its managed heap size. The window (1 minute to 1 hour) is a maximum; a short recording fills the chart. Click a snapshot marker to compare with it. Without a live process (dumps), the chart plots the snapshots' managed heap side by side.
+- **Snapshot cards**: time, managed heap, change since the previous snapshot of the same source, and which one is being viewed or used as the baseline. Click a card to compare with it; hover to remove it from the history.
+- **Comparison**: headline changes (managed heap, kept alive, objects, and how many types grew in every snapshot), then every type's change: objects before → after, a diverging bar of the byte change (growth right in red, shrinkage left in green), and a trend line of its bytes across the process's snapshots. Filter by **Changed**, **Growing**, **New** or **All**, hide framework types, or search. Types that grew in every snapshot are badged and listed first. Double-click a row to open the type.
 
-The export button writes a JSON investigation containing the capture summary (including findings), baseline totals, the selected object's fields/root paths, the visible graph, the retained composition, the type's retention flow and the removal estimate. The report is evidence for review; it is not a reloadable complete heap snapshot. Keep the original dump when another investigator needs to explore other objects.
+When you capture the same process (or dump file) again, the new snapshot is compared with the previous one automatically; turn off **Compare with previous capture** to stop that. **Set baseline**, or clicking a card, pins a baseline that later captures keep comparing with until you clear it. Until there is something to compare, the view shows a four-step guide: capture, repeat the action, capture again, confirm with a third capture.
+
+Comparison uses type/module identity, counts, and own bytes. It does not treat addresses as stable object identities across moving collections. Types that disappear remain visible with negative count/byte deltas.
+
+Growth appears as findings (growth since the baseline, and types that grew in every snapshot), in the Overview's growth list, in the Snapshots view and as a column in the type list (sort by **Growth since baseline**). Open a growing type, group its instances by retention path, and check which path accumulates instances; confirm that the operation's expected owner lifetime has ended before treating persistent growth as a leak.
+
+## Right-click menus and the command palette
+
+Every list of objects or types (type list, instances and groups, findings, largest owners, the dominator tree, the comparison table, the object browser's fields, root paths and retained types) and graph nodes share one right-click menu: **Inspect**, **Why is it alive?**, **What does it keep alive?**, **Show in graph**, **Open** the type, **Retention paths of this type**, **Group instances by retention**, and copy the address, type name, value or retention path. A right-drag on the graph still pans.
+
+The command palette (**Ctrl+Shift+P**) adds **Capture memory snapshot**, **Open memory dump…**, **Compare memory snapshots**, **Set memory baseline**, **Memory: go to type or address** and **Export memory report…**.
+
+## Export evidence
+
+The export button writes a self-contained **HTML report** (headline numbers, generations, findings with their items, the biggest owners, types by retained size, the managed heap across snapshots and the type changes when snapshots were compared) that opens in any browser and can be attached to a bug report. Choose a `.json` file name instead for the raw investigation: the capture summary (including findings), baseline totals, snapshot history, comparison rows, the selected object's fields/root paths, the visible graph, the retained composition, the type's retention flow, instance groups and the removal estimate. Reports are evidence for review; they are not reloadable heap snapshots. Keep the original dump when another investigator needs to explore other objects.
 
 ## Runtime support and analysis budgets
 
@@ -120,17 +147,17 @@ The matching runtime DAC (`mscordacwks.dll` for Framework, `mscordaccore.dll` fo
 
 Default analysis budgets are **1,000,000 objects** and **6,000,000 references**. Capture also reads disposed flags, reference-array lengths and up to 2,000,000 strings (500,000 distinct values, 64 million characters) for the inspections. Options allow up to 5,000,000 objects / 30,000,000 references. Larger limits can require gigabytes of worker memory, especially for large reference arrays; x86 address space is more constrained. Missing/corrupt data, omitted referenced objects/roots, and exhausted graph budgets make coverage incomplete. Estimates then explicitly remain provisional and can overstate reclamation.
 
-The worker retains the full bounded analysis; the UI separately limits graph neighborhoods to 120 objects / 400 references (12 owners and 16 references per hop, expandable 24 at a time), dominator pages to 150 nodes, retention flows to 5,000 instances, object pages to 200, matching type display to 5,000, reference lists to 200 per direction, fields to 128, strings to 200–256 characters, and delegate targets to 20. Root examples traverse at most 50,000 ancestors with 128 slots per displayed path. Display limits do not change full-graph dominator calculations. Follow a neighbor to explore beyond the current map. Root and graph truncation remain part of the inspection/report data.
+The worker retains the full bounded analysis; the UI separately limits graph neighborhoods to 120 objects / 400 references (12 owners and 16 references per hop, expandable 24 at a time), dominator pages to 150 nodes, sunbursts to four rings of 24 owners (3,000 segments), instance groups to 60 groups with 40 example instances over the 20,000 largest instances, retention flows to 5,000 instances, object pages to 200, matching type display to 5,000, reference lists to 200 per direction, fields to 128, strings to 200–256 characters, and delegate targets to 20. Root examples traverse at most 50,000 ancestors with 128 slots per displayed path. Display limits do not change full-graph dominator calculations. Follow a neighbor to explore beyond the current map. Root and graph truncation remain part of the inspection/report data.
 
 Opening/loading a capture has a five-minute worker deadline; queries have a one-minute deadline. A timeout closes the owned worker and requires reopening the capture. Failed/cancelled replacement captures preserve the previous successful session. Closing WpfStudio disposes the active worker and native snapshot. Normal shutdown disconnects and waits for native snapshot cleanup and file-handle release; an unresponsive worker is terminated after the shutdown deadline.
 
 ## Validation
 
-`WpfStudio.Profiling.Tests` exercises shared ownership, parallel slots, multiple roots, rooted/unrooted cycles, dependent handles, permanent frozen roots, incomplete coverage, a 100,000-object chain, and randomized graphs against an independent reachability oracle. Its real-process tests capture and load full dumps from .NET 10 and Framework 4.8 fixtures, including frozen string-literal eligibility. `HeapExplorationTests` cover retention flows (static fields shown as roots, instances held by two statics on both branches, hidden root kinds, column folding and flow conservation), dominator pages (sibling grouping, statics holders replaced by their fields), non-double-counted type retention, retained composition, root-path ordering, graph neighbourhoods, every automatic inspection, and label shortening.
+`WpfStudio.Profiling.Tests` exercises shared ownership, parallel slots, multiple roots, rooted/unrooted cycles, dependent handles, permanent frozen roots, incomplete coverage, a 100,000-object chain, and randomized graphs against an independent reachability oracle. Its real-process tests capture and load full dumps from .NET 10 and Framework 4.8 fixtures, including frozen string-literal eligibility, retention grouping and value grouping of identical arrays. `HeapExplorationTests` cover instance grouping (retention paths, owners, generations, repeated-link collapsing, hidden roots, budgets), the nested dominator tree behind the sunburst (tree-compatible keys, group drill-in, folding), retention flows (static fields shown as roots, instances held by two statics on both branches, hidden root kinds, column folding and flow conservation), dominator pages (sibling grouping, statics holders replaced by their fields), non-double-counted type retention, retained composition, root-path ordering, graph neighbourhoods, every automatic inspection, and label shortening.
 
-`WpfStudio.Shell.Tests` exercises worker IPC against x64 .NET and x86 Framework processes and full dumps (including the packaged self-contained x86 worker), incompatible WOW64 recovery, baseline disappearance, capture cancellation/failure, stale/empty selection results, and worker disposal without terminating targets or leaving dump files locked. View-model tests cover browser back/forward history and lazy field expansion, findings and baseline growth, retention-flow root filters, graph expansion merging, and type navigation.
+`WpfStudio.Shell.Tests` exercises worker IPC against x64 .NET and x86 Framework processes and full dumps (including the packaged self-contained x86 worker), incompatible WOW64 recovery, baseline disappearance, capture cancellation/failure, stale/empty selection results, and worker disposal without terminating targets or leaving dump files locked. View-model tests cover browser back/forward history and lazy field expansion, findings and baseline growth, snapshot history (automatic comparison with the previous capture, pinned baselines, steady growth, new and gone types, removal), the HTML report, instance groups, sunburst drill-in, live memory samples, retention-flow root filters, graph expansion merging, and type navigation.
 
-The WPF smoke test exercises real capture, the Overview (KPIs, generations, findings, treemap), the type Sankey (static cache and static event roots), collection expansion in the field tree, the vertical graph with expansion, focus, fit and zoom, the dominator tree and treemap, root paths, shared-root and exclusive-release estimates, baseline growth, a short docked layout, docking reuse, light/dark rendering, and zero binding errors. Screenshots are written to `artifacts/screenshots/memory-*.png`. For a focused run (which also enlarges the window for review screenshots):
+The WPF smoke test exercises the live memory chart before capture, real capture, right-click menus, retention and value grouping, the sunburst, the Snapshots view with three captures and steady growth, the Overview (KPIs, generations, findings, treemap), the type Sankey (static cache and static event roots), collection expansion in the field tree, the vertical graph with expansion, focus, fit and zoom, the dominator tree and treemap, root paths, shared-root and exclusive-release estimates, baseline growth, a short docked layout, docking reuse, light/dark rendering, and zero binding errors. Screenshots are written to `artifacts/screenshots/memory-*.png`. For a focused run (which also enlarges the window for review screenshots):
 
 ```powershell
 $env:WPFSTUDIO_TEST_MEMORY_ONLY = '1'

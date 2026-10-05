@@ -17,11 +17,7 @@ public static class MemorySize
 
     public static string Signed(long bytes) => bytes > 0 ? "+" + Format(bytes) : Format(bytes);
 
-    public static string Generation(string generation) => generation switch
-    {
-        "Generation0" => "Gen 0", "Generation1" => "Gen 1", "Generation2" => "Gen 2", "Large" => "Large object heap",
-        "Pinned" => "Pinned object heap", "Frozen" => "Frozen", _ => generation
-    };
+    public static string Generation(string generation) => MemoryLabels.GenerationName(generation);
 
     public static string GenerationShort(string generation) => generation switch
     {
@@ -33,6 +29,16 @@ public sealed class MemorySizeConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
         value is long size ? MemorySize.Format(size) : value is int count ? MemorySize.Format(count) : "—";
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
+}
+
+/// <summary>"Generation2" becomes "Gen 2", "Large" becomes "LOH", for compact object rows.</summary>
+public sealed class GenerationTextConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) => value is string generation ? MemorySize.GenerationShort(generation) switch
+    {
+        "Gen0" => "Gen 0", "Gen1" => "Gen 1", "Gen2" => "Gen 2", var other => other
+    } : "";
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => Binding.DoNothing;
 }
 

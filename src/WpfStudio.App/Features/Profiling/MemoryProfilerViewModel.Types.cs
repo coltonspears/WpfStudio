@@ -42,6 +42,7 @@ public sealed partial class MemoryProfilerViewModel
         if (_updating) return;
         _skip = 0; QueueQuery();
         if (value is not null) _ = LoadFlowAsync(value.Key, _lifetime.Token); else { CancelFlow(); Flow = null; }
+        if (IsGrouped) _ = LoadGroupsAsync(_lifetime.Token);
     }
     partial void OnObjectFilterChanged(string value) { if (!_updating) { _skip = 0; QueueQuery(); } }
     partial void OnTypeFilterChanged(string value) => RefreshTypes();

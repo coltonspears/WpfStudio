@@ -108,7 +108,7 @@
      </TreeView.ItemContainerStyle>
      <TreeView.ItemTemplate>
       <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-       <Grid ToolTip="{Binding ToolTipText}" Margin="0,1,6,1">
+       <Grid ToolTip="{Binding ToolTipText}" Margin="0,1,6,1" p:MemoryMenus.Target="{Binding}">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <TextBlock x:Name="Line" TextTrimming="CharacterEllipsis" FontSize="11.5">
          <Run Text="{Binding Name, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}"/><Run Text=": " Foreground="{DynamicResource SubtleBrush}"/><Run Text="{Binding Value, Mode=OneWay}" Style="{StaticResource ValueRun}"/>
@@ -157,7 +157,7 @@
                <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{DynamicResource StrongBorderBrush}" VerticalAlignment="Bottom" Margin="0,0,0,9"/>
                <StackPanel Grid.Column="1" Margin="6,0,0,0">
                 <TextBlock x:Name="Via" Text="{Binding Via}" FontSize="10.5" Foreground="{DynamicResource WarningBrush}" Margin="4,2,0,0" TextTrimming="CharacterEllipsis"/>
-                <Button x:Name="Target" Content="{Binding TargetShort}" Style="{StaticResource RowButton}" Padding="4,2" HorizontalContentAlignment="Left"
+                <Button x:Name="Target" Content="{Binding TargetShort}" Style="{StaticResource RowButton}" Padding="4,2" HorizontalContentAlignment="Left" p:MemoryMenus.Target="{Binding}"
                  Command="{Binding DataContext.OpenPathStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Target}"/>
                </StackPanel>
               </Grid>
@@ -212,7 +212,7 @@
       <ItemsControl ItemsSource="{Binding RetainedTypes}" Focusable="False">
        <ItemsControl.ItemTemplate>
         <DataTemplate>
-         <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,-6,0" Command="{Binding DataContext.OpenRetainedTypeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Type.Type}">
+         <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,-6,0" Command="{Binding DataContext.OpenRetainedTypeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Type.Type}" p:MemoryMenus.Target="{Binding}">
           <Grid>
            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

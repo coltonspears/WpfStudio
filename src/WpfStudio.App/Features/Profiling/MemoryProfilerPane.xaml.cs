@@ -4,7 +4,7 @@ using System.Windows.Controls;
 
 namespace WpfStudio.App.Features.Profiling;
 
-/// <summary>Hosts the four profiler views and the docked object browser. View switching and the browser column are
+/// <summary>Hosts the five profiler views and the docked object browser. View switching and the browser column are
 /// handled here because they are pure layout; all state lives in <see cref="MemoryProfilerViewModel"/>.</summary>
 public partial class MemoryProfilerPane : UserControl
 {
@@ -16,6 +16,8 @@ public partial class MemoryProfilerPane : UserControl
         InitializeComponent();
         DataContextChanged += (_, e) => Attach(e.NewValue as MemoryProfilerViewModel);
         Loaded += (_, _) => { Attach(DataContext as MemoryProfilerViewModel); Apply(); };
+        // Live memory sampling runs only while the profiler is on screen.
+        IsVisibleChanged += (_, _) => { if (_model is not null) _model.IsMonitorActive = IsVisible; };
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == System.Windows.Input.Key.G && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control && _model?.HasCapture == true)
@@ -29,6 +31,8 @@ public partial class MemoryProfilerPane : UserControl
         };
     }
 
+    private void FocusGoTo() => Dispatcher.BeginInvoke(() => { GoToBox.Focus(); GoToBox.SelectAll(); }, System.Windows.Threading.DispatcherPriority.Input);
+
     private void ProcessesOpened(object? sender, EventArgs e)
     {
         // Keep the list current without a separate click; the selection is preserved by process identity.
@@ -39,9 +43,9 @@ public partial class MemoryProfilerPane : UserControl
     private void Attach(MemoryProfilerViewModel? model)
     {
         if (ReferenceEquals(model, _model)) return;
-        if (_model is not null) _model.PropertyChanged -= ModelChanged;
+        if (_model is not null) { _model.PropertyChanged -= ModelChanged; _model.FocusGoToRequested -= FocusGoTo; _model.IsMonitorActive = false; }
         _model = model;
-        if (_model is not null) _model.PropertyChanged += ModelChanged;
+        if (_model is not null) { _model.PropertyChanged += ModelChanged; _model.FocusGoToRequested += FocusGoTo; _model.IsMonitorActive = IsVisible; }
         Apply();
     }
 
@@ -59,6 +63,7 @@ public partial class MemoryProfilerPane : UserControl
         TypesView.Visibility = view == MemoryProfilerViewModel.TypesView ? Visibility.Visible : Visibility.Collapsed;
         RetentionView.Visibility = view == MemoryProfilerViewModel.RetentionView ? Visibility.Visible : Visibility.Collapsed;
         GraphView.Visibility = view == MemoryProfilerViewModel.GraphView ? Visibility.Visible : Visibility.Collapsed;
+        SnapshotsView.Visibility = view == MemoryProfilerViewModel.SnapshotsView ? Visibility.Visible : Visibility.Collapsed;
         var showBrowser = _model.IsBrowserVisible;
         if (showBrowser && BrowserColumn.Width.Value == 0) BrowserColumn.Width = _browserWidth;
         else if (!showBrowser && BrowserColumn.Width.Value > 0) { _browserWidth = BrowserColumn.Width; BrowserColumn.Width = new GridLength(0); }

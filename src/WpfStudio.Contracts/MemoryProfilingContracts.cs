@@ -96,6 +96,28 @@ public sealed record MemoryChildItem(string Name, string Type, string Value, str
 public sealed record MemoryObjectChildren(int ObjectId, string Shape, string Preview, int TotalCount, int Skip,
     IReadOnlyList<MemoryChildItem> Items);
 
+/// <summary>Organizes the instances of one type into groups. By is Retention (the shape of the shortest root path),
+/// Owner (the exclusive owner type and field), Generation, or Value (string content, array length, or identical field
+/// values, so duplicates stand out).</summary>
+public sealed record MemoryGroupRequest(string TypeKey, string By = "Retention", int MaxInstances = 20_000, int MaxGroups = 60,
+    int SamplesPerGroup = 40, IReadOnlyList<string>? HiddenRootKinds = null);
+/// <summary>Kind: Static, Root, Owner, Generation, Value, Unique, Unrooted or Hidden. Steps is the retention chain from the root
+/// down to the instances' owner (Retention grouping), for breadcrumb display. WastedBytes is non-zero for duplicate values.</summary>
+public sealed record MemoryInstanceGroup(string Key, string Title, string Detail, string Kind, int Count, long RetainedBytes,
+    long ShallowBytes, IReadOnlyList<string> Steps, IReadOnlyList<MemoryObjectInfo> Samples, long WastedBytes = 0);
+public sealed record MemoryInstanceGroups(string TypeKey, string By, int Instances, int Grouped, IReadOnlyList<MemoryInstanceGroup> Groups,
+    int OtherCount, long OtherBytes, bool IsTruncated, string Description);
+
+/// <summary>A nested slice of the dominator tree for a sunburst. ParentId and TypeKey select the centre exactly like
+/// <see cref="MemoryDominatorQuery"/>. Sibling instances of one type are grouped; nodes below MinShare of the centre fold into
+/// one "smaller" node per parent.</summary>
+public sealed record MemoryDominatorTreeRequest(int? ParentId = null, string? TypeKey = null, int Depth = 4, double MinShare = 0.004,
+    int MaxChildren = 24);
+/// <summary>Key matches the dominator tree's row identity: "o{id}" for objects, "g{parentId}|{typeKey}" for groups.</summary>
+public sealed record MemorySunburstNode(string Key, string TypeKey, string Label, string Detail, int Count, long RetainedBytes,
+    int? ObjectId, IReadOnlyList<MemorySunburstNode> Children, bool IsOther = false);
+public sealed record MemorySunburst(MemorySunburstNode Root, long TotalBytes, bool IsTruncated);
+
 public interface IMemoryProfilerRpc
 {
     Task<string> GetArchitectureAsync(HeapCaptureRequest request, CancellationToken cancellationToken = default);
@@ -109,6 +131,8 @@ public interface IMemoryProfilerRpc
     Task<MemoryRetainedComposition> GetRetainedAsync(int objectId, CancellationToken cancellationToken = default);
     Task<MemoryRetentionFlow> GetRetentionFlowAsync(MemoryFlowRequest request, CancellationToken cancellationToken = default);
     Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default);
+    Task<MemoryInstanceGroups> GetInstanceGroupsAsync(MemoryGroupRequest request, CancellationToken cancellationToken = default);
+    Task<MemorySunburst> GetDominatorTreeAsync(MemoryDominatorTreeRequest request, CancellationToken cancellationToken = default);
 }
 
 public interface IMemorySession : IAsyncDisposable
@@ -123,6 +147,8 @@ public interface IMemorySession : IAsyncDisposable
     Task<MemoryRetainedComposition> GetRetainedAsync(int objectId, CancellationToken cancellationToken = default);
     Task<MemoryRetentionFlow> GetRetentionFlowAsync(MemoryFlowRequest request, CancellationToken cancellationToken = default);
     Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default);
+    Task<MemoryInstanceGroups> GetInstanceGroupsAsync(MemoryGroupRequest request, CancellationToken cancellationToken = default);
+    Task<MemorySunburst> GetDominatorTreeAsync(MemoryDominatorTreeRequest request, CancellationToken cancellationToken = default);
 }
 
 public interface IMemoryProfiler

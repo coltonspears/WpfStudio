@@ -65,7 +65,8 @@ public sealed partial class HeapAnalysis
     }
 
     /// <summary>The objects that own the most memory. Pass-through wrappers (a holder whose single dominated child
-    /// owns nearly everything) are skipped in favour of that child, and permanent objects are excluded.</summary>
+    /// owns nearly everything) are skipped in favour of that child, unless the wrapper is an application object holding a
+    /// framework one (a page holding its byte[] is the owner people recognise). Permanent objects are excluded.</summary>
     public IReadOnlyList<MemoryObjectInfo> GetTopRetainers(int take = 12)
     {
         var result = new List<MemoryObjectInfo>();
@@ -74,11 +75,14 @@ public sealed partial class HeapAnalysis
             if (result.Count >= take || RetainedBytes[id] <= 0) break;
             if (!Reachable[id] || _graph.Objects[id].Generation == "Frozen" || _staticsHolder[id]) continue;
             var children = DominatedBy(id);
-            if (children.Length > 0 && RetainedBytes[children[0]] >= RetainedBytes[id] * 0.85) continue;
+            if (children.Length > 0 && RetainedBytes[children[0]] >= RetainedBytes[id] * 0.85 &&
+                !(IsApplicationObject(id) && !IsApplicationObject(children[0]))) continue;
             result.Add(Describe(id));
         }
         return result;
     }
+
+    private bool IsApplicationObject(int id) => !MemoryLabels.IsFrameworkModule(_graph.Types[_graph.Objects[id].TypeId].Module);
 
     public MemoryDominatorPage GetDominators(MemoryDominatorQuery query, CancellationToken token = default)
     {

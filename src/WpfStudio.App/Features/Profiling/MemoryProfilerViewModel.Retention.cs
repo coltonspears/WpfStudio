@@ -17,9 +17,73 @@ public sealed partial class MemoryProfilerViewModel
     [ObservableProperty] public partial DominatorNodeViewModel? SelectedDominator { get; set; }
     [ObservableProperty] public partial string? SelectedRetentionKey { get; set; }
     [ObservableProperty] public partial bool IsLoadingDominators { get; set; }
+    public IReadOnlyList<string> RetentionCharts { get; } = ["Treemap", "Sunburst"];
+    /// <summary>Treemap shows one level of owners; the sunburst shows several levels around the focused owner.</summary>
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsSunburst))] public partial string RetentionChart { get; set; } = "Treemap";
+    [ObservableProperty] public partial MemorySunburst? Sunburst { get; set; }
+    [ObservableProperty] public partial bool IsLoadingSunburst { get; set; }
+    public bool IsSunburst => RetentionChart == "Sunburst";
+    private long _sunburstRevision;
     public string RetentionMapTitle => RetentionFocus is { } focus ? $"What {focus.Title} keeps alive" : "What the GC roots keep alive";
-    public string RetentionMapDetail => RetentionFocus is { } focus ? $"{focus.RetainedText} · {focus.PercentText} of the heap · double-click a rectangle to drill in"
-        : Summary is { } s ? $"{MemorySize.Format(s.ReachableBytes)} reachable · each rectangle is memory owned exclusively by one object or group" : "";
+    public string RetentionMapDetail => RetentionFocus is { } focus ? $"{focus.RetainedText} · {focus.PercentText} of the heap · double-click {(IsSunburst ? "a segment" : "a rectangle")} to drill in"
+        : Summary is { } s ? $"{MemorySize.Format(s.ReachableBytes)} reachable · " + (IsSunburst ? "rings show what each owner keeps alive, several levels deep" : "each rectangle is memory owned exclusively by one object or group") : "";
+
+    partial void OnRetentionChartChanged(string value)
+    {
+        OnPropertyChanged(nameof(RetentionMapDetail));
+        if (value == "Sunburst") _ = LoadSunburstAsync(_lifetime.Token);
+    }
+
+    /// <summary>Loads the nested dominator slice around the current focus for the sunburst.</summary>
+    private async Task LoadSunburstAsync(CancellationToken token)
+    {
+        if (_session is not { } session || _disposed || !IsSunburst) return;
+        var revision = _revision; var sunburstRevision = ++_sunburstRevision;
+        var focus = RetentionFocus;
+        var request = focus is null ? new MemoryDominatorTreeRequest()
+            : focus.IsGroup ? new MemoryDominatorTreeRequest(focus.ParentId, focus.Node.TypeKey) : new MemoryDominatorTreeRequest(focus.Object?.Id);
+        IsLoadingSunburst = true;
+        try
+        {
+            var sunburst = await session.GetDominatorTreeAsync(request, token);
+            if (_disposed || revision != _revision || sunburstRevision != _sunburstRevision) return;
+            Sunburst = sunburst;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { if (!_disposed && sunburstRevision == _sunburstRevision) Status = "The sunburst is unavailable: " + ex.Message; }
+        finally { if (sunburstRevision == _sunburstRevision) IsLoadingSunburst = false; }
+    }
+
+    [RelayCommand] private void SetRetentionChart(string? chart) { if (chart is not null && RetentionCharts.Contains(chart)) RetentionChart = chart; }
+
+    [RelayCommand]
+    private void SelectSunburstNode(MemorySunburstNode? node)
+    {
+        if (node is null || node.IsOther) return;
+        SelectedRetentionKey = node.Key;
+        if (node.ObjectId is int id) ShowObject(id);
+    }
+
+    /// <summary>Drills into a sunburst segment by walking the same path in the dominator tree, so the breadcrumb, tree
+    /// and sunburst stay in step.</summary>
+    [RelayCommand]
+    private async Task OpenSunburstNodeAsync(IReadOnlyList<MemorySunburstNode>? path)
+    {
+        if (path is not { Count: > 0 } || path[^1].IsOther) return;
+        var at = RetentionFocus;
+        foreach (var step in path)
+        {
+            if (at is not null) await at.EnsureLoadedAsync();
+            var children = at?.Children ?? DominatorRoots;
+            var next = children.FirstOrDefault(c => c.Key == step.Key);
+            if (next is null) { Status = $"{step.Label} is not among the largest owners listed in the tree."; break; }
+            at = next;
+        }
+        if (at is not null && !ReferenceEquals(at, RetentionFocus)) await FocusDominatorAsync(at);
+    }
+
+    [RelayCommand]
+    private Task RetentionUpAsync() => RetentionFocus is { } focus ? FocusDominatorAsync(focus.Parent) : Task.CompletedTask;
     private long HeapBytes => Math.Max(1, Summary?.ManagedBytes ?? 1);
 
     private async Task LoadDominatorRootsAsync(CancellationToken token)
@@ -34,6 +98,7 @@ public sealed partial class MemoryProfilerViewModel
             DominatorRoots.Clear();
             foreach (var node in Wrap(page, null)) DominatorRoots.Add(node);
             RetentionFocus = null; RetentionTrail.Clear(); RefreshRetentionMap();
+            if (IsSunburst) _ = LoadSunburstAsync(_lifetime.Token);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!_disposed && revision == _revision) Status = "The dominator tree is unavailable: " + ex.Message; }
@@ -73,6 +138,8 @@ public sealed partial class MemoryProfilerViewModel
         for (var at = node; at is not null; at = at.Parent) RetentionTrail.Insert(0, at);
         if (node is not null) { await node.EnsureLoadedAsync(); node.IsExpanded = true; }
         RefreshRetentionMap();
+        OnPropertyChanged(nameof(RetentionMapDetail));
+        if (IsSunburst) await LoadSunburstAsync(_lifetime.Token);
     }
 
     [RelayCommand] private Task RetentionHomeAsync() => FocusDominatorAsync(null);

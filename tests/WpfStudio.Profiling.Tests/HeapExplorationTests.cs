@@ -101,6 +101,24 @@ public sealed class HeapExplorationTests
     }
 
     [Fact]
+    public void TopRetainersKeepApplicationOwnersOfFrameworkBuffers()
+    {
+        var types = new[]
+        {
+            new HeapType("p", "App.Page", "App.dll"), new HeapType("b", "System.Byte[]", "System.Private.CoreLib.dll"),
+            new HeapType("l", "System.Collections.Generic.List<System.Byte[]>", "System.Private.CoreLib.dll"),
+        };
+        var graph = new HeapGraph([Obj(1, 0, 40), Obj(2, 1, 10_000), Obj(3, 2, 32), Obj(4, 1, 20_000)], types,
+            [new(0, 1, 0), new(2, 3, 1)], ["Payload", "_items"], [new(0, "h", "StrongHandle"), new(2, "h2", "StrongHandle")]);
+        var top = new HeapAnalysis(graph).GetTopRetainers();
+        // The page is the owner people recognise, even though its buffer holds nearly all of its bytes.
+        Assert.Contains(top, o => o.Id == 0);
+        // A framework wrapper still defers to what it wraps.
+        Assert.DoesNotContain(top, o => o.Id == 2);
+        Assert.Contains(top, o => o.Id == 3);
+    }
+
+    [Fact]
     public void DominatorPagesGroupSiblingInstancesByType()
     {
         var types = new[] { new HeapType("h", "Holder", "App.dll"), new HeapType("a", "App.A", "App.dll"), new HeapType("b", "App.B", "App.dll") };
@@ -198,6 +216,77 @@ public sealed class HeapExplorationTests
         Assert.Equal(199 * 100, strings.Bytes); Assert.Equal("\"customer\"", Assert.Single(strings.Items).Label);
         var sparse = Assert.Single(insights, i => i.Id == "sparse-arrays");
         Assert.Equal((8 * 1024 - 1) * 8L, sparse.Bytes);
+    }
+
+    [Fact]
+    public void InstanceGroupsCollectInstancesHeldTheSameWay()
+    {
+        var analysis = CacheAndEventFixture(out _);
+        var byPath = analysis.GetInstanceGroups(new("app|App.Page"));
+        Assert.Equal(4, byPath.Instances); Assert.Equal(4, byPath.Grouped); Assert.False(byPath.IsTruncated);
+        var cache = byPath.Groups[0];
+        Assert.Equal("Static", cache.Kind); Assert.Equal("Cache.Pages", cache.Title); Assert.Equal(2, cache.Count); Assert.Equal(3000, cache.RetainedBytes);
+        Assert.Equal(["Cache.Pages", "List<Page> · _items", "Page[] · Array/reference slot +0x10"], cache.Steps);
+        Assert.Equal([4, 3], cache.Samples.Select(s => s.Id));
+        var handler = Assert.Single(byPath.Groups, g => g.Kind == "Root");
+        Assert.Equal(["Strong handle", "EventHandler · _target"], handler.Steps);
+        Assert.Equal(1, Assert.Single(byPath.Groups, g => g.Kind == "Unrooted").Count);
+        // Hiding the handle's root kind moves its page into the hidden group.
+        Assert.Contains(analysis.GetInstanceGroups(new("app|App.Page", HiddenRootKinds: ["StrongHandle"])).Groups, g => g.Kind == "Hidden" && g.Count == 1);
+
+        var byOwner = analysis.GetInstanceGroups(new("app|App.Page", "Owner"));
+        var array = Assert.Single(byOwner.Groups, g => g.Kind == "Owner" && g.Title == "Page[]");
+        Assert.Equal(2, array.Count);
+        Assert.Contains(byOwner.Groups, g => g.Title == "EventHandler" && g.Detail.Contains("_target"));
+        Assert.Equal("Gen 2", Assert.Single(analysis.GetInstanceGroups(new("app|App.Page", "Generation")).Groups).Title);
+
+        var capped = analysis.GetInstanceGroups(new("app|App.Page", MaxInstances: 2, MaxGroups: 1));
+        Assert.True(capped.IsTruncated); Assert.Equal(2, capped.Grouped); Assert.Single(capped.Groups);
+    }
+
+    [Fact]
+    public void RetentionGroupsCollapseRepeatedLinksSoListsOfAnyLengthShareAGroup()
+    {
+        // Two chains of different length (root -> node -> node -> ... -> item) group together.
+        var types = new[] { new HeapType("n", "App.Node", "App.dll"), new HeapType("i", "App.Item", "App.dll") };
+        var objects = new List<HeapObject>(); var edges = new List<HeapEdge>(); var roots = new List<HeapRoot>();
+        foreach (var length in new[] { 2, 5 })
+        {
+            var first = objects.Count;
+            for (var i = 0; i < length; i++) { objects.Add(Obj((ulong)objects.Count + 1, 0, 10)); if (i > 0) edges.Add(new(objects.Count - 2, objects.Count - 1, 0)); }
+            objects.Add(Obj((ulong)objects.Count + 1, 1, 10)); edges.Add(new(objects.Count - 2, objects.Count - 1, 1));
+            roots.Add(new(first, "h", "StrongHandle"));
+        }
+        var analysis = new HeapAnalysis(new HeapGraph(objects.ToArray(), types, edges.ToArray(), ["Next", "Item"], roots.ToArray()));
+        var group = Assert.Single(analysis.GetInstanceGroups(new("i")).Groups);
+        Assert.Equal(2, group.Count);
+        Assert.Equal(["Strong handle", "Node · Next (repeated)", "Node · Item"], group.Steps);
+    }
+
+    [Fact]
+    public void DominatorTreeNestsOwnersForTheSunburstWithTreeCompatibleKeys()
+    {
+        var analysis = CacheAndEventFixture(out _);
+        var sunburst = analysis.GetDominatorTree(new());
+        Assert.Equal("heap", sunburst.Root.Key);
+        var list = Assert.Single(sunburst.Root.Children, c => c.Key == "o1");
+        Assert.Contains("Static App.Cache.Pages", list.Detail);
+        var array = Assert.Single(list.Children);
+        Assert.Equal("o2", array.Key);
+        var pages = Assert.Single(array.Children);
+        Assert.Equal("g2|app|App.Page", pages.Key); Assert.Equal(2, pages.Count); Assert.Equal(3000, pages.RetainedBytes);
+        Assert.Equal(["o4", "o3"], pages.Children.Select(c => c.Key));
+        Assert.Contains(sunburst.Root.Children, c => c.Key == "o6" && c.Children.Single().Key == "o5");
+        Assert.Equal(sunburst.Root.Children.Sum(c => c.RetainedBytes), sunburst.TotalBytes);
+
+        var group = analysis.GetDominatorTree(new(2, "app|App.Page"));
+        Assert.Equal("g2|app|App.Page", group.Root.Key); Assert.Equal(2, group.Root.Children.Count);
+        Assert.Single(analysis.GetDominatorTree(new(1, Depth: 1)).Root.Children);
+
+        var folded = analysis.GetDominatorTree(new(MinShare: 0.2));
+        Assert.True(folded.IsTruncated);
+        var other = Assert.Single(folded.Root.Children, c => c.IsOther);
+        Assert.Equal(564, other.RetainedBytes);
     }
 
     [Fact]

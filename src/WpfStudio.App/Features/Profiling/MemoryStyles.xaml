@@ -2,6 +2,7 @@
  xmlns:p="clr-namespace:WpfStudio.App.Features.Profiling" xmlns:c="clr-namespace:WpfStudio.App.Controls">
  <p:MemorySizeConverter x:Key="Bytes"/>
  <p:GroupBytesConverter x:Key="GroupBytes"/>
+ <p:GenerationTextConverter x:Key="GenerationText"/>
 
  <Style x:Key="Note" TargetType="TextBlock">
   <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
@@ -24,6 +25,21 @@
  <Style x:Key="Mono" TargetType="TextBlock">
   <Setter Property="FontFamily" Value="{DynamicResource CodeFont}"/>
   <Setter Property="FontSize" Value="11"/>
+ </Style>
+
+ <!-- Headline number on a KPI tile; Tone picks the status colour. -->
+ <Style x:Key="KpiValue" TargetType="TextBlock">
+  <Setter Property="FontSize" Value="22"/>
+  <Setter Property="FontWeight" Value="SemiBold"/>
+  <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+  <Setter Property="Margin" Value="0,3,0,1"/>
+  <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+  <Style.Triggers>
+   <DataTrigger Binding="{Binding Tone}" Value="Accent"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding Tone}" Value="Success"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding Tone}" Value="Warning"><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding Tone}" Value="Danger"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+  </Style.Triggers>
  </Style>
 
  <!-- Flat surface panel used for every dashboard section. -->

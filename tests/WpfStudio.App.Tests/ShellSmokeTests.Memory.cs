@@ -40,6 +40,11 @@ public sealed partial class ShellSmokeTests
             for (var i = 0; i < 2; i++) await Command(fixture, "grow");
             await model.RefreshProcessesCommand.ExecuteAsync(null);
             model.SelectedProcess = model.Processes.Single(p => p.Id == fixture.Id);
+            // The empty state watches the selected process live while the pane is visible.
+            using (var live = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+                while (model.LiveSamples.Count < 3) await Task.Delay(50, live.Token);
+            Assert.True(model.IsMonitorActive); Assert.Contains("Private", model.LiveMemoryText);
+            await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-empty-live.png"));
             await model.CaptureCommand.ExecuteAsync(null);
             Assert.True(model.HasCapture, model.Status); Assert.True(model.Summary!.IsComplete, model.Status);
             Assert.Equal(5, model.Kpis.Count); Assert.NotEmpty(model.GenerationSegments); Assert.NotEmpty(model.CompositionItems);
@@ -72,6 +77,26 @@ public sealed partial class ShellSmokeTests
             while (payload.IsLoading || payload.Children.Any(c => c.IsPlaceholder)) await Task.Delay(20, deadline.Token);
             Assert.Contains(payload.Children, c => c.Name == "[0]");
 
+            // Right-click menus offer the same actions everywhere.
+            var typeRow = Descendants<System.Windows.Controls.Grid>(pane).First(g => MemoryMenus.GetTarget(g) is MemoryTypeRow);
+            Assert.True(MemoryMenus.Populate(typeRow));
+            Assert.Contains(typeRow.ContextMenu!.Items.OfType<System.Windows.Controls.MenuItem>(), i => (string)i.Header == "Group instances by retention");
+
+            // Grouping: all three pages share one static retention path; their payload arrays are identical.
+            model.TypeDetailTab = 1; model.InstanceGrouping = "Retention";
+            while (model.GroupRows.Count == 0 || model.IsLoadingGroups) await Task.Delay(20, deadline.Token);
+            var cacheGroup = model.GroupRows.First();
+            Assert.Equal(3, cacheGroup.Group.Count); Assert.True(cacheGroup.IsRoot); Assert.True(cacheGroup.HasSteps);
+            cacheGroup.IsExpanded = true; await Idle();
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-groups.png"));
+            var bytesType = model.Types.Single(t => t.Name == "System.Byte[]");
+            model.InstanceGrouping = "Value"; model.OpenTypeCommand.Execute(bytesType.Key);
+            while (model.InstanceGroups?.TypeKey != bytesType.Key || model.IsLoadingGroups) await Task.Delay(20, deadline.Token);
+            Assert.Contains(model.GroupRows, g => g.Kind == "Value" && g.Group.Count == 3 && g.HasWaste);
+            await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-groups-value.png"));
+            model.InstanceGrouping = "None"; model.TypeDetailTab = 0; model.OpenTypeCommand.Execute(pageType.Key);
+            while (model.Objects.FirstOrDefault()?.TypeKey != pageType.Key || model.IsInspecting) await Task.Delay(20, deadline.Token);
+
             // Graph: vertical layout with roots on top and a minimap.
             model.SelectedView = MemoryProfilerViewModel.GraphView; await Idle();
             var graph = Descendants<MemoryGraphSurface>(pane).Single();
@@ -96,6 +121,15 @@ public sealed partial class ShellSmokeTests
             model.SelectedView = MemoryProfilerViewModel.RetentionView; await Idle();
             Assert.NotEmpty(model.RetentionMapItems);
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-retention.png"));
+            model.RetentionChart = "Sunburst";
+            while (model.Sunburst is null || model.IsLoadingSunburst) await Task.Delay(20, deadline.Token);
+            await Idle();
+            var sunburst = Descendants<SunburstChart>(pane).Single();
+            // The full smoke run uses the default window, so only require room for a readable chart.
+            Assert.True(sunburst.IsVisible && Math.Min(sunburst.ActualWidth, sunburst.ActualHeight) > (focused ? 250 : 140), $"Sunburst is {sunburst.ActualWidth} × {sunburst.ActualHeight}");
+            Assert.NotEmpty(model.Sunburst!.Root.Children);
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-sunburst.png"));
+            model.RetentionChart = "Treemap";
 
             // Why alive, then the shared-root and exclusive-release estimates.
             model.SelectedView = MemoryProfilerViewModel.TypesView;
@@ -132,6 +166,23 @@ public sealed partial class ShellSmokeTests
             model.TypeSort = "Growth since baseline"; model.TypeFilter = "RetentionFixture"; model.SelectedView = MemoryProfilerViewModel.TypesView;
             await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-comparison-types.png"));
             model.TypeFilter = "";
+
+            // Snapshots: history, live timeline and type changes; a third capture confirms steady growth.
+            model.SelectedView = MemoryProfilerViewModel.SnapshotsView; await Idle();
+            Assert.Equal(2, model.Snapshots.Count); Assert.True(model.HasComparison);
+            Assert.Contains(model.ComparisonRows, r => r.Key == pageType.Key && r.CountDelta == 1);
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-snapshots.png"));
+            await Command(fixture, "grow");
+            await model.CaptureCommand.ExecuteAsync(null);
+            while (model.IsInspecting) await Task.Delay(20, deadline.Token);
+            Assert.Same(model.Snapshots[0], model.BaselineSnapshot);
+            Assert.True(model.ComparisonRows.First(r => r.Key == pageType.Key).GrowsEveryTime);
+            Assert.Contains(model.Findings, f => f.Insight.Id == "steady-growth");
+            Assert.Equal(3, model.TimelineMarkers.Count);
+            await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-snapshots-steady.png"));
+            ThemeService.Apply("Light"); await Idle();
+            Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-snapshots-light.png"));
+            ThemeService.Apply(shell.ThemeName); await Idle();
             // A short docked workbench still leaves room for the views and the browser.
             if (focused) { pane.Height = 460; await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-short.png")); pane.Height = double.NaN; await Idle(); }
             await model.CloseCaptureCommand.ExecuteAsync(null);

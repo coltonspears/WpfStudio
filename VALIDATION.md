@@ -2,6 +2,19 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Memory profiler: snapshots, grouping and sunburst (2026-10-04)
+
+A fifth view, **Snapshots** (Ctrl+5), keeps every capture of the session as a summary. It charts the selected process's private bytes and working set live with each snapshot marked, and compares the newest capture with the previous one of the same process automatically (or with a pinned baseline). The comparison shows every type's change as a diverging bar with a trend line across the snapshots, and flags types that grew in every snapshot; those also become a High-severity finding when they are application types. The empty workbench shows the live chart as soon as a process is selected. The type view's **Instances** tab groups instances by retention path, exclusive owner, generation or value: identical strings, arrays and field values form duplicate groups that report the bytes the extra copies waste. **Retention** adds a sunburst of the dominator tree whose drill-in stays in step with the tree and breadcrumb. One right-click menu now serves every object and type list and graph nodes. The command palette has memory entries. Export writes a self-contained HTML report, or JSON for a `.json` name. The largest-owner list keeps an application object that wraps a framework buffer (a page and its `byte[]`), so the browser opens on the page.
+
+| Suite | Result |
+| --- | --- |
+| Profiling | 27 passed (4 new grouping, sunburst and top-retainer cases; the live-fixture test adds retention and value grouping) |
+| Shell | 543 passed (2 new memory view-model cases, palette entries); one earlier full run had a single failure that did not reproduce in the next two full runs or in six repeated memory-suite runs |
+| Loaded WPF app (`WPFSTUDIO_TEST_MEMORY_ONLY`) | Passed; screenshots at 1880×1120 |
+| Loaded WPF app (full) | Passed, with zero binding errors |
+
+The WPF check adds the live chart before capture, a right-click menu, retention and value grouping (three pages on one static path; three identical payload arrays), the sunburst, and the Snapshots view across three captures with steady growth, in both themes. Process-memory sampling runs only while the profiler is visible.
+
 ## Memory profiler redesign (2026-10-03)
 
 The memory workbench now has four linked views and a docked object browser. **Overview** shows headline numbers, heap generations, automatic findings, a namespace/type treemap, the largest owners and baseline growth. **Types** has a grouped type list and, for each type, a retention-path Sankey and its instances. **Retention** pairs a dominator tree with a drill-down treemap. **Graph** is a vertical retention graph with on-demand expansion and a full minimap. The browser has an expandable, collection-aware field tree, back/forward history, why-alive chains, keeps-alive breakdowns and the cleanup simulations. The [memory guide](docs/memory-profiler.md) describes each view, finding and bound.
