@@ -95,7 +95,8 @@ public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfi
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(20));
                 await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
-                var rpc = new JsonRpc(pipe);
+                // Must match the worker's formatter (WpfStudio.ProfilingHost).
+                var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(pipe, pipe, new SystemTextJsonFormatter()));
                 var proxy = rpc.Attach<IMemoryProfilerRpc>(); rpc.StartListening();
                 return new(process, pipe, rpc, proxy);
             }

@@ -59,7 +59,8 @@ public sealed partial class MemoryProfilerViewModel
     }
 
     partial void OnComparisonFilterChanged(string value) => RefreshComparison();
-    partial void OnComparisonSearchChanged(string value) => RefreshComparison();
+    private RefreshThrottle? _comparisonSearchThrottle;
+    partial void OnComparisonSearchChanged(string value) => (_comparisonSearchThrottle ??= new(RefreshComparison)).Request();
     partial void OnComparisonOnlyMyCodeChanged(bool value) => RefreshComparison();
     partial void OnTimelineWindowChanged(string value) => OnPropertyChanged(nameof(TimelineSeconds));
     partial void OnIsMonitorActiveChanged(bool value) => UpdateMonitor();

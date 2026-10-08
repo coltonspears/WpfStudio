@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Runtime;
 using WpfStudio.Contracts.Profiling;
 
@@ -15,6 +16,8 @@ public sealed partial class ClrHeapSnapshot : IDisposable
     private readonly Dictionary<ulong, int> _addresses;
     public HeapAnalysis Analysis { get; }
     public HeapSummary Summary { get; }
+    /// <summary>Wall-clock milliseconds per load stage, in order, for diagnosing slow captures.</summary>
+    public IReadOnlyList<KeyValuePair<string, double>> LoadTimings { get; private init; } = [];
 
     private ClrHeapSnapshot(DataTarget target, ClrRuntime runtime, Dictionary<ulong, int> addresses,
         HeapAnalysis analysis, HeapSummary summary)
@@ -47,7 +50,10 @@ public sealed partial class ClrHeapSnapshot : IDisposable
             if (request.ProcessStartTimeUtcTicks is not long start || process.StartTime.ToUniversalTime().Ticks != start)
                 throw new InvalidOperationException("The process exited or its identity changed. Refresh the process list and select it again.");
             source = $"{process.ProcessName} (PID {process.Id})";
-            target = DataTarget.CreateSnapshotAndAttach(process.Id, options);
+            var snapshot = DataTarget.CreateSnapshotAndAttach(process.Id, options);
+            // The snapshot is immutable, so its memory is read in cached pages instead of one system call per read.
+            try { target = new DataTarget(new CachingDataReader(snapshot, Environment.Is64BitProcess ? 512L << 20 : 96L << 20), options); }
+            catch { snapshot.Dispose(); throw; }
         }
         ClrRuntime? runtime = null;
         try
@@ -67,62 +73,79 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                     ex.Message, ex);
             }
             var heap = runtime.Heap;
+            var timings = new List<KeyValuePair<string, double>>(); var clock = Stopwatch.StartNew();
+            void Stage(string name) { timings.Add(new(name, clock.Elapsed.TotalMilliseconds)); clock.Restart(); }
+            Stage("Open runtime");
             if (!heap.CanWalkHeap) throw new InvalidDataException("The CLR heap is not walkable in this capture. Capture a full dump when the runtime is in a consistent state.");
             var notes = new HashSet<string>(StringComparer.Ordinal); var complete = true;
             if (target.ClrVersions.Length > 1)
                 notes.Add($"This capture contains {target.ClrVersions.Length} runtimes. The analysis covers runtime index {request.RuntimeIndex} only.");
             var types = new List<HeapType>(); var typeIds = new Dictionary<string, int>(StringComparer.Ordinal);
+            var typeByMethodTable = new Dictionary<ulong, int>();
             var objects = new List<HeapObject>(); var addresses = new Dictionary<ulong, int>();
             var extras = new HeapExtras { PointerSize = target.DataReader.PointerSize };
             var probes = new Dictionary<ulong, TypeProbe>();
             long stringChars = 0; var stringsScanned = 0;
+            var pointerSize = target.DataReader.PointerSize; var reader = target.DataReader;
+            // Static names label reference slots while the heap is walked, so they are resolved first.
+            var staticNames = ReadStaticNames(runtime, token, notes);
+            var dependents = ReadDependentHandles(runtime, notes);
+            Stage("Static names and handles");
+            var labels = new List<string>(); var labelIds = new Dictionary<string, int>(StringComparer.Ordinal);
+            var fieldLabels = new Dictionary<(ulong MethodTable, int Offset), int>();
+            // Targets are resolved after the walk: a reference can point at an object that has not been enumerated yet.
+            var edges = new List<HeapEdge>(); var edgeTargets = new List<ulong>();
+            var buffer = new byte[64 * 1024]; var referencesFull = false;
+            var stringBuffer = new byte[4096]; var stringLookup = extras.Strings.GetAlternateLookup<ReadOnlySpan<char>>();
+            ClrSegment? segment = null;
             foreach (var obj in heap.EnumerateObjects(carefully: true))
             {
                 token.ThrowIfCancellationRequested();
                 if (!obj.IsValid) { Incomplete("Some object headers are missing or invalid."); continue; }
+                if (segment is null || !segment.ObjectRange.Contains(obj.Address)) segment = heap.GetSegmentByAddress(obj.Address);
                 if (obj.IsFree)
                 {
                     extras.FreeBytes = checked(extras.FreeBytes + (long)obj.Size);
-                    if (heap.GetSegmentByAddress(obj.Address)?.GetGeneration(obj.Address) == Generation.Large) extras.LargeFreeBytes += (long)obj.Size;
+                    if (segment?.GetGeneration(obj.Address) == Generation.Large) extras.LargeFreeBytes += (long)obj.Size;
                     continue;
                 }
                 if (objects.Count >= request.MaxObjects) { Incomplete($"Object limit reached ({request.MaxObjects:N0}). Increase the analysis budget to include the rest of the heap."); break; }
-                var type = obj.Type!; var name = type.Name ?? "<unknown type>";
-                var module = Path.GetFileName(type.Module.Name ?? "<unknown module>"); var key = module + "|" + name;
-                if (!typeIds.TryGetValue(key, out var typeId)) { typeId = types.Count; typeIds.Add(key, typeId); types.Add(new(key, name, module, obj.IsDelegate)); }
+                var type = obj.Type!;
+                if (!typeByMethodTable.TryGetValue(type.MethodTable, out var typeId))
+                {
+                    var name = type.Name ?? "<unknown type>";
+                    var module = Path.GetFileName(type.Module.Name ?? "<unknown module>"); var key = module + "|" + name;
+                    // Distinct method tables can share a name (an assembly loaded twice); they stay one type, as before.
+                    if (!typeIds.TryGetValue(key, out typeId)) { typeId = types.Count; typeIds.Add(key, typeId); types.Add(new(key, name, module, obj.IsDelegate)); }
+                    typeByMethodTable.Add(type.MethodTable, typeId);
+                }
                 var id = objects.Count;
                 addresses.Add(obj.Address, id);
-                objects.Add(new(obj.Address, typeId, checked((long)obj.Size), heap.GetSegmentByAddress(obj.Address)?.GetGeneration(obj.Address).ToString() ?? "Unknown"));
-                if (heap.IsObjectCorrupted(obj.Address, out _)) Incomplete("Missing or inconsistent object/reference data was detected. Use a full dump for reliable retention estimates.");
-                if (!probes.TryGetValue(type.MethodTable, out var probe)) probes[type.MethodTable] = probe = TypeProbe.For(type, target.DataReader.PointerSize);
+                objects.Add(new(obj.Address, typeId, checked((long)obj.Size), segment is null ? HeapGeneration.Unknown : ToGeneration(segment.GetGeneration(obj.Address))));
+                if (!probes.TryGetValue(type.MethodTable, out var probe)) probes[type.MethodTable] = probe = TypeProbe.For(type, pointerSize);
                 try { Observe(obj, id, probe); }
                 catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException) { }
+                var readable = referencesFull || ReadReferences(obj, type, id);
+                if (!readable || heap.IsObjectCorrupted(obj.Address, out _))
+                    Incomplete("Missing or inconsistent object/reference data was detected. Use a full dump for reliable retention estimates.");
             }
             if (objects.Count == 0) notes.Add("No allocated managed objects were enumerated.");
-            var staticNames = ReadStaticNames(runtime, token, notes);
-            var labels = new List<string>(); var labelIds = new Dictionary<string, int>(StringComparer.Ordinal);
-            var edges = new List<HeapEdge>();
-            for (var i = 0; i < objects.Count; i++)
+            Stage("Objects and references");
+            // Resolve and compact: references outside the enumerated heap are dropped.
+            var kept = 0;
+            for (var i = 0; i < edges.Count; i++)
             {
-                token.ThrowIfCancellationRequested();
-                if (edges.Count >= request.MaxReferences) { Incomplete($"Reference limit reached ({request.MaxReferences:N0}). Increase the analysis budget for full retention coverage."); break; }
-                var obj = heap.GetObject(objects[i].Address);
-                foreach (var reference in obj.EnumerateReferencesWithFields(carefully: true, considerDependantHandles: true))
-                {
-                    if (edges.Count >= request.MaxReferences) { Incomplete($"Reference limit reached ({request.MaxReferences:N0}). Increase the analysis budget for full retention coverage."); break; }
-                    if (!addresses.TryGetValue(reference.Object.Address, out var to))
-                    { if (reference.Object.Address != 0) Incomplete("Some referenced objects were outside the enumerated heap."); continue; }
-                    var slot = reference.Offset >= 0 ? obj.Address + (ulong)target.DataReader.PointerSize + (ulong)reference.Offset : 0;
-                    var label = staticNames.TryGetValue(slot, out var staticName) ? staticName : ReferenceLabel(reference, obj.IsArray, target.DataReader.PointerSize);
-                    if (!labelIds.TryGetValue(label, out var labelId)) { labelId = labels.Count; labelIds.Add(label, labelId); labels.Add(label); }
-                    edges.Add(new(i, to, labelId, reference.IsDependentHandle));
-                }
+                if (!addresses.TryGetValue(edgeTargets[i], out var to)) { Incomplete("Some referenced objects were outside the enumerated heap."); continue; }
+                edges[kept++] = edges[i] with { To = to };
             }
+            edges.RemoveRange(kept, edges.Count - kept);
+            edgeTargets.Clear(); edgeTargets.TrimExcess();
+            Stage("Resolve references");
             var roots = new List<HeapRoot>();
             for (var i = 0; i < objects.Count; i++)
             {
                 token.ThrowIfCancellationRequested();
-                if (objects[i].Generation != nameof(Generation.Frozen)) continue;
+                if (objects[i].Generation != HeapGeneration.Frozen) continue;
                 if (roots.Count >= Math.Min(request.MaxReferences, 1_000_000)) { Incomplete("The frozen-object root analysis budget was reached."); break; }
                 // Frozen segments are intrinsically alive; ClrMD's handle/stack root list excludes them.
                 roots.Add(new(i, $"Frozen segment @ 0x{objects[i].Address:X}", "Frozen segment", IsPermanent: true));
@@ -140,22 +163,27 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                 roots.Add(new(objectId, label, root.RootKind.ToString(), root.IsPinned));
                 runtimeRootCount++;
             }
-            if (runtimeRootCount == 0 && objects.Any(o => o.Generation != nameof(Generation.Frozen)))
+            if (runtimeRootCount == 0 && objects.Exists(o => o.Generation != HeapGeneration.Frozen))
                 Incomplete("No runtime GC roots were available. This capture cannot establish collection eligibility for ordinary heap objects.");
             if (extras.StringsTruncated) notes.Add("Duplicate-string detection compared a bounded sample of strings.");
+            Stage("Roots");
             var graph = new HeapGraph(objects.ToArray(), types.ToArray(), edges.ToArray(), labels.ToArray(), roots.ToArray(), complete);
+            Stage("Graph");
             var analysis = new HeapAnalysis(graph, token);
+            timings.AddRange(analysis.Timings); clock.Restart();
             long reachableBytes = 0, unreachableBytes = 0;
             for (var i = 0; i < objects.Count; i++)
                 if (analysis.Reachable[i]) reachableBytes = checked(reachableBytes + objects[i].Size);
                 else unreachableBytes = checked(unreachableBytes + objects[i].Size);
             var insights = HeapInsights.Compute(graph, analysis, extras, token);
+            Stage("Findings");
             var family = info.Flavor == ClrFlavor.Desktop ? ".NET Framework" : ".NET";
             var summary = new HeapSummary(source, $"{family} {info.Version}", target.DataReader.Architecture.ToString(),
                 DateTimeOffset.UtcNow, objects.Count, checked(reachableBytes + unreachableBytes), reachableBytes, unreachableBytes,
                 extras.FreeBytes, edges.Count, roots.Count, complete, notes.ToArray(), analysis.SummarizeTypes(),
                 analysis.SummarizeGenerations(), analysis.SummarizeRootKinds(), insights, analysis.GetTopRetainers());
-            return new(target, runtime, addresses, analysis, summary);
+            Stage("Summaries");
+            return new(target, runtime, addresses, analysis, summary) { LoadTimings = timings };
 
             void Incomplete(string note) { complete = false; notes.Add(note); }
 
@@ -165,10 +193,14 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                 {
                     if (obj.Size > 4096 || stringsScanned >= 2_000_000 || stringChars > 64_000_000 || extras.Strings.Count >= 500_000)
                     { if (obj.Size > 4096 || extras.Strings.Count >= 500_000 || stringsScanned >= 2_000_000) extras.StringsTruncated = true; return; }
-                    var text = obj.AsString(2048);
-                    if (text is null) return;
+                    // Compare the captured characters in place; only the first copy of each value becomes a string.
+                    var size = (int)obj.Size; var header = pointerSize + sizeof(int);
+                    if (size < header || reader.Read(obj.Address, stringBuffer.AsSpan(0, size)) != size) return;
+                    var length = BitConverter.ToInt32(stringBuffer, pointerSize);
+                    if (length < 0 || header + 2L * length > size) return;
+                    var text = MemoryMarshal.Cast<byte, char>(stringBuffer.AsSpan(header, 2 * Math.Min(length, 2048)));
                     stringsScanned++; stringChars += text.Length;
-                    if (!extras.Strings.TryGetValue(text, out var group)) extras.Strings[text] = group = new() { Sample = id };
+                    if (!stringLookup.TryGetValue(text, out var group)) extras.Strings[new string(text)] = group = new() { Sample = id };
                     group.Count++; group.Bytes += (long)obj.Size;
                 }
                 else if (probe.IsReferenceArray)
@@ -182,8 +214,109 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                     if (probe.IsWindow) extras.ClosedWindows.Add(id);
                 }
             }
+
+            // Reads one object's references with its GC descriptor over a single memory read, falling back to ClrMD's
+            // field enumeration for very large objects. Returns false when the object's memory could not be read.
+            bool ReadReferences(ClrObject obj, ClrType type, int from)
+            {
+                if (type.ContainsPointers)
+                {
+                    var size = obj.Size;
+                    if (size <= MaxDirectReadBytes)
+                    {
+                        if ((int)size > buffer.Length) buffer = new byte[Math.Max((int)size, buffer.Length * 2)];
+                        if (reader.Read(obj.Address, buffer.AsSpan(0, (int)size)) != (int)size) return false;
+                        foreach (var (address, offset) in type.GCDesc.WalkObject(buffer, (int)size))
+                            if (address != 0 && !Add(from, address, LabelFor(obj.Address, type, offset), false)) return true;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            foreach (var reference in obj.EnumerateReferencesWithFields(carefully: true, considerDependantHandles: false))
+                            {
+                                if (reference.Object.Address == 0) continue;
+                                var label = reference.Offset >= 0 && staticNames.TryGetValue(obj.Address + (ulong)pointerSize + (ulong)reference.Offset, out var staticName)
+                                    ? Intern(staticName) : Intern(ReferenceLabel(reference, obj.IsArray, pointerSize));
+                                if (!Add(from, reference.Object.Address, label, false)) return true;
+                            }
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException) { return false; }
+                    }
+                }
+                if (dependents.TryGetValue(obj.Address, out var values))
+                    foreach (var value in values)
+                        if (!Add(from, value, Intern(DependentHandleLabel), true)) return true;
+                return true;
+            }
+
+            bool Add(int from, ulong to, int label, bool dependent)
+            {
+                if (edges.Count >= request.MaxReferences)
+                {
+                    referencesFull = true;
+                    Incomplete($"Reference limit reached ({request.MaxReferences:N0}). Increase the analysis budget for full retention coverage.");
+                    return false;
+                }
+                edges.Add(new(from, -1, label, dependent)); edgeTargets.Add(to);
+                return true;
+            }
+
+            // Labels match ReferenceLabel. GC-descriptor offsets include the method table; ClrMD reference offsets do not.
+            int LabelFor(ulong address, ClrType type, int offset)
+            {
+                if (staticNames.Count != 0 && staticNames.TryGetValue(address + (ulong)offset, out var staticName)) return Intern(staticName);
+                var dataOffset = offset - pointerSize;
+                if (type.IsArray)
+                    // Array slots carry their index instead of a string; elements start after the (pointer-sized) length.
+                    return dataOffset >= pointerSize && (dataOffset - pointerSize) % pointerSize == 0
+                        ? ~((dataOffset - pointerSize) / pointerSize)
+                        : Intern($"Array/reference slot +0x{dataOffset:X}");
+                if (fieldLabels.TryGetValue((type.MethodTable, offset), out var cached)) return cached;
+                var label = Intern(ReferenceLabel(ClrReference.CreateFromFieldOrArray(default, type, dataOffset), false, pointerSize));
+                fieldLabels.Add((type.MethodTable, offset), label);
+                return label;
+            }
+
+            int Intern(string label)
+            {
+                if (!labelIds.TryGetValue(label, out var labelId)) { labelId = labels.Count; labelIds.Add(label, labelId); labels.Add(label); }
+                return labelId;
+            }
         }
-        catch { runtime?.Dispose(); target.Dispose(); throw; }
+        catch { runtime?.Dispose(); DisposeTarget(target); throw; }
+    }
+
+    private const int MaxDirectReadBytes = 8 << 20;
+    private const string DependentHandleLabel = "Dependent handle: value retained while key is alive";
+
+    private static HeapGeneration ToGeneration(Generation generation) => generation switch
+    {
+        Generation.Generation0 => HeapGeneration.Generation0,
+        Generation.Generation1 => HeapGeneration.Generation1,
+        Generation.Generation2 => HeapGeneration.Generation2,
+        Generation.Large => HeapGeneration.Large,
+        Generation.Pinned => HeapGeneration.Pinned,
+        Generation.Frozen => HeapGeneration.Frozen,
+        _ => HeapGeneration.Unknown
+    };
+
+    /// <summary>Dependent handles keep their value alive while the key (primary) is alive: key address -> values.</summary>
+    private static Dictionary<ulong, List<ulong>> ReadDependentHandles(ClrRuntime runtime, HashSet<string> notes)
+    {
+        var result = new Dictionary<ulong, List<ulong>>();
+        try
+        {
+            foreach (var handle in runtime.EnumerateHandles())
+            {
+                if (handle.HandleKind != ClrHandleKind.Dependent || handle.Object.Address == 0 || handle.Dependent.Address == 0) continue;
+                if (!result.TryGetValue(handle.Object.Address, out var values)) result[handle.Object.Address] = values = [];
+                values.Add(handle.Dependent.Address);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        { notes.Add("Some dependent handles could not be read. Values kept alive by ConditionalWeakTable may appear unrooted."); }
+        return result;
     }
 
     private sealed class TypeProbe
@@ -256,7 +389,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
 
     private static string ReferenceLabel(ClrReference reference, bool isArray, int pointerSize)
     {
-        if (reference.IsDependentHandle) return "Dependent handle: value retained while key is alive";
+        if (reference.IsDependentHandle) return DependentHandleLabel;
         // Reference-array elements start after the method table and the (pointer-sized) length.
         if (reference.Field is null && isArray && reference.Offset >= pointerSize && (reference.Offset - pointerSize) % pointerSize == 0)
             return $"[{(reference.Offset - pointerSize) / pointerSize}]";
@@ -269,7 +402,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
 
     public MemoryObjectDetails Inspect(int id, CancellationToken token = default)
     {
-        var description = Analysis.Describe(id); var address = Convert.ToUInt64(description.Address[2..], 16);
+        var description = Analysis.Describe(id); var address = Analysis.AddressOf(id);
         var obj = _runtime.Heap.GetObject(address); var fields = new List<MemoryFieldInfo>(); var preview = description.Type;
         if (obj.IsArray) preview = $"{description.Type} · {obj.AsArray().Length:N0} elements";
         else if (obj.Type?.IsString == true) preview = '"' + (obj.AsString(256) ?? "<unreadable>") + '"';
@@ -333,5 +466,8 @@ public sealed partial class ClrHeapSnapshot : IDisposable
         return numeric;
     }
 
-    public void Dispose() { _runtime.Dispose(); _target.Dispose(); }
+    public void Dispose() { _runtime.Dispose(); DisposeTarget(_target); }
+
+    /// <summary>Also releases a caching reader's snapshot, whether or not the data target disposes its reader.</summary>
+    private static void DisposeTarget(DataTarget target) { var reader = target.DataReader; target.Dispose(); (reader as IDisposable)?.Dispose(); }
 }

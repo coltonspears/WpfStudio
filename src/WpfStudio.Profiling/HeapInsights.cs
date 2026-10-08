@@ -79,17 +79,19 @@ public static class HeapInsights
     private static void EventHandlerRetention(HeapGraph graph, HeapAnalysis analysis, List<MemoryInsight> insights)
     {
         var found = new List<int>();
+        // Decided once per type rather than once per object.
+        var candidate = Array.ConvertAll(graph.Types, type =>
+            !type.IsDelegate && !MemoryLabels.IsFrameworkModule(type.Module) && !type.Name.Contains("<>c", StringComparison.Ordinal));
+        var objectArray = Array.ConvertAll(graph.Types, type => type.Name == "System.Object[]");
         for (var id = 0; id < graph.Objects.Length; id++)
         {
-            if (!analysis.Reachable[id]) continue;
-            var type = graph.Types[graph.Objects[id].TypeId];
-            if (type.IsDelegate || MemoryLabels.IsFrameworkModule(type.Module) || type.Name.Contains("<>c", StringComparison.Ordinal)) continue;
+            if (!analysis.Reachable[id] || !candidate[graph.Objects[id].TypeId]) continue;
             var dominator = analysis.ImmediateDominators[id];
             if (dominator < 0) continue;
             var owner = graph.Types[graph.Objects[dominator].TypeId];
             if (owner.IsDelegate) { found.Add(id); continue; }
             // A multicast delegate keeps its targets through an object[] invocation list.
-            if (owner.Name == "System.Object[]" && analysis.ImmediateDominators[dominator] is var listOwner && listOwner >= 0 &&
+            if (objectArray[graph.Objects[dominator].TypeId] && analysis.ImmediateDominators[dominator] is var listOwner && listOwner >= 0 &&
                 graph.Types[graph.Objects[listOwner].TypeId].IsDelegate) found.Add(id);
         }
         if (found.Count == 0) return;
@@ -168,8 +170,12 @@ public static class HeapInsights
     private static void LargeObjects(HeapGraph graph, HeapAnalysis analysis, HeapExtras extras, List<MemoryInsight> insights)
     {
         var large = new List<int>();
-        for (var id = 0; id < graph.Objects.Length; id++) if (graph.Objects[id].Generation == "Large") large.Add(id);
-        var managed = graph.Objects.Sum(o => o.Size);
+        long managed = 0;
+        for (var id = 0; id < graph.Objects.Length; id++)
+        {
+            managed += graph.Objects[id].Size;
+            if (graph.Objects[id].Generation == HeapGeneration.Large) large.Add(id);
+        }
         var fragmented = extras.FreeBytes > 8 << 20 && extras.FreeBytes > managed / 4;
         if (large.Count == 0 && !fragmented) return;
         var bytes = large.Sum(id => graph.Objects[id].Size);
@@ -189,10 +195,10 @@ public static class HeapInsights
     private static void Pinning(HeapGraph graph, HeapAnalysis analysis, List<MemoryInsight> insights)
     {
         var pinned = graph.Roots.Where(r => r.IsPinned && !r.IsPermanent).Select(r => r.ObjectId).Distinct()
-            .Where(id => graph.Objects[id].Generation is not ("Pinned" or "Frozen")).ToArray();
+            .Where(id => graph.Objects[id].Generation is not (HeapGeneration.Pinned or HeapGeneration.Frozen)).ToArray();
         if (pinned.Length == 0) return;
         var bytes = pinned.Sum(id => graph.Objects[id].Size);
-        var ephemeral = pinned.Count(id => graph.Objects[id].Generation is "Generation0" or "Generation1");
+        var ephemeral = pinned.Count(id => graph.Objects[id].Generation is HeapGeneration.Generation0 or HeapGeneration.Generation1);
         var byType = pinned.GroupBy(id => graph.Objects[id].TypeId).Select(g => (Type: graph.Types[g.Key], Ids: g.ToArray()))
             .OrderByDescending(g => g.Ids.Length).ToArray();
         insights.Add(new("pinned", "Runtime", ephemeral > 50 ? "Low" : "Info",

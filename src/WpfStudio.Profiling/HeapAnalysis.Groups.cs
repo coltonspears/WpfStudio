@@ -10,20 +10,14 @@ public sealed partial class HeapAnalysis
     private const string Repeated = " (repeated)";
 
     /// <summary>Instances of one type, largest retained first.</summary>
-    internal int[] InstancesOf(string typeKey)
-    {
-        if (!TryGetTypeId(typeKey, out var typeId)) return [];
-        var result = new List<int>();
-        foreach (var id in _rankedObjects) if (_graph.Objects[id].TypeId == typeId) result.Add(id);
-        return result.ToArray();
-    }
+    internal ReadOnlySpan<int> InstancesOf(string typeKey) => TryGetTypeId(typeKey, out var typeId) ? InstancesOf(typeId) : [];
 
     /// <summary>Groups by Retention (shortest root path shape), Owner (immediate dominator type and field) or Generation.
     /// Value grouping needs field contents and is handled by the snapshot.</summary>
     public MemoryInstanceGroups GetInstanceGroups(MemoryGroupRequest request, CancellationToken token = default)
     {
         var instances = InstancesOf(request.TypeKey);
-        var sampled = instances.Take(Math.Clamp(request.MaxInstances, 1, 200_000)).ToArray();
+        var sampled = instances[..Math.Min(instances.Length, Math.Clamp(request.MaxInstances, 1, 200_000))];
         var groups = new Dictionary<string, InstanceGroupBuilder>(StringComparer.Ordinal);
         var by = request.By is "Owner" or "Generation" ? request.By : "Retention";
         bool[]? reachable = null; int[]? parents = null;
@@ -112,7 +106,7 @@ public sealed partial class HeapAnalysis
         }
         else if (path.Terminal >= 0)
         {
-            var label = _graph.Labels[_graph.Edges[path.Terminal].LabelId];
+            var label = _graph.Label(_graph.Edges[path.Terminal].LabelId);
             root = MemoryLabels.ShortStatic(label); kind = "Static"; detail = label;
         }
         else { root = "Unknown root"; kind = "Root"; detail = "The root of this path was not captured."; }
@@ -122,7 +116,7 @@ public sealed partial class HeapAnalysis
         {
             var edge = _graph.Edges[path.Edges[i]];
             var owner = MemoryLabels.ShortType(_graph.Types[_graph.Objects[edge.From].TypeId].Name);
-            var field = FlowLabel(_graph.Labels[edge.LabelId]);
+            var field = FlowLabel(edge.LabelId);
             var step = field.Length == 0 ? owner : owner + " · " + field;
             if (step == last)
             {
@@ -157,7 +151,7 @@ public sealed partial class HeapAnalysis
 
     private GroupShape GenerationShape(int id)
     {
-        var generation = _graph.Objects[id].Generation;
+        var generation = HeapGraph.GenerationName(_graph.Objects[id].Generation);
         var detail = generation switch
         {
             "Generation0" => "Recently allocated; the cheapest to collect.",

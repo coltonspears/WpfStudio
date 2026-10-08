@@ -11,8 +11,9 @@ public sealed partial class MemoryProfilerViewModel
     private CancellationTokenSource? _query, _flow;
     private long _queryRevision, _flowRevision;
     private int _skip;
-    public ObservableCollection<MemoryTypeRow> Types { get; } = [];
-    public ObservableCollection<MemoryObjectInfo> Objects { get; } = [];
+    public BulkObservableCollection<MemoryTypeRow> Types { get; } = [];
+    private RefreshThrottle? _typeFilterThrottle;
+    public BulkObservableCollection<MemoryObjectInfo> Objects { get; } = [];
     public IReadOnlyList<string> TypeSortOptions { get; } = ["Total managed bytes", "Retained bytes", "Largest retained object", "Object count", "Growth since baseline"];
     public IReadOnlyList<string> TypeGroupings { get; } = ["No grouping", "Namespace", "Assembly"];
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSelectedType), nameof(SelectedTypeTitle), nameof(SelectedTypeDetail))] public partial MemoryTypeRow? SelectedType { get; set; }
@@ -45,7 +46,7 @@ public sealed partial class MemoryProfilerViewModel
         if (IsGrouped) _ = LoadGroupsAsync(_lifetime.Token);
     }
     partial void OnObjectFilterChanged(string value) { if (!_updating) { _skip = 0; QueueQuery(); } }
-    partial void OnTypeFilterChanged(string value) => RefreshTypes();
+    partial void OnTypeFilterChanged(string value) => (_typeFilterThrottle ??= new(RefreshTypes)).Request();
     partial void OnTypeSortChanged(string value) => RefreshTypes();
     partial void OnTypeGroupingChanged(string value) => RefreshTypes();
     partial void OnOnlyApplicationTypesChanged(bool value) => RefreshTypes();
@@ -91,7 +92,7 @@ public sealed partial class MemoryProfilerViewModel
         }
         var selectedKey = SelectedType?.Key;
         _updating = true;
-        try { Types.Clear(); foreach (var row in rows.Take(5000)) Types.Add(row); SelectedType = Types.FirstOrDefault(r => r.Key == selectedKey); }
+        try { Types.ReplaceAll(rows.Take(5000)); SelectedType = Types.FirstOrDefault(r => r.Key == selectedKey); }
         finally { _updating = false; }
         if (selectedKey is not null && SelectedType is null) { _skip = 0; QueueQuery(); CancelFlow(); Flow = null; }
         OnPropertyChanged(nameof(SelectedTypeDetail)); OnPropertyChanged(nameof(HasSelectedType)); OnPropertyChanged(nameof(SelectedTypeTitle));
@@ -116,7 +117,7 @@ public sealed partial class MemoryProfilerViewModel
             var page = await session.GetObjectsAsync(new(SelectedType?.Key, ObjectFilter, _skip), queryToken);
             if (_disposed || revision != _revision || queryRevision != _queryRevision) return;
             _updating = true;
-            try { Objects.Clear(); foreach (var obj in page.Objects) Objects.Add(obj); TotalObjects = page.TotalCount; SelectedObject = null; }
+            try { Objects.ReplaceAll(page.Objects); TotalObjects = page.TotalCount; SelectedObject = null; }
             finally { _updating = false; }
             OnPropertyChanged(nameof(MaxObjectRetained));
             ObjectPageDescription = page.Objects.Count == 0 ? "No matching objects in this capture."

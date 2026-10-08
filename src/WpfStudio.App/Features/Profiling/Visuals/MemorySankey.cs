@@ -32,7 +32,12 @@ public sealed class MemorySankey : FrameworkElement
     private HashSet<int> _litNodes = [];
     private HashSet<Band> _litBands = [];
 
-    private sealed record Band(MemoryFlowLink Link, double SourceY, double TargetY, double Thickness, double X0, double X1);
+    private sealed record Band(MemoryFlowLink Link, double SourceY, double TargetY, double Thickness, double X0, double X1)
+    {
+        // Built once per layout, so hit testing on every mouse move does not rebuild every band.
+        public Geometry Shape { get; } = BandGeometry(SourceY, TargetY, Thickness, X0, X1);
+    }
+    private Dictionary<int, MemoryFlowNode> _nodesById = [];
 
     public MemorySankey()
     {
@@ -62,7 +67,7 @@ public sealed class MemorySankey : FrameworkElement
     {
         var size = new Size(ActualWidth, ActualHeight);
         if (size == _laidOutFor) return;
-        _laidOutFor = size; _nodeRects.Clear(); _bands.Clear();
+        _laidOutFor = size; _nodeRects.Clear(); _bands.Clear(); _nodesById = [];
         if (Flow is not { Nodes.Count: > 0 } flow || size.Width < 120 || size.Height < 60) return;
         var maxLevel = flow.Nodes.Max(n => n.Level);
         // An instance held through several paths appears on each, so a node is as tall as its widest side.
@@ -83,7 +88,7 @@ public sealed class MemorySankey : FrameworkElement
             scale = Math.Min(scale, (height - Padding * (column.Count - 1)) / total);
         }
         if (scale == double.MaxValue || scale <= 0) scale = 1;
-        var byId = flow.Nodes.ToDictionary(n => n.Id);
+        _nodesById = flow.Nodes.ToDictionary(n => n.Id);
         // Order: largest first, then two barycentre passes against the neighbouring column to reduce crossings.
         foreach (var column in columns) column.Sort((a, b) => Rank(a).CompareTo(Rank(b)) is var r && r != 0 ? r : Size(b).CompareTo(Size(a)));
         var position = new Dictionary<int, double>();
@@ -136,7 +141,6 @@ public sealed class MemorySankey : FrameworkElement
             var targetY = _nodeRects[link.ToId].Y + inOffset[link.ToId] + thickness / 2; inOffset[link.ToId] += thickness;
             _bands.Add(new(link, sourceY[link], targetY, thickness, _nodeRects[link.FromId].Right, _nodeRects[link.ToId].Left));
         }
-        _ = byId;
     }
 
     /// <summary>Special buckets stay at the bottom of their column.</summary>
@@ -162,7 +166,7 @@ public sealed class MemorySankey : FrameworkElement
             dc.DrawText(ChartPalette.Text(this, Flow is null ? EmptyText : "No retention paths for this selection.", 12, muted, Math.Max(10, ActualWidth - 24)), new Point(12, 12));
             return;
         }
-        var nodes = flow.Nodes.ToDictionary(n => n.Id);
+        var nodes = _nodesById;
         var accent = ChartPalette.Resource(this, "AccentBrush", Colors.SlateBlue);
         var tracing = _litBands.Count > 0;
         foreach (var band in _bands)
@@ -171,7 +175,7 @@ public sealed class MemorySankey : FrameworkElement
             var lit = _litBands.Contains(band);
             var baseColor = source.Kind is "Root" or "Static" ? NodeColor(source) : muted;
             var color = lit ? ChartPalette.WithAlpha(accent, 0.55) : ChartPalette.WithAlpha(baseColor, tracing ? 0.12 : 0.32);
-            dc.DrawGeometry(ChartPalette.Frozen(color), null, BandGeometry(band));
+            dc.DrawGeometry(ChartPalette.Frozen(color), null, band.Shape);
         }
         // Field names sit near the end of each band, clear of the node labels that start at the source.
         foreach (var band in _bands.Where(b => b.Thickness >= 14 && b.Link.Label.Length > 0))
@@ -218,16 +222,16 @@ public sealed class MemorySankey : FrameworkElement
         return UseBytes ? $"{MemorySize.Format(node.Bytes)} · {count}" : $"{count} · {MemorySize.Format(node.Bytes)}";
     }
 
-    private static Geometry BandGeometry(Band band)
+    private static Geometry BandGeometry(double sourceY, double targetY, double thickness, double x0, double x1)
     {
-        var half = band.Thickness / 2; var mid = (band.X0 + band.X1) / 2;
+        var half = thickness / 2; var mid = (x0 + x1) / 2;
         var geometry = new StreamGeometry();
         using (var context = geometry.Open())
         {
-            context.BeginFigure(new Point(band.X0, band.SourceY - half), true, true);
-            context.BezierTo(new Point(mid, band.SourceY - half), new Point(mid, band.TargetY - half), new Point(band.X1, band.TargetY - half), true, false);
-            context.LineTo(new Point(band.X1, band.TargetY + half), true, false);
-            context.BezierTo(new Point(mid, band.TargetY + half), new Point(mid, band.SourceY + half), new Point(band.X0, band.SourceY + half), true, false);
+            context.BeginFigure(new Point(x0, sourceY - half), true, true);
+            context.BezierTo(new Point(mid, sourceY - half), new Point(mid, targetY - half), new Point(x1, targetY - half), true, false);
+            context.LineTo(new Point(x1, targetY + half), true, false);
+            context.BezierTo(new Point(mid, targetY + half), new Point(mid, sourceY + half), new Point(x0, sourceY + half), true, false);
         }
         geometry.Freeze();
         return geometry;
@@ -239,7 +243,7 @@ public sealed class MemorySankey : FrameworkElement
         foreach (var (id, rect) in _nodeRects)
             if (new Rect(rect.X - 4, rect.Y - 2, rect.Width + 8 + 120, Math.Max(rect.Height + 4, 14)).Contains(point) && point.X <= rect.Right + 120) return (id, null);
         for (var i = _bands.Count - 1; i >= 0; i--)
-            if (BandGeometry(_bands[i]).FillContains(point)) return (null, _bands[i]);
+            if (_bands[i].Shape.FillContains(point)) return (null, _bands[i]);
         return (null, null);
     }
 

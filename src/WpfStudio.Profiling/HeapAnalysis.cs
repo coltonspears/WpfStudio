@@ -1,3 +1,4 @@
+using System.Globalization;
 using WpfStudio.Contracts.Profiling;
 
 namespace WpfStudio.Profiling;
@@ -10,6 +11,9 @@ public sealed partial class HeapAnalysis
     private readonly int[] _parentReference;
     private readonly bool[] _pinned;
     private readonly int[] _rankedObjects;
+    // Instances of each type, largest retained first: a compact index so per-type queries never scan the whole heap.
+    private readonly int[] _typeOffsets;
+    private readonly int[] _typeMembers;
     // Dominator tree as a compact child index. Slot Objects.Length is the virtual root (the GC roots).
     private readonly int[] _dominatorOffsets;
     private readonly int[] _dominatorChildren;
@@ -29,44 +33,74 @@ public sealed partial class HeapAnalysis
     {
         _graph = graph;
         var count = graph.Objects.Length;
-        _staticLabel = graph.Labels.Select(l => l.StartsWith(MemoryLabels.StaticPrefix, StringComparison.Ordinal)).ToArray();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        void Stage(string name) { _timings.Add(new("Analysis: " + name, clock.Elapsed.TotalMilliseconds)); clock.Restart(); }
+        _staticLabel = new bool[graph.Labels.Length];
+        for (var i = 0; i < _staticLabel.Length; i++) _staticLabel[i] = graph.Labels[i].StartsWith(MemoryLabels.StaticPrefix, StringComparison.Ordinal);
         _staticsHolder = new bool[count];
-        foreach (var edge in graph.Edges) if (_staticLabel[edge.LabelId]) _staticsHolder[edge.From] = true;
+        foreach (var edge in graph.Edges) if (IsStaticEdge(edge)) _staticsHolder[edge.From] = true;
         (Reachable, _parentReference) = Walk(null, null, null, cancellationToken);
+        Stage("reachability");
         (ImmediateDominators, RetainedBytes, RetainedObjects) = ComputeDominators(cancellationToken);
-        foreach (var permanent in graph.Roots.Where(r => r.IsPermanent))
-        { RetainedBytes[permanent.ObjectId] = 0; RetainedObjects[permanent.ObjectId] = 0; }
-        foreach (var edge in graph.Edges.Where(e => IsFrozenReference(e) && Reachable[e.From]))
-        { RetainedBytes[edge.To] = 0; RetainedObjects[edge.To] = 0; }
+        Stage("dominators");
+        foreach (var permanent in graph.Roots)
+            if (permanent.IsPermanent) { RetainedBytes[permanent.ObjectId] = 0; RetainedObjects[permanent.ObjectId] = 0; }
+        foreach (var edge in graph.Edges)
+            if (IsFrozenReference(edge) && Reachable[edge.From]) { RetainedBytes[edge.To] = 0; RetainedObjects[edge.To] = 0; }
         _pinned = new bool[count];
         foreach (var root in graph.Roots) if (root.IsPinned) _pinned[root.ObjectId] = true;
-        _rankedObjects = Enumerable.Range(0, count).OrderByDescending(i => RetainedBytes[i])
-            .ThenByDescending(i => graph.Objects[i].Size).ToArray();
+        // Struct keys sort without a delegate or interface call per comparison; the index tie-break keeps the order
+        // a stable sort would give.
+        var ranking = new RankKey[count];
+        for (var i = 0; i < count; i++) ranking[i] = new(RetainedBytes[i], graph.Objects[i].Size, i);
+        Array.Sort(ranking);
+        _rankedObjects = new int[count];
+        for (var i = 0; i < count; i++) _rankedObjects[i] = ranking[i].Id;
+        (_typeOffsets, _typeMembers) = BuildTypeIndex();
+        Stage("ranking");
         (_dominatorOffsets, _dominatorChildren) = BuildDominatorTree(cancellationToken);
+        Stage("dominator tree");
         _typeRetainedBytes = ComputeTypeRetained(cancellationToken);
         _typeIds = new(StringComparer.Ordinal);
         for (var i = 0; i < graph.Types.Length; i++) _typeIds.TryAdd(graph.Types[i].Key, i);
+        Stage("type retention");
     }
 
-    public IReadOnlyList<MemoryTypeSummary> SummarizeTypes() => _graph.Objects.Select((o, i) => (o, i))
-        .GroupBy(x => x.o.TypeId).Select(g =>
+    private readonly List<KeyValuePair<string, double>> _timings = [];
+    /// <summary>Milliseconds per construction step, for load diagnostics.</summary>
+    internal IReadOnlyList<KeyValuePair<string, double>> Timings => _timings;
+
+    public IReadOnlyList<MemoryTypeSummary> SummarizeTypes()
+    {
+        var types = _graph.Types.Length;
+        var counts = new int[types]; var reachable = new int[types];
+        var bytes = new long[types]; var reachableBytes = new long[types]; var largest = new long[types];
+        for (var i = 0; i < _graph.Objects.Length; i++)
         {
-            var type = _graph.Types[g.Key];
-            long reachableBytes = 0; var reachable = 0; long largest = 0, bytes = 0;
-            foreach (var (o, i) in g)
-            {
-                bytes += o.Size; largest = Math.Max(largest, RetainedBytes[i]);
-                if (Reachable[i]) { reachable++; reachableBytes += o.Size; }
-            }
-            return new MemoryTypeSummary(type.Key, type.Name, type.Module, g.Count(), bytes, reachable, largest,
-                _typeRetainedBytes[g.Key], reachableBytes);
-        }).OrderByDescending(t => t.Bytes).ToArray();
+            var obj = _graph.Objects[i]; var t = obj.TypeId;
+            counts[t]++; bytes[t] += obj.Size; largest[t] = Math.Max(largest[t], RetainedBytes[i]);
+            if (Reachable[i]) { reachable[t]++; reachableBytes[t] += obj.Size; }
+        }
+        var result = new List<MemoryTypeSummary>(types);
+        for (var t = 0; t < types; t++)
+        {
+            if (counts[t] == 0) continue;
+            var type = _graph.Types[t];
+            result.Add(new(type.Key, type.Name, type.Module, counts[t], bytes[t], reachable[t], largest[t], _typeRetainedBytes[t], reachableBytes[t]));
+        }
+        // A stable sort, so equal-sized types keep first-seen order.
+        return result.OrderByDescending(t => t.Bytes).ToArray();
+    }
 
     public IReadOnlyList<MemoryGenerationSummary> SummarizeGenerations()
     {
-        var order = new[] { "Generation0", "Generation1", "Generation2", "Large", "Pinned", "Frozen", "Unknown" };
-        return _graph.Objects.GroupBy(o => o.Generation).Select(g => new MemoryGenerationSummary(g.Key, g.Count(), g.Sum(o => o.Size)))
-            .OrderBy(g => Array.IndexOf(order, g.Generation) is var index && index < 0 ? order.Length : index).ToArray();
+        var generations = Enum.GetValues<HeapGeneration>();
+        var counts = new int[generations.Length]; var bytes = new long[generations.Length];
+        foreach (var obj in _graph.Objects) { counts[(int)obj.Generation]++; bytes[(int)obj.Generation] += obj.Size; }
+        var result = new List<MemoryGenerationSummary>();
+        foreach (var generation in generations)
+            if (counts[(int)generation] > 0) result.Add(new(HeapGraph.GenerationName(generation), counts[(int)generation], bytes[(int)generation]));
+        return result;
     }
 
     public IReadOnlyList<MemoryRootKindSummary> SummarizeRootKinds() => _graph.Roots.GroupBy(r => r.Kind)
@@ -78,8 +112,11 @@ public sealed partial class HeapAnalysis
         ValidateObject(id);
         var obj = _graph.Objects[id]; var type = _graph.Types[obj.TypeId];
         return new(id, $"0x{obj.Address:X}", type.Key, type.Name, type.Module, obj.Size,
-            RetainedBytes[id], Reachable[id], obj.Generation, _pinned[id], RetainedObjects[id]);
+            RetainedBytes[id], Reachable[id], HeapGraph.GenerationName(obj.Generation), _pinned[id], RetainedObjects[id]);
     }
+
+    /// <summary>The object's address in the captured process.</summary>
+    public ulong AddressOf(int id) { ValidateObject(id); return _graph.Objects[id].Address; }
 
     public MemoryReferenceInfo DescribeReference(int id)
     {
@@ -87,7 +124,7 @@ public sealed partial class HeapAnalysis
         {
             var edge = _graph.Edges[id];
             return new(id, edge.From, edge.To, ObjectLabel(edge.From), ObjectLabel(edge.To),
-                _graph.Labels[edge.LabelId], IsFrozenReference(edge) ? "Frozen object reference" : edge.IsDependent ? "Dependent handle (key → value)" : "Strong reference", false, false,
+                _graph.Label(edge.LabelId), IsFrozenReference(edge) ? "Frozen object reference" : edge.IsDependent ? "Dependent handle (key → value)" : "Strong reference", false, false,
                 IsPermanent: IsFrozenReference(edge));
         }
         var index = id - _graph.Edges.Length;
@@ -101,16 +138,37 @@ public sealed partial class HeapAnalysis
         var found = new List<MemoryObjectInfo>(); var total = 0;
         var skip = Math.Max(0, query.Skip); var take = Math.Clamp(query.Take, 1, 500);
         var search = query.Search.Trim();
-        foreach (var i in _rankedObjects)
+        ReadOnlySpan<int> candidates;
+        if (query.TypeKey is null) candidates = _rankedObjects;
+        else if (TryGetTypeId(query.TypeKey, out var typeId)) candidates = InstancesOf(typeId);
+        else return new(0, []);
+        // Type names are matched once per type; addresses are formatted into a stack buffer instead of a string per object.
+        var nameMatches = search.Length == 0 ? null : Array.ConvertAll(_graph.Types, t => t.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+        var searchAddresses = search.Length is > 0 and <= 18 && CouldMatchAddress(search);
+        Span<char> hex = stackalloc char[18];
+        hex[0] = '0'; hex[1] = 'x';
+        for (var n = 0; n < candidates.Length; n++)
         {
-            if ((i & 1023) == 0) token.ThrowIfCancellationRequested();
-            var obj = _graph.Objects[i]; var type = _graph.Types[obj.TypeId];
-            if (query.TypeKey is not null && type.Key != query.TypeKey || query.ReachableOnly && !Reachable[i]) continue;
-            if (search.Length != 0 && !type.Name.Contains(search, StringComparison.OrdinalIgnoreCase) &&
-                !$"0x{obj.Address:X}".Contains(search, StringComparison.OrdinalIgnoreCase)) continue;
+            if ((n & 1023) == 0) token.ThrowIfCancellationRequested();
+            var i = candidates[n];
+            if (query.ReachableOnly && !Reachable[i]) continue;
+            if (nameMatches is not null && !nameMatches[_graph.Objects[i].TypeId])
+            {
+                if (!searchAddresses || !_graph.Objects[i].Address.TryFormat(hex[2..], out var written, "X", CultureInfo.InvariantCulture) ||
+                    !hex[..(written + 2)].Contains(search, StringComparison.OrdinalIgnoreCase)) continue;
+            }
             if (total++ >= skip && found.Count < take) found.Add(Describe(i));
         }
         return new(total, found);
+    }
+
+    /// <summary>Whether the text can occur in "0x" followed by hex digits, so name searches skip address formatting.</summary>
+    private static bool CouldMatchAddress(string search)
+    {
+        var digits = search.AsSpan();
+        if (digits.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) digits = digits[2..];
+        else if (digits.StartsWith("x", StringComparison.OrdinalIgnoreCase)) digits = digits[1..];
+        return !digits.ContainsAnyExcept("0123456789abcdefABCDEF");
     }
 
     /// <summary>Root-path examples, longest-lived owners first: static fields and handles before stacks and the finalizer queue.</summary>
@@ -129,24 +187,25 @@ public sealed partial class HeapAnalysis
         while (queue.TryDequeue(out var node) && paths.Count < candidates)
         {
             token.ThrowIfCancellationRequested();
-            if (_graph.RootIndexes.TryGetValue(node, out var roots))
-                foreach (var root in roots)
-                {
-                    if (hiddenKinds is not null && hiddenKinds.Contains(_graph.Roots[root].Kind)) continue;
-                    if (paths.Count == candidates) { truncated = true; break; }
-                    var refs = new List<MemoryReferenceInfo> { DescribeReference(_graph.Edges.Length + root) };
-                    var at = node;
-                    while (at != objectId && refs.Count < 128) { var e = next[at]; refs.Add(DescribeReference(e)); at = _graph.Edges[e].To; }
-                    if (at == objectId) paths.Add(new(refs)); else truncated = true;
-                }
+            foreach (var root in _graph.RootsOf(node))
+            {
+                if (hiddenKinds is not null && hiddenKinds.Contains(_graph.Roots[root].Kind)) continue;
+                if (paths.Count == candidates) { truncated = true; break; }
+                var refs = new List<MemoryReferenceInfo> { DescribeReference(_graph.Edges.Length + root) };
+                var at = node;
+                while (at != objectId && refs.Count < 128) { var e = next[at]; refs.Add(DescribeReference(e)); at = _graph.Edges[e].To; }
+                if (at == objectId) paths.Add(new(refs)); else truncated = true;
+            }
             foreach (var edgeId in _graph.Incoming.For(node))
             {
                 var edge = _graph.Edges[edgeId]; var from = edge.From;
                 if (!Reachable[from]) continue;
                 // A static field ends a path on its own, so two statics in the same runtime holder are two paths.
-                if (_staticLabel[edge.LabelId] && _graph.RootIndexes.TryGetValue(from, out var holderRoots))
+                if (IsStaticEdge(edge) && _graph.IsRooted(from))
                 {
-                    var holderRoot = holderRoots.FirstOrDefault(r => hiddenKinds is null || !hiddenKinds.Contains(_graph.Roots[r].Kind), -1);
+                    var holderRoot = -1;
+                    foreach (var r in _graph.RootsOf(from))
+                        if (hiddenKinds is null || !hiddenKinds.Contains(_graph.Roots[r].Kind)) { holderRoot = r; break; }
                     if (holderRoot < 0) continue;
                     if (paths.Count == candidates) { truncated = true; continue; }
                     var refs = new List<MemoryReferenceInfo> { DescribeReference(_graph.Edges.Length + holderRoot), DescribeReference(edgeId) };
@@ -173,12 +232,12 @@ public sealed partial class HeapAnalysis
     {
         var obj = Describe(id);
         var incoming = _graph.Incoming.For(id).ToArray(); var outgoing = _graph.Outgoing.For(id).ToArray();
-        var directRoots = _graph.RootIndexes.TryGetValue(id, out var r) ? r : [];
+        var directRoots = _graph.RootsOf(id).ToArray();
         var (paths, truncated) = GetRootPaths(id, token);
         var dominators = new List<MemoryObjectInfo>();
         for (var d = ImmediateDominators[id]; d >= 0 && dominators.Count < 64; d = ImmediateDominators[d]) dominators.Add(Describe(d));
         var evidence = new List<string>();
-        if (obj.Generation == "Frozen") evidence.Add("This object occupies a frozen segment. It remains alive independently of ordinary references and cannot be released by clearing an owner.");
+        if (_graph.Objects[id].Generation == HeapGeneration.Frozen) evidence.Add("This object occupies a frozen segment. It remains alive independently of ordinary references and cannot be released by clearing an owner.");
         if (!obj.IsReachable) evidence.Add(_graph.IsComplete
             ? "No strong GC-root path was found. This object is already eligible for collection in the captured graph."
             : "No captured root path was found. Incomplete data cannot establish that this object is collectible.");
@@ -298,10 +357,9 @@ public sealed partial class HeapAnalysis
 
     private MemoryGraphNode Node(int id, int column, bool focus)
     {
-        var degreeIn = _graph.Incoming.Offsets[id + 1] - _graph.Incoming.Offsets[id] +
-            (_graph.RootIndexes.TryGetValue(id, out var roots) ? roots.Length : 0);
+        var degreeIn = _graph.Incoming.Offsets[id + 1] - _graph.Incoming.Offsets[id] + _graph.RootsOf(id).Length;
         var degreeOut = _graph.Outgoing.Offsets[id + 1] - _graph.Outgoing.Offsets[id];
-        return new(Describe(id), column, focus, _graph.RootIndexes.ContainsKey(id), degreeIn, degreeOut);
+        return new(Describe(id), column, focus, _graph.IsRooted(id), degreeIn, degreeOut);
     }
 
     private List<int> Neighbors(int id, bool incoming)
@@ -325,12 +383,11 @@ public sealed partial class HeapAnalysis
             foreach (var edgeId in _graph.Outgoing.For(node))
                 if (lookup.Contains(_graph.Edges[edgeId].To))
                 { if (edgeIds.Count < 400) edgeIds.Add(edgeId); else truncated = true; }
-            if (_graph.RootIndexes.TryGetValue(node, out var roots))
-                foreach (var root in roots)
-                {
-                    if (hiddenKinds is not null && hiddenKinds.Contains(_graph.Roots[root].Kind)) continue;
-                    if (edgeIds.Count < 400) edgeIds.Add(_graph.Edges.Length + root); else truncated = true;
-                }
+            foreach (var root in _graph.RootsOf(node))
+            {
+                if (hiddenKinds is not null && hiddenKinds.Contains(_graph.Roots[root].Kind)) continue;
+                if (edgeIds.Count < 400) edgeIds.Add(_graph.Edges.Length + root); else truncated = true;
+            }
         }
         return edgeIds;
     }
@@ -339,24 +396,25 @@ public sealed partial class HeapAnalysis
     {
         var seen = new bool[_graph.Objects.Length];
         var parent = new int[seen.Length]; Array.Fill(parent, -1);
-        var queue = new Queue<int>();
+        // Every object is enqueued at most once, so a flat array is the whole queue.
+        var queue = new int[seen.Length]; int head = 0, tail = 0;
         // Visit longer-lived roots first so the shortest-path tree prefers statics and handles over stacks.
         foreach (var i in RootOrder)
         {
             var root = _graph.Roots[i]; var id = root.ObjectId;
             if (hiddenKinds is not null && hiddenKinds.Contains(root.Kind)) continue;
             if ((!root.IsPermanent && (id == removedObject || _graph.Edges.Length + i == removedReference)) || seen[id]) continue;
-            seen[id] = true; parent[id] = _graph.Edges.Length + i; queue.Enqueue(id);
+            seen[id] = true; parent[id] = _graph.Edges.Length + i; queue[tail++] = id;
         }
-        var iterations = 0;
-        while (queue.TryDequeue(out var node))
+        while (head < tail)
         {
-            if ((iterations++ & 1023) == 0) token.ThrowIfCancellationRequested();
+            var node = queue[head++];
+            if ((head & 1023) == 0) token.ThrowIfCancellationRequested();
             foreach (var e in _graph.Outgoing.For(node))
             {
                 var to = _graph.Edges[e].To;
                 if (e == removedReference || (to == removedObject && !IsFrozenReference(_graph.Edges[e])) || seen[to]) continue;
-                seen[to] = true; parent[to] = e; queue.Enqueue(to);
+                seen[to] = true; parent[to] = e; queue[tail++] = to;
             }
         }
         return (seen, parent);
@@ -398,7 +456,33 @@ public sealed partial class HeapAnalysis
 
     internal bool TryGetTypeId(string key, out int typeId) => _typeIds.TryGetValue(key, out typeId);
     private string ObjectLabel(int id) => _graph.Types[_graph.Objects[id].TypeId].Name + $" @ 0x{_graph.Objects[id].Address:X}";
-    private bool IsFrozenReference(HeapEdge edge) => !edge.IsDependent && _graph.Objects[edge.From].Generation == "Frozen";
+    private bool IsFrozenReference(HeapEdge edge) => !edge.IsDependent && _graph.Objects[edge.From].Generation == HeapGeneration.Frozen;
+    private bool IsStaticEdge(HeapEdge edge) => edge.LabelId >= 0 && _staticLabel[edge.LabelId];
+
+    private (int[] Offsets, int[] Members) BuildTypeIndex()
+    {
+        var offsets = new int[_graph.Types.Length + 1];
+        foreach (var obj in _graph.Objects) offsets[obj.TypeId + 1]++;
+        for (var i = 1; i < offsets.Length; i++) offsets[i] += offsets[i - 1];
+        var cursor = (int[])offsets.Clone();
+        var members = new int[_graph.Objects.Length];
+        foreach (var id in _rankedObjects) members[cursor[_graph.Objects[id].TypeId]++] = id;
+        return (offsets, members);
+    }
+
+    /// <summary>Instances of one type, largest retained first.</summary>
+    internal ReadOnlySpan<int> InstancesOf(int typeId) => _typeMembers.AsSpan(_typeOffsets[typeId], _typeOffsets[typeId + 1] - _typeOffsets[typeId]);
+
+    /// <summary>Largest retained first, then largest shallow size, then object order.</summary>
+    private readonly record struct RankKey(long Retained, long Size, int Id) : IComparable<RankKey>
+    {
+        public int CompareTo(RankKey other)
+        {
+            if (Retained != other.Retained) return other.Retained.CompareTo(Retained);
+            if (Size != other.Size) return other.Size.CompareTo(Size);
+            return Id.CompareTo(other.Id);
+        }
+    }
     private void ValidateObject(int id) { if ((uint)id >= _graph.Objects.Length) throw new ArgumentOutOfRangeException(nameof(id)); }
 
     private (int[] Dominators, long[] Bytes, int[] Counts) ComputeDominators(CancellationToken token)
@@ -432,7 +516,7 @@ public sealed partial class HeapAnalysis
                 if (number[pred] == 0) continue;
                 semi[w] = Math.Min(semi[w], semi[Evaluate(pred)]);
             }
-            if (_graph.RootIndexes.ContainsKey(w)) semi[w] = 1;
+            if (_graph.IsRooted(w)) semi[w] = 1;
             var s = vertex[semi[w]]; bucketNext[w] = bucketHead[s]; bucketHead[s] = w;
             ancestor[w] = parent[w];
             var v = bucketHead[parent[w]]; bucketHead[parent[w]] = -1;
