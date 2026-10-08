@@ -11,7 +11,7 @@ public sealed partial class ClrHeapSnapshot
     public MemoryObjectChildren GetChildren(MemoryChildrenRequest request, CancellationToken token = default)
     {
         var description = Analysis.Describe(request.ObjectId);
-        var obj = _runtime.Heap.GetObject(Convert.ToUInt64(description.Address[2..], 16));
+        var obj = _runtime.Heap.GetObject(Analysis.AddressOf(request.ObjectId));
         var skip = Math.Max(0, request.Skip); var take = Math.Clamp(request.Take, 1, 500);
         var type = obj.Type;
         if (type is null) return new(request.ObjectId, "Object", description.Type, 0, skip, []);

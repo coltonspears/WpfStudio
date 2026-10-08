@@ -27,10 +27,19 @@ public sealed class SunburstChart : FrameworkElement
     public ICommand? UpCommand { get => (ICommand?)GetValue(UpCommandProperty); set => SetValue(UpCommandProperty, value); }
     public string EmptyText { get => (string)GetValue(EmptyTextProperty); set => SetValue(EmptyTextProperty, value); }
 
-    private sealed record Segment(MemorySunburstNode Node, IReadOnlyList<MemorySunburstNode> Path, int Ring, double Start, double Sweep, Color Color);
+    private sealed record Segment(MemorySunburstNode Node, IReadOnlyList<MemorySunburstNode> Path, int Ring, double Start, double Sweep, Color Color)
+    {
+        // Built once per layout; hovering only redraws.
+        public Geometry? Shape { get; set; }
+        public Brush? Fill { get; set; }
+        public Brush? DimFill { get; set; }
+        public FormattedText? Label { get; set; }
+        public Point LabelAt { get; set; }
+    }
     private readonly List<Segment> _segments = [];
     private Point _centre; private double _inner, _ring;
     private Segment? _hover;
+    private (MemorySunburst? Data, Size Size, Color Surface, Color Text, double Dpi) _laidOutFor;
 
     public SunburstChart() { ClipToBounds = true; ToolTipService.SetInitialShowDelay(this, 150); }
 
@@ -39,7 +48,6 @@ public sealed class SunburstChart : FrameworkElement
 
     protected override void OnRender(DrawingContext dc)
     {
-        _segments.Clear();
         var w = ActualWidth; var h = ActualHeight;
         dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, h));
         var muted = ChartPalette.Resource(this, "MutedBrush", Colors.Gray);
@@ -47,6 +55,7 @@ public sealed class SunburstChart : FrameworkElement
         var surface = ChartPalette.Resource(this, "EditorBrush", Colors.Black);
         if (Data is not { } data || data.Root.Children.Count == 0 || data.TotalBytes <= 0)
         {
+            _segments.Clear(); _laidOutFor = default;
             if (EmptyText.Length > 0 && w > 40)
             {
                 var empty = ChartPalette.Text(this, EmptyText, 12, muted, w - 20);
@@ -55,28 +64,20 @@ public sealed class SunburstChart : FrameworkElement
             return;
         }
         var radius = Math.Min(w, h) / 2 - 6;
-        if (radius < 60) return;
-        var depth = Math.Max(1, Depth(data.Root) - 1);
-        _centre = new Point(w / 2, h / 2);
-        _inner = Math.Max(42, radius * 0.26);
-        _ring = (radius - _inner) / depth;
-
-        // Lay out: each child's sweep is its share of the parent's bytes.
-        var top = data.Root.Children;
-        for (var i = 0; i < top.Count; i++)
+        if (radius < 60) { _segments.Clear(); _laidOutFor = default; return; }
+        var layoutKey = (data, new Size(w, h), surface, text, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        if (layoutKey != _laidOutFor)
         {
-            var color = top[i].IsOther ? ChartPalette.Series(this, -1) : ChartPalette.Series(this, i);
-            Layout(top[i], [top[i]], 0, Offset(top, i, data.Root.RetainedBytes, 0, 360), Sweep(top[i], data.Root.RetainedBytes, 360), color);
+            _laidOutFor = layoutKey;
+            LayOut(data, radius, surface);
         }
 
         var separator = ChartPalette.Pen(surface, 1.2);
         var hoverPath = _hover?.Path;
         foreach (var segment in _segments)
         {
-            var color = segment.Color;
-            if (hoverPath is not null && !OnPath(segment, hoverPath)) color = ChartPalette.Mix(color, surface, 0.55);
-            var geometry = Sector(segment.Ring, segment.Start, segment.Sweep);
-            dc.DrawGeometry(ChartPalette.Frozen(color), separator, geometry);
+            var fill = hoverPath is not null && !OnPath(segment, hoverPath) ? segment.DimFill! : segment.Fill!;
+            dc.DrawGeometry(fill, separator, segment.Shape!);
         }
         if (SelectedKey is { } selected && _segments.FirstOrDefault(s => s.Node.Key == selected) is { } chosen)
             dc.DrawGeometry(null, ChartPalette.Pen(text, 2), Sector(chosen.Ring, chosen.Start, chosen.Sweep));
@@ -84,21 +85,8 @@ public sealed class SunburstChart : FrameworkElement
         // Centre: the focused owner and its total.
         dc.DrawEllipse(ChartPalette.Frozen(surface), ChartPalette.Pen(ChartPalette.Resource(this, "BorderBrush", Colors.DimGray), 1), _centre, _inner - 3, _inner - 3);
 
-        // Labels where they fit: horizontal text at the segment's middle, sized so it stays inside its ring and its angle.
         foreach (var segment in _segments)
-        {
-            var mid = _inner + _ring * (segment.Ring + 0.5);
-            var arc = Math.PI * 2 * mid * segment.Sweep / 360;
-            if (arc < 40 || _ring < 18) continue;
-            var angle = (segment.Start + segment.Sweep / 2 - 90) * Math.PI / 180;
-            var radial = Math.Abs(Math.Cos(angle)); var tangential = Math.Abs(Math.Sin(angle));
-            var width = Math.Min(Math.Min((_ring - 6) / Math.Max(radial, 0.05), (arc - 8) / Math.Max(tangential, 0.05)), 170);
-            if (width < 28) continue;
-            var at = new Point(_centre.X + mid * Math.Cos(angle), _centre.Y + mid * Math.Sin(angle));
-            var color = ChartPalette.ReadableText(segment.Color);
-            var label = ChartPalette.Text(this, segment.Node.Label, 10.5, color, width, bold: segment.Ring == 0);
-            dc.DrawText(label, new Point(at.X - label.Width / 2, at.Y - label.Height / 2));
-        }
+            if (segment.Label is { } label) dc.DrawText(label, segment.LabelAt);
 
         var name = ChartPalette.Text(this, data.Root.Label, 11.5, text, _inner * 1.6, bold: true);
         var total = ChartPalette.Text(this, MemorySize.Format(data.TotalBytes), 13, ChartPalette.Resource(this, "AccentBrush", Colors.SteelBlue), _inner * 1.6, bold: true);
@@ -108,6 +96,42 @@ public sealed class SunburstChart : FrameworkElement
         dc.DrawText(name, new Point(_centre.X - name.Width / 2, y)); y += name.Height;
         dc.DrawText(total, new Point(_centre.X - total.Width / 2, y)); y += total.Height;
         if (hint is not null) dc.DrawText(hint, new Point(_centre.X - hint.Width / 2, y));
+    }
+
+    /// <summary>Positions every segment and builds its geometry, fills and label. Runs when the data, size, theme or DPI
+    /// changes, not on hover.</summary>
+    private void LayOut(MemorySunburst data, double radius, Color surface)
+    {
+        _segments.Clear();
+        var depth = Math.Max(1, Depth(data.Root) - 1);
+        _centre = new Point(ActualWidth / 2, ActualHeight / 2);
+        _inner = Math.Max(42, radius * 0.26);
+        _ring = (radius - _inner) / depth;
+
+        // Each child's sweep is its share of the parent's bytes.
+        var top = data.Root.Children;
+        for (var i = 0; i < top.Count; i++)
+        {
+            var color = top[i].IsOther ? ChartPalette.Series(this, -1) : ChartPalette.Series(this, i);
+            Layout(top[i], [top[i]], 0, Offset(top, i, data.Root.RetainedBytes, 0, 360), Sweep(top[i], data.Root.RetainedBytes, 360), color);
+        }
+        foreach (var segment in _segments)
+        {
+            segment.Shape = Sector(segment.Ring, segment.Start, segment.Sweep);
+            segment.Fill = ChartPalette.Frozen(segment.Color);
+            segment.DimFill = ChartPalette.Frozen(ChartPalette.Mix(segment.Color, surface, 0.55));
+            // Labels where they fit: horizontal text at the segment's middle, sized so it stays inside its ring and its angle.
+            var mid = _inner + _ring * (segment.Ring + 0.5);
+            var arc = Math.PI * 2 * mid * segment.Sweep / 360;
+            if (arc < 40 || _ring < 18) continue;
+            var angle = (segment.Start + segment.Sweep / 2 - 90) * Math.PI / 180;
+            var radial = Math.Abs(Math.Cos(angle)); var tangential = Math.Abs(Math.Sin(angle));
+            var width = Math.Min(Math.Min((_ring - 6) / Math.Max(radial, 0.05), (arc - 8) / Math.Max(tangential, 0.05)), 170);
+            if (width < 28) continue;
+            var at = new Point(_centre.X + mid * Math.Cos(angle), _centre.Y + mid * Math.Sin(angle));
+            var label = ChartPalette.Text(this, segment.Node.Label, 10.5, ChartPalette.ReadableText(segment.Color), width, bold: segment.Ring == 0);
+            segment.Label = label; segment.LabelAt = new Point(at.X - label.Width / 2, at.Y - label.Height / 2);
+        }
     }
 
     private void Layout(MemorySunburstNode node, IReadOnlyList<MemorySunburstNode> path, int ring, double start, double sweep, Color color)

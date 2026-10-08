@@ -306,5 +306,5 @@ public sealed class HeapExplorationTests
         Assert.Equal("Cache<Page>.Items", MemoryLabels.ShortStatic("App.Cache<App.Page>.Items"));
     }
 
-    private static HeapObject Obj(ulong address, int type, long size) => new(address, type, size, "Generation2");
+    private static HeapObject Obj(ulong address, int type, long size) => new(address, type, size, HeapGeneration.Generation2);
 }

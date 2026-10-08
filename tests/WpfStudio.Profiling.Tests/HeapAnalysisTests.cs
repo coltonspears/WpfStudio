@@ -62,7 +62,7 @@ public sealed class HeapAnalysisTests
     [Fact]
     public void DependentHandleValueLivesOnlyWhileItsKeyIsRooted()
     {
-        var graph = new HeapGraph([new(1, 0, 10, "Gen2"), new(2, 0, 100, "Gen2")],
+        var graph = new HeapGraph([new(1, 0, 10, HeapGeneration.Generation2), new(2, 0, 100, HeapGeneration.Generation2)],
             [new("T", "T", "fixture")], [new(0, 1, 0, IsDependent: true)], ["dependent"], [new(0, "key", "Strong")]);
         var analysis = new HeapAnalysis(graph);
         Assert.Equal(110, analysis.EstimateRelease(new(0)).ReclaimableBytes);
@@ -73,7 +73,7 @@ public sealed class HeapAnalysisTests
     [Fact]
     public void FrozenObjectsRemainRootedWhenOwnersAreRemoved()
     {
-        var graph = new HeapGraph([new(1, 0, 10, "Gen2"), new(2, 0, 100, "Frozen"), new(3, 0, 20, "Gen2"), new(4, 0, 200, "Gen2")],
+        var graph = new HeapGraph([new(1, 0, 10, HeapGeneration.Generation2), new(2, 0, 100, HeapGeneration.Frozen), new(3, 0, 20, HeapGeneration.Generation2), new(4, 0, 200, HeapGeneration.Generation2)],
             [new("T", "T", "fixture")], [new(0, 1, 0), new(0, 2, 0), new(1, 3, 0)], ["field"],
             [new(0, "owner", "Strong"), new(1, "frozen", "Frozen segment", IsPermanent: true)]);
         var analysis = new HeapAnalysis(graph);
@@ -146,7 +146,7 @@ public sealed class HeapAnalysisTests
     }
 
     private static HeapAnalysis Analyze(long[] sizes, (int From, int To)[] edges, int[] roots, bool complete = true) =>
-        new(new HeapGraph(sizes.Select((s, i) => new HeapObject((ulong)i + 1, 0, s, "Gen2")).ToArray(),
+        new(new HeapGraph(sizes.Select((s, i) => new HeapObject((ulong)i + 1, 0, s)).ToArray(),
             [new("T", "Fixture.Type", "fixture")], edges.Select(e => new HeapEdge(e.From, e.To, 0)).ToArray(),
             ["child"], roots.Select(r => new HeapRoot(r, "root", "Strong")).ToArray(), complete));
 

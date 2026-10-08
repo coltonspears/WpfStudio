@@ -14,7 +14,7 @@ public sealed partial class ClrHeapSnapshot
     {
         if (request.By != "Value") return Analysis.GetInstanceGroups(request, token);
         var instances = Analysis.InstancesOf(request.TypeKey);
-        var sampled = instances.Take(Math.Clamp(request.MaxInstances, 1, 200_000)).ToArray();
+        var sampled = instances[..Math.Min(instances.Length, Math.Clamp(request.MaxInstances, 1, 200_000))];
         var groups = new Dictionary<string, HeapAnalysis.InstanceGroupBuilder>(StringComparer.Ordinal);
         var buffer = new byte[64 * 1024];
         for (var i = 0; i < sampled.Length; i++)
@@ -49,7 +49,7 @@ public sealed partial class ClrHeapSnapshot
 
     private (string Key, string Title) ValueSignature(int id, byte[] buffer)
     {
-        var address = Convert.ToUInt64(Analysis.Describe(id).Address[2..], 16);
+        var address = Analysis.AddressOf(id);
         var obj = _runtime.Heap.GetObject(address);
         var type = obj.Type;
         if (type is null) return ("unreadable", "Unreadable in this capture");
