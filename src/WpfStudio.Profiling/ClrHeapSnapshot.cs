@@ -89,7 +89,9 @@ public sealed partial class ClrHeapSnapshot : IDisposable
             var pointerSize = target.DataReader.PointerSize; var reader = target.DataReader;
             // Static names label reference slots while the heap is walked, so they are resolved first.
             var staticNames = ReadStaticNames(runtime, token, notes);
-            var dependents = ReadDependentHandles(runtime, notes);
+            var dependents = ReadDependentHandles(runtime, out var handlesComplete);
+            // Missing key -> value edges can make reachable objects look collectible, so a partial handle table is incomplete data.
+            if (!handlesComplete) Incomplete("Some dependent handles could not be read. Values kept alive by ConditionalWeakTable may appear unrooted.");
             Stage("Static names and handles");
             var labels = new List<string>(); var labelIds = new Dictionary<string, int>(StringComparer.Ordinal);
             var fieldLabels = new Dictionary<(ulong MethodTable, int Offset), int>();
@@ -226,8 +228,13 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                     {
                         if ((int)size > buffer.Length) buffer = new byte[Math.Max((int)size, buffer.Length * 2)];
                         if (reader.Read(obj.Address, buffer.AsSpan(0, (int)size)) != (int)size) return false;
-                        foreach (var (address, offset) in type.GCDesc.WalkObject(buffer, (int)size))
-                            if (address != 0 && !Add(from, address, LabelFor(obj.Address, type, offset), false)) return true;
+                        // A damaged GC descriptor must cost one object's references, not the whole capture.
+                        try
+                        {
+                            foreach (var (address, offset) in type.GCDesc.WalkObject(buffer, (int)size))
+                                if (address != 0 && !Add(from, address, LabelFor(obj.Address, type, offset), false)) return true;
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException) { return false; }
                     }
                     else
                     {
@@ -302,9 +309,9 @@ public sealed partial class ClrHeapSnapshot : IDisposable
     };
 
     /// <summary>Dependent handles keep their value alive while the key (primary) is alive: key address -> values.</summary>
-    private static Dictionary<ulong, List<ulong>> ReadDependentHandles(ClrRuntime runtime, HashSet<string> notes)
+    private static Dictionary<ulong, List<ulong>> ReadDependentHandles(ClrRuntime runtime, out bool complete)
     {
-        var result = new Dictionary<ulong, List<ulong>>();
+        var result = new Dictionary<ulong, List<ulong>>(); complete = true;
         try
         {
             foreach (var handle in runtime.EnumerateHandles())
@@ -315,7 +322,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
-        { notes.Add("Some dependent handles could not be read. Values kept alive by ConditionalWeakTable may appear unrooted."); }
+        { complete = false; }
         return result;
     }
 
