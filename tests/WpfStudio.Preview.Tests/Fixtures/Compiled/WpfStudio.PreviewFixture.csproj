@@ -10,5 +10,6 @@
   <ItemGroup>
     <ProjectReference Include="../Dependencies/Controls/Controls.csproj" />
     <Resource Include="Theme/PackProbe.txt" />
+    <Resource Include="Theme/Dot.png" />
   </ItemGroup>
 </Project>

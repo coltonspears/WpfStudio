@@ -23,6 +23,11 @@
       <CompiledFixtureFiles Include="$(MSBuildProjectDirectory)/Fixtures/Compiled/bin/$(Configuration)/net10.0-windows/**/*" />
     </ItemGroup>
     <Copy SourceFiles="@(CompiledFixtureFiles)" DestinationFiles="@(CompiledFixtureFiles->'$(OutDir)CompiledFixture/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <!-- Authored resources beside the build, as in a real project directory. -->
+    <ItemGroup>
+      <CompiledFixtureThemeFiles Include="$(MSBuildProjectDirectory)/Fixtures/Compiled/Theme/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CompiledFixtureThemeFiles)" DestinationFiles="@(CompiledFixtureThemeFiles->'$(OutDir)CompiledFixture/Theme/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="CopyDependencyPreviewFixture" AfterTargets="Build">
     <ItemGroup>
