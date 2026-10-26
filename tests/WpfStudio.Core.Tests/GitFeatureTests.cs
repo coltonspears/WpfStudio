@@ -21,7 +21,7 @@ public sealed class GitFeatureTests
     [Theory]
     [InlineData("https://github.com/owner/repo.git", GitHost.GitHub, "https://github.com/owner/repo")]
     [InlineData("git@github.com:owner/repo.git", GitHost.GitHub, "https://github.com/owner/repo")]
-    [InlineData("https://token:x-oauth@github.com/owner/repo", GitHost.GitHub, "https://github.com/owner/repo")]
+    [InlineData("https://build-agent@github.com/owner/repo", GitHost.GitHub, "https://github.com/owner/repo")]
     [InlineData("git@gitlab.com:group/sub/repo.git", GitHost.GitLab, "https://gitlab.com/group/sub/repo")]
     [InlineData("https://bitbucket.org/team/repo.git", GitHost.Bitbucket, "https://bitbucket.org/team/repo")]
     [InlineData("https://git.example.com:8443/scm/repo.git", GitHost.Generic, "https://git.example.com:8443/scm/repo")]
@@ -29,7 +29,7 @@ public sealed class GitFeatureTests
     {
         var remote = GitRemote.Parse(url)!;
         Assert.Equal((host, web), (remote.Host, remote.WebUrl));
-        Assert.DoesNotContain("token", remote.WebUrl);
+        Assert.DoesNotContain("@", remote.WebUrl);
     }
 
     [Theory]
