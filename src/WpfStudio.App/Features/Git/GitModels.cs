@@ -90,7 +90,10 @@ public sealed record GitSnapshot(string? Root, string Branch, string? Upstream, 
 /// <summary>A multi-step Git operation that stopped for conflicts and must be continued or aborted.</summary>
 public enum GitOperation { None, Merge, Rebase, CherryPick, Revert }
 
-/// <summary>A file's repository, its path relative to the root, and its committed text (null when untracked or binary).</summary>
+/// <summary>
+/// A file's repository, its path relative to the root, and its committed text. <see cref="IsTracked"/> means the path
+/// exists in HEAD; <see cref="HeadText"/> is then null only for binary or oversized files.
+/// </summary>
 public sealed record GitFileBase(string Root, string RelativePath, string? HeadText, bool IsTracked, string? HeadCommit, WpfStudio.Core.Git.GitRemote? Remote);
 
 /// <summary>A conflicted file's current text and the conflict blocks found in it.</summary>

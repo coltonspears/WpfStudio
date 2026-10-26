@@ -61,6 +61,12 @@ public sealed class CodeLensIntegrationTests
             Assert.Equal((0, 0), (Lens("Unused").References, Lens("Unused").XamlReferences));
             Assert.Equal(Model.Split('\n').ToList().FindIndex(line => line.Contains("Unused")) + 1, Lens("Unused").Line);
 
+            // Find References from the declaration includes the generated member's XAML uses the lens counted.
+            var titleUses = await client.FindSymbolReferencesAsync(new(model, Model.IndexOf("_title", StringComparison.Ordinal) + 2, 1));
+            Assert.Contains(titleUses.Locations, location => location.Path == view && Markup.Substring(location.Start, location.Length) == "Title");
+            var saveUses = await client.FindSymbolReferencesAsync(new(model, Model.IndexOf("void Save", StringComparison.Ordinal) + 6, 1));
+            Assert.Contains(saveUses.Locations, location => location.Path == view && Markup.Substring(location.Start, location.Length) == "SaveCommand");
+
             Assert.True((await client.UpdateDocumentAsync(new(code, CodeBehind, 1, Analyze: false))).Accepted);
             var handler = Assert.Single((await client.GetCodeLensAsync(new(code, 1))).Entries, entry => entry.Name == "OnHelp");
             Assert.Equal(1, handler.XamlReferences);

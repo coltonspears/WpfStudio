@@ -99,7 +99,8 @@ public sealed class GitService
         var relative = System.IO.Path.GetRelativePath(root, System.IO.Path.GetFullPath(filePath)).Replace('\\', '/');
         if (relative.StartsWith("../", StringComparison.Ordinal)) return null;
         var head = await RunAsync(root, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken, allowFailure: true, readOnly: true);
-        var tracked = (await RunAsync(root, ["ls-files", "--error-unmatch", "--", relative], cancellationToken, allowFailure: true, readOnly: true)).ExitCode == 0;
+        // Committed means present in HEAD. A newly staged file is in the index only, so all its lines are additions.
+        var tracked = head.ExitCode == 0 && (await RunAsync(root, ["cat-file", "-e", $"HEAD:{relative}"], cancellationToken, allowFailure: true, readOnly: true)).ExitCode == 0;
         string? text = null;
         if (tracked && head.ExitCode == 0)
         {
