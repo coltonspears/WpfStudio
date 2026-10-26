@@ -125,6 +125,7 @@ public sealed partial class ShellViewModel
         {
             case EditorAction.Definition: await GoToDefinitionCommand.ExecuteAsync(null); break;
             case EditorAction.OpenDesigner: await OpenDesignerCommand.ExecuteAsync(null); break;
+            case EditorAction.Implementation: await GoToImplementationCommand.ExecuteAsync(null); break;
             case EditorAction.References: await FindReferencesCommand.ExecuteAsync(null); break;
             case EditorAction.Rename: await RenameSymbolCommand.ExecuteAsync(null); break;
             case EditorAction.Format: await FormatCommand.ExecuteAsync(null); break;

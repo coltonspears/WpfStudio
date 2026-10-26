@@ -9,7 +9,7 @@ using WpfStudio.Workspace;
 
 namespace WpfStudio.App.ViewModels;
 
-public enum EditorAction { Definition, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, AskColtonGpt, OpenDesigner }
+public enum EditorAction { Definition, Implementation, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, AskColtonGpt, OpenDesigner }
 public sealed record BreakpointMarker(int Line, bool Enabled, bool Bound, string Condition, string Status);
 public sealed record EditorSelection(int CaretOffset, int Start, int Length);
 public sealed record XamlQuickFix(XamlCodeAction Action, IAsyncRelayCommand<XamlCodeAction?> ApplyCommand)

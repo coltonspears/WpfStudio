@@ -41,7 +41,7 @@ The IDE opens `WpfStudio.App.MainWindow`, resolved and shown by `App.OnStartup` 
 
 **Start.** The Start page lists recent workspaces, opens the bundled CounterApp sample in one click, and shows a short getting-started checklist. The command center in the title bar (or **Ctrl+P**) finds files with fuzzy matching; type `>` or press **Ctrl+Shift+P** to run any command, with its shortcut shown beside it.
 
-**Open and navigate.** Open a `.sln`, `.slnx`, or SDK-style `.csproj`. The solution tree uses vector icons for projects, folders, C#, XAML, and other files. Use quick-open for a filename and solution search (**Edit > Find in workspace**) for text. Every editor tab has a context bar showing the file's folder and kind, and the files related to it: a view's code-behind and view model, or the views that declare a view model as their `DataContext`. Press **F7** to jump between them. Right-click a tree item to open its project file, select the startup project, manage packages, reveal its folder, or copy its path. Keep an eye on Output when SDK discovery or restore fails: files remain accessible even if language services cannot fully load the project.
+**Open and navigate.** Open a `.sln`, `.slnx`, or SDK-style `.csproj`. The solution tree uses vector icons for projects, folders, C#, XAML, and other files. Use quick-open for a filename and solution search (**Edit > Find in workspace**) for text. Every editor tab has a context bar showing the file's folder and kind, and the files related to it: a view's code-behind and view model, or the views that declare a view model as their `DataContext`. Press **F7** to jump between them. Type `#` in the command center, or press **Ctrl+T**, to search types and members across the solution by name, camel-case humps (`CVM`) or a qualified name (`Customer.Save`). **Ctrl+F12** goes to the implementations of an interface or abstract member, the overrides of a virtual member, or the types derived from a class; several results open in Search results. **Ctrl+-** and **Ctrl+Shift+-** step back and forward through the places definition, implementation, reference, symbol, file and diagnostic jumps started from. Right-click a tree item to open its project file, select the startup project, manage packages, reveal its folder, or copy its path. Keep an eye on Output when SDK discovery or restore fails: files remain accessible even if language services cannot fully load the project.
 
 **Edit and refactor.** C# completion, signature assistance, definitions, references, rename, and formatting run through the worker. Right-click in the editor or press **Ctrl+.** to open its actions. Refactor includes symbol rename, organize usings, and switching a local declaration between `var` and an explicit type. These changes are previewed, checked against current document versions, and undoable. Type conversions reject cases that could change meaning; organizing usings avoids moving comments or conditional directives.
 
@@ -122,6 +122,7 @@ Closing a modified SQL script prompts to save, discard, or cancel. Saving an ope
 | Command | Shortcut |
 | --- | --- |
 | Go to file (command center) | Ctrl+P |
+| Go to symbol | Ctrl+T |
 | Command palette | Ctrl+Shift+P |
 | Open solution or project | Ctrl+Shift+O |
 | Open file | Ctrl+O |
@@ -132,6 +133,8 @@ Closing a modified SQL script prompts to save, discard, or cancel. Saving an ope
 | Create WPF item | Ctrl+Shift+N |
 | Switch view ⇄ code-behind ⇄ view model | F7 |
 | Completion in an editor | Ctrl+Space |
+| Go to implementation | Ctrl+F12 |
+| Navigate back / forward | Ctrl+- / Ctrl+Shift+- |
 | Editor actions / refactoring menu | Ctrl+. |
 | Rename C# symbol | F2 |
 | Toggle C# breakpoint | F9 |

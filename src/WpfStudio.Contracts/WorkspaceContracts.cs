@@ -38,6 +38,9 @@ public sealed record SymbolReferenceResult(IReadOnlyList<SourceLocation> Locatio
 public sealed record RenameRequest(string Path, int Position, long Version, string NewName, string? Text = null,
     string? ProjectPath = null, IReadOnlyList<XamlDocumentOverlay>? XamlOverlays = null);
 public sealed record RefactorRequest(string Path, int Position, long Version, string Action);
+/// <summary>A solution-wide type and member search. The query may be qualified, for example <c>Customer.Save</c>.</summary>
+public sealed record SymbolSearchRequest(string Query, int Limit = 100);
+public sealed record SymbolSearchResult(string Name, string Kind, string? Container, SourceLocation Location);
 public sealed record WorkspaceEditResult(IReadOnlyList<DocumentEdits> Documents, IReadOnlyList<string> Warnings,
     XamlNameProjectionPlan? NameProjection = null);
 
@@ -63,6 +66,9 @@ public interface IWorkspaceRpc
     Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
+    /// <summary>Implementations of an interface or abstract member, overrides of a virtual member, or types derived from the type at the position.</summary>
+    Task<IReadOnlyList<SourceLocation>> FindImplementationsAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
+    Task<IReadOnlyList<SymbolSearchResult>> SearchSymbolsAsync(SymbolSearchRequest request, CancellationToken cancellationToken);
     Task<SymbolReferenceResult> FindSymbolReferencesAsync(SymbolReferenceRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> FormatXamlAsync(XamlFormattingRequest request, CancellationToken cancellationToken);

@@ -225,6 +225,10 @@
     <KeyBinding Key="F11" Modifiers="Shift" Command="{Binding Debugger.StepOutCommand}" />
     <KeyBinding Key="F12" Command="{Binding GoToDefinitionCommand}" />
     <KeyBinding Key="F12" Modifiers="Shift" Command="{Binding FindReferencesCommand}" />
+    <KeyBinding Key="F12" Modifiers="Control" Command="{Binding GoToImplementationCommand}" />
+    <KeyBinding Key="T" Modifiers="Control" Command="{Binding GoToSymbolCommand}" />
+    <KeyBinding Key="OemMinus" Modifiers="Control" Command="{Binding NavigateBackCommand}" />
+    <KeyBinding Key="OemMinus" Modifiers="Control+Shift" Command="{Binding NavigateForwardCommand}" />
     <KeyBinding Key="F2" Command="{Binding RenameSymbolCommand}" />
     <KeyBinding Key="F" Modifiers="Control+Shift" Command="{Binding FormatCommand}" />
     <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding NewWpfItemCommand}" />
@@ -325,7 +329,12 @@
           </MenuItem>
           <MenuItem Header="_Code">
             <MenuItem Header="Go to definition" c:Ui.Icon="Target" Command="{Binding GoToDefinitionCommand}" InputGestureText="F12" />
+            <MenuItem Header="Go to implementation" Command="{Binding GoToImplementationCommand}" InputGestureText="Ctrl+F12" />
             <MenuItem Header="Find references" Command="{Binding FindReferencesCommand}" InputGestureText="Shift+F12" />
+            <MenuItem Header="Go to symbol…" c:Ui.Icon="Braces" Command="{Binding GoToSymbolCommand}" InputGestureText="Ctrl+T" />
+            <Separator />
+            <MenuItem Header="Navigate back" c:Ui.Icon="ArrowLeft" Command="{Binding NavigateBackCommand}" InputGestureText="Ctrl+-" />
+            <MenuItem Header="Navigate forward" c:Ui.Icon="ArrowRight" Command="{Binding NavigateForwardCommand}" InputGestureText="Ctrl+Shift+-" />
             <Separator />
             <MenuItem Header="Rename symbol…" Command="{Binding RenameSymbolCommand}" InputGestureText="F2" />
             <MenuItem Header="Organize usings…" Command="{Binding RefactorCommand}" CommandParameter="OrganizeUsings" />

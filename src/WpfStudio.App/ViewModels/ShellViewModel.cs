@@ -213,6 +213,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         try
         {
             Status = "Loading " + Path.GetFileName(path) + "…";
+            _history.Clear();
             var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
             Terminal.WorkingDirectory = directory;
             _allFiles = await Task.Run(() => EnumerateSourceFiles(directory).ToArray(), token);
@@ -609,6 +610,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task NavigateWpfAsync(WpfItem? item) => item == null ? Task.CompletedTask : GuardAsync(() => NavigateAsync(item.Path, item.Line, 1));
     public async Task NavigateAsync(string path, int line, int column, bool execution = false)
     {
+        if (!execution) RecordNavigationOrigin();
         await OpenDocumentAsync(path);
         if (ActiveDocument is not { } doc || !doc.State.Path.Equals(path, StringComparison.OrdinalIgnoreCase)) return;
         var text = doc.State.Content; var offset = 0;

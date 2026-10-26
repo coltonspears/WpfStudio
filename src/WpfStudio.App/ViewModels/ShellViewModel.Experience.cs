@@ -164,7 +164,7 @@ public sealed partial class ShellViewModel
     }
 
     // ------------------------------------------------------------------ Command palette
-    public string PalettePlaceholder => IsCommandPalette ? "Type a command name" : "Go to file by name — type > to run a command";
+    public string PalettePlaceholder => IsCommandPalette ? "Type a command name" : "Go to file by name — # for a type or member, > to run a command";
     partial void OnIsCommandPaletteChanged(bool value) => OnPropertyChanged(nameof(PalettePlaceholder));
     [RelayCommand] private void PaletteNext() => MovePalette(1);
     [RelayCommand] private void PalettePrevious() => MovePalette(-1);
@@ -182,6 +182,8 @@ public sealed partial class ShellViewModel
         var commandMode = query.StartsWith('>');
         if (IsCommandPalette != commandMode) IsCommandPalette = commandMode;
         if (commandMode) query = query[1..].Trim();
+        else if (query.StartsWith('#')) { RefreshSymbolPalette(query[1..].Trim()); return; }
+        _symbolSearch?.Cancel();
         IEnumerable<PaletteEntry> results;
         if (commandMode)
         {
@@ -202,7 +204,7 @@ public sealed partial class ShellViewModel
     }
 
     private static int? Best(int? first, int? second) => first == null ? second : second == null ? first : Math.Max(first.Value, second.Value);
-    private PaletteEntry FileEntry(string path) => new(Path.GetFileName(path), RelativeDirectory(path), () => OpenDocumentAsync(path), IconKind: FileIconKindConverter.KindFor(path));
+    private PaletteEntry FileEntry(string path) => new(Path.GetFileName(path), RelativeDirectory(path), () => { RecordNavigationOrigin(); return OpenDocumentAsync(path); }, IconKind: FileIconKindConverter.KindFor(path));
 
     /// <summary>Case-insensitive subsequence match favouring prefixes, word starts and runs; null when absent.</summary>
     internal static int? FuzzyScore(string candidate, string query)
@@ -253,7 +255,11 @@ public sealed partial class ShellViewModel
         yield return Command("Edit", "Find in workspace…", FindInWorkspaceCommand, icon: "Search");
         yield return Command("Edit", "Undo last workspace edit", UndoWorkspaceEditCommand);
         yield return Command("Code", "Go to definition", GoToDefinitionCommand, shortcut: "F12", icon: "Target");
+        yield return Command("Code", "Go to implementation", GoToImplementationCommand, shortcut: "Ctrl+F12", icon: "Target", detail: "Implementations, overrides or derived types");
         yield return Command("Code", "Find references", FindReferencesCommand, shortcut: "Shift+F12", icon: "Search");
+        yield return Command("Code", "Go to symbol…", GoToSymbolCommand, shortcut: "Ctrl+T", icon: "Braces", detail: "Search types and members across the solution");
+        yield return Command("Code", "Navigate back", NavigateBackCommand, shortcut: "Ctrl+-", icon: "ArrowLeft");
+        yield return Command("Code", "Navigate forward", NavigateForwardCommand, shortcut: "Ctrl+Shift+-", icon: "ArrowRight");
         yield return Command("Code", "Rename symbol…", RenameSymbolCommand, shortcut: "F2");
         yield return Command("Code", "Format document", FormatCommand, icon: "Braces");
         yield return Command("Code", "Organize usings", RefactorCommand, "OrganizeUsings", detail: "Preview import changes");
