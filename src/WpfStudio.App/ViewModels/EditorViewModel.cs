@@ -132,6 +132,34 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public long DecorationsVersion { get; private set; } = -1;
     public event Action? DecorationsChanged;
     [ObservableProperty] public partial bool ShowInlayHints { get; set; } = true;
+    /// <summary>Reference counts after declarations, including XAML uses; computed after typing pauses.</summary>
+    public IReadOnlyList<CodeLensEntry> CodeLenses { get; private set; } = [];
+    public long CodeLensVersion { get; private set; } = -1;
+    public event Action? CodeLensChanged;
+    public event Action<CodeLensEntry, int>? CodeLensRequested;
+    public void RequestCodeLens(CodeLensEntry entry, int position) => CodeLensRequested?.Invoke(entry, position);
+    [ObservableProperty] public partial bool ShowCodeLens { get; set; } = true;
+    partial void OnShowCodeLensChanged(bool value) { if (value) ScheduleCodeLens(State.Version); else { CodeLenses = []; CodeLensChanged?.Invoke(); } }
+    private CancellationTokenSource? _codeLens;
+    private void ScheduleCodeLens(long version)
+    {
+        _codeLens?.Cancel(); _codeLens?.Dispose(); _codeLens = null;
+        if (!IsCSharp || IsReadOnly || !ShowCodeLens || _disposed || !_workspace.IsConnected) return;
+        _codeLens = new();
+        var token = _codeLens.Token;
+        _ = Task.Run(async () =>
+        {
+            // Counting scans every XAML file, so wait for a pause in typing.
+            await Task.Delay(CodeLensVersion < 0 ? 300 : 1500, token);
+            var result = await _workspace.GetCodeLensAsync(new(State.Path, version), token);
+            await _dispatcher.InvokeAsync(() =>
+            {
+                if (token.IsCancellationRequested || _disposed || version != State.Version || result.Version != version) return;
+                CodeLenses = result.Entries; CodeLensVersion = version;
+                CodeLensChanged?.Invoke();
+            }, token);
+        }, token).ContinueWith(_ => { }, TaskScheduler.Default); // Optional: a failure leaves the previous lenses.
+    }
     /// <summary>Asks the editor to collapse (true) or expand (false) every folding.</summary>
     public event Action<bool>? FoldingRequested;
     public void SetAllFolded(bool folded) => FoldingRequested?.Invoke(folded);
@@ -251,6 +279,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                     SemanticSpans = current.Spans; InlayHints = current.Hints; DecorationsVersion = version;
                     DecorationsChanged?.Invoke();
                 }
+                if (IsCSharp) ScheduleCodeLens(version);
             }, token);
         }
         catch (OperationCanceledException) { }
@@ -447,6 +476,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (_resources is not null) _resources.Changed -= SemanticStateChanged;
         ClearQuickFixes();
         DisposeGit();
+        _codeLens?.Cancel();
         _analysis?.Cancel();
         _analysis?.Dispose();
     }

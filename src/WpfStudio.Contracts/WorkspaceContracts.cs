@@ -52,6 +52,12 @@ public sealed record ApplyCodeActionRequest(string Path, long Version, string Id
 public sealed record SemanticSpan(int Start, int Length, string Kind);
 /// <summary>Text shown inline before <paramref name="Position"/> without being part of the document. Kind is Parameter or Type.</summary>
 public sealed record InlayHint(int Position, string Text, string Kind);
+/// <summary>
+/// Reference counts above a declaration. <paramref name="XamlReferences"/> counts verified XAML uses (bindings,
+/// event handlers); <paramref name="XamlName"/> names the generated member XAML uses, such as SaveCommand.
+/// </summary>
+public sealed record CodeLensEntry(int Line, int Position, string Name, int References, int XamlReferences, string? XamlName = null);
+public sealed record CodeLensResult(long Version, IReadOnlyList<CodeLensEntry> Entries, bool Complete, string? Status = null);
 public sealed record EditorDecorationsResult(long Version, IReadOnlyList<SemanticSpan> Spans, IReadOnlyList<InlayHint> Hints);
 public sealed record WorkspaceEditResult(IReadOnlyList<DocumentEdits> Documents, IReadOnlyList<string> Warnings,
     XamlNameProjectionPlan? NameProjection = null);
@@ -88,6 +94,8 @@ public interface IWorkspaceRpc
     Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken);
     /// <summary>Semantic colouring and inline parameter-name and type hints for a synchronized C# document.</summary>
     Task<EditorDecorationsResult> GetEditorDecorationsAsync(DocumentRequest request, CancellationToken cancellationToken);
+    /// <summary>C# and XAML reference counts for the declarations in a synchronized C# document.</summary>
+    Task<CodeLensResult> GetCodeLensAsync(DocumentRequest request, CancellationToken cancellationToken);
     /// <summary>Roslyn's C# code fixes for diagnostics at the span and refactorings available there.</summary>
     Task<CodeActionsResult> GetCodeActionsAsync(CodeActionsRequest request, CancellationToken cancellationToken);
     /// <summary>Computes, but does not apply, the edits of an action returned by <see cref="GetCodeActionsAsync"/>.</summary>

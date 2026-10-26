@@ -6,6 +6,7 @@ using System.Windows.Media;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
 using ICSharpCode.AvalonEdit.Rendering;
+using WpfStudio.Contracts;
 using WpfStudio.Core.Git;
 
 namespace WpfStudio.App.Controls;
@@ -15,6 +16,10 @@ public sealed partial class EditorSurface
 {
     private GitChangeMargin? _changeMargin;
     private LineEndGenerator? _blameAnnotation;
+    private LineEndGenerator? _codeLensAnnotation;
+    /// <summary>Lens positions follow edits until the next count arrives.</summary>
+    private sealed class TrackedLens(int position, CodeLensEntry entry) { public int Position = position; public CodeLensEntry Entry { get; } = entry; }
+    private List<TrackedLens> _lenses = [];
     private int _blameLine = -1;
     private readonly Popup _changePopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Right, PopupAnimation = PopupAnimation.Fade };
 
@@ -23,9 +28,44 @@ public sealed partial class EditorSurface
         _changeMargin = new GitChangeMargin(this);
         var numbers = TextArea.LeftMargins.OfType<LineNumberMargin>().FirstOrDefault();
         TextArea.LeftMargins.Insert(numbers is null ? TextArea.LeftMargins.Count : TextArea.LeftMargins.IndexOf(numbers) + 1, _changeMargin);
+        _codeLensAnnotation = new LineEndGenerator(CreateCodeLens);
+        TextArea.TextView.ElementGenerators.Add(_codeLensAnnotation);
         _blameAnnotation = new LineEndGenerator(line => line.LineNumber == _blameLine ? CreateBlameAnnotation(line.LineNumber) : null);
         TextArea.TextView.ElementGenerators.Add(_blameAnnotation);
         TextArea.Caret.PositionChanged += (_, _) => UpdateBlameLine();
+    }
+
+    private void ApplyCodeLens()
+    {
+        _lenses = ViewModel is { ShowCodeLens: true } vm && vm.CodeLensVersion == vm.State.Version && Text == vm.State.Content
+            ? [.. vm.CodeLenses.Where(entry => entry.Position <= Document.TextLength).OrderBy(entry => entry.Position).Select(entry => new TrackedLens(entry.Position, entry))]
+            : [];
+        TextArea.TextView.Redraw();
+    }
+
+    private void ShiftCodeLens(int offset, int removed, int inserted)
+    {
+        if (_lenses.Count == 0) return;
+        var kept = new List<TrackedLens>(_lenses.Count);
+        foreach (var lens in _lenses)
+            if (WpfStudio.Core.Text.DecorationOffsets.MapPoint(lens.Position, offset, removed, inserted) is { } moved) { lens.Position = moved; kept.Add(lens); }
+        _lenses = kept;
+    }
+
+    private UIElement? CreateCodeLens(DocumentLine line)
+    {
+        if (_lenses.Count == 0 || ViewModel is not { ShowCodeLens: true } vm) return null;
+        var lens = _lenses.FirstOrDefault(item => item.Position >= line.Offset && item.Position <= line.EndOffset);
+        if (lens is null) return null;
+        var entry = lens.Entry;
+        var text = (entry.References == 1 ? "1 reference" : $"{entry.References} references")
+            + (entry.XamlReferences > 0 ? $" · {entry.XamlReferences} in XAML" + (entry.XamlName is { } name ? $" via {name}" : "") : "");
+        var block = Annotation(text);
+        block.Margin = new Thickness(20, 0, 0, 0);
+        block.Cursor = Cursors.Hand;
+        block.ToolTip = $"Find references to {entry.Name}, including bindings and event handlers in XAML.";
+        block.MouseLeftButtonDown += (_, e) => { e.Handled = true; vm.RequestCodeLens(entry, lens.Position); };
+        return block;
     }
 
     private void OnGitChanged()

@@ -131,11 +131,12 @@ public sealed partial class EditorSurface : TextEditor
         ViewModel.DecorationsChanged += ApplyDecorations;
         ViewModel.FoldingRequested += SetAllFolded;
         ViewModel.GitChanged += OnGitChanged;
+        ViewModel.CodeLensChanged += ApplyCodeLens;
         _trackedDocument = Document; Document.Changed += OnDocumentChanged;
         _hints.Enabled = ViewModel.ShowInlayHints;
         ApplyDecorations();
         InstallFolding();
-        _changeMargin?.Update(); _blameLine = -1; UpdateBlameLine();
+        _changeMargin?.Update(); _blameLine = -1; UpdateBlameLine(); ApplyCodeLens();
         _syncing = false; Navigate();
     }
     private void Detach()
@@ -153,10 +154,11 @@ public sealed partial class EditorSurface : TextEditor
             _attached.DecorationsChanged -= ApplyDecorations;
             _attached.FoldingRequested -= SetAllFolded;
             _attached.GitChanged -= OnGitChanged;
+            _attached.CodeLensChanged -= ApplyCodeLens;
             UninstallFolding(_attached.State);
         }
         if (_trackedDocument != null) { _trackedDocument.Changed -= OnDocumentChanged; _trackedDocument = null; }
-        _semantic.Clear(); _hints.Clear();
+        _semantic.Clear(); _hints.Clear(); _lenses = [];
         _attached = null;
     }
     private void StateChanged(object? sender, PropertyChangedEventArgs args)
@@ -170,6 +172,7 @@ public sealed partial class EditorSurface : TextEditor
         if (args.PropertyName == nameof(EditorViewModel.ExecutionLine)) { _margin.InvalidateVisual(); TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
         if (args.PropertyName == nameof(EditorViewModel.ShowInlayHints) && ViewModel is { } model) { _hints.Enabled = model.ShowInlayHints; TextArea.TextView.Redraw(); }
         if (args.PropertyName == nameof(EditorViewModel.ShowInlineBlame)) { _blameLine = -1; UpdateBlameLine(); }
+        if (args.PropertyName == nameof(EditorViewModel.ShowCodeLens)) ApplyCodeLens();
         if (args.PropertyName == nameof(EditorViewModel.XamlContextRevision))
         {
             _completionRequest?.Cancel(); _completion?.Close(); CancelHover();
@@ -492,6 +495,7 @@ public sealed partial class EditorSurface : TextEditor
     {
         _semantic.Shift(e.Offset, e.RemovalLength, e.InsertionLength);
         _hints.Shift(e.Offset, e.RemovalLength, e.InsertionLength);
+        ShiftCodeLens(e.Offset, e.RemovalLength, e.InsertionLength);
         if (_folding != null) { _foldingTimer.Stop(); _foldingTimer.Start(); }
     }
     private void InstallFolding()
