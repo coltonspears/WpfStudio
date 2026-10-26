@@ -26,7 +26,8 @@ public sealed record CompletionEntry(string Id, string DisplayText, string Inser
 public sealed record CompletionResult(long Version, int Start, int Length, IReadOnlyList<CompletionEntry> Items);
 public sealed record CompletionEditRequest(string Path, long Version, string ItemId);
 public sealed record TextEdit(int Start, int Length, string NewText);
-public sealed record DocumentEdits(string Path, long Version, IReadOnlyList<TextEdit> Edits, string? ExpectedTextHash = null);
+/// <summary>Edits to one file. <paramref name="Create"/> marks a new file whose edits insert its whole text.</summary>
+public sealed record DocumentEdits(string Path, long Version, IReadOnlyList<TextEdit> Edits, string? ExpectedTextHash = null, bool Create = false);
 public sealed record SignatureParameter(string Name, string Type, string? Documentation);
 public sealed record SignatureEntry(string Label, string? Documentation, IReadOnlyList<SignatureParameter> Parameters);
 public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures);
@@ -38,6 +39,20 @@ public sealed record SymbolReferenceResult(IReadOnlyList<SourceLocation> Locatio
 public sealed record RenameRequest(string Path, int Position, long Version, string NewName, string? Text = null,
     string? ProjectPath = null, IReadOnlyList<XamlDocumentOverlay>? XamlOverlays = null);
 public sealed record RefactorRequest(string Path, int Position, long Version, string Action);
+/// <summary>A solution-wide type and member search. The query may be qualified, for example <c>Customer.Save</c>.</summary>
+public sealed record SymbolSearchRequest(string Query, int Limit = 100);
+public sealed record SymbolSearchResult(string Name, string Kind, string? Container, SourceLocation Location);
+/// <summary>Code fixes and refactorings for a caret (<paramref name="Length"/> 0) or selection.</summary>
+public sealed record CodeActionsRequest(string Path, int Start, int Length, long Version);
+/// <summary>An offered action. <paramref name="Kind"/> is "Fix" or "Refactor"; the identifier is valid until the document changes.</summary>
+public sealed record CodeActionEntry(string Id, string Title, string Kind);
+public sealed record CodeActionsResult(long Version, IReadOnlyList<CodeActionEntry> Actions);
+public sealed record ApplyCodeActionRequest(string Path, long Version, string Id);
+/// <summary>A semantically classified range. Kind is Type, Interface, Enum, TypeParameter, Method, Property, Field, Event, Constant, EnumMember, Parameter, Local or Namespace.</summary>
+public sealed record SemanticSpan(int Start, int Length, string Kind);
+/// <summary>Text shown inline before <paramref name="Position"/> without being part of the document. Kind is Parameter or Type.</summary>
+public sealed record InlayHint(int Position, string Text, string Kind);
+public sealed record EditorDecorationsResult(long Version, IReadOnlyList<SemanticSpan> Spans, IReadOnlyList<InlayHint> Hints);
 public sealed record WorkspaceEditResult(IReadOnlyList<DocumentEdits> Documents, IReadOnlyList<string> Warnings,
     XamlNameProjectionPlan? NameProjection = null);
 
@@ -63,11 +78,20 @@ public interface IWorkspaceRpc
     Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
+    /// <summary>Implementations of an interface or abstract member, overrides of a virtual member, or types derived from the type at the position.</summary>
+    Task<IReadOnlyList<SourceLocation>> FindImplementationsAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
+    Task<IReadOnlyList<SymbolSearchResult>> SearchSymbolsAsync(SymbolSearchRequest request, CancellationToken cancellationToken);
     Task<SymbolReferenceResult> FindSymbolReferencesAsync(SymbolReferenceRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> FormatXamlAsync(XamlFormattingRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken);
+    /// <summary>Semantic colouring and inline parameter-name and type hints for a synchronized C# document.</summary>
+    Task<EditorDecorationsResult> GetEditorDecorationsAsync(DocumentRequest request, CancellationToken cancellationToken);
+    /// <summary>Roslyn's C# code fixes for diagnostics at the span and refactorings available there.</summary>
+    Task<CodeActionsResult> GetCodeActionsAsync(CodeActionsRequest request, CancellationToken cancellationToken);
+    /// <summary>Computes, but does not apply, the edits of an action returned by <see cref="GetCodeActionsAsync"/>.</summary>
+    Task<WorkspaceEditResult> ApplyCodeActionAsync(ApplyCodeActionRequest request, CancellationToken cancellationToken);
 }
 
 public enum BuildOperation { Restore, Build, Rebuild, Clean, Run, Test }

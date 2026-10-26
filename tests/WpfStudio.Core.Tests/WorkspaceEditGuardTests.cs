@@ -32,6 +32,24 @@ public sealed class WorkspaceEditGuardTests
     }
 
     [Fact]
+    public async Task CreatedFilesArePreparedAsNewBuffersAndRefuseToOverwrite()
+    {
+        string directory = CreateDirectory();
+        string created = Path.Combine(directory, "Customer.cs");
+        var store = new DocumentStore(directory);
+        var transaction = new WorkspaceEditTransaction(store);
+        var edit = new WpfStudio.Contracts.DocumentEdits(created, 0, [new(0, 0, "class Customer { }")], Create: true);
+        var change = Assert.Single(await transaction.PrepareAsync(new([edit], [])));
+        Assert.Equal(("", "class Customer { }"), (change.Before, change.After));
+        await transaction.ApplyAsync([change]);
+        Assert.Equal("class Customer { }", store.Find(created)!.Content);
+        Assert.False(File.Exists(created));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.PrepareAsync(new([edit], [])));
+        Assert.Equal([created], transaction.Undo());
+        Assert.Null(store.Find(created));
+    }
+
+    [Fact]
     public async Task AcceptedContextGuardKeepsNormalApplyAndUndoBehavior()
     {
         string directory = CreateDirectory();

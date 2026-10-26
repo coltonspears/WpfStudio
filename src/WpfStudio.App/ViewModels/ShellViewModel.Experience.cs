@@ -67,6 +67,13 @@ public sealed partial class ShellViewModel
     }
     [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke("Search"); SearchFocusRequested?.Invoke(); }
     [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(AppPaths.DataDirectory); DesktopNavigation.Reveal(AppPaths.DataDirectory); return Task.CompletedTask; });
+    /// <summary>Opens the command palette on the snippets for the active editor's language.</summary>
+    [RelayCommand] private void InsertSnippet()
+    {
+        if (ActiveDocument is not { IsReadOnly: false } document || !WpfStudio.Core.Text.SnippetCatalog.For(document.State.Extension).Any())
+        { Status = "Snippets are available in C# and XAML editors"; return; }
+        IsCommandPalette = true; PaletteQuery = "> Snippet: "; IsPaletteOpen = true; RefreshPalette();
+    }
     [RelayCommand] private void ShowShortcuts() { IsCommandPalette = true; PaletteQuery = ">"; IsPaletteOpen = true; RefreshPalette(); }
 
     // ------------------------------------------------------------------ Related files
@@ -164,7 +171,7 @@ public sealed partial class ShellViewModel
     }
 
     // ------------------------------------------------------------------ Command palette
-    public string PalettePlaceholder => IsCommandPalette ? "Type a command name" : "Go to file by name — type > to run a command";
+    public string PalettePlaceholder => IsCommandPalette ? "Type a command name" : "Go to file by name — # for a type or member, > to run a command";
     partial void OnIsCommandPaletteChanged(bool value) => OnPropertyChanged(nameof(PalettePlaceholder));
     [RelayCommand] private void PaletteNext() => MovePalette(1);
     [RelayCommand] private void PalettePrevious() => MovePalette(-1);
@@ -182,6 +189,8 @@ public sealed partial class ShellViewModel
         var commandMode = query.StartsWith('>');
         if (IsCommandPalette != commandMode) IsCommandPalette = commandMode;
         if (commandMode) query = query[1..].Trim();
+        else if (query.StartsWith('#')) { RefreshSymbolPalette(query[1..].Trim()); return; }
+        _symbolSearch?.Cancel();
         IEnumerable<PaletteEntry> results;
         if (commandMode)
         {
@@ -202,7 +211,7 @@ public sealed partial class ShellViewModel
     }
 
     private static int? Best(int? first, int? second) => first == null ? second : second == null ? first : Math.Max(first.Value, second.Value);
-    private PaletteEntry FileEntry(string path) => new(Path.GetFileName(path), RelativeDirectory(path), () => OpenDocumentAsync(path), IconKind: FileIconKindConverter.KindFor(path));
+    private PaletteEntry FileEntry(string path) => new(Path.GetFileName(path), RelativeDirectory(path), () => { RecordNavigationOrigin(); return OpenDocumentAsync(path); }, IconKind: FileIconKindConverter.KindFor(path));
 
     /// <summary>Case-insensitive subsequence match favouring prefixes, word starts and runs; null when absent.</summary>
     internal static int? FuzzyScore(string candidate, string query)
@@ -253,7 +262,11 @@ public sealed partial class ShellViewModel
         yield return Command("Edit", "Find in workspace…", FindInWorkspaceCommand, icon: "Search");
         yield return Command("Edit", "Undo last workspace edit", UndoWorkspaceEditCommand);
         yield return Command("Code", "Go to definition", GoToDefinitionCommand, shortcut: "F12", icon: "Target");
+        yield return Command("Code", "Go to implementation", GoToImplementationCommand, shortcut: "Ctrl+F12", icon: "Target", detail: "Implementations, overrides or derived types");
         yield return Command("Code", "Find references", FindReferencesCommand, shortcut: "Shift+F12", icon: "Search");
+        yield return Command("Code", "Go to symbol…", GoToSymbolCommand, shortcut: "Ctrl+T", icon: "Braces", detail: "Search types and members across the solution");
+        yield return Command("Code", "Navigate back", NavigateBackCommand, shortcut: "Ctrl+-", icon: "ArrowLeft");
+        yield return Command("Code", "Navigate forward", NavigateForwardCommand, shortcut: "Ctrl+Shift+-", icon: "ArrowRight");
         yield return Command("Code", "Rename symbol…", RenameSymbolCommand, shortcut: "F2");
         yield return Command("Code", "Format document", FormatCommand, icon: "Braces");
         yield return Command("Code", "Organize usings", RefactorCommand, "OrganizeUsings", detail: "Preview import changes");
@@ -263,6 +276,11 @@ public sealed partial class ShellViewModel
         yield return Command("WPF", "Switch view ⇄ view model", SwitchRelatedCommand, shortcut: "F7", icon: "Swap");
         yield return Command("WPF", "Insert observable property…", InsertPropertyCommand, icon: "Plus");
         yield return Command("WPF", "Insert relay command…", InsertCommandCommand, icon: "Plus");
+        yield return Command("Edit", "Insert snippet…", InsertSnippetCommand, icon: "Braces", detail: "MVVM, WPF and C# templates; or type a shortcut and press Tab");
+        if (ActiveDocument is { IsReadOnly: false } editor)
+            foreach (var snippet in WpfStudio.Core.Text.SnippetCatalog.For(editor.State.Extension))
+                yield return new PaletteEntry("Snippet: " + snippet.Title, snippet.Shortcut + " ⇥" + (snippet.WrapsSelection ? " · wraps the selection" : ""),
+                    () => { if (Documents.Contains(editor)) { ActiveDocument = editor; editor.InsertSnippet(snippet); } return Task.CompletedTask; }, "Snippets", Icon: "Braces");
         yield return Command("WPF", "Rename resource key…", RenameResourceCommand, icon: "Tag");
         yield return Command("WPF", "Refresh WPF index", RefreshWpfCommand, icon: "Refresh");
         yield return Command("WPF", "Import asset…", ImportAssetCommand, icon: "Image");
@@ -277,6 +295,9 @@ public sealed partial class ShellViewModel
         yield return Command("Debug", "Run without debugging", RunCommand, shortcut: "Ctrl+F5", icon: "PlayOutline");
         yield return Command("Debug", "Stop debugging", Debugger.StopCommand, shortcut: "Shift+F5", icon: "Stop");
         yield return Command("Debug", "Toggle breakpoint", ToggleBreakpointCommand, shortcut: "F9");
+        yield return Command("Debug", "Breakpoint hit count…", BreakpointHitCountCommand, icon: "Bug", detail: "Break on a hit number, from a hit, or every Nth hit");
+        yield return Command("Debug", "Tracepoint log message…", BreakpointLogMessageCommand, icon: "Bug", detail: "Log a message with {expressions} and continue");
+        yield return Command("Debug", "Add watch", AddWatchAtCaretCommand, icon: "Eye", detail: "Watch the expression at the caret or the selection");
         yield return Command("Debug", "Show breakpoints", ShowBreakpointsCommand, icon: "Bug", detail: "Conditions, enabled state and binding status");
         yield return Command("Debug", "Attach to process…", ShowToolCommand, "Debugger", icon: "Plug");
         yield return Command("View", "Solution Explorer", ShowToolCommand, "Explorer", icon: "Folder");
@@ -299,6 +320,9 @@ public sealed partial class ShellViewModel
         yield return MemoryCommand("Set memory baseline", MemoryProfiler.SetBaselineCommand, icon: "Baseline");
         yield return MemoryCommand("Memory: go to type or address", MemoryProfiler.FocusGoToCommand, icon: "Search");
         yield return MemoryCommand("Export memory report…", MemoryProfiler.ExportReportCommand, icon: "Export", detail: "HTML report or JSON data");
+        yield return Command("View", ShowInlayHints ? "Hide inline hints" : "Show inline hints", ToggleInlayHintsCommand, icon: "Text", detail: "Parameter names for literal arguments and types of var declarations");
+        yield return Command("View", "Collapse all regions", CollapseAllCommand, icon: "Collapse");
+        yield return Command("View", "Expand all regions", ExpandAllCommand, icon: "Expand");
         yield return Command("View", "Dark theme", SetThemeCommand, "Dark", icon: "Moon");
         yield return Command("View", "Light theme", SetThemeCommand, "Light", icon: "Sun");
         yield return Command("View", "Save window layout", SaveLayoutCommand, icon: "Sidebar");

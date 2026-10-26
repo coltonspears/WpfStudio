@@ -16,6 +16,12 @@ public sealed class WorkspaceEditTransaction
         var changes = new List<FileChange>();
         foreach (var edit in result.Documents)
         {
+            if (edit.Create)
+            {
+                if (_store.Find(edit.Path) != null || File.Exists(edit.Path)) throw new InvalidOperationException($"{System.IO.Path.GetFileName(edit.Path)} already exists. Rename or remove it and recompute the edit.");
+                changes.Add(new FileChange(edit.Path, "", ApplyTextEdits("", edit.Edits), "New file"));
+                continue;
+            }
             var doc = await _store.OpenAsync(edit.Path, token);
             if (edit.Version > 0 && doc.Version != edit.Version) throw new InvalidOperationException("A document changed while the edit was being computed. Try again.");
             if (edit.ExpectedTextHash != null && DocumentStore.Hash(Encoding.UTF8.GetBytes(doc.Content)) != edit.ExpectedTextHash)

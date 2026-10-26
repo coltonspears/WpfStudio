@@ -9,13 +9,16 @@ using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.CodeCompletion;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
+using ICSharpCode.AvalonEdit.Folding;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Rendering;
 using ICSharpCode.AvalonEdit.Search;
+using ICSharpCode.AvalonEdit.Snippets;
 using WpfStudio.App.ViewModels;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
+using WpfStudio.Core.Text;
 
 [assembly: InternalsVisibleTo("WpfStudio.Shell.Tests")]
 
@@ -36,6 +39,16 @@ public sealed class EditorSurface : TextEditor
     private readonly ToolTip _signature = new() { Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint, StaysOpen = false };
     private readonly DebugMargin _margin;
     private readonly DiagnosticRenderer _diagnostics;
+    private readonly SemanticColorizer _semantic = new();
+    private readonly InlayHintGenerator _hints;
+    private readonly System.Windows.Threading.DispatcherTimer _foldingTimer;
+    private readonly XmlFoldingStrategy _xmlFolding = new() { ShowAttributesWhenFolded = true };
+    private FoldingManager? _folding;
+    private TextDocument? _trackedDocument;
+    /// <summary>Folded regions survive switching tabs, which detaches the editor from its buffer.</summary>
+    private static readonly ConditionalWeakTable<DocumentState, List<(int Start, int End)>> FoldedRegions = new();
+    /// <summary>Files larger than this keep syntax colouring but no folding.</summary>
+    private const int MaximumFoldingCharacters = 2_000_000;
     public EditorSurface()
     {
         FontFamily = new FontFamily("Cascadia Code, Consolas"); FontSize = 13; ShowLineNumbers = true;
@@ -55,6 +68,9 @@ public sealed class EditorSurface : TextEditor
         SearchPanel.Install(TextArea);
         _margin = new DebugMargin(this); TextArea.LeftMargins.Insert(0, _margin);
         _diagnostics = new DiagnosticRenderer(this); TextArea.TextView.BackgroundRenderers.Add(_diagnostics);
+        TextArea.TextView.LineTransformers.Add(_semantic);
+        _hints = new InlayHintGenerator(this); TextArea.TextView.ElementGenerators.Add(_hints);
+        _foldingTimer = new(TimeSpan.FromMilliseconds(500), System.Windows.Threading.DispatcherPriority.Background, (_, _) => UpdateFoldings(), Dispatcher) { IsEnabled = false };
         TextChanged += OnEditorTextChanged;
         TextArea.Caret.PositionChanged += (_, _) => { if (ViewModel is { } vm && !_syncing) { vm.State.CaretOffset = CaretOffset; vm.State.CaretLine = TextArea.Caret.Line; vm.State.CaretColumn = TextArea.Caret.Column; } };
         TextArea.TextEntered += OnTextEntered;
@@ -88,6 +104,13 @@ public sealed class EditorSurface : TextEditor
         ViewModel.NavigationRequested += Navigate; ViewModel.Diagnostics.CollectionChanged += DiagnosticsChanged; ViewModel.BreakpointLines.CollectionChanged += BreakpointsChanged;
         ViewModel.SelectionRequested += RestoreSelection;
         ViewModel.BreakpointMarkers.CollectionChanged += BreakpointsChanged;
+        ViewModel.SnippetRequested += InsertRequestedSnippet;
+        ViewModel.DecorationsChanged += ApplyDecorations;
+        ViewModel.FoldingRequested += SetAllFolded;
+        _trackedDocument = Document; Document.Changed += OnDocumentChanged;
+        _hints.Enabled = ViewModel.ShowInlayHints;
+        ApplyDecorations();
+        InstallFolding();
         _syncing = false; Navigate();
     }
     private void Detach()
@@ -101,7 +124,13 @@ public sealed class EditorSurface : TextEditor
             _attached.NavigationRequested -= Navigate; _attached.Diagnostics.CollectionChanged -= DiagnosticsChanged; _attached.BreakpointLines.CollectionChanged -= BreakpointsChanged;
             _attached.SelectionRequested -= RestoreSelection;
             _attached.BreakpointMarkers.CollectionChanged -= BreakpointsChanged;
+            _attached.SnippetRequested -= InsertRequestedSnippet;
+            _attached.DecorationsChanged -= ApplyDecorations;
+            _attached.FoldingRequested -= SetAllFolded;
+            UninstallFolding(_attached.State);
         }
+        if (_trackedDocument != null) { _trackedDocument.Changed -= OnDocumentChanged; _trackedDocument = null; }
+        _semantic.Clear(); _hints.Clear();
         _attached = null;
     }
     private void StateChanged(object? sender, PropertyChangedEventArgs args)
@@ -113,6 +142,7 @@ public sealed class EditorSurface : TextEditor
     private void ModelChanged(object? sender, PropertyChangedEventArgs args)
     {
         if (args.PropertyName == nameof(EditorViewModel.ExecutionLine)) { _margin.InvalidateVisual(); TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
+        if (args.PropertyName == nameof(EditorViewModel.ShowInlayHints) && ViewModel is { } model) { _hints.Enabled = model.ShowInlayHints; TextArea.TextView.Redraw(); }
         if (args.PropertyName == nameof(EditorViewModel.XamlContextRevision))
         {
             _completionRequest?.Cancel(); _completion?.Close(); CancelHover();
@@ -170,7 +200,12 @@ public sealed class EditorSurface : TextEditor
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (_pendingCompletion != null && e.Key == Key.Escape) { CancelPendingCompletion(); e.Handled = true; return; }
-        if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _ = ShowCompletionAsync(); }
+        if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && TryExpandSnippet()) e.Handled = true;
+        else if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _ = ShowCompletionAsync(); }
+        else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ViewModel is { IsCSharp: true } csharp)
+        {
+            e.Handled = true; _ = ShowQuickActionsAsync(csharp);
+        }
         else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ContextMenu != null)
         {
             if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset);
@@ -191,6 +226,12 @@ public sealed class EditorSurface : TextEditor
         if (message is not null) ShowHover(message);
         try
         {
+            if (await vm.DataTipAsync(offset, token) is { } dataTip)
+            {
+                if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
+                message = message is null ? dataTip : dataTip + Environment.NewLine + Environment.NewLine + message;
+                ShowHover(message);
+            }
             var hover = await vm.HoverAsync(offset, token);
             if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
             if (hover is not null) message = message is null ? hover.Text : message + Environment.NewLine + Environment.NewLine + hover.Text;
@@ -230,6 +271,9 @@ public sealed class EditorSurface : TextEditor
             var end = vm.State.Extension == ".xaml" ? Math.Clamp(result.Start + result.Length, caret, Document.TextLength) : caret;
             var window = new CompletionWindow(TextArea) { StartOffset = result.Start, EndOffset = end, CloseWhenCaretAtBeginning = true };
             foreach (var item in result.Items.Take(250)) window.CompletionList.CompletionData.Add(new StudioCompletion(this, item, result.Version, contextRevision));
+            // C# snippets join the list outside member access, as in Visual Studio; Tab or Enter expands them.
+            if (vm.IsCSharp && (result.Start == 0 || Document.GetCharAt(result.Start - 1) != '.'))
+                foreach (var snippet in SnippetCatalog.For(".cs")) window.CompletionList.CompletionData.Add(new SnippetCompletion(this, snippet));
             window.Closed += (_, _) => { if (_completion == window) _completion = null; };
             _completion = window; window.Show();
         }
@@ -404,6 +448,238 @@ public sealed class EditorSurface : TextEditor
         public double Priority => 0;
         public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => _ = owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs);
     }
+    /// <summary>Takes the view model's decorations when they describe the current text; later edits shift them.</summary>
+    private void ApplyDecorations()
+    {
+        if (ViewModel is { } vm && vm.DecorationsVersion == vm.State.Version && Text == vm.State.Content)
+        { _semantic.Set(vm.SemanticSpans); _hints.Set(vm.InlayHints); }
+        else { _semantic.Clear(); _hints.Clear(); }
+        TextArea.TextView.Redraw();
+    }
+    private void OnDocumentChanged(object? sender, DocumentChangeEventArgs e)
+    {
+        _semantic.Shift(e.Offset, e.RemovalLength, e.InsertionLength);
+        _hints.Shift(e.Offset, e.RemovalLength, e.InsertionLength);
+        if (_folding != null) { _foldingTimer.Stop(); _foldingTimer.Start(); }
+    }
+    private void InstallFolding()
+    {
+        if (ViewModel is not { } vm || vm.State.Extension is not (".cs" or ".xaml" or ".xml" or ".csproj" or ".props" or ".targets" or ".resx")) return;
+        _folding = FoldingManager.Install(TextArea);
+        UpdateFoldings();
+        if (FoldedRegions.TryGetValue(vm.State, out var folded))
+            foreach (var section in _folding.AllFoldings.Where(section => folded.Contains((section.StartOffset, section.EndOffset))))
+                section.IsFolded = true;
+    }
+    private void UninstallFolding(DocumentState state)
+    {
+        _foldingTimer.Stop();
+        if (_folding is null) return;
+        FoldedRegions.AddOrUpdate(state, _folding.AllFoldings.Where(section => section.IsFolded).Select(section => (section.StartOffset, section.EndOffset)).ToList());
+        FoldingManager.Uninstall(_folding);
+        _folding = null;
+    }
+    private void UpdateFoldings()
+    {
+        _foldingTimer.Stop();
+        if (_folding is null || ViewModel is not { } vm) return;
+        if (Document.TextLength > MaximumFoldingCharacters) { _folding.Clear(); return; }
+        if (vm.State.Extension == ".cs")
+            _folding.UpdateFoldings(CSharpFolding.Find(Text).Select(region => new NewFolding(region.Start, region.End) { Name = region.Title }), -1);
+        else _xmlFolding.UpdateFoldings(_folding, Document); // Keeps the previous foldings while XML is malformed.
+    }
+    private void SetAllFolded(bool folded)
+    {
+        if (_folding is null) return;
+        UpdateFoldings();
+        foreach (var section in _folding.AllFoldings) section.IsFolded = folded;
+        if (folded) TextArea.Caret.BringCaretToView();
+    }
+    private ContextMenu? _quickActions;
+    /// <summary>Ctrl+. in C#: a menu at the caret listing fixes first, then refactorings. Each opens the change review.</summary>
+    private async Task ShowQuickActionsAsync(EditorViewModel vm)
+    {
+        if (_quickActions is { } previous) previous.IsOpen = false;
+        var view = TextArea.TextView;
+        var caret = TextArea.Caret.CalculateCaretRectangle();
+        var menu = new ContextMenu
+        {
+            PlacementTarget = view, Placement = System.Windows.Controls.Primitives.PlacementMode.Relative,
+            HorizontalOffset = caret.Left - view.HorizontalOffset, VerticalOffset = caret.Bottom - view.VerticalOffset
+        };
+        menu.Items.Add(new MenuItem { Header = new TextBlock { Text = "Finding quick actions…" }, IsEnabled = false });
+        _quickActions = menu;
+        menu.IsOpen = true;
+        await vm.RefreshQuickFixesAsync(CaretOffset);
+        if (!ReferenceEquals(_quickActions, menu) || !menu.IsOpen || vm != ViewModel) return;
+        menu.Items.Clear();
+        if (vm.CodeActions.Count == 0)
+        {
+            menu.Items.Add(new MenuItem { Header = new TextBlock { Text = vm.LanguageStatus is { Length: > 0 } status ? status : "No quick actions here" }, IsEnabled = false });
+            return;
+        }
+        bool? fixes = null;
+        foreach (var item in vm.CodeActions)
+        {
+            if (fixes is not null && fixes != item.IsFix) menu.Items.Add(new Separator());
+            fixes = item.IsFix;
+            // A TextBlock header keeps underscores in titles from becoming access keys.
+            menu.Items.Add(new MenuItem { Header = new TextBlock { Text = item.Title }, Command = item.ApplyCommand, CommandParameter = item.Action, ToolTip = item.IsFix ? "Code fix" : "Refactoring" });
+        }
+        if (menu.Items[0] is MenuItem first) first.Focus();
+    }
+    /// <summary>Expands the snippet whose shortcut is the word before the caret. Returns false to let Tab indent.</summary>
+    internal bool TryExpandSnippet()
+    {
+        if (ViewModel is not { } vm || IsReadOnly || _completion != null || _pendingCompletion != null || !TextArea.Selection.IsEmpty
+            || !TextArea.StackedInputHandlers.IsEmpty) return false; // An active snippet's fields own Tab.
+        if (SnippetCatalog.WordBefore(Text, CaretOffset, out var start) is not { } word || SnippetCatalog.Find(word, vm.State.Extension) is not { } snippet) return false;
+        InsertSnippet(snippet, start, CaretOffset - start);
+        return true;
+    }
+    private void InsertRequestedSnippet(CodeSnippet snippet)
+    {
+        if (IsReadOnly) return;
+        InsertSnippet(snippet, CaretOffset, 0);
+        Focus();
+    }
+    /// <summary>Replaces <paramref name="length"/> characters at <paramref name="start"/> with an interactive snippet: Tab moves between fields, Enter or Esc finishes.</summary>
+    internal void InsertSnippet(CodeSnippet snippet, int start, int length)
+    {
+        var parts = SnippetCatalog.Resolve(SnippetCatalog.Parse(snippet.Body), Text, start);
+        var expansion = new Snippet();
+        var fields = new Dictionary<string, SnippetReplaceableTextElement>(StringComparer.Ordinal);
+        foreach (var part in parts)
+        {
+            switch (part)
+            {
+                case SnippetLiteral literal: expansion.Elements.Add(new SnippetTextElement { Text = literal.Text }); break;
+                case SnippetField field: expansion.Elements.Add(fields[field.Name] = new SnippetReplaceableTextElement { Text = field.Default }); break;
+                case SnippetMirror mirror: expansion.Elements.Add(new SnippetBoundElement { TargetElement = fields[mirror.Name] }); break;
+                case SnippetCaret: expansion.Elements.Add(new SnippetCaretElement()); break;
+                case SnippetSelection: expansion.Elements.Add(new SnippetSelectionElement()); break;
+            }
+        }
+        // One undo step removes both the shortcut and the expansion.
+        using (Document.RunUpdate())
+        {
+            if (length > 0) { Document.Remove(start, length); CaretOffset = start; }
+            expansion.Insert(TextArea);
+        }
+        TextArea.Caret.BringCaretToView();
+    }
+    private sealed class SnippetCompletion(EditorSurface owner, CodeSnippet snippet) : ICompletionData
+    {
+        public ImageSource? Image => null;
+        public string Text => snippet.Shortcut;
+        public object Content => snippet.Shortcut;
+        public object Description => "Snippet: " + snippet.Title + " (Tab)";
+        public double Priority => 0;
+        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
+        {
+            if (insertionRequestEventArgs is TextCompositionEventArgs typed) typed.Handled = true;
+            owner.InsertSnippet(snippet, completionSegment.Offset, completionSegment.Length);
+        }
+    }
+    /// <summary>Semantic colours from Roslyn layered over syntax highlighting: types, members, parameters.</summary>
+    private sealed class SemanticColorizer : DocumentColorizingTransformer
+    {
+        private List<SemanticSpan> _spans = [];
+        public void Set(IReadOnlyList<SemanticSpan> spans) => _spans = [.. spans.OrderBy(span => span.Start)];
+        public void Clear() => _spans = [];
+        public void Shift(int offset, int removed, int inserted)
+        {
+            if (_spans.Count == 0) return;
+            var shifted = new List<SemanticSpan>(_spans.Count);
+            foreach (var span in _spans)
+                if (DecorationOffsets.MapRange(span.Start, span.Length, offset, removed, inserted) is { } mapped) shifted.Add(span with { Start = mapped.Start });
+            _spans = shifted;
+        }
+        protected override void ColorizeLine(DocumentLine line)
+        {
+            if (_spans.Count == 0) return;
+            int lineStart = line.Offset, lineEnd = line.EndOffset;
+            // Spans do not overlap, so the first candidate is at most one before the first span starting on the line.
+            int low = 0, high = _spans.Count;
+            while (low < high) { var middle = (low + high) / 2; if (_spans[middle].Start < lineStart) low = middle + 1; else high = middle; }
+            for (var index = Math.Max(0, low - 1); index < _spans.Count && _spans[index].Start < lineEnd; index++)
+            {
+                var span = _spans[index];
+                int start = Math.Max(span.Start, lineStart), end = Math.Min(span.Start + span.Length, lineEnd);
+                if (end <= start || BrushFor(span.Kind) is not { } brush) continue;
+                ChangeLinePart(start, end, element => element.TextRunProperties.SetForegroundBrush(brush));
+            }
+        }
+        private static Brush? BrushFor(string kind) => kind switch
+        {
+            "Type" => Resource("SyntaxType"), "Interface" => Resource("SyntaxInterface"), "Enum" => Resource("SyntaxEnum"),
+            "TypeParameter" => Resource("SyntaxTypeParameter"), "Method" => Resource("SyntaxMethod"),
+            "Property" or "Field" or "Event" or "Constant" or "EnumMember" => Resource("SyntaxMember"),
+            "Parameter" => Resource("SyntaxParameter"),
+            _ => null // Locals and namespaces keep the text colour.
+        };
+        private static Brush? Resource(string key) => Application.Current?.TryFindResource(key) as Brush;
+    }
+    /// <summary>
+    /// Renders inline hints as zero-length elements. The caret never stops on a hint, and each offset emits at most
+    /// one hint per visual line, so generation always advances.
+    /// </summary>
+    private sealed class InlayHintGenerator(EditorSurface owner) : VisualLineElementGenerator
+    {
+        private List<InlayHint> _hints = [];
+        private int _emittedAt = -1;
+        public bool Enabled { get; set; } = true;
+        public void Set(IReadOnlyList<InlayHint> hints) => _hints = [.. hints.OrderBy(hint => hint.Position).DistinctBy(hint => hint.Position)];
+        public void Clear() => _hints = [];
+        public void Shift(int offset, int removed, int inserted)
+        {
+            if (_hints.Count == 0) return;
+            var shifted = new List<InlayHint>(_hints.Count);
+            foreach (var hint in _hints)
+                if (DecorationOffsets.MapPoint(hint.Position, offset, removed, inserted) is { } position) shifted.Add(hint with { Position = position });
+            _hints = shifted;
+        }
+        public override void StartGeneration(ITextRunConstructionContext context) { base.StartGeneration(context); _emittedAt = -1; }
+        public override int GetFirstInterestedOffset(int startOffset)
+        {
+            if (!Enabled || _hints.Count == 0) return -1;
+            var index = IndexAtOrAfter(startOffset);
+            if (index < _hints.Count && _hints[index].Position == _emittedAt) index++;
+            if (index >= _hints.Count) return -1;
+            var position = _hints[index].Position;
+            return position <= CurrentContext.VisualLine.LastDocumentLine.EndOffset ? position : -1;
+        }
+        public override VisualLineElement? ConstructElement(int offset)
+        {
+            var index = IndexAtOrAfter(offset);
+            if (index >= _hints.Count || _hints[index].Position != offset || offset == _emittedAt) return null;
+            _emittedAt = offset;
+            var hint = _hints[index];
+            var size = Math.Max(8, owner.FontSize - 1.5);
+            var padding = new Thickness(3, 0, 3, 0);
+            var text = new TextBlock { Text = hint.Text, FontFamily = owner.FontFamily, FontSize = size };
+            text.SetResourceReference(TextBlock.ForegroundProperty, "InlayHintBrush");
+            var chip = new Border
+            {
+                Child = text, Padding = padding, CornerRadius = new CornerRadius(3), Cursor = Cursors.Arrow,
+                Margin = hint.Kind == "Parameter" ? new Thickness(0, 0, 3, 0) : new Thickness(1, 0, 0, 0)
+            };
+            chip.SetResourceReference(Border.BackgroundProperty, "InlayHintBackgroundBrush");
+            // Align the hint's text baseline with the line's baseline instead of its bottom edge.
+            TextBlock.SetBaselineOffset(chip, padding.Top + size * owner.FontFamily.Baseline);
+            return new HintElement(chip);
+        }
+        private int IndexAtOrAfter(int offset)
+        {
+            int low = 0, high = _hints.Count;
+            while (low < high) { var middle = (low + high) / 2; if (_hints[middle].Position < offset) low = middle + 1; else high = middle; }
+            return low;
+        }
+    }
+    private sealed class HintElement(UIElement element) : InlineObjectElement(0, element)
+    {
+        public override int GetNextCaretPosition(int visualColumn, System.Windows.Documents.LogicalDirection direction, CaretPositioningMode mode) => -1;
+    }
     private sealed class DebugMargin(EditorSurface owner) : AbstractMargin
     {
         protected override Size MeasureOverride(Size availableSize) => new(22, 0);
@@ -421,8 +697,17 @@ public sealed class EditorSurface : TextEditor
                 if (marker != null)
                 {
                     var brush = marker.Enabled ? danger : muted;
-                    context.DrawEllipse(marker.Enabled && marker.Bound ? brush : null, new Pen(brush, 1.8), new Point(10, y), 5.5, 5.5);
-                    if (marker.Condition.Length > 0) context.DrawEllipse(brush, null, new Point(10, y), 1.7, 1.7);
+                    var fill = marker.Enabled && marker.Bound ? brush : null;
+                    if (marker.IsTracepoint)
+                    {
+                        // Tracepoints use a diamond, as in Visual Studio.
+                        var diamond = new StreamGeometry();
+                        using (var g = diamond.Open()) { g.BeginFigure(new Point(10, y - 6), true, true); g.LineTo(new Point(16, y), true, false); g.LineTo(new Point(10, y + 6), true, false); g.LineTo(new Point(4, y), true, false); }
+                        diamond.Freeze();
+                        context.DrawGeometry(fill, new Pen(brush, 1.8), diamond);
+                    }
+                    else context.DrawEllipse(fill, new Pen(brush, 1.8), new Point(10, y), 5.5, 5.5);
+                    if (marker.Condition.Length > 0 || marker.HitCondition.Length > 0) context.DrawEllipse(fill is null ? brush : owner.TryFindResource("EditorBrush") as Brush ?? Brushes.White, null, new Point(10, y), 1.7, 1.7);
                 }
                 else if (owner.ViewModel.BreakpointLines.Contains(line)) context.DrawEllipse(danger, null, new Point(10, y), 5.5, 5.5);
                 if (owner.ViewModel.ExecutionLine == line)
@@ -449,7 +734,9 @@ public sealed class EditorSurface : TextEditor
             base.OnMouseMove(e);
             var line = TextView?.GetVisualLineFromVisualTop(e.GetPosition(TextView).Y + TextView.VerticalOffset)?.FirstDocumentLine.LineNumber;
             var marker = owner.ViewModel?.BreakpointMarkers.FirstOrDefault(b => b.Line == line);
-            ToolTip = marker == null ? "Click to add a C# breakpoint (F9)" : $"{(marker.Enabled ? marker.Status : "Disabled")} breakpoint on line {line}" + (marker.Condition.Length > 0 ? $"\nCondition: {marker.Condition}" : "") + "\nClick to remove. Right-click the line for conditions.";
+            ToolTip = marker == null ? "Click to add a C# breakpoint (F9)" : $"{(marker.Enabled ? marker.Status : "Disabled")} {(marker.IsTracepoint ? "tracepoint" : "breakpoint")} on line {line}"
+                + (marker.Condition.Length > 0 ? $"\nCondition: {marker.Condition}" : "") + (marker.HitCondition.Length > 0 ? $"\nHit count: {marker.HitCondition}" : "")
+                + (marker.IsTracepoint ? $"\nLogs: {marker.LogMessage}" : "") + "\nClick to remove. Right-click the line for conditions, hit counts and log messages.";
         }
         protected override void OnTextViewChanged(TextView? oldTextView, TextView? newTextView)
         {

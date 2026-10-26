@@ -265,6 +265,7 @@ public sealed partial class ShellViewModel
         var text = _store.Find(result.Path)?.Content ?? await ProjectXamlDiagnosticText.ReadAsync(result.Path, _lifetime.Token);
         if (!WorkspaceCurrent() || !ReferenceEquals(workspace, Workspace) || text is null || TextHash(text) != result.ExpectedTextHash)
         { Status = "The reference source or project changed. Find references again before navigating."; return; }
+        RecordNavigationOrigin();
         await OpenDocumentAsync(result.Path);
         if (ActiveDocument is not { } editor || !editor.State.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase)
             || !WorkspaceCurrent() || !ReferenceEquals(workspace, Workspace) || TextHash(editor.State.Content) != result.ExpectedTextHash)

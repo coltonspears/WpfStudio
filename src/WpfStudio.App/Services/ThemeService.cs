@@ -54,6 +54,15 @@ public static class ThemeService
         ("SyntaxNumber",          "#EFA07C", "#B2481A"),
         ("SyntaxType",            "#5FCDBE", "#0B7A6E"),
         ("SyntaxAttribute",       "#9CC7FF", "#1F5FB8"),
+        // Semantic colouring from the language worker, layered over the syntax colours above.
+        ("SyntaxInterface",       "#8FDDA8", "#227A47"),
+        ("SyntaxEnum",            "#B8D98A", "#5C7A12"),
+        ("SyntaxTypeParameter",   "#7FC4BA", "#2A6F67"),
+        ("SyntaxMethod",          "#E8D48F", "#7D5B00"),
+        ("SyntaxMember",          "#D7A8E8", "#8A3D9E"), // properties, fields, events, constants, enum members
+        ("SyntaxParameter",       "#8FC6EA", "#1E6894"),
+        ("InlayHintBrush",        "#8A8F9B", "#767B86"),
+        ("InlayHintBackgroundBrush","#26282F", "#EFF0F3"),
         // Categorical data colours (profiler treemaps, generation bars). Fixed order, validated for colour-vision
         // deficiency on both surfaces; use them for identity only and never for status.
         ("Chart1Brush",           "#3987E5", "#2A78D6"),

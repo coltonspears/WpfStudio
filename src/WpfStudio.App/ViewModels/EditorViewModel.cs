@@ -9,12 +9,21 @@ using WpfStudio.Workspace;
 
 namespace WpfStudio.App.ViewModels;
 
-public enum EditorAction { Definition, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, AskColtonGpt, OpenDesigner }
-public sealed record BreakpointMarker(int Line, bool Enabled, bool Bound, string Condition, string Status);
+public enum EditorAction { Definition, Implementation, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, BreakpointHitCount, BreakpointLogMessage, AddWatch, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, InsertSnippet, AskColtonGpt, OpenDesigner }
+public sealed record BreakpointMarker(int Line, bool Enabled, bool Bound, string Condition, string Status, string HitCondition = "", string LogMessage = "")
+{
+    public bool IsTracepoint => LogMessage.Length > 0;
+}
 public sealed record EditorSelection(int CaretOffset, int Start, int Length);
 public sealed record XamlQuickFix(XamlCodeAction Action, IAsyncRelayCommand<XamlCodeAction?> ApplyCommand)
 {
     public string Title => Action.Title;
+}
+/// <summary>A Roslyn code fix or refactoring offered by Ctrl+. in a C# editor.</summary>
+public sealed record CSharpQuickAction(CodeActionEntry Action, IAsyncRelayCommand<CodeActionEntry?> ApplyCommand)
+{
+    public string Title => Action.Title;
+    public bool IsFix => Action.Kind == "Fix";
 }
 
 public sealed partial class EditorViewModel : ObservableObject, IDisposable
@@ -62,6 +71,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public ObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
     public ObservableCollection<XamlQuickFix> QuickFixes { get; } = [];
     public event Func<XamlCodeAction, Task>? CodeActionRequested;
+    public ObservableCollection<CSharpQuickAction> CodeActions { get; } = [];
+    /// <summary>The shell computes the action's edits and opens the change review.</summary>
+    public event Func<CodeActionEntry, Task>? CSharpCodeActionRequested;
+    private long _codeActionsVersion = -1;
     public ObservableCollection<int> BreakpointLines { get; } = [];
     public ObservableCollection<BreakpointMarker> BreakpointMarkers { get; } = [];
     public IRelayCommand<EditorAction> ActionCommand { get; }
@@ -113,6 +126,15 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public event Action? NavigationRequested;
     public event Action<EditorSelection>? SelectionRequested;
     [ObservableProperty] public partial int ExecutionLine { get; set; } = -1;
+    /// <summary>Semantic colouring and inline hints for <see cref="DecorationsVersion"/>; the editor maps them through later edits.</summary>
+    public IReadOnlyList<SemanticSpan> SemanticSpans { get; private set; } = [];
+    public IReadOnlyList<InlayHint> InlayHints { get; private set; } = [];
+    public long DecorationsVersion { get; private set; } = -1;
+    public event Action? DecorationsChanged;
+    [ObservableProperty] public partial bool ShowInlayHints { get; set; } = true;
+    /// <summary>Asks the editor to collapse (true) or expand (false) every folding.</summary>
+    public event Action<bool>? FoldingRequested;
+    public void SetAllFolded(bool folded) => FoldingRequested?.Invoke(folded);
     [ObservableProperty] public partial string LanguageStatus { get; set; } = "";
     public void Navigate(int offset) { State.CaretOffset = Math.Clamp(offset, 0, State.Content.Length); NavigationRequested?.Invoke(); }
     public void RestoreSelection(int caret, int start, int length)
@@ -125,6 +147,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         SelectionRequested?.Invoke(new(caret, start, length));
     }
     public void ToggleBreakpoint(int line) => BreakpointRequested?.Invoke(line);
+    /// <summary>Asks the attached editor to expand a snippet at the caret, wrapping any selection the snippet supports.</summary>
+    public event Action<WpfStudio.Core.Text.CodeSnippet>? SnippetRequested;
+    public void InsertSnippet(WpfStudio.Core.Text.CodeSnippet snippet) => SnippetRequested?.Invoke(snippet);
     private void ContentChanged(object? sender, EventArgs e)
     {
         if (_disposed) return;
@@ -191,6 +216,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (debounce) await Task.Delay(350, token);
             if (!_workspace.IsConnected || !IsCurrentAnalysis(version, semanticRevision, resources.Generation, token)) return;
             IReadOnlyList<WorkspaceDiagnostic> diagnostics;
+            EditorDecorationsResult? decorations = null;
             string? status = null;
             if (State.Extension == ".xaml")
             {
@@ -209,6 +235,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 var result = await _workspace.UpdateDocumentAsync(new(State.Path, text, version), token);
                 if (!result.Accepted || result.Version != version) return;
                 diagnostics = result.Diagnostics;
+                // Colouring and hints are optional and refresh with the next analysis; diagnostics apply regardless.
+                try { decorations = await _workspace.GetEditorDecorationsAsync(new(State.Path, version), token); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { decorations = null; }
             }
             else return;
             await _dispatcher.InvokeAsync(() =>
@@ -216,6 +245,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 if (!IsCurrentAnalysis(version, semanticRevision, resources.Generation, token) || !_workspace.IsConnected) return;
                 Diagnostics.Clear(); foreach (var item in diagnostics) Diagnostics.Add(item);
                 LanguageStatus = status ?? ""; // Counts are shown by the status bar's error and warning summary.
+                if (decorations is { } current && current.Version == version)
+                {
+                    SemanticSpans = current.Spans; InlayHints = current.Hints; DecorationsVersion = version;
+                    DecorationsChanged?.Invoke();
+                }
             }, token);
         }
         catch (OperationCanceledException) { }
@@ -276,6 +310,21 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         var result = await _workspace.GetSignatureHelpAsync(new(State.Path, offset, State.Version), token);
         return result.Version == State.Version ? string.Join(Environment.NewLine, result.Signatures.Take(6).Select(s => s.Label)) : null;
     }
+    /// <summary>Evaluates an expression while the debugger is paused; set by the shell. Returns null when unavailable.</summary>
+    public Func<string, CancellationToken, Task<string?>>? DataTipEvaluator { get; set; }
+    /// <summary>The expression a DataTip or Add watch would use at <paramref name="offset"/>: the selection when it contains the offset, else the hovered member chain.</summary>
+    public string? DebugExpressionAt(int offset)
+    {
+        if (!IsCSharp) return null;
+        if (SelectionLength is > 0 and <= 200 && offset >= SelectionStart && offset <= SelectionStart + SelectionLength && !SelectedText.Contains('\n'))
+            return SelectedText.Trim() is { Length: > 0 } selected ? selected : null;
+        return WpfStudio.Core.Text.DebugExpressionLocator.Find(State.Content, offset)?.Expression;
+    }
+    public async Task<string?> DataTipAsync(int offset, CancellationToken token = default)
+    {
+        if (DataTipEvaluator is not { } evaluate || DebugExpressionAt(offset) is not { } expression) return null;
+        return await evaluate(expression, token);
+    }
     public async Task<XamlHoverInfo?> HoverAsync(int offset, CancellationToken token = default)
     {
         if (!IsXaml || _disposed || !_workspace.IsConnected || _xamlContextUnavailable is not null) return null;
@@ -288,6 +337,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public async Task RefreshQuickFixesAsync(int offset, CancellationToken token = default)
     {
         ClearQuickFixes();
+        if (IsCSharp) { await RefreshCSharpActionsAsync(offset, token); return; }
         if (!IsXaml || IsReadOnly || _disposed || !_workspace.IsConnected || _xamlContextUnavailable is not null) return;
         _quickFixRequest = CancellationTokenSource.CreateLinkedTokenSource(token);
         token = _quickFixRequest.Token;
@@ -313,6 +363,47 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (IsCurrentAnalysis(version, revision, resources.Generation, token)) LanguageStatus = "Quick fixes unavailable";
             _report(ex.Message);
         }
+    }
+    /// <summary>Lists Roslyn fixes and refactorings for the selection when it contains <paramref name="offset"/>, else for the caret.</summary>
+    private async Task RefreshCSharpActionsAsync(int offset, CancellationToken token)
+    {
+        if (IsReadOnly || _disposed || !_workspace.IsConnected) return;
+        _quickFixRequest = CancellationTokenSource.CreateLinkedTokenSource(token);
+        token = _quickFixRequest.Token;
+        long contextRevision = QuickFixContextRevision;
+        int start = Math.Clamp(offset, 0, State.Content.Length), length = 0;
+        if (SelectionLength > 0 && offset >= SelectionStart && offset <= SelectionStart + SelectionLength) { start = SelectionStart; length = SelectionLength; }
+        try
+        {
+            await SyncAsync(token);
+            long version = State.Version;
+            var result = await _workspace.GetCodeActionsAsync(new(State.Path, start, length, version), token);
+            await _dispatcher.InvokeAsync(() =>
+            {
+                if (_disposed || token.IsCancellationRequested || version != State.Version || result.Version != version || contextRevision != QuickFixContextRevision) return;
+                _codeActionsVersion = version;
+                foreach (var action in result.Actions) CodeActions.Add(new(action, ApplyCSharpCodeActionCommand));
+            }, token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            LanguageStatus = "Quick actions unavailable";
+            _report(ex.Message);
+        }
+    }
+    [RelayCommand] private async Task ApplyCSharpCodeActionAsync(CodeActionEntry? action)
+    {
+        if (action is null || _disposed || IsReadOnly || !_workspace.IsConnected || _codeActionsVersion != State.Version
+            || !CodeActions.Any(item => ReferenceEquals(item.Action, action)))
+        {
+            ClearQuickFixes();
+            LanguageStatus = "The document changed. Press Ctrl+. again.";
+            return;
+        }
+        try { if (CSharpCodeActionRequested is { } apply) await apply(action); }
+        catch (Exception ex) { LanguageStatus = ex.Message; _report(ex.Message); }
+        finally { ClearQuickFixes(); }
     }
     [RelayCommand] private async Task ApplyCodeActionAsync(XamlCodeAction? action)
     {
@@ -340,6 +431,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _quickFixRequest?.Dispose();
         _quickFixRequest = null;
         QuickFixes.Clear();
+        CodeActions.Clear();
+        _codeActionsVersion = -1;
     }
     public void Dispose()
     {

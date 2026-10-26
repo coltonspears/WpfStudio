@@ -91,6 +91,18 @@ public sealed partial class ShellViewModel
         var changes = await _edits.PrepareAsync(result);
         if (await PreviewAsync("Review C# refactoring", changes, string.Join(Environment.NewLine, result.Warnings))) await ApplyChangesAsync(changes);
     });
+    private async Task ApplyCSharpCodeActionAsync(EditorViewModel editor, WpfStudio.Contracts.CodeActionEntry action)
+    {
+        var state = editor.State;
+        Status = action.Title + "…";
+        var result = await _workspace.ApplyCodeActionAsync(new(state.Path, state.Version, action.Id), _lifetime.Token);
+        var changes = await _edits.PrepareAsync(result);
+        if (await PreviewAsync(action.Title, changes, string.Join(Environment.NewLine, result.Warnings)))
+        {
+            await ApplyChangesAsync(changes);
+            Status = "Applied: " + action.Title;
+        }
+    }
     [RelayCommand] private void ShowBreakpoints() { Debugger.SelectedTab = 2; ToolRequested?.Invoke("Debugger"); }
     [RelayCommand] private Task BreakpointConditionAsync() => GuardAsync(async () =>
     {
@@ -104,6 +116,45 @@ public sealed partial class ShellViewModel
         breakpoint.Condition = condition; Debugger.SelectedBreakpoint = breakpoint;
         await Debugger.ApplyBreakpointsCommand.ExecuteAsync(null); ShowBreakpoints();
     });
+    [RelayCommand] private Task BreakpointHitCountAsync() => GuardAsync(async () =>
+    {
+        if (ActiveDocument is not { } doc || doc.State.Extension != ".cs") return;
+        var breakpoint = BreakpointAtCaret(doc);
+        var text = await _dialogs.PromptAsync("Breakpoint hit count", "Break on hit 5, >=5 from the fifth hit, or %5 on every fifth hit (leave empty for every hit):", breakpoint?.HitCondition ?? "");
+        if (text == null) return;
+        if (!WpfStudio.Contracts.HitCondition.TryParse(text, out _, out var error)) { await _dialogs.ShowErrorAsync("Breakpoint hit count", error!); return; }
+        breakpoint ??= await AddBreakpointAtCaretAsync(doc);
+        if (breakpoint == null) return;
+        breakpoint.HitCondition = text.Trim(); Debugger.SelectedBreakpoint = breakpoint;
+        await Debugger.ApplyBreakpointsCommand.ExecuteAsync(null);
+        Status = "Breakpoint " + breakpoint.Summary.ToLowerInvariant();
+    });
+    [RelayCommand] private Task BreakpointLogMessageAsync() => GuardAsync(async () =>
+    {
+        if (ActiveDocument is not { } doc || doc.State.Extension != ".cs") return;
+        var breakpoint = BreakpointAtCaret(doc);
+        var text = await _dialogs.PromptAsync("Tracepoint", "Write this message to Output and continue. Use {expression} for values and $FUNCTION, $TID, $FILEPOS or $HITCOUNT (leave empty to break instead):", breakpoint?.LogMessage ?? "");
+        if (text == null) return;
+        breakpoint ??= await AddBreakpointAtCaretAsync(doc);
+        if (breakpoint == null) return;
+        breakpoint.LogMessage = text.Trim(); Debugger.SelectedBreakpoint = breakpoint;
+        await Debugger.ApplyBreakpointsCommand.ExecuteAsync(null);
+        Status = breakpoint.IsTracepoint ? "Tracepoint set; its messages appear in Debugger > Output" : "Breakpoint breaks again instead of logging";
+    });
+    [RelayCommand] private Task AddWatchAtCaretAsync() => GuardAsync(async () =>
+    {
+        if (ActiveDocument is not { IsCSharp: true } doc || doc.DebugExpressionAt(doc.State.CaretOffset) is not { } expression)
+        { Status = "Place the caret on a variable or member, or select an expression, to add a watch"; return; }
+        await Debugger.AddWatchAsync(expression);
+        Debugger.SelectedTab = 1; ToolRequested?.Invoke("Debugger");
+    });
+    private BreakpointViewModel? BreakpointAtCaret(EditorViewModel doc) =>
+        Debugger.Breakpoints.FirstOrDefault(b => b.Path.Equals(doc.State.Path, StringComparison.OrdinalIgnoreCase) && b.Line == doc.State.CaretLine);
+    private async Task<BreakpointViewModel?> AddBreakpointAtCaretAsync(EditorViewModel doc)
+    {
+        await Debugger.ToggleBreakpointAsync(doc.State.Path, doc.State.CaretLine);
+        return BreakpointAtCaret(doc);
+    }
     [RelayCommand] private Task DisableBreakpointAsync() => GuardAsync(async () =>
     {
         if (ActiveDocument is not { } doc) return;
@@ -125,17 +176,22 @@ public sealed partial class ShellViewModel
         {
             case EditorAction.Definition: await GoToDefinitionCommand.ExecuteAsync(null); break;
             case EditorAction.OpenDesigner: await OpenDesignerCommand.ExecuteAsync(null); break;
+            case EditorAction.Implementation: await GoToImplementationCommand.ExecuteAsync(null); break;
             case EditorAction.References: await FindReferencesCommand.ExecuteAsync(null); break;
             case EditorAction.Rename: await RenameSymbolCommand.ExecuteAsync(null); break;
             case EditorAction.Format: await FormatCommand.ExecuteAsync(null); break;
             case EditorAction.OrganizeUsings: case EditorAction.UseVar: case EditorAction.UseExplicitType: await RefactorCommand.ExecuteAsync(action.ToString()); break;
             case EditorAction.ToggleBreakpoint: await ToggleBreakpointCommand.ExecuteAsync(null); break;
             case EditorAction.BreakpointCondition: await BreakpointConditionCommand.ExecuteAsync(null); break;
+            case EditorAction.BreakpointHitCount: await BreakpointHitCountCommand.ExecuteAsync(null); break;
+            case EditorAction.BreakpointLogMessage: await BreakpointLogMessageCommand.ExecuteAsync(null); break;
+            case EditorAction.AddWatch: await AddWatchAtCaretCommand.ExecuteAsync(null); break;
             case EditorAction.DisableBreakpoint: await DisableBreakpointCommand.ExecuteAsync(null); break;
             case EditorAction.ShowBreakpoints: ShowBreakpoints(); break;
             case EditorAction.SwitchRelated: await SwitchRelatedCommand.ExecuteAsync(null); break;
             case EditorAction.InsertProperty: await InsertPropertyCommand.ExecuteAsync(null); break;
             case EditorAction.InsertCommand: await InsertCommandCommand.ExecuteAsync(null); break;
+            case EditorAction.InsertSnippet: InsertSnippet(); break;
             case EditorAction.AskColtonGpt:
                 await OpenAssistantCommand.ExecuteAsync(null);
                 if (Features != null) Features.Assistant.ContextMode = document.SelectionLength > 0 ? "Selected text" : "No editor context";
