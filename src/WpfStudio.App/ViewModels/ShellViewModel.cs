@@ -148,20 +148,26 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     public async Task InitializeAsync(string[] arguments)
     {
+        var assistant = Features?.Assistant.InitializeAsync() ?? Task.CompletedTask;
         var settings = await _settings.LoadAsync();
-        if (Features != null) await Features.Assistant.InitializeAsync();
+        await assistant;
         ThemeName = settings.Theme; ThemeChanged?.Invoke(ThemeName);
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true;
         var requested = arguments.FirstOrDefault(a => File.Exists(a) && Path.GetExtension(a).ToLowerInvariant() is ".sln" or ".slnx" or ".csproj");
+        var restoring = requested == null && settings.WorkspacePath != null && File.Exists(settings.WorkspacePath);
+        // Read the previous session's files while the language worker loads; tabs still open in their saved order afterwards.
+        var prefetched = restoring ? settings.OpenDocuments.Where(File.Exists).Select(PrefetchDocumentAsync).ToArray() : [];
         if (requested != null) await LoadWorkspaceAsync(requested);
-        else if (settings.WorkspacePath != null && File.Exists(settings.WorkspacePath)) await LoadWorkspaceAsync(settings.WorkspacePath);
+        else if (restoring) await LoadWorkspaceAsync(settings.WorkspacePath!);
         if (Workspace != null && requested == null)
         {
             StartupProject = Projects.FirstOrDefault(p => p.ProjectPath == settings.StartupProject) ?? StartupProject;
             foreach (var path in settings.OpenDocuments.Where(File.Exists)) await GuardAsync(() => OpenDocumentAsync(path));
         }
+        foreach (var state in await Task.WhenAll(prefetched))
+            if (state != null && !Documents.Any(d => ReferenceEquals(d.State, state))) _store.Close(state);
         var recovered = await _store.ReadRecoveryAsync();
         if (recovered.Count > 0 && await _dialogs.ConfirmAsync("Recover unsaved work", $"Recover {recovered.Count} unsaved document(s) from the previous session?"))
         {
@@ -171,6 +177,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         else foreach (var item in recovered) _store.DeleteRecovery(item.Path);
         LayoutRestoreRequested?.Invoke();
         _recoveryLoop = RecoveryLoopAsync(_lifetime.Token);
+    }
+    private async Task<DocumentState?> PrefetchDocumentAsync(string path)
+    {
+        // Failures are reported when the tab itself is opened.
+        try { return await Task.Run(() => _store.OpenAsync(path, _lifetime.Token)); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { return null; }
     }
     private async Task RecoveryLoopAsync(CancellationToken token)
     {
@@ -215,10 +227,14 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Status = "Loading " + Path.GetFileName(path) + "…";
             var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
             Terminal.WorkingDirectory = directory;
-            _allFiles = await Task.Run(() => EnumerateSourceFiles(directory).ToArray(), token);
-            Explorer.Clear(); foreach (var node in ExplorerNode.FromFiles(directory, _allFiles)) Explorer.Add(node);
             TargetFramework = null;
-            Workspace = await _workspace.LoadAsync(new(path, Configuration), token);
+            // Start the worker first: listing files overlaps its process start and SDK resolution, and the tree appears before language services finish.
+            var loading = _workspace.LoadAsync(new(path, Configuration), token);
+            try { _allFiles = await Task.Run(() => EnumerateSourceFiles(directory).ToArray(), token); }
+            catch (IOException ex) { _allFiles = []; AppendOutput("File listing: " + ex.Message); }
+            Explorer.Clear(); foreach (var node in ExplorerNode.FromFiles(directory, _allFiles)) Explorer.Add(node);
+            Status = "Loading language services for " + Path.GetFileName(path) + "…";
+            Workspace = await loading;
             RefreshConfigurations();
             Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
             StartupProject = Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();

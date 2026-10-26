@@ -69,6 +69,18 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var path = Path.GetFullPath(request.Path);
         var issues = new ConcurrentQueue<WorkspaceIssue>();
         var paths = ProjectDiscovery.GetProjectPaths(path);
+        // Each evaluation is a separate `dotnet msbuild` process that does not depend on the Roslyn
+        // solution. Start them now so they overlap the solution load instead of running one by one after it.
+        var evaluations = new ConcurrentDictionary<string, Task<ProjectDiscovery.EvaluatedProject?>>(StringComparer.OrdinalIgnoreCase);
+        var evaluationSlots = new SemaphoreSlim(Math.Clamp(Environment.ProcessorCount / 2, 2, 8));
+        Task<ProjectDiscovery.EvaluatedProject?> Evaluate(string projectPath) => evaluations.GetOrAdd(projectPath, key => Task.Run<ProjectDiscovery.EvaluatedProject?>(async () =>
+        {
+            await evaluationSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try { return await ProjectDiscovery.EvaluateAsync(key, request.Configuration, request.TargetFramework, cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { issues.Enqueue(new WorkspaceIssue(ex.Message)); return null; }
+            finally { evaluationSlots.Release(); }
+        }, cancellationToken));
+        foreach (var projectPath in paths) _ = Evaluate(projectPath);
         var sdk = "Unavailable";
         try
         {
@@ -89,16 +101,14 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             issues.Enqueue(new WorkspaceIssue($"Language workspace could not load: {ex.Message}. File navigation remains available.", "Error"));
             lock (_gate) { _solution = null; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _xamlProjects.Clear(); }
         }
-        var models = new List<WorkspaceProject>();
         var configurations = new HashSet<string>(ProjectDiscovery.GetDeclaredConfigurations(path), StringComparer.OrdinalIgnoreCase);
         var loadedProjects = _solution?.Projects.ToArray() ?? [];
-        foreach (var projectPath in paths.Concat(loadedProjects.Select(p => p.FilePath).OfType<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
+        async Task<(WorkspaceProject Model, IEnumerable<string> Configurations)> BuildProjectAsync(string projectPath)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var project = loadedProjects.FirstOrDefault(p => string.Equals(p.FilePath, projectPath, StringComparison.OrdinalIgnoreCase));
-            ProjectDiscovery.EvaluatedProject? evaluated = null;
-            try { evaluated = await ProjectDiscovery.EvaluateAsync(projectPath, request.Configuration, request.TargetFramework, cancellationToken).ConfigureAwait(false); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { issues.Enqueue(new WorkspaceIssue(ex.Message)); }
+            var evaluated = await Evaluate(projectPath).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             lock (_gate)
                 foreach (var context in loadedProjects.Where(p => string.Equals(p.FilePath, projectPath, StringComparison.OrdinalIgnoreCase)))
                 {
@@ -112,7 +122,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                             evaluated.OutputType is "Exe" or "WinExe");
                     }
                 }
-            foreach (var configuration in evaluated?.Configurations.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? ProjectDiscovery.GetDeclaredConfigurations(projectPath)) configurations.Add(configuration);
+            var projectConfigurations = evaluated?.Configurations.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? ProjectDiscovery.GetDeclaredConfigurations(projectPath);
             var files = (evaluated?.Files ?? ProjectDiscovery.FallbackFiles(projectPath)).ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
             if (project is not null)
             {
@@ -132,10 +142,15 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                     }
             }
             files.TryAdd(projectPath, new WorkspaceFile(projectPath, Path.GetFileName(projectPath), "Project"));
-            models.Add(new WorkspaceProject(project?.Id.ToString() ?? projectPath, project?.Name ?? Path.GetFileNameWithoutExtension(projectPath), projectPath,
+            return (new WorkspaceProject(project?.Id.ToString() ?? projectPath, project?.Name ?? Path.GetFileNameWithoutExtension(projectPath), projectPath,
                 evaluated?.TargetFramework, evaluated?.OutputPath ?? project?.OutputFilePath, evaluated?.OutputType is "Exe" or "WinExe",
-                files.Values.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToArray(), evaluated?.AssemblyName, evaluated?.ProjectAssetsPath));
+                files.Values.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToArray(), evaluated?.AssemblyName, evaluated?.ProjectAssetsPath), projectConfigurations);
         }
+        // Projects are independent here: generator runs and evaluations proceed together, results keep solution order.
+        var built = await Task.WhenAll(paths.Concat(loadedProjects.Select(p => p.FilePath).OfType<string>()).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(BuildProjectAsync)).ConfigureAwait(false);
+        var models = built.Select(result => result.Model).ToList();
+        foreach (var configuration in built.SelectMany(result => result.Configurations)) configurations.Add(configuration);
         lock (_gate)
         {
             CaptureDiskDocuments(loadedProjects);
@@ -429,7 +444,9 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var name = Path.GetFileName(originalPath);
         if (string.IsNullOrWhiteSpace(name)) name = "Generated.g.cs";
         var path = Path.Combine(directory, name);
-        if (!File.Exists(path)) await File.WriteAllTextAsync(path, content, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
+        // Content-addressed, so a concurrent writer of the same name produces identical bytes.
+        try { if (!File.Exists(path)) await File.WriteAllTextAsync(path, content, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false); }
+        catch (IOException) when (File.Exists(path)) { }
         return path;
     }
     private static TextEdit ToEdit(TextChange change) => new(change.Span.Start, change.Span.Length, change.NewText ?? "");
