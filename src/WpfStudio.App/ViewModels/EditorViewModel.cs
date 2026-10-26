@@ -19,6 +19,12 @@ public sealed record XamlQuickFix(XamlCodeAction Action, IAsyncRelayCommand<Xaml
 {
     public string Title => Action.Title;
 }
+/// <summary>A Roslyn code fix or refactoring offered by Ctrl+. in a C# editor.</summary>
+public sealed record CSharpQuickAction(CodeActionEntry Action, IAsyncRelayCommand<CodeActionEntry?> ApplyCommand)
+{
+    public string Title => Action.Title;
+    public bool IsFix => Action.Kind == "Fix";
+}
 
 public sealed partial class EditorViewModel : ObservableObject, IDisposable
 {
@@ -65,6 +71,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public ObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
     public ObservableCollection<XamlQuickFix> QuickFixes { get; } = [];
     public event Func<XamlCodeAction, Task>? CodeActionRequested;
+    public ObservableCollection<CSharpQuickAction> CodeActions { get; } = [];
+    /// <summary>The shell computes the action's edits and opens the change review.</summary>
+    public event Func<CodeActionEntry, Task>? CSharpCodeActionRequested;
+    private long _codeActionsVersion = -1;
     public ObservableCollection<int> BreakpointLines { get; } = [];
     public ObservableCollection<BreakpointMarker> BreakpointMarkers { get; } = [];
     public IRelayCommand<EditorAction> ActionCommand { get; }
@@ -309,6 +319,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public async Task RefreshQuickFixesAsync(int offset, CancellationToken token = default)
     {
         ClearQuickFixes();
+        if (IsCSharp) { await RefreshCSharpActionsAsync(offset, token); return; }
         if (!IsXaml || IsReadOnly || _disposed || !_workspace.IsConnected || _xamlContextUnavailable is not null) return;
         _quickFixRequest = CancellationTokenSource.CreateLinkedTokenSource(token);
         token = _quickFixRequest.Token;
@@ -334,6 +345,47 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (IsCurrentAnalysis(version, revision, resources.Generation, token)) LanguageStatus = "Quick fixes unavailable";
             _report(ex.Message);
         }
+    }
+    /// <summary>Lists Roslyn fixes and refactorings for the selection when it contains <paramref name="offset"/>, else for the caret.</summary>
+    private async Task RefreshCSharpActionsAsync(int offset, CancellationToken token)
+    {
+        if (IsReadOnly || _disposed || !_workspace.IsConnected) return;
+        _quickFixRequest = CancellationTokenSource.CreateLinkedTokenSource(token);
+        token = _quickFixRequest.Token;
+        long contextRevision = QuickFixContextRevision;
+        int start = Math.Clamp(offset, 0, State.Content.Length), length = 0;
+        if (SelectionLength > 0 && offset >= SelectionStart && offset <= SelectionStart + SelectionLength) { start = SelectionStart; length = SelectionLength; }
+        try
+        {
+            await SyncAsync(token);
+            long version = State.Version;
+            var result = await _workspace.GetCodeActionsAsync(new(State.Path, start, length, version), token);
+            await _dispatcher.InvokeAsync(() =>
+            {
+                if (_disposed || token.IsCancellationRequested || version != State.Version || result.Version != version || contextRevision != QuickFixContextRevision) return;
+                _codeActionsVersion = version;
+                foreach (var action in result.Actions) CodeActions.Add(new(action, ApplyCSharpCodeActionCommand));
+            }, token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            LanguageStatus = "Quick actions unavailable";
+            _report(ex.Message);
+        }
+    }
+    [RelayCommand] private async Task ApplyCSharpCodeActionAsync(CodeActionEntry? action)
+    {
+        if (action is null || _disposed || IsReadOnly || !_workspace.IsConnected || _codeActionsVersion != State.Version
+            || !CodeActions.Any(item => ReferenceEquals(item.Action, action)))
+        {
+            ClearQuickFixes();
+            LanguageStatus = "The document changed. Press Ctrl+. again.";
+            return;
+        }
+        try { if (CSharpCodeActionRequested is { } apply) await apply(action); }
+        catch (Exception ex) { LanguageStatus = ex.Message; _report(ex.Message); }
+        finally { ClearQuickFixes(); }
     }
     [RelayCommand] private async Task ApplyCodeActionAsync(XamlCodeAction? action)
     {
@@ -361,6 +413,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _quickFixRequest?.Dispose();
         _quickFixRequest = null;
         QuickFixes.Clear();
+        CodeActions.Clear();
+        _codeActionsVersion = -1;
     }
     public void Dispose()
     {

@@ -176,6 +176,10 @@ public sealed class EditorSurface : TextEditor
         if (_pendingCompletion != null && e.Key == Key.Escape) { CancelPendingCompletion(); e.Handled = true; return; }
         if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && TryExpandSnippet()) e.Handled = true;
         else if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _ = ShowCompletionAsync(); }
+        else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ViewModel is { IsCSharp: true } csharp)
+        {
+            e.Handled = true; _ = ShowQuickActionsAsync(csharp);
+        }
         else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ContextMenu != null)
         {
             if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset);
@@ -417,6 +421,39 @@ public sealed class EditorSurface : TextEditor
         public object Description => entry.Description ?? string.Join(", ", entry.Tags);
         public double Priority => 0;
         public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => _ = owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs);
+    }
+    private ContextMenu? _quickActions;
+    /// <summary>Ctrl+. in C#: a menu at the caret listing fixes first, then refactorings. Each opens the change review.</summary>
+    private async Task ShowQuickActionsAsync(EditorViewModel vm)
+    {
+        if (_quickActions is { } previous) previous.IsOpen = false;
+        var view = TextArea.TextView;
+        var caret = TextArea.Caret.CalculateCaretRectangle();
+        var menu = new ContextMenu
+        {
+            PlacementTarget = view, Placement = System.Windows.Controls.Primitives.PlacementMode.Relative,
+            HorizontalOffset = caret.Left - view.HorizontalOffset, VerticalOffset = caret.Bottom - view.VerticalOffset
+        };
+        menu.Items.Add(new MenuItem { Header = new TextBlock { Text = "Finding quick actions…" }, IsEnabled = false });
+        _quickActions = menu;
+        menu.IsOpen = true;
+        await vm.RefreshQuickFixesAsync(CaretOffset);
+        if (!ReferenceEquals(_quickActions, menu) || !menu.IsOpen || vm != ViewModel) return;
+        menu.Items.Clear();
+        if (vm.CodeActions.Count == 0)
+        {
+            menu.Items.Add(new MenuItem { Header = new TextBlock { Text = vm.LanguageStatus is { Length: > 0 } status ? status : "No quick actions here" }, IsEnabled = false });
+            return;
+        }
+        bool? fixes = null;
+        foreach (var item in vm.CodeActions)
+        {
+            if (fixes is not null && fixes != item.IsFix) menu.Items.Add(new Separator());
+            fixes = item.IsFix;
+            // A TextBlock header keeps underscores in titles from becoming access keys.
+            menu.Items.Add(new MenuItem { Header = new TextBlock { Text = item.Title }, Command = item.ApplyCommand, CommandParameter = item.Action, ToolTip = item.IsFix ? "Code fix" : "Refactoring" });
+        }
+        if (menu.Items[0] is MenuItem first) first.Focus();
     }
     /// <summary>Expands the snippet whose shortcut is the word before the caret. Returns false to let Tab indent.</summary>
     internal bool TryExpandSnippet()

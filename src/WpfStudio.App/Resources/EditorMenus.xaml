@@ -14,6 +14,17 @@
     </Style>
    </MenuItem.ItemContainerStyle>
   </MenuItem>
+  <MenuItem Header="Quick actions" InputGestureText="Ctrl+." ItemsSource="{Binding CodeActions}" IsEnabled="{Binding HasItems, RelativeSource={RelativeSource Self}}" ToolTip="Roslyn code fixes and refactorings at the caret or selection">
+   <MenuItem.ItemTemplate>
+    <DataTemplate><TextBlock Text="{Binding Title}"/></DataTemplate>
+   </MenuItem.ItemTemplate>
+   <MenuItem.ItemContainerStyle>
+    <Style TargetType="MenuItem">
+     <Setter Property="Command" Value="{Binding ApplyCommand}"/>
+     <Setter Property="CommandParameter" Value="{Binding Action}"/>
+    </Style>
+   </MenuItem.ItemContainerStyle>
+  </MenuItem>
   <Separator/>
   <MenuItem Header="Refactor" c:Ui.Icon="Braces">
    <MenuItem Header="Rename symbol…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Rename}" InputGestureText="F2"/>

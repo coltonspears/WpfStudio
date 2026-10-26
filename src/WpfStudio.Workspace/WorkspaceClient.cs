@@ -307,6 +307,8 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public Task<WorkspaceEditResult> FormatXamlAsync(XamlFormattingRequest request, CancellationToken cancellationToken = default) => Proxy.FormatXamlAsync(request, cancellationToken);
     public Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken = default) => Proxy.RenameAsync(request, cancellationToken);
     public Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken = default) => Proxy.RefactorAsync(request, cancellationToken);
+    public Task<CodeActionsResult> GetCodeActionsAsync(CodeActionsRequest request, CancellationToken cancellationToken = default) => Proxy.GetCodeActionsAsync(request, cancellationToken);
+    public Task<WorkspaceEditResult> ApplyCodeActionAsync(ApplyCodeActionRequest request, CancellationToken cancellationToken = default) => Proxy.ApplyCodeActionAsync(request, cancellationToken);
 
     private IWorkspaceRpc Proxy => _proxy ?? throw new InvalidOperationException($"Workspace worker is not connected. Reopen or restart the workspace. {_workerError}");
 

@@ -42,6 +42,8 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         try
         {
             var snapshot = await LoadCoreAsync(request, cancellationToken).ConfigureAwait(false);
+            // Discovering Roslyn's code fix providers takes a few seconds; do it before the first Ctrl+.
+            _ = Task.Run(CodeActionCatalog.Warm, CancellationToken.None);
             lock (_gate) _workspaceInventoryReady = _solution is not null;
             return snapshot;
         }
@@ -82,12 +84,12 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
                 loaded = (await _workspace.OpenProjectAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false)).Solution;
             else loaded = await _workspace.OpenSolutionAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
-            lock (_gate) { SetAuthoredSolution(loaded); _semanticRevision++; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _xamlProjects.Clear(); }
+            lock (_gate) { SetAuthoredSolution(loaded); _semanticRevision++; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _codeActions.Clear(); _xamlProjects.Clear(); }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             issues.Enqueue(new WorkspaceIssue($"Language workspace could not load: {ex.Message}. File navigation remains available.", "Error"));
-            lock (_gate) { _solution = null; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _xamlProjects.Clear(); }
+            lock (_gate) { _solution = null; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _codeActions.Clear(); _xamlProjects.Clear(); }
         }
         var models = new List<WorkspaceProject>();
         var configurations = new HashSet<string>(ProjectDiscovery.GetDeclaredConfigurations(path), StringComparer.OrdinalIgnoreCase);
@@ -186,6 +188,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 _versions[path] = request.Version;
                 _syncedTexts[path] = request.Text;
                 _completions.Clear(); // Changes in any file can change the semantic context of a completion.
+                _codeActions.Clear();
             }
             document = solution.GetDocument(ids[0])!;
         }
@@ -238,7 +241,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 _xamlBatchCache.Clear();
             }
             _versions.Remove(path); _syncedTexts.Remove(path);
-            _completions.Clear();
+            _completions.Clear(); _codeActions.Clear();
         }
         await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
     }

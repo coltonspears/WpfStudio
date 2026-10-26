@@ -91,6 +91,18 @@ public sealed partial class ShellViewModel
         var changes = await _edits.PrepareAsync(result);
         if (await PreviewAsync("Review C# refactoring", changes, string.Join(Environment.NewLine, result.Warnings))) await ApplyChangesAsync(changes);
     });
+    private async Task ApplyCSharpCodeActionAsync(EditorViewModel editor, WpfStudio.Contracts.CodeActionEntry action)
+    {
+        var state = editor.State;
+        Status = action.Title + "…";
+        var result = await _workspace.ApplyCodeActionAsync(new(state.Path, state.Version, action.Id), _lifetime.Token);
+        var changes = await _edits.PrepareAsync(result);
+        if (await PreviewAsync(action.Title, changes, string.Join(Environment.NewLine, result.Warnings)))
+        {
+            await ApplyChangesAsync(changes);
+            Status = "Applied: " + action.Title;
+        }
+    }
     [RelayCommand] private void ShowBreakpoints() { Debugger.SelectedTab = 2; ToolRequested?.Invoke("Debugger"); }
     [RelayCommand] private Task BreakpointConditionAsync() => GuardAsync(async () =>
     {

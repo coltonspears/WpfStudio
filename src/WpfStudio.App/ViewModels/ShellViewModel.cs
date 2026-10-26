@@ -335,6 +335,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
         vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
         vm.CodeActionRequested += action => ApplyXamlCodeActionAsync(vm, action);
+        vm.CSharpCodeActionRequested += action => GuardAsync(() => ApplyCSharpCodeActionAsync(vm, action));
         vm.ContextChanged += () =>
         {
             if (ReferenceEquals(vm, ActiveDocument))

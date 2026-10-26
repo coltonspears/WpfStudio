@@ -26,7 +26,8 @@ public sealed record CompletionEntry(string Id, string DisplayText, string Inser
 public sealed record CompletionResult(long Version, int Start, int Length, IReadOnlyList<CompletionEntry> Items);
 public sealed record CompletionEditRequest(string Path, long Version, string ItemId);
 public sealed record TextEdit(int Start, int Length, string NewText);
-public sealed record DocumentEdits(string Path, long Version, IReadOnlyList<TextEdit> Edits, string? ExpectedTextHash = null);
+/// <summary>Edits to one file. <paramref name="Create"/> marks a new file whose edits insert its whole text.</summary>
+public sealed record DocumentEdits(string Path, long Version, IReadOnlyList<TextEdit> Edits, string? ExpectedTextHash = null, bool Create = false);
 public sealed record SignatureParameter(string Name, string Type, string? Documentation);
 public sealed record SignatureEntry(string Label, string? Documentation, IReadOnlyList<SignatureParameter> Parameters);
 public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures);
@@ -41,6 +42,12 @@ public sealed record RefactorRequest(string Path, int Position, long Version, st
 /// <summary>A solution-wide type and member search. The query may be qualified, for example <c>Customer.Save</c>.</summary>
 public sealed record SymbolSearchRequest(string Query, int Limit = 100);
 public sealed record SymbolSearchResult(string Name, string Kind, string? Container, SourceLocation Location);
+/// <summary>Code fixes and refactorings for a caret (<paramref name="Length"/> 0) or selection.</summary>
+public sealed record CodeActionsRequest(string Path, int Start, int Length, long Version);
+/// <summary>An offered action. <paramref name="Kind"/> is "Fix" or "Refactor"; the identifier is valid until the document changes.</summary>
+public sealed record CodeActionEntry(string Id, string Title, string Kind);
+public sealed record CodeActionsResult(long Version, IReadOnlyList<CodeActionEntry> Actions);
+public sealed record ApplyCodeActionRequest(string Path, long Version, string Id);
 public sealed record WorkspaceEditResult(IReadOnlyList<DocumentEdits> Documents, IReadOnlyList<string> Warnings,
     XamlNameProjectionPlan? NameProjection = null);
 
@@ -74,6 +81,10 @@ public interface IWorkspaceRpc
     Task<WorkspaceEditResult> FormatXamlAsync(XamlFormattingRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken);
     Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken);
+    /// <summary>Roslyn's C# code fixes for diagnostics at the span and refactorings available there.</summary>
+    Task<CodeActionsResult> GetCodeActionsAsync(CodeActionsRequest request, CancellationToken cancellationToken);
+    /// <summary>Computes, but does not apply, the edits of an action returned by <see cref="GetCodeActionsAsync"/>.</summary>
+    Task<WorkspaceEditResult> ApplyCodeActionAsync(ApplyCodeActionRequest request, CancellationToken cancellationToken);
 }
 
 public enum BuildOperation { Restore, Build, Rebuild, Clean, Run, Test }
