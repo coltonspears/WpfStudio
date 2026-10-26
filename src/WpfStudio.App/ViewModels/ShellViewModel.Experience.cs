@@ -67,6 +67,13 @@ public sealed partial class ShellViewModel
     }
     [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke("Search"); SearchFocusRequested?.Invoke(); }
     [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(AppPaths.DataDirectory); DesktopNavigation.Reveal(AppPaths.DataDirectory); return Task.CompletedTask; });
+    /// <summary>Opens the command palette on the snippets for the active editor's language.</summary>
+    [RelayCommand] private void InsertSnippet()
+    {
+        if (ActiveDocument is not { IsReadOnly: false } document || !WpfStudio.Core.Text.SnippetCatalog.For(document.State.Extension).Any())
+        { Status = "Snippets are available in C# and XAML editors"; return; }
+        IsCommandPalette = true; PaletteQuery = "> Snippet: "; IsPaletteOpen = true; RefreshPalette();
+    }
     [RelayCommand] private void ShowShortcuts() { IsCommandPalette = true; PaletteQuery = ">"; IsPaletteOpen = true; RefreshPalette(); }
 
     // ------------------------------------------------------------------ Related files
@@ -269,6 +276,11 @@ public sealed partial class ShellViewModel
         yield return Command("WPF", "Switch view ⇄ view model", SwitchRelatedCommand, shortcut: "F7", icon: "Swap");
         yield return Command("WPF", "Insert observable property…", InsertPropertyCommand, icon: "Plus");
         yield return Command("WPF", "Insert relay command…", InsertCommandCommand, icon: "Plus");
+        yield return Command("Edit", "Insert snippet…", InsertSnippetCommand, icon: "Braces", detail: "MVVM, WPF and C# templates; or type a shortcut and press Tab");
+        if (ActiveDocument is { IsReadOnly: false } editor)
+            foreach (var snippet in WpfStudio.Core.Text.SnippetCatalog.For(editor.State.Extension))
+                yield return new PaletteEntry("Snippet: " + snippet.Title, snippet.Shortcut + " ⇥" + (snippet.WrapsSelection ? " · wraps the selection" : ""),
+                    () => { if (Documents.Contains(editor)) { ActiveDocument = editor; editor.InsertSnippet(snippet); } return Task.CompletedTask; }, "Snippets", Icon: "Braces");
         yield return Command("WPF", "Rename resource key…", RenameResourceCommand, icon: "Tag");
         yield return Command("WPF", "Refresh WPF index", RefreshWpfCommand, icon: "Refresh");
         yield return Command("WPF", "Import asset…", ImportAssetCommand, icon: "Image");

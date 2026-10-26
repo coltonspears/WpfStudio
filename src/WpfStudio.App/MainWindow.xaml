@@ -299,6 +299,8 @@
             <MenuItem Header="Find in file…" c:Ui.Icon="Search" Command="ApplicationCommands.Find" InputGestureText="Ctrl+F" />
             <MenuItem Header="Find in workspace…" Command="{Binding FindInWorkspaceCommand}" />
             <Separator />
+            <MenuItem Header="Insert snippet…" c:Ui.Icon="Braces" Command="{Binding InsertSnippetCommand}" />
+            <Separator />
             <MenuItem Header="Undo last workspace edit" Command="{Binding UndoWorkspaceEditCommand}" />
           </MenuItem>
           <MenuItem Header="_View">

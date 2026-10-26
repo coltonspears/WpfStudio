@@ -9,7 +9,7 @@ using WpfStudio.Workspace;
 
 namespace WpfStudio.App.ViewModels;
 
-public enum EditorAction { Definition, Implementation, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, BreakpointHitCount, BreakpointLogMessage, AddWatch, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, AskColtonGpt, OpenDesigner }
+public enum EditorAction { Definition, Implementation, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, BreakpointHitCount, BreakpointLogMessage, AddWatch, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, InsertSnippet, AskColtonGpt, OpenDesigner }
 public sealed record BreakpointMarker(int Line, bool Enabled, bool Bound, string Condition, string Status, string HitCondition = "", string LogMessage = "")
 {
     public bool IsTracepoint => LogMessage.Length > 0;
@@ -128,6 +128,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         SelectionRequested?.Invoke(new(caret, start, length));
     }
     public void ToggleBreakpoint(int line) => BreakpointRequested?.Invoke(line);
+    /// <summary>Asks the attached editor to expand a snippet at the caret, wrapping any selection the snippet supports.</summary>
+    public event Action<WpfStudio.Core.Text.CodeSnippet>? SnippetRequested;
+    public void InsertSnippet(WpfStudio.Core.Text.CodeSnippet snippet) => SnippetRequested?.Invoke(snippet);
     private void ContentChanged(object? sender, EventArgs e)
     {
         if (_disposed) return;

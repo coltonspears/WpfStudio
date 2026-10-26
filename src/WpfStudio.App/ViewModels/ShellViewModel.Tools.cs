@@ -179,6 +179,7 @@ public sealed partial class ShellViewModel
             case EditorAction.SwitchRelated: await SwitchRelatedCommand.ExecuteAsync(null); break;
             case EditorAction.InsertProperty: await InsertPropertyCommand.ExecuteAsync(null); break;
             case EditorAction.InsertCommand: await InsertCommandCommand.ExecuteAsync(null); break;
+            case EditorAction.InsertSnippet: InsertSnippet(); break;
             case EditorAction.AskColtonGpt:
                 await OpenAssistantCommand.ExecuteAsync(null);
                 if (Features != null) Features.Assistant.ContextMode = document.SelectionLength > 0 ? "Selected text" : "No editor context";

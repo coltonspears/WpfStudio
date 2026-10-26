@@ -25,6 +25,8 @@
   <MenuItem Header="MVVM" c:Ui.Icon="Layers">
    <MenuItem Header="Insert observable property…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertProperty}"/>
    <MenuItem Header="Insert relay command…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertCommand}"/>
+   <Separator/>
+   <MenuItem Header="Insert snippet…" c:Ui.Icon="Braces" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertSnippet}"/>
   </MenuItem>
   <MenuItem Header="Breakpoint" c:Ui.Icon="Bug">
    <MenuItem Header="Toggle breakpoint" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.ToggleBreakpoint}" InputGestureText="F9"/>

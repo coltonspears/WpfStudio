@@ -12,10 +12,12 @@ using ICSharpCode.AvalonEdit.Editing;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Rendering;
 using ICSharpCode.AvalonEdit.Search;
+using ICSharpCode.AvalonEdit.Snippets;
 using WpfStudio.App.ViewModels;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
+using WpfStudio.Core.Text;
 
 [assembly: InternalsVisibleTo("WpfStudio.Shell.Tests")]
 
@@ -88,6 +90,7 @@ public sealed class EditorSurface : TextEditor
         ViewModel.NavigationRequested += Navigate; ViewModel.Diagnostics.CollectionChanged += DiagnosticsChanged; ViewModel.BreakpointLines.CollectionChanged += BreakpointsChanged;
         ViewModel.SelectionRequested += RestoreSelection;
         ViewModel.BreakpointMarkers.CollectionChanged += BreakpointsChanged;
+        ViewModel.SnippetRequested += InsertRequestedSnippet;
         _syncing = false; Navigate();
     }
     private void Detach()
@@ -101,6 +104,7 @@ public sealed class EditorSurface : TextEditor
             _attached.NavigationRequested -= Navigate; _attached.Diagnostics.CollectionChanged -= DiagnosticsChanged; _attached.BreakpointLines.CollectionChanged -= BreakpointsChanged;
             _attached.SelectionRequested -= RestoreSelection;
             _attached.BreakpointMarkers.CollectionChanged -= BreakpointsChanged;
+            _attached.SnippetRequested -= InsertRequestedSnippet;
         }
         _attached = null;
     }
@@ -170,7 +174,8 @@ public sealed class EditorSurface : TextEditor
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (_pendingCompletion != null && e.Key == Key.Escape) { CancelPendingCompletion(); e.Handled = true; return; }
-        if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _ = ShowCompletionAsync(); }
+        if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && TryExpandSnippet()) e.Handled = true;
+        else if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _ = ShowCompletionAsync(); }
         else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ContextMenu != null)
         {
             if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset);
@@ -236,6 +241,9 @@ public sealed class EditorSurface : TextEditor
             var end = vm.State.Extension == ".xaml" ? Math.Clamp(result.Start + result.Length, caret, Document.TextLength) : caret;
             var window = new CompletionWindow(TextArea) { StartOffset = result.Start, EndOffset = end, CloseWhenCaretAtBeginning = true };
             foreach (var item in result.Items.Take(250)) window.CompletionList.CompletionData.Add(new StudioCompletion(this, item, result.Version, contextRevision));
+            // C# snippets join the list outside member access, as in Visual Studio; Tab or Enter expands them.
+            if (vm.IsCSharp && (result.Start == 0 || Document.GetCharAt(result.Start - 1) != '.'))
+                foreach (var snippet in SnippetCatalog.For(".cs")) window.CompletionList.CompletionData.Add(new SnippetCompletion(this, snippet));
             window.Closed += (_, _) => { if (_completion == window) _completion = null; };
             _completion = window; window.Show();
         }
@@ -409,6 +417,59 @@ public sealed class EditorSurface : TextEditor
         public object Description => entry.Description ?? string.Join(", ", entry.Tags);
         public double Priority => 0;
         public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => _ = owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs);
+    }
+    /// <summary>Expands the snippet whose shortcut is the word before the caret. Returns false to let Tab indent.</summary>
+    internal bool TryExpandSnippet()
+    {
+        if (ViewModel is not { } vm || IsReadOnly || _completion != null || _pendingCompletion != null || !TextArea.Selection.IsEmpty
+            || !TextArea.StackedInputHandlers.IsEmpty) return false; // An active snippet's fields own Tab.
+        if (SnippetCatalog.WordBefore(Text, CaretOffset, out var start) is not { } word || SnippetCatalog.Find(word, vm.State.Extension) is not { } snippet) return false;
+        InsertSnippet(snippet, start, CaretOffset - start);
+        return true;
+    }
+    private void InsertRequestedSnippet(CodeSnippet snippet)
+    {
+        if (IsReadOnly) return;
+        InsertSnippet(snippet, CaretOffset, 0);
+        Focus();
+    }
+    /// <summary>Replaces <paramref name="length"/> characters at <paramref name="start"/> with an interactive snippet: Tab moves between fields, Enter or Esc finishes.</summary>
+    internal void InsertSnippet(CodeSnippet snippet, int start, int length)
+    {
+        var parts = SnippetCatalog.Resolve(SnippetCatalog.Parse(snippet.Body), Text, start);
+        var expansion = new Snippet();
+        var fields = new Dictionary<string, SnippetReplaceableTextElement>(StringComparer.Ordinal);
+        foreach (var part in parts)
+        {
+            switch (part)
+            {
+                case SnippetLiteral literal: expansion.Elements.Add(new SnippetTextElement { Text = literal.Text }); break;
+                case SnippetField field: expansion.Elements.Add(fields[field.Name] = new SnippetReplaceableTextElement { Text = field.Default }); break;
+                case SnippetMirror mirror: expansion.Elements.Add(new SnippetBoundElement { TargetElement = fields[mirror.Name] }); break;
+                case SnippetCaret: expansion.Elements.Add(new SnippetCaretElement()); break;
+                case SnippetSelection: expansion.Elements.Add(new SnippetSelectionElement()); break;
+            }
+        }
+        // One undo step removes both the shortcut and the expansion.
+        using (Document.RunUpdate())
+        {
+            if (length > 0) { Document.Remove(start, length); CaretOffset = start; }
+            expansion.Insert(TextArea);
+        }
+        TextArea.Caret.BringCaretToView();
+    }
+    private sealed class SnippetCompletion(EditorSurface owner, CodeSnippet snippet) : ICompletionData
+    {
+        public ImageSource? Image => null;
+        public string Text => snippet.Shortcut;
+        public object Content => snippet.Shortcut;
+        public object Description => "Snippet: " + snippet.Title + " (Tab)";
+        public double Priority => 0;
+        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
+        {
+            if (insertionRequestEventArgs is TextCompositionEventArgs typed) typed.Handled = true;
+            owner.InsertSnippet(snippet, completionSegment.Offset, completionSegment.Length);
+        }
     }
     private sealed class DebugMargin(EditorSurface owner) : AbstractMargin
     {
