@@ -151,16 +151,16 @@ public sealed class GitService
         var status = ParseStatus((await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=no"], cancellationToken)).Output);
         if (status.Any(change => change.IsConflict)) throw new InvalidOperationException("Resolve and stage every conflicted file first.");
         var operation = await GetOperationAsync(root, cancellationToken);
-        // core.editor=true accepts the prepared message without opening an editor.
+        // GIT_EDITOR=":" (set by noEditor) is Git's own "accept the prepared message" editor on every platform.
         string[] arguments = operation switch
         {
-            GitOperation.Merge => ["-c", "core.editor=true", "commit", "--no-edit"],
-            GitOperation.Rebase => ["-c", "core.editor=true", "rebase", "--continue"],
-            GitOperation.CherryPick => ["-c", "core.editor=true", "cherry-pick", "--continue"],
-            GitOperation.Revert => ["-c", "core.editor=true", "revert", "--continue"],
+            GitOperation.Merge => ["commit", "--no-edit"],
+            GitOperation.Rebase => ["rebase", "--continue"],
+            GitOperation.CherryPick => ["cherry-pick", "--continue"],
+            GitOperation.Revert => ["revert", "--continue"],
             _ => throw new InvalidOperationException("No merge, rebase, cherry-pick or revert is in progress.")
         };
-        var result = await RunAsync(root, arguments, cancellationToken, allowFailure: true);
+        var result = await RunAsync(root, arguments, cancellationToken, allowFailure: true, noEditor: true);
         if (result.ExitCode != 0 && await GetOperationAsync(root, cancellationToken) == GitOperation.None) throw new InvalidOperationException(result.Display);
         return result.Display;
     }
@@ -472,7 +472,7 @@ public sealed class GitService
 
     /// <param name="readOnly">Adds --no-optional-locks so background reads never hold the index lock a user action needs.</param>
     private static async Task<GitResult> RunAsync(string directory, IEnumerable<string> arguments, CancellationToken cancellationToken,
-        bool allowFailure = false, string? input = null, bool readOnly = false, bool signIn = false)
+        bool allowFailure = false, string? input = null, bool readOnly = false, bool signIn = false, bool noEditor = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo("git")
@@ -488,6 +488,8 @@ public sealed class GitService
         // There is no console to type into. Sign-in uses Git Credential Manager's own window instead.
         start.Environment["GIT_TERMINAL_PROMPT"] = "0";
         start.Environment["GCM_INTERACTIVE"] = signIn ? "Auto" : "Never";
+        // GIT_EDITOR overrides core.editor, and Git never launches the editor ":".
+        if (noEditor) start.Environment["GIT_EDITOR"] = ":";
         // A developer's shell tracing preferences must not leak HTTP credentials
         // into this pane's operation log.
         foreach (var trace in new[] { "GIT_TRACE", "GIT_TRACE_CURL", "GIT_CURL_VERBOSE", "GIT_TRACE_PACKET", "GIT_TRACE2", "GIT_TRACE2_EVENT", "GIT_TRACE2_PERF" })

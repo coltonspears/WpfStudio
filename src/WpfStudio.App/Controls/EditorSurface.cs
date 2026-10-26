@@ -142,6 +142,7 @@ public sealed partial class EditorSurface : TextEditor
     private void Detach()
     {
         CancelHover();
+        _changePopup.IsOpen = false;
         CancelPendingCompletion();
         _completion?.Close(); _completionRequest?.Cancel();
         if (_attached != null)
@@ -493,6 +494,7 @@ public sealed partial class EditorSurface : TextEditor
     }
     private void OnDocumentChanged(object? sender, DocumentChangeEventArgs e)
     {
+        _changePopup.IsOpen = false; // Its line numbers describe the text before this edit.
         _semantic.Shift(e.Offset, e.RemovalLength, e.InsertionLength);
         _hints.Shift(e.Offset, e.RemovalLength, e.InsertionLength);
         ShiftCodeLens(e.Offset, e.RemovalLength, e.InsertionLength);

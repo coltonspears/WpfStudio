@@ -70,6 +70,7 @@ public sealed partial class EditorSurface
 
     private void OnGitChanged()
     {
+        _changePopup.IsOpen = false; // Its change no longer describes the file.
         _changeMargin?.Update(); // The margin appears once the file is known to be in a repository.
         _blameLine = -1; // Redraw the annotation with the new blame.
         UpdateBlameLine();
@@ -157,7 +158,14 @@ public sealed partial class EditorSurface
         }
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
         var revert = new Button { Content = change.Kind == LineChangeKind.Added ? "Remove added lines" : "Revert change", IsEnabled = !IsReadOnly, Margin = new Thickness(0, 0, 6, 0) };
-        revert.Click += (_, _) => { _changePopup.IsOpen = false; RevertChange(change); Focus(); };
+        // The popup can outlive its editor's state; revert only the same buffer while the change is still current.
+        var model = ViewModel; var document = Document;
+        revert.Click += (_, _) =>
+        {
+            _changePopup.IsOpen = false;
+            if (!ReferenceEquals(model, ViewModel) || !ReferenceEquals(document, Document) || model?.LineChanges.Contains(change) != true) return;
+            RevertChange(change); Focus();
+        };
         var close = new Button { Content = "Close" };
         close.Click += (_, _) => { _changePopup.IsOpen = false; Focus(); };
         buttons.Children.Add(revert); buttons.Children.Add(close);
@@ -250,10 +258,11 @@ public sealed partial class EditorSurface
             var line = CurrentContext.VisualLine.LastDocumentLine;
             return line.EndOffset >= startOffset && line.EndOffset != _emittedAt ? line.EndOffset : -1;
         }
+        // A folded block is one visual line: the annotation belongs to its first (header) line but is placed at its end.
         public override VisualLineElement? ConstructElement(int offset)
         {
-            var line = CurrentContext.VisualLine.LastDocumentLine;
-            if (offset != line.EndOffset || offset == _emittedAt || create(line) is not { } element) return null;
+            var end = CurrentContext.VisualLine.LastDocumentLine.EndOffset;
+            if (offset != end || offset == _emittedAt || create(CurrentContext.VisualLine.FirstDocumentLine) is not { } element) return null;
             _emittedAt = offset;
             return new AnnotationElement(element);
         }
