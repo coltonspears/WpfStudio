@@ -283,6 +283,9 @@ public sealed partial class ShellViewModel
         yield return Command("Debug", "Run without debugging", RunCommand, shortcut: "Ctrl+F5", icon: "PlayOutline");
         yield return Command("Debug", "Stop debugging", Debugger.StopCommand, shortcut: "Shift+F5", icon: "Stop");
         yield return Command("Debug", "Toggle breakpoint", ToggleBreakpointCommand, shortcut: "F9");
+        yield return Command("Debug", "Breakpoint hit count…", BreakpointHitCountCommand, icon: "Bug", detail: "Break on a hit number, from a hit, or every Nth hit");
+        yield return Command("Debug", "Tracepoint log message…", BreakpointLogMessageCommand, icon: "Bug", detail: "Log a message with {expressions} and continue");
+        yield return Command("Debug", "Add watch", AddWatchAtCaretCommand, icon: "Eye", detail: "Watch the expression at the caret or the selection");
         yield return Command("Debug", "Show breakpoints", ShowBreakpointsCommand, icon: "Bug", detail: "Conditions, enabled state and binding status");
         yield return Command("Debug", "Attach to process…", ShowToolCommand, "Debugger", icon: "Plug");
         yield return Command("View", "Solution Explorer", ShowToolCommand, "Explorer", icon: "Folder");

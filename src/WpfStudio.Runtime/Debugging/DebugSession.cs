@@ -5,7 +5,8 @@ using System.Text.Json;
 namespace WpfStudio.Runtime.Debugging;
 
 public sealed record DebugLaunchConfiguration(string Program, string WorkingDirectory, IReadOnlyList<string>? Arguments = null, IReadOnlyDictionary<string, string>? Environment = null);
-public sealed record SourceBreakpoint(string Path, int Line, string? Condition = null, bool Enabled = true);
+/// <summary>A source breakpoint. Hit conditions and log messages are applied by the IDE, so they work with any adapter.</summary>
+public sealed record SourceBreakpoint(string Path, int Line, string? Condition = null, bool Enabled = true, string? HitCondition = null, string? LogMessage = null);
 public sealed record DebugEvent(string Name, JsonElement Body);
 
 /// <summary>Owns one managed debug session; the adapter never runs inside the IDE process.</summary>

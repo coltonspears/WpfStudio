@@ -384,6 +384,9 @@
             <Separator />
             <MenuItem Header="Toggle breakpoint" Command="{Binding ToggleBreakpointCommand}" InputGestureText="F9" />
             <MenuItem Header="Breakpoint condition…" Command="{Binding BreakpointConditionCommand}" />
+            <MenuItem Header="Breakpoint hit count…" Command="{Binding BreakpointHitCountCommand}" />
+            <MenuItem Header="Tracepoint log message…" Command="{Binding BreakpointLogMessageCommand}" />
+            <MenuItem Header="Add watch" Command="{Binding AddWatchAtCaretCommand}" />
             <MenuItem Header="Show breakpoints" Command="{Binding ShowBreakpointsCommand}" />
           </MenuItem>
           <MenuItem Header="_Tools">

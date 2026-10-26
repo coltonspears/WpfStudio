@@ -191,6 +191,12 @@ public sealed class EditorSurface : TextEditor
         if (message is not null) ShowHover(message);
         try
         {
+            if (await vm.DataTipAsync(offset, token) is { } dataTip)
+            {
+                if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
+                message = message is null ? dataTip : dataTip + Environment.NewLine + Environment.NewLine + message;
+                ShowHover(message);
+            }
             var hover = await vm.HoverAsync(offset, token);
             if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
             if (hover is not null) message = message is null ? hover.Text : message + Environment.NewLine + Environment.NewLine + hover.Text;
@@ -421,8 +427,17 @@ public sealed class EditorSurface : TextEditor
                 if (marker != null)
                 {
                     var brush = marker.Enabled ? danger : muted;
-                    context.DrawEllipse(marker.Enabled && marker.Bound ? brush : null, new Pen(brush, 1.8), new Point(10, y), 5.5, 5.5);
-                    if (marker.Condition.Length > 0) context.DrawEllipse(brush, null, new Point(10, y), 1.7, 1.7);
+                    var fill = marker.Enabled && marker.Bound ? brush : null;
+                    if (marker.IsTracepoint)
+                    {
+                        // Tracepoints use a diamond, as in Visual Studio.
+                        var diamond = new StreamGeometry();
+                        using (var g = diamond.Open()) { g.BeginFigure(new Point(10, y - 6), true, true); g.LineTo(new Point(16, y), true, false); g.LineTo(new Point(10, y + 6), true, false); g.LineTo(new Point(4, y), true, false); }
+                        diamond.Freeze();
+                        context.DrawGeometry(fill, new Pen(brush, 1.8), diamond);
+                    }
+                    else context.DrawEllipse(fill, new Pen(brush, 1.8), new Point(10, y), 5.5, 5.5);
+                    if (marker.Condition.Length > 0 || marker.HitCondition.Length > 0) context.DrawEllipse(fill is null ? brush : owner.TryFindResource("EditorBrush") as Brush ?? Brushes.White, null, new Point(10, y), 1.7, 1.7);
                 }
                 else if (owner.ViewModel.BreakpointLines.Contains(line)) context.DrawEllipse(danger, null, new Point(10, y), 5.5, 5.5);
                 if (owner.ViewModel.ExecutionLine == line)
@@ -449,7 +464,9 @@ public sealed class EditorSurface : TextEditor
             base.OnMouseMove(e);
             var line = TextView?.GetVisualLineFromVisualTop(e.GetPosition(TextView).Y + TextView.VerticalOffset)?.FirstDocumentLine.LineNumber;
             var marker = owner.ViewModel?.BreakpointMarkers.FirstOrDefault(b => b.Line == line);
-            ToolTip = marker == null ? "Click to add a C# breakpoint (F9)" : $"{(marker.Enabled ? marker.Status : "Disabled")} breakpoint on line {line}" + (marker.Condition.Length > 0 ? $"\nCondition: {marker.Condition}" : "") + "\nClick to remove. Right-click the line for conditions.";
+            ToolTip = marker == null ? "Click to add a C# breakpoint (F9)" : $"{(marker.Enabled ? marker.Status : "Disabled")} {(marker.IsTracepoint ? "tracepoint" : "breakpoint")} on line {line}"
+                + (marker.Condition.Length > 0 ? $"\nCondition: {marker.Condition}" : "") + (marker.HitCondition.Length > 0 ? $"\nHit count: {marker.HitCondition}" : "")
+                + (marker.IsTracepoint ? $"\nLogs: {marker.LogMessage}" : "") + "\nClick to remove. Right-click the line for conditions, hit counts and log messages.";
         }
         protected override void OnTextViewChanged(TextView? oldTextView, TextView? newTextView)
         {

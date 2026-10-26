@@ -29,8 +29,12 @@
   <MenuItem Header="Breakpoint" c:Ui.Icon="Bug">
    <MenuItem Header="Toggle breakpoint" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.ToggleBreakpoint}" InputGestureText="F9"/>
    <MenuItem Header="Condition…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.BreakpointCondition}"/>
+   <MenuItem Header="Hit count…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.BreakpointHitCount}"/>
+   <MenuItem Header="Log message (tracepoint)…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.BreakpointLogMessage}"/>
    <MenuItem Header="Enable / disable on this line" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.DisableBreakpoint}"/>
    <MenuItem Header="Show all breakpoints" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.ShowBreakpoints}"/>
+   <Separator/>
+   <MenuItem Header="Add watch" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.AddWatch}"/>
   </MenuItem>
   <Separator/>
   <MenuItem Header="Ask ColtonGPT…" c:Ui.Icon="Chat" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.AskColtonGpt}"/>

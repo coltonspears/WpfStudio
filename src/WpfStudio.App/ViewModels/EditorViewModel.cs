@@ -9,8 +9,11 @@ using WpfStudio.Workspace;
 
 namespace WpfStudio.App.ViewModels;
 
-public enum EditorAction { Definition, Implementation, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, AskColtonGpt, OpenDesigner }
-public sealed record BreakpointMarker(int Line, bool Enabled, bool Bound, string Condition, string Status);
+public enum EditorAction { Definition, Implementation, References, Rename, Format, OrganizeUsings, UseVar, UseExplicitType, ToggleBreakpoint, BreakpointCondition, BreakpointHitCount, BreakpointLogMessage, AddWatch, DisableBreakpoint, ShowBreakpoints, SwitchRelated, InsertProperty, InsertCommand, AskColtonGpt, OpenDesigner }
+public sealed record BreakpointMarker(int Line, bool Enabled, bool Bound, string Condition, string Status, string HitCondition = "", string LogMessage = "")
+{
+    public bool IsTracepoint => LogMessage.Length > 0;
+}
 public sealed record EditorSelection(int CaretOffset, int Start, int Length);
 public sealed record XamlQuickFix(XamlCodeAction Action, IAsyncRelayCommand<XamlCodeAction?> ApplyCommand)
 {
@@ -275,6 +278,21 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         await SyncAsync(token);
         var result = await _workspace.GetSignatureHelpAsync(new(State.Path, offset, State.Version), token);
         return result.Version == State.Version ? string.Join(Environment.NewLine, result.Signatures.Take(6).Select(s => s.Label)) : null;
+    }
+    /// <summary>Evaluates an expression while the debugger is paused; set by the shell. Returns null when unavailable.</summary>
+    public Func<string, CancellationToken, Task<string?>>? DataTipEvaluator { get; set; }
+    /// <summary>The expression a DataTip or Add watch would use at <paramref name="offset"/>: the selection when it contains the offset, else the hovered member chain.</summary>
+    public string? DebugExpressionAt(int offset)
+    {
+        if (!IsCSharp) return null;
+        if (SelectionLength is > 0 and <= 200 && offset >= SelectionStart && offset <= SelectionStart + SelectionLength && !SelectedText.Contains('\n'))
+            return SelectedText.Trim() is { Length: > 0 } selected ? selected : null;
+        return WpfStudio.Core.Text.DebugExpressionLocator.Find(State.Content, offset)?.Expression;
+    }
+    public async Task<string?> DataTipAsync(int offset, CancellationToken token = default)
+    {
+        if (DataTipEvaluator is not { } evaluate || DebugExpressionAt(offset) is not { } expression) return null;
+        return await evaluate(expression, token);
     }
     public async Task<XamlHoverInfo?> HoverAsync(int offset, CancellationToken token = default)
     {

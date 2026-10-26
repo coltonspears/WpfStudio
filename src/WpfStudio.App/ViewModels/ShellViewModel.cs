@@ -327,7 +327,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         var existing = Documents.FirstOrDefault(d => d.State.Path.Equals(state.Path, StringComparison.OrdinalIgnoreCase));
         if (existing != null) { ActiveDocument = existing; return; }
-        var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources);
+        var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources)
+        {
+            DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null)
+        };
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
         vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
@@ -486,7 +489,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             foreach (var bp in Debugger.Breakpoints.Where(b => b.Path.Equals(doc.State.Path, StringComparison.OrdinalIgnoreCase)))
             {
                 if (bp.Enabled) doc.BreakpointLines.Add(bp.Line);
-                doc.BreakpointMarkers.Add(new(bp.Line, bp.Enabled, bp.Status == "Bound", bp.Condition, bp.Status));
+                doc.BreakpointMarkers.Add(new(bp.Line, bp.Enabled, bp.Status == "Bound", bp.Condition, bp.Status, bp.HitCondition, bp.LogMessage));
             }
         }
     }

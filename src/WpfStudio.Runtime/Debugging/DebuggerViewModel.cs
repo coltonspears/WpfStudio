@@ -19,7 +19,28 @@ public sealed partial class BreakpointViewModel : ObservableObject
     [ObservableProperty] public partial string Condition { get; set; } = "";
     [ObservableProperty] public partial bool Enabled { get; set; } = true;
     [ObservableProperty] public partial string Status { get; set; } = "Pending";
-    public SourceBreakpoint ToModel() => new(Path, Line, Condition, Enabled);
+    /// <summary>Breaks by hit count, for example 5, &gt;=5 or %5. Empty breaks on every hit.</summary>
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(Summary))] public partial string HitCondition { get; set; } = "";
+    /// <summary>A tracepoint message. When set, a hit writes the message to Output and execution continues.</summary>
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(Summary), nameof(IsTracepoint))] public partial string LogMessage { get; set; } = "";
+    /// <summary>Hits counted in the current session, after any condition was true.</summary>
+    [ObservableProperty] public partial int HitCount { get; set; }
+    /// <summary>The adapter's identifier and resolved line; a breakpoint can bind to the next statement.</summary>
+    public int? AdapterId { get; set; }
+    public int? BoundLine { get; set; }
+    public bool IsTracepoint => LogMessage.Length > 0;
+    public bool HasClientBehavior => HitCondition.Length > 0 || LogMessage.Length > 0;
+    public string Summary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (HitCondition.Length > 0) parts.Add(WpfStudio.Contracts.HitCondition.TryParse(HitCondition, out var hit, out _) ? "Breaks " + hit.Describe() : "Invalid hit count");
+            if (LogMessage.Length > 0) parts.Add("Logs: " + LogMessage);
+            return string.Join(" · ", parts);
+        }
+    }
+    public SourceBreakpoint ToModel() => new(Path, Line, Condition, Enabled, HitCondition.Length == 0 ? null : HitCondition, LogMessage.Length == 0 ? null : LogMessage);
 }
 
 public sealed partial class DebugVariableViewModel : ObservableObject
@@ -104,7 +125,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         {
             var state = JsonSerializer.Deserialize<DebugWorkspaceState>(await File.ReadAllTextAsync(statePath));
             if (state is null) return;
-            foreach (var item in state.Breakpoints) Breakpoints.Add(new BreakpointViewModel { Path = item.Path, Line = item.Line, Condition = item.Condition ?? "", Enabled = item.Enabled });
+            foreach (var item in state.Breakpoints) Breakpoints.Add(new BreakpointViewModel { Path = item.Path, Line = item.Line, Condition = item.Condition ?? "", Enabled = item.Enabled, HitCondition = item.HitCondition ?? "", LogMessage = item.LogMessage ?? "" });
             watchExpressions.AddRange(state.Watches);
             foreach (var expression in watchExpressions) Watches.Add(new DebugVariableViewModel(expression, "Run to evaluate", null, 0));
         }
@@ -114,6 +135,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     public async Task LaunchAsync(DebugLaunchConfiguration configuration, CancellationToken cancellationToken = default)
     {
         Error = ""; ExceptionDetails = ""; Status = "Starting debugger…";
+        ResetHitCounts();
         try
         {
             await session.LaunchAsync(configuration, Breakpoints.Select(x => x.ToModel()).ToArray(), BreakOnThrown, cancellationToken);
@@ -135,6 +157,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     [RelayCommand] private Task AttachAsync() => GuardAsync(async () =>
     {
         Status = "Attaching…";
+        ResetHitCounts();
         await session.AttachAsync(AttachProcessId, Breakpoints.Select(x => x.ToModel()).ToArray(), BreakOnThrown);
         IsActive = true; if (!IsStopped) Status = "Running";
         foreach (var path in Breakpoints.Select(x => x.Path).Distinct(StringComparer.OrdinalIgnoreCase)) await ApplyFileBreakpointsAsync(path);
@@ -185,7 +208,10 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         foreach (var value in values.EnumerateArray())
         {
             if (index >= items.Length) break;
-            items[index++].Status = value.TryGetProperty("verified", out var verified) && verified.GetBoolean() ? "Bound" : Text(value, "message", "Unbound · symbols not loaded");
+            var item = items[index++];
+            item.Status = value.TryGetProperty("verified", out var verified) && verified.GetBoolean() ? "Bound" : Text(value, "message", "Unbound · symbols not loaded");
+            item.AdapterId = value.TryGetProperty("id", out _) ? Int(value, "id") : null;
+            item.BoundLine = Int(value, "line") is > 0 and var bound ? bound : null;
         }
     }
 
@@ -193,30 +219,110 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     {
         if (message.Name == "stopped")
         {
-            IsActive = true; IsStopped = true; threadId = Int(message.Body, "threadId"); stopVersion++;
-            Status = "Paused · " + Text(message.Body, "reason", "breakpoint");
-            _ = GuardAsync(async () =>
+            // Hit counts and tracepoints decide whether this stop is shown or silently resumed.
+            if (Text(message.Body, "reason") == "breakpoint" && Breakpoints.Any(b => b.Enabled && b.HasClientBehavior))
             {
-                var response = await session.RequestAsync("threads");
-                SelectedThread = null;
-                Threads.Clear(); if (response.TryGetProperty("threads", out var threads)) foreach (var thread in threads.EnumerateArray()) Threads.Add(new DebugThread(Int(thread, "id"), Text(thread, "name")));
-                SelectedThread = Threads.FirstOrDefault(x => x.Id == threadId) ?? Threads.FirstOrDefault();
-                if (Text(message.Body, "reason") == "exception")
-                {
-                    var info = await session.RequestAsync("exceptionInfo", new { threadId });
-                    ExceptionDetails = Text(info, "exceptionId") + "\n" + Text(info, "description") + (info.TryGetProperty("details", out var details) ? "\n" + details.ToString() : "");
-                }
-            });
+                var version = ++stopVersion;
+                _ = GuardAsync(() => HandleBreakpointStopAsync(message, Int(message.Body, "threadId"), version));
+                return;
+            }
+            EnterStopped(message);
         }
         else if (message.Name == "continued") { IsStopped = false; Status = "Running"; stopVersion++; Locals.Clear(); }
         else if (message.Name is "terminated" or "exited") { EndSession(); _ = GuardAsync(async () => await session.DisposeAsync()); }
         else if (message.Name == "breakpoint" && message.Body.TryGetProperty("breakpoint", out var changed) && changed.TryGetProperty("source", out var source))
         {
             var path = Text(source, "path"); var line = Int(changed, "line");
-            foreach (var item in Breakpoints.Where(x => x.Line == line && string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase)))
+            var id = changed.TryGetProperty("id", out _) ? Int(changed, "id") : (int?)null;
+            foreach (var item in Breakpoints.Where(x => id is not null && x.AdapterId == id || x.Line == line && string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase)))
+            {
                 item.Status = changed.TryGetProperty("verified", out var verified) && verified.GetBoolean() ? "Bound" : Text(changed, "message", "Unbound");
+                if (line > 0) item.BoundLine = line;
+            }
         }
     });
+
+    private void EnterStopped(DebugEvent message)
+    {
+        IsActive = true; IsStopped = true; threadId = Int(message.Body, "threadId"); stopVersion++;
+        Status = "Paused · " + Text(message.Body, "reason", "breakpoint");
+        _ = GuardAsync(async () =>
+        {
+            var response = await session.RequestAsync("threads");
+            SelectedThread = null;
+            Threads.Clear(); if (response.TryGetProperty("threads", out var threads)) foreach (var thread in threads.EnumerateArray()) Threads.Add(new DebugThread(Int(thread, "id"), Text(thread, "name")));
+            SelectedThread = Threads.FirstOrDefault(x => x.Id == threadId) ?? Threads.FirstOrDefault();
+            if (Text(message.Body, "reason") == "exception")
+            {
+                var info = await session.RequestAsync("exceptionInfo", new { threadId });
+                ExceptionDetails = Text(info, "exceptionId") + "\n" + Text(info, "description") + (info.TryGetProperty("details", out var details) ? "\n" + details.ToString() : "");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Applies a breakpoint's hit count and log message. The adapter stops on every hit whose condition is true;
+    /// stops that do not reach the hit count, and every tracepoint hit, continue without showing a paused state.
+    /// </summary>
+    private async Task HandleBreakpointStopAsync(DebugEvent message, int stoppedThread, int version)
+    {
+        var trace = await session.RequestAsync("stackTrace", new { threadId = stoppedThread, startFrame = 0, levels = 1 });
+        if (version != stopVersion) return;
+        JsonElement? top = trace.TryGetProperty("stackFrames", out var frames) && frames.GetArrayLength() > 0 ? frames[0] : null;
+        var path = top is { } frame && frame.TryGetProperty("source", out var source) ? Text(source, "path") : "";
+        var line = top is { } current ? Int(current, "line") : 0;
+        var ids = message.Body.TryGetProperty("hitBreakpointIds", out var hit) && hit.ValueKind == JsonValueKind.Array
+            ? hit.EnumerateArray().Where(value => value.TryGetInt32(out _)).Select(value => value.GetInt32()).ToHashSet() : [];
+        var breakpoint = Breakpoints.FirstOrDefault(b => b.Enabled && b.AdapterId is { } id && ids.Contains(id))
+            ?? Breakpoints.FirstOrDefault(b => b.Enabled && (b.BoundLine ?? b.Line) == line && string.Equals(b.Path, path, StringComparison.OrdinalIgnoreCase));
+        if (breakpoint is null || !breakpoint.HasClientBehavior) { EnterStopped(message); return; }
+        breakpoint.HitCount++;
+        if (!WpfStudio.Contracts.HitCondition.TryParse(breakpoint.HitCondition, out var condition, out _)) condition = WpfStudio.Contracts.HitCondition.Always;
+        if (condition.ShouldBreak(breakpoint.HitCount) && breakpoint.IsTracepoint && top is { } logged)
+        {
+            var frameId = Int(logged, "id");
+            var keywords = new Dictionary<string, string>
+            {
+                ["FUNCTION"] = Text(logged, "name"), ["TID"] = stoppedThread.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["FILEPOS"] = $"{Path.GetFileName(path)}({line})", ["HITCOUNT"] = breakpoint.HitCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            };
+            var text = await WpfStudio.Contracts.TracepointMessage.FormatAsync(breakpoint.LogMessage, expression => EvaluateValueAsync(expression, frameId), keywords);
+            AppendOutput(text + Environment.NewLine);
+        }
+        else if (condition.ShouldBreak(breakpoint.HitCount)) { EnterStopped(message); return; }
+        if (version != stopVersion) return;
+        await session.ContinueAsync(stoppedThread);
+    }
+
+    private async Task<string> EvaluateValueAsync(string expression, int frameId)
+    {
+        var value = await session.RequestAsync("evaluate", new { expression, frameId, context = "watch" });
+        return Text(value, "result");
+    }
+
+    /// <summary>Evaluates a hovered expression in the selected frame for an editor DataTip; null when not paused or not evaluable.</summary>
+    public async Task<string?> EvaluateDataTipAsync(string expression, CancellationToken cancellationToken = default)
+    {
+        if (!IsStopped || SelectedFrame is not { } frame) return null;
+        var version = stopVersion;
+        try
+        {
+            var value = await session.RequestAsync("evaluate", new { expression, frameId = frame.Id, context = "hover" }, cancellationToken);
+            if (version != stopVersion || !IsStopped) return null;
+            var type = Text(value, "type");
+            return expression + " = " + Text(value, "result") + (type.Length > 0 ? "  (" + type + ")" : "");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
+    }
+
+    /// <summary>Adds an expression to Watches, evaluating it immediately when paused.</summary>
+    public Task AddWatchAsync(string expression)
+    {
+        WatchExpression = expression;
+        return AddWatchCommand.ExecuteAsync(null);
+    }
+
+    private void ResetHitCounts() { foreach (var breakpoint in Breakpoints) { breakpoint.HitCount = 0; breakpoint.AdapterId = null; breakpoint.BoundLine = null; } }
 
     private async Task RefreshFramesAsync()
     {
