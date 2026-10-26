@@ -84,7 +84,9 @@ public static class CodeActionCatalog
         budget.CancelAfter(Budget);
         var token = budget.Token;
         var results = new ConcurrentBag<CodeActionCandidate>();
-        var diagnostics = await DiagnosticsAsync(document, span, providers, token).ConfigureAwait(false);
+        ImmutableArray<Diagnostic> diagnostics;
+        try { diagnostics = await DiagnosticsAsync(document, span, providers, token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { diagnostics = []; } // Budget spent; offer refactorings only.
 
         var fixWork = diagnostics.SelectMany(diagnostic => providers.FixesById.GetValueOrDefault(diagnostic.Id, []).Select(provider => (diagnostic, provider)));
         await IgnoreBudget(Parallel.ForEachAsync(fixWork, new ParallelOptions { CancellationToken = token, MaxDegreeOfParallelism = Environment.ProcessorCount }, async (item, ct) =>
@@ -99,16 +101,19 @@ public static class CodeActionCatalog
         })).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!token.IsCancellationRequested)
-            await IgnoreBudget(Parallel.ForEachAsync(providers.Refactorings, new ParallelOptions { CancellationToken = token, MaxDegreeOfParallelism = Environment.ProcessorCount }, async (provider, ct) =>
+        // Refactorings get their own budget, so slow diagnostics do not hide them.
+        using var refactoringBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        refactoringBudget.CancelAfter(Budget);
+        token = refactoringBudget.Token;
+        await IgnoreBudget(Parallel.ForEachAsync(providers.Refactorings, new ParallelOptions { CancellationToken = token, MaxDegreeOfParallelism = Environment.ProcessorCount }, async (provider, ct) =>
+        {
+            try
             {
-                try
-                {
-                    await provider.ComputeRefactoringsAsync(new CodeRefactoringContext(document, span,
-                        action => results.Add(new(action.Title, "Refactor", action, 4)), ct)).ConfigureAwait(false);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
-            })).ConfigureAwait(false);
+                await provider.ComputeRefactoringsAsync(new CodeRefactoringContext(document, span,
+                    action => results.Add(new(action.Title, "Refactor", action, 4)), ct)).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
+        })).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
 
         return Flatten(results).Where(candidate => candidate.Action is not CodeActionWithOptions)
