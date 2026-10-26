@@ -27,7 +27,7 @@ Pass a workspace path to open it at launch:
 dotnet run --project src/WpfStudio.App -- C:\Work\MyApp\MyApp.sln
 ```
 
-`Get-Debugger.ps1` downloads netcoredbg 3.2.0-1092 and verifies the pinned archive checksum. Terminal JavaScript assets are already included; installing Node.js or npm is unnecessary.
+`Get-Debugger.ps1` downloads netcoredbg 3.2.0-1092 and verifies the pinned archive checksum. It is optional: when the debugger is missing, the Debugger pane and **F5** offer **Install debugger**, which downloads the same release, verifies the same checksum and installs it under `%LOCALAPPDATA%\WpfStudio\debugger`. Terminal JavaScript assets are already included; installing Node.js or npm is unnecessary.
 
 The IDE opens `WpfStudio.App.MainWindow`, resolved and shown by `App.OnStartup` in `src/WpfStudio.App/App.xaml.cs`. Its content is defined in `MainWindow.xaml`. WpfStudio draws its own title bar with `WindowChrome` (menu, command center, and caption buttons); Windows still provides the resize border, rounded corners, and shadow, and the maximize button supports Windows 11 Snap Layouts. Because the title bar is WPF content, the smoke-test screenshots include it. Theme and docking layout are restored from your local profile. The startup-project selector inside the IDE selects the application to run or debug, rather than the IDE's own window.
 

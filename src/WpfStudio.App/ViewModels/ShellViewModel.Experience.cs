@@ -299,6 +299,7 @@ public sealed partial class ShellViewModel
         yield return Command("Debug", "Tracepoint log message…", BreakpointLogMessageCommand, icon: "Bug", detail: "Log a message with {expressions} and continue");
         yield return Command("Debug", "Add watch", AddWatchAtCaretCommand, icon: "Eye", detail: "Watch the expression at the caret or the selection");
         yield return Command("Debug", "Show breakpoints", ShowBreakpointsCommand, icon: "Bug", detail: "Conditions, enabled state and binding status");
+        yield return Command("Debug", "Install or reinstall the debugger", Debugger.InstallAdapterCommand, icon: "Bug", detail: "Download netcoredbg into your WpfStudio profile");
         yield return Command("Debug", "Attach to process…", ShowToolCommand, "Debugger", icon: "Plug");
         yield return Command("View", "Solution Explorer", ShowToolCommand, "Explorer", icon: "Folder");
         yield return Command("View", "WPF Explorer", ShowToolCommand, "WpfTools", icon: "Layers");

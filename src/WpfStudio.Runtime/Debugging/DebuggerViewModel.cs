@@ -91,6 +91,34 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         session.Error += OnError;
     }
     public event Action<string, int>? SourceRequested;
+    /// <summary>Downloads and installs the debug adapter, returning its executable; set by the application.</summary>
+    public Func<IProgress<string>, CancellationToken, Task<string>>? AdapterInstaller { get; init; }
+    public string AdapterDescription { get; init; } = "the debug adapter";
+    public bool IsAdapterMissing => !File.Exists(session.AdapterPath);
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(InstallAdapterCommand))] public partial bool IsInstallingAdapter { get; set; }
+    [ObservableProperty] public partial string AdapterStatus { get; set; } = "";
+    private bool CanInstallAdapter() => AdapterInstaller is not null && !IsInstallingAdapter;
+    [RelayCommand(CanExecute = nameof(CanInstallAdapter))] private async Task InstallAdapterAsync()
+    {
+        if (AdapterInstaller is not { } install) return;
+        IsInstallingAdapter = true; Error = "";
+        try
+        {
+            session.AdapterPath = await install(new Progress<string>(message => AdapterStatus = message), CancellationToken.None);
+            AdapterStatus = "Installed " + AdapterDescription;
+            Status = "Ready · .NET 8–10 managed debugging";
+        }
+        catch (Exception ex) { AdapterStatus = ""; Error = "Debugger installation failed: " + ex.Message; }
+        finally { IsInstallingAdapter = false; OnPropertyChanged(nameof(IsAdapterMissing)); }
+    }
+    /// <summary>True when the adapter is present, installing it first if the user agrees.</summary>
+    public async Task<bool> EnsureAdapterAsync(Func<Task<bool>> confirm)
+    {
+        if (!IsAdapterMissing) return true;
+        if (AdapterInstaller is null || !await confirm()) return false;
+        await InstallAdapterAsync();
+        return !IsAdapterMissing;
+    }
     public ObservableCollection<BreakpointViewModel> Breakpoints { get; } = [];
     public ObservableCollection<DebugThread> Threads { get; } = [];
     public ObservableCollection<DebugFrame> Frames { get; } = [];
@@ -156,6 +184,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
 
     [RelayCommand] private Task AttachAsync() => GuardAsync(async () =>
     {
+        if (IsAdapterMissing) { Error = "Install the debugger first: choose Install debugger above."; return; }
         Status = "Attaching…";
         ResetHitCounts();
         await session.AttachAsync(AttachProcessId, Breakpoints.Select(x => x.ToModel()).ToArray(), BreakOnThrown);

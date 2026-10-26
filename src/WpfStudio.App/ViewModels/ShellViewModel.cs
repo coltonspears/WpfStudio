@@ -476,6 +476,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (Debugger.IsStopped) { await Debugger.ContinueCommand.ExecuteAsync(null); return; }
         if (Debugger.IsActive) { Status = "The debugger is already running"; return; }
         if (IsBusy || _loading || StartupProject == null) return;
+        if (!await EnsureDebuggerAsync()) return;
         IsBusy = true; _operation = new(); ToolRequested?.Invoke("Debugger");
         try
         {
@@ -495,6 +496,17 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
         finally { _operation.Dispose(); _operation = null; IsBusy = false; if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
     });
+    /// <summary>Offers to install the debug adapter when it is missing; false when debugging cannot start.</summary>
+    private async Task<bool> EnsureDebuggerAsync()
+    {
+        if (!Debugger.IsAdapterMissing) return true;
+        ToolRequested?.Invoke("Debugger");
+        Status = "Installing the debugger…";
+        var ready = await Debugger.EnsureAdapterAsync(() => _dialogs.ConfirmAsync("Install the debugger",
+            $"Debugging needs {Debugger.AdapterDescription}, which isn't installed. Download it now (about 5 MB from GitHub), verify its checksum and install it in your WpfStudio profile?"));
+        Status = ready ? "Debugger installed" : "Debugging needs the debugger. Choose Install debugger in the Debugger pane.";
+        return ready;
+    }
     private BufferedBuildProgress CreateBuildProgress()
     {
         _buildDiagnostics.Clear(); RefreshEditorDiagnostics();

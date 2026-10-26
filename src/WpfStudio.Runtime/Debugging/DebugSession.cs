@@ -31,7 +31,7 @@ public sealed class DebugSession : IAsyncDisposable
     private async Task ConnectAsync(CancellationToken cancellationToken, bool isolateStartupHooks = false)
     {
         if (IsActive) throw new InvalidOperationException("Stop the active debugging session first.");
-        if (!File.Exists(AdapterPath)) throw new FileNotFoundException("netcoredbg is missing. Run tools/Get-Debugger.ps1 and rebuild WpfStudio.", AdapterPath);
+        if (!File.Exists(AdapterPath)) throw new FileNotFoundException("netcoredbg is not installed. Choose Install debugger in the Debugger pane, or run tools/Get-Debugger.ps1 and rebuild WpfStudio.", AdapterPath);
         disposing = false;
         initialized = NewCompletion();
         process = new Process { StartInfo = new ProcessStartInfo(AdapterPath, "--interpreter=vscode") { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(AdapterPath)! } };
