@@ -8,6 +8,10 @@ namespace WpfStudio.Workspace;
 
 public sealed partial class BuildService
 {
+    /// <summary>The non-package assemblies a XAML preview needs, resolved by MSBuild for the project and its project references.</summary>
+    public Task<PreviewReferenceSet> ResolvePreviewReferencesAsync(string projectPath, string configuration = "Debug", string? targetFramework = null, CancellationToken cancellationToken = default) =>
+        PreviewReferenceResolver.ResolveAsync(projectPath, configuration, targetFramework, cancellationToken);
+
     public async Task<ResolvedLaunch> ResolveLaunchAsync(string projectPath, string configuration = "Debug", string? targetFramework = null, string? profileName = null, CancellationToken cancellationToken = default)
     {
         projectPath = Path.GetFullPath(projectPath);

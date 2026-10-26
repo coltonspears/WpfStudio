@@ -59,6 +59,8 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     private string? _sourceHash;
     private string? _sourceAssembly;
     private string? _projectAssetsPath;
+    private Func<CancellationToken, Task<PreviewReferenceSet>>? _referenceResolver;
+    private PreviewReferenceSet? _references;
     private bool _disposed;
     private bool _picking;
     public DesignerViewModel(IPreviewClient client, IUiDispatcher dispatcher)
@@ -97,7 +99,8 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         : string.IsNullOrWhiteSpace(AssemblyPath) || !File.Exists(AssemblyPath) ? "Source preview · framework controls"
         : "Source preview · built assembly · code-behind and application startup are not run";
 
-    public async Task OpenAsync(DocumentState document, string? assemblyPath = null, string? projectDirectory = null, string? sourceAssembly = null, string? projectAssetsPath = null)
+    public async Task OpenAsync(DocumentState document, string? assemblyPath = null, string? projectDirectory = null, string? sourceAssembly = null, string? projectAssetsPath = null,
+        Func<CancellationToken, Task<PreviewReferenceSet>>? referenceResolver = null)
     {
         if (_disposed) return;
         if (document.Extension != ".xaml") throw new ArgumentException("The designer requires a XAML document.", nameof(document));
@@ -105,6 +108,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         if (_document != null) _document.ContentChanged -= ContentChanged;
         _document = document; _document.ContentChanged += ContentChanged;
         DocumentName = document.Name; AssemblyPath = assemblyPath; ProjectDirectory = projectDirectory; _sourceAssembly = sourceAssembly; _projectAssetsPath = projectAssetsPath;
+        _referenceResolver = referenceResolver; _references = null;
         ConfigureScenarios(document.Path, projectDirectory);
         ViewTypeName = ReadViewType(document.Content);
         OnPropertyChanged(nameof(SourcePath));
@@ -169,12 +173,22 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
             if (!double.IsFinite(PreviewWidth) || !double.IsFinite(PreviewHeight) || PreviewWidth < 32 || PreviewHeight < 32 || PreviewWidth > 4096 || PreviewHeight > 4096)
                 throw new InvalidOperationException("Preview width and height must be between 32 and 4096.");
             var assembly = string.IsNullOrWhiteSpace(AssemblyPath) || !IsCompiledPreview && !File.Exists(AssemblyPath) ? null : AssemblyPath;
+            // MSBuild resolves HintPath and project references; typing reuses the last answer, Refresh asks again.
+            if (_referenceResolver is { } resolve && (!debounce || _references is null))
+            {
+                Status = "Resolving project references…";
+                try { _references = await resolve(token); }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                { _references = new([], [], [$"Project references could not be resolved: {exception.Message}"]); }
+                if (!Current(revision)) return;
+                Status = "Rendering preview…";
+            }
             OnPropertyChanged(nameof(SessionDescription));
             var snapshot = await _client.RenderAsync(new(document.Path, text, revision, PreviewWidth, PreviewHeight,
                 assembly, ProjectDirectory, Mode,
                 string.IsNullOrWhiteSpace(ViewTypeName) ? null : ViewTypeName,
                 string.IsNullOrWhiteSpace(ApplicationResourcePath) ? null : ApplicationResourcePath,
-                scenario, UseDesignTimeValues, AutoSize, _projectAssetsPath), token);
+                scenario, UseDesignTimeValues, AutoSize, _projectAssetsPath, _references), token);
             if (!Current(revision) || document.Version != sourceVersion || snapshot.Version != revision) return;
             if (!await VerifyScenarioConfigurationAsync(revision, token) || !Current(revision) || document.Version != sourceVersion) return;
             if (snapshot.Success && snapshot.Scenario?.Configuration != scenario)
@@ -183,6 +197,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
             _sourceHash = DocumentStore.Hash(System.Text.Encoding.UTF8.GetBytes(text));
             SetSnapshot(snapshot);
             Status = snapshot.Status ?? (snapshot.Success ? "Preview ready. Select an element to inspect it." : "Preview could not render; see diagnostics.");
+            if (_references?.Warnings is { Count: > 0 } warnings) Status += " " + warnings[0];
             if (snapshot.Success) RestoreSelection();
         }
         catch (OperationCanceledException) { }

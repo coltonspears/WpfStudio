@@ -142,6 +142,7 @@ public sealed partial class ShellViewModel
         // then discover the new assembly without requiring the designer to reopen.
         TrackDesignerEditor(document);
         await Designer.OpenAsync(document.State, assembly,
-            project == null ? Path.GetDirectoryName(document.State.Path) : Path.GetDirectoryName(project.ProjectPath), project?.AssemblyName, project?.ProjectAssetsPath);
+            project == null ? Path.GetDirectoryName(document.State.Path) : Path.GetDirectoryName(project.ProjectPath), project?.AssemblyName, project?.ProjectAssetsPath,
+            project is null ? null : token => _build.ResolvePreviewReferencesAsync(project.ProjectPath, Configuration, project.TargetFramework, token));
     });
 }

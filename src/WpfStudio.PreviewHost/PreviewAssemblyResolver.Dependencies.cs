@@ -11,9 +11,11 @@ namespace WpfStudio.PreviewHost;
 internal sealed partial class PreviewAssemblyResolver
 {
     private readonly Dictionary<string, string> _missingDependencies = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<string> _searchDirectories = [];
 
     private void StageDependencies(PreviewRequest request)
     {
+        _searchDirectories = PreviewDependencyCatalog.SearchDirectories(request);
         foreach (var asset in PreviewDependencyCatalog.Read(request).Assets)
         {
             string destination = PreviewDependencyCatalog.Within(_directory!, asset.RelativePath);
@@ -26,6 +28,29 @@ internal sealed partial class PreviewAssemblyResolver
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             File.Copy(asset.Source, destination);
         }
+    }
+
+    /// <summary>
+    /// Copies an assembly that is in a HintPath folder but not in the output into the shadow directory, the way
+    /// MSBuild would find it beside its references. Returns the staged path, or null when no folder has it.
+    /// </summary>
+    private string? StageFromSearchDirectories(string fileName, string? culture = null)
+    {
+        if (_directory is null || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return null;
+        string relative = string.IsNullOrWhiteSpace(culture) ? fileName : Path.Combine(culture, fileName);
+        foreach (string directory in _searchDirectories)
+        {
+            string source = Path.Combine(directory, relative);
+            if (!File.Exists(source) || (File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0) continue;
+            string destination = PreviewDependencyCatalog.Within(_directory, relative.Replace('\\', '/'));
+            if (!File.Exists(destination))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(source, destination);
+            }
+            return destination;
+        }
+        return null;
     }
 
     public void PrepareXamlNamespaces(string text)
