@@ -154,6 +154,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         ContextChanged?.Invoke();
+        OnGitContentChanged();
         _ = StartAnalysisAsync(debounce: true);
     }
     private void StatePropertyChanged(object? sender, PropertyChangedEventArgs args)
@@ -445,6 +446,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _workspace.CSharpModelChanged -= CSharpModelChanged;
         if (_resources is not null) _resources.Changed -= SemanticStateChanged;
         ClearQuickFixes();
+        DisposeGit();
         _analysis?.Cancel();
         _analysis?.Dispose();
     }

@@ -81,10 +81,20 @@ public sealed record GitDiff(string Title, string Path, string Text, string? Bef
 }
 
 public sealed record GitSnapshot(string? Root, string Branch, string? Upstream, string Tracking,
-    IReadOnlyList<GitChange> Changes, IReadOnlyList<string> Branches, IReadOnlyList<GitCommit> History, string Message)
+    IReadOnlyList<GitChange> Changes, IReadOnlyList<string> Branches, IReadOnlyList<GitCommit> History, string Message,
+    WpfStudio.Core.Git.GitRemote? Remote = null, GitOperation Operation = GitOperation.None)
 {
     public static GitSnapshot Unavailable(string message) => new(null, "No repository", null, "", [], [], [], message);
 }
+
+/// <summary>A multi-step Git operation that stopped for conflicts and must be continued or aborted.</summary>
+public enum GitOperation { None, Merge, Rebase, CherryPick, Revert }
+
+/// <summary>A file's repository, its path relative to the root, and its committed text (null when untracked or binary).</summary>
+public sealed record GitFileBase(string Root, string RelativePath, string? HeadText, bool IsTracked, string? HeadCommit, WpfStudio.Core.Git.GitRemote? Remote);
+
+/// <summary>A conflicted file's current text and the conflict blocks found in it.</summary>
+public sealed record GitConflictFile(string Root, string RelativePath, string FullPath, string Text, IReadOnlyList<WpfStudio.Core.Git.ConflictBlock> Blocks);
 
 internal static class GitText
 {

@@ -133,6 +133,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Inline parameter-name and type hints in C# editors.</summary>
     [ObservableProperty] public partial bool ShowInlayHints { get; set; } = true;
     partial void OnShowInlayHintsChanged(bool value) { foreach (var document in Documents) document.ShowInlayHints = value; }
+    /// <summary>Who last changed the caret's line, shown after the line in editors of committed files.</summary>
+    [ObservableProperty] public partial bool ShowInlineBlame { get; set; } = true;
+    partial void OnShowInlineBlameChanged(bool value) { foreach (var document in Documents) document.ShowInlineBlame = value; }
+    [RelayCommand] private void ToggleInlineBlame() { ShowInlineBlame = !ShowInlineBlame; Status = ShowInlineBlame ? "Line blame shown" : "Line blame hidden"; }
     [RelayCommand] private void ToggleInlayHints() { ShowInlayHints = !ShowInlayHints; Status = ShowInlayHints ? "Inline hints shown" : "Inline hints hidden"; }
     [RelayCommand] private void CollapseAll() => ActiveDocument?.SetAllFolded(true);
     [RelayCommand] private void ExpandAll() => ActiveDocument?.SetAllFolded(false);
@@ -159,6 +163,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         await assistant;
         ThemeName = settings.Theme; ThemeChanged?.Invoke(ThemeName);
         ShowInlayHints = settings.ShowInlayHints;
+        ShowInlineBlame = settings.ShowInlineBlame;
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true;
@@ -353,8 +358,11 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources)
         {
             DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
-            ShowInlayHints = ShowInlayHints
+            ShowInlayHints = ShowInlayHints,
+            ShowInlineBlame = ShowInlineBlame
         };
+        if (Features?.GitService is { } git) _ = vm.RefreshGitAsync(git, _lifetime.Token);
+        vm.BlameCommitRequested += line => _ = GuardAsync(async () => { await OpenGitCommand.ExecuteAsync(null); Features?.Git.ShowCommit(line); });
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
         vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
@@ -443,7 +451,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             }
         }
         catch (Exception ex) { AppendOutput(ex.Message); }
-        finally { _checkingFiles = false; RequestProjectXamlAnalysis(); }
+        finally
+        {
+            _checkingFiles = false; RequestProjectXamlAnalysis();
+            // A commit or checkout in the terminal changes what change margins and blame compare with.
+            if (Features?.GitService is { } git) foreach (var document in Documents) _ = document.RefreshGitAsync(git, _lifetime.Token);
+        }
     }
     [RelayCommand] private Task ReloadDocumentAsync() => GuardAsync(async () => { if (ActiveDocument == null) return; if (ActiveDocument.State.IsDirty && !await _dialogs.ConfirmAsync("Reload document", "Discard editor changes and reload this file from disk?")) return; await _store.ReloadAsync(ActiveDocument.State); });
     [RelayCommand] private Task BuildAsync() => RunBuildAsync(BuildOperation.Build);
@@ -819,7 +832,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) _store.DeleteRecovery(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }

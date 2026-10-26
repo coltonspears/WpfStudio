@@ -25,7 +25,7 @@ using WpfStudio.Core.Text;
 namespace WpfStudio.App.Controls;
 
 /// <summary>Presentation adapter for AvalonEdit: caret, highlighting, adorners and completion popups.</summary>
-public sealed class EditorSurface : TextEditor
+public sealed partial class EditorSurface : TextEditor
 {
     private static readonly ConditionalWeakTable<DocumentState, TextDocument> Buffers = new();
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(nameof(ViewModel), typeof(EditorViewModel), typeof(EditorSurface), new PropertyMetadata(null, Changed));
@@ -78,6 +78,7 @@ public sealed class EditorSurface : TextEditor
         _diagnostics = new DiagnosticRenderer(this); TextArea.TextView.BackgroundRenderers.Add(_diagnostics);
         TextArea.TextView.LineTransformers.Add(_semantic);
         _hints = new InlayHintGenerator(this); TextArea.TextView.ElementGenerators.Add(_hints);
+        InitializeAnnotations();
         _foldingTimer = new(TimeSpan.FromMilliseconds(500), System.Windows.Threading.DispatcherPriority.Background, (_, _) => UpdateFoldings(), Dispatcher) { IsEnabled = false };
         TextChanged += OnEditorTextChanged;
         TextArea.Caret.PositionChanged += (_, _) => { if (ViewModel is { } vm && !_syncing) { vm.State.CaretOffset = CaretOffset; vm.State.CaretLine = TextArea.Caret.Line; vm.State.CaretColumn = TextArea.Caret.Column; } };
@@ -129,10 +130,12 @@ public sealed class EditorSurface : TextEditor
         ViewModel.SnippetRequested += InsertRequestedSnippet;
         ViewModel.DecorationsChanged += ApplyDecorations;
         ViewModel.FoldingRequested += SetAllFolded;
+        ViewModel.GitChanged += OnGitChanged;
         _trackedDocument = Document; Document.Changed += OnDocumentChanged;
         _hints.Enabled = ViewModel.ShowInlayHints;
         ApplyDecorations();
         InstallFolding();
+        _changeMargin?.Update(); _blameLine = -1; UpdateBlameLine();
         _syncing = false; Navigate();
     }
     private void Detach()
@@ -149,6 +152,7 @@ public sealed class EditorSurface : TextEditor
             _attached.SnippetRequested -= InsertRequestedSnippet;
             _attached.DecorationsChanged -= ApplyDecorations;
             _attached.FoldingRequested -= SetAllFolded;
+            _attached.GitChanged -= OnGitChanged;
             UninstallFolding(_attached.State);
         }
         if (_trackedDocument != null) { _trackedDocument.Changed -= OnDocumentChanged; _trackedDocument = null; }
@@ -165,6 +169,7 @@ public sealed class EditorSurface : TextEditor
     {
         if (args.PropertyName == nameof(EditorViewModel.ExecutionLine)) { _margin.InvalidateVisual(); TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
         if (args.PropertyName == nameof(EditorViewModel.ShowInlayHints) && ViewModel is { } model) { _hints.Enabled = model.ShowInlayHints; TextArea.TextView.Redraw(); }
+        if (args.PropertyName == nameof(EditorViewModel.ShowInlineBlame)) { _blameLine = -1; UpdateBlameLine(); }
         if (args.PropertyName == nameof(EditorViewModel.XamlContextRevision))
         {
             _completionRequest?.Cancel(); _completion?.Close(); CancelHover();

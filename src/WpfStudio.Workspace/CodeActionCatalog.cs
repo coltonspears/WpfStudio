@@ -25,7 +25,7 @@ public static class CodeActionCatalog
 {
     private static readonly Lazy<Providers> Loaded = new(Load);
     /// <summary>Per-request budget. Slow providers are abandoned, not awaited.</summary>
-    public static TimeSpan Budget { get; set; } = TimeSpan.FromSeconds(4);
+    public static TimeSpan Budget { get; set; } = TimeSpan.FromSeconds(8);
     public const int MaximumActions = 80;
 
     private sealed record Providers(ImmutableArray<CodeFixProvider> Fixes, ImmutableArray<CodeRefactoringProvider> Refactorings,

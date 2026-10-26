@@ -322,6 +322,7 @@ public sealed partial class ShellViewModel
         yield return MemoryCommand("Memory: go to type or address", MemoryProfiler.FocusGoToCommand, icon: "Search");
         yield return MemoryCommand("Export memory report…", MemoryProfiler.ExportReportCommand, icon: "Export", detail: "HTML report or JSON data");
         yield return Command("View", ShowInlayHints ? "Hide inline hints" : "Show inline hints", ToggleInlayHintsCommand, icon: "Text", detail: "Parameter names for literal arguments and types of var declarations");
+        yield return Command("View", ShowInlineBlame ? "Hide line blame" : "Show line blame", ToggleInlineBlameCommand, icon: "Git", detail: "Author, age and summary of the commit that last changed the caret's line");
         yield return Command("View", "Collapse all regions", CollapseAllCommand, icon: "Collapse");
         yield return Command("View", "Expand all regions", ExpandAllCommand, icon: "Expand");
         yield return Command("View", "Dark theme", SetThemeCommand, "Dark", icon: "Moon");
@@ -329,6 +330,11 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Save window layout", SaveLayoutCommand, icon: "Sidebar");
         yield return Command("View", "Reset window layout", ResetLayoutCommand, icon: "Sidebar");
         yield return Command("Tools", "NuGet packages", OpenPackagesCommand, icon: "Package", detail: "Search, install, update, remove");
+        if (Features?.Git is { HasRemote: true } git)
+        {
+            yield return Command("Tools", git.RemoteText, git.OpenRemoteCommand, icon: "Link", detail: git.Remote!.WebUrl);
+            yield return Command("Tools", git.PullRequestText, git.CreatePullRequestCommand, icon: "Link", detail: "Opens " + git.Remote.HostName + " for the current branch");
+        }
         yield return Command("Tools", "Git changes", OpenGitCommand, icon: "Git", detail: "Stage, commit, branches and history");
         yield return Command("Tools", "Settings", OpenSettingsCommand, shortcut: "Ctrl+,", icon: "Settings", detail: "Appearance and ColtonGPT");
         yield return Command("Tools", "Reload workspace", ReloadWorkspaceCommand, icon: "Refresh");

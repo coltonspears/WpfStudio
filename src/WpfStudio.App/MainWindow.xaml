@@ -321,6 +321,7 @@
             <MenuItem Header="SQL Server" c:Ui.Icon="Database" Command="{Binding ShowToolCommand}" CommandParameter="Database" />
             <Separator />
             <MenuItem Header="Inline hints" IsCheckable="True" IsChecked="{Binding ShowInlayHints}" ToolTip="Parameter names for literal arguments and types of var declarations in C#" />
+            <MenuItem Header="Line blame" IsCheckable="True" IsChecked="{Binding ShowInlineBlame}" ToolTip="Show who last changed the caret's line, after the line" />
             <MenuItem Header="Collapse all regions" c:Ui.Icon="Collapse" Command="{Binding CollapseAllCommand}" />
             <MenuItem Header="Expand all regions" c:Ui.Icon="Expand" Command="{Binding ExpandAllCommand}" />
             <Separator />

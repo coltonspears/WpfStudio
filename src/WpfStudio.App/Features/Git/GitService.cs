@@ -52,8 +52,138 @@ public sealed class GitService
             }
         }
         var changes = ParseStatus(status.Output);
+        var remote = await GetRemoteAsync(root, upstream, cancellationToken);
+        var operation = await GetOperationAsync(root, cancellationToken);
         return new(root, branch, upstream, tracking, changes, branches, history,
-            changes.Count == 0 ? "Working tree clean" : $"{changes.Count} changed file{(changes.Count == 1 ? "" : "s")}");
+            changes.Count == 0 ? "Working tree clean" : $"{changes.Count} changed file{(changes.Count == 1 ? "" : "s")}", remote, operation);
+    }
+
+    /// <summary>The web location of the upstream's remote, else origin, else the only remote.</summary>
+    public async Task<WpfStudio.Core.Git.GitRemote?> GetRemoteAsync(string root, string? upstream, CancellationToken cancellationToken = default)
+    {
+        var names = (await RunAsync(root, ["remote"], cancellationToken, allowFailure: true, readOnly: true)).Output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var preferred = upstream?.Split('/', 2)[0];
+        var name = names.FirstOrDefault(n => n == preferred) ?? names.FirstOrDefault(n => n == "origin") ?? (names.Length == 1 ? names[0] : null);
+        if (name is null) return null;
+        var url = await RunAsync(root, ["remote", "get-url", "--", name], cancellationToken, allowFailure: true, readOnly: true);
+        return url.ExitCode == 0 ? WpfStudio.Core.Git.GitRemote.Parse(url.Output.Trim()) : null;
+    }
+
+    public async Task<GitOperation> GetOperationAsync(string root, CancellationToken cancellationToken = default)
+    {
+        async Task<bool> Exists(string name)
+        {
+            var path = await RunAsync(root, ["rev-parse", "--git-path", name], cancellationToken, allowFailure: true, readOnly: true);
+            if (path.ExitCode != 0) return false;
+            var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, path.Output.Trim()));
+            return File.Exists(full) || Directory.Exists(full);
+        }
+        if (await Exists("rebase-merge") || await Exists("rebase-apply")) return GitOperation.Rebase;
+        if (await Exists("MERGE_HEAD")) return GitOperation.Merge;
+        if (await Exists("CHERRY_PICK_HEAD")) return GitOperation.CherryPick;
+        if (await Exists("REVERT_HEAD")) return GitOperation.Revert;
+        return GitOperation.None;
+    }
+
+    /// <summary>The committed version of a working file for the editor's change margin and blame; null outside a repository.</summary>
+    public async Task<GitFileBase?> GetFileBaseAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        var directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(filePath));
+        if (directory is null || !Directory.Exists(directory)) return null;
+        GitResult discovery;
+        try { discovery = await RunAsync(directory, ["rev-parse", "--show-toplevel"], cancellationToken, allowFailure: true, readOnly: true); }
+        catch (Win32Exception) { return null; }
+        if (discovery.ExitCode != 0) return null;
+        var root = System.IO.Path.GetFullPath(discovery.Output.TrimEnd('\r', '\n'));
+        var relative = System.IO.Path.GetRelativePath(root, System.IO.Path.GetFullPath(filePath)).Replace('\\', '/');
+        if (relative.StartsWith("../", StringComparison.Ordinal)) return null;
+        var head = await RunAsync(root, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken, allowFailure: true, readOnly: true);
+        var tracked = (await RunAsync(root, ["ls-files", "--error-unmatch", "--", relative], cancellationToken, allowFailure: true, readOnly: true)).ExitCode == 0;
+        string? text = null;
+        if (tracked && head.ExitCode == 0)
+        {
+            try { text = await ReadBlobAsync(root, $"HEAD:{relative}", cancellationToken); }
+            catch (GitOutputLimitException) { text = null; }
+            if (IsBinary(text)) text = null;
+        }
+        var upstream = await RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true, readOnly: true);
+        var remote = await GetRemoteAsync(root, upstream.ExitCode == 0 ? upstream.Output.Trim() : null, cancellationToken);
+        return new(root, relative, text, tracked, head.ExitCode == 0 ? head.Output.Trim() : null, remote);
+    }
+
+    /// <summary>Blame for the editor's current (possibly unsaved) text, so line numbers match the buffer.</summary>
+    public async Task<IReadOnlyList<WpfStudio.Core.Git.BlameLine>> BlameAsync(string root, string relativePath, string contents, CancellationToken cancellationToken = default)
+    {
+        ValidatePaths(root, [relativePath]);
+        var result = await RunAsync(root, ["blame", "--porcelain", "--contents", "-", "--", relativePath], cancellationToken, input: contents, readOnly: true);
+        return WpfStudio.Core.Git.GitBlame.Parse(result.Output);
+    }
+
+    /// <summary>Merges a branch into the current one. Conflicts are not an error: they are left for the resolver.</summary>
+    public async Task<string> MergeAsync(string root, string branch, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(branch) || branch.StartsWith('-')) throw new InvalidOperationException("Choose a branch to merge.");
+        await RequireCleanAsync(root, cancellationToken);
+        var result = await RunAsync(root, ["merge", "--no-edit", "--no-ff", "--", branch], cancellationToken, allowFailure: true);
+        if (result.ExitCode == 0) return result.Display;
+        if (await GetOperationAsync(root, cancellationToken) == GitOperation.Merge)
+            return result.Display + "\nResolve the conflicts, then choose Continue. Abort returns the branch to where it was.";
+        throw new InvalidOperationException(result.Display);
+    }
+
+    public async Task<string> AbortOperationAsync(string root, CancellationToken cancellationToken = default)
+    {
+        var operation = await GetOperationAsync(root, cancellationToken);
+        string[] arguments = operation switch
+        {
+            GitOperation.Merge => ["merge", "--abort"], GitOperation.Rebase => ["rebase", "--abort"],
+            GitOperation.CherryPick => ["cherry-pick", "--abort"], GitOperation.Revert => ["revert", "--abort"],
+            _ => throw new InvalidOperationException("No merge, rebase, cherry-pick or revert is in progress.")
+        };
+        return (await RunAsync(root, arguments, cancellationToken)).Display;
+    }
+
+    /// <summary>Commits a resolved merge, or continues a rebase, cherry-pick or revert, keeping Git's prepared message.</summary>
+    public async Task<string> ContinueOperationAsync(string root, CancellationToken cancellationToken = default)
+    {
+        var status = ParseStatus((await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=no"], cancellationToken)).Output);
+        if (status.Any(change => change.IsConflict)) throw new InvalidOperationException("Resolve and stage every conflicted file first.");
+        var operation = await GetOperationAsync(root, cancellationToken);
+        // core.editor=true accepts the prepared message without opening an editor.
+        string[] arguments = operation switch
+        {
+            GitOperation.Merge => ["-c", "core.editor=true", "commit", "--no-edit"],
+            GitOperation.Rebase => ["-c", "core.editor=true", "rebase", "--continue"],
+            GitOperation.CherryPick => ["-c", "core.editor=true", "cherry-pick", "--continue"],
+            GitOperation.Revert => ["-c", "core.editor=true", "revert", "--continue"],
+            _ => throw new InvalidOperationException("No merge, rebase, cherry-pick or revert is in progress.")
+        };
+        var result = await RunAsync(root, arguments, cancellationToken, allowFailure: true);
+        if (result.ExitCode != 0 && await GetOperationAsync(root, cancellationToken) == GitOperation.None) throw new InvalidOperationException(result.Display);
+        return result.Display;
+    }
+
+    public async Task<GitConflictFile> ReadConflictAsync(string root, GitChange change, CancellationToken cancellationToken = default)
+    {
+        ValidatePaths(root, [change.Path]);
+        var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, change.Path));
+        var file = await ReadWorkingFileAsync(path, cancellationToken);
+        if (file.Text is null) throw new InvalidOperationException(file.Message ?? "The conflicted file was deleted on one side. Choose a side in the terminal (git add or git rm).");
+        return new(root, change.Path, path, file.Text, WpfStudio.Core.Git.MergeConflicts.Parse(file.Text));
+    }
+
+    /// <summary>Writes the resolved text and stages it, unless the file changed since it was read.</summary>
+    public async Task<string> ResolveConflictAsync(GitConflictFile conflict, string resolved, CancellationToken cancellationToken = default)
+    {
+        ValidatePaths(conflict.Root, [conflict.RelativePath]);
+        var current = await ReadWorkingFileAsync(conflict.FullPath, cancellationToken);
+        if (current.Text != conflict.Text) throw new InvalidOperationException("The file changed since the conflicts were loaded. Reload it and resolve again.");
+        if (WpfStudio.Core.Git.MergeConflicts.Parse(resolved).Count > 0) throw new InvalidOperationException("The result still contains conflict markers.");
+        var bytes = await File.ReadAllBytesAsync(conflict.FullPath, cancellationToken);
+        var bom = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble);
+        await File.WriteAllTextAsync(conflict.FullPath, resolved, new UTF8Encoding(bom), cancellationToken);
+        return (await RunAsync(conflict.Root, ["add", "--", conflict.RelativePath], cancellationToken)).Display;
     }
 
     // The -z porcelain format emits destination before source for renamed/copied paths.
@@ -242,17 +372,28 @@ public sealed class GitService
         return files;
     }
 
-    public async Task<string> FetchAsync(string root, CancellationToken cancellationToken = default) =>
-        (await RunAsync(root, ["fetch"], cancellationToken)).Display;
+    /// <param name="signIn">
+    /// Lets Git Credential Manager show its sign-in window (Microsoft Entra for Azure DevOps, a browser for GitHub).
+    /// Without it, network operations use only stored credentials and never prompt.
+    /// </param>
+    public async Task<string> FetchAsync(string root, CancellationToken cancellationToken = default, bool signIn = false) =>
+        (await RunAsync(root, ["fetch"], cancellationToken, signIn: signIn)).Display;
 
-    public async Task<string> PullAsync(string root, CancellationToken cancellationToken = default)
+    public async Task<string> PullAsync(string root, CancellationToken cancellationToken = default, bool signIn = false)
     {
         await RequireCleanAsync(root, cancellationToken);
-        return (await RunAsync(root, ["pull", "--ff-only"], cancellationToken)).Display;
+        return (await RunAsync(root, ["pull", "--ff-only"], cancellationToken, signIn: signIn)).Display;
     }
 
-    public async Task<string> PushAsync(string root, CancellationToken cancellationToken = default) =>
-        (await RunAsync(root, ["push"], cancellationToken)).Display;
+    public async Task<string> PushAsync(string root, CancellationToken cancellationToken = default, bool signIn = false) =>
+        (await RunAsync(root, ["push"], cancellationToken, signIn: signIn)).Display;
+
+    /// <summary>Recognizes the messages Git and credential helpers print when stored credentials are missing or rejected.</summary>
+    public static bool IsAuthenticationFailure(string message) =>
+        new[] { "Authentication failed", "could not read Username", "could not read Password", "terminal prompts disabled", "Logon failed",
+                "returned error: 401", "returned error: 403", "HTTP 401", "HTTP 403", "Permission denied (publickey)", "TF401019",
+                "fatal: credential", "Unauthorized" }
+            .Any(marker => message.Contains(marker, StringComparison.OrdinalIgnoreCase));
 
     public async Task<string> SwitchBranchAsync(string root, string branch, bool create = false, CancellationToken cancellationToken = default)
     {
@@ -330,7 +471,7 @@ public sealed class GitService
 
     /// <param name="readOnly">Adds --no-optional-locks so background reads never hold the index lock a user action needs.</param>
     private static async Task<GitResult> RunAsync(string directory, IEnumerable<string> arguments, CancellationToken cancellationToken,
-        bool allowFailure = false, string? input = null, bool readOnly = false)
+        bool allowFailure = false, string? input = null, bool readOnly = false, bool signIn = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo("git")
@@ -341,10 +482,11 @@ public sealed class GitService
             StandardInputEncoding = new UTF8Encoding(false)
         };
         if (readOnly) start.ArgumentList.Add("--no-optional-locks");
-        foreach (var argument in new[] { "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "credential.interactive=never" }.Concat(arguments))
+        foreach (var argument in new[] { "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "credential.interactive=" + (signIn ? "auto" : "never") }.Concat(arguments))
             start.ArgumentList.Add(argument);
+        // There is no console to type into. Sign-in uses Git Credential Manager's own window instead.
         start.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        start.Environment["GCM_INTERACTIVE"] = "Never";
+        start.Environment["GCM_INTERACTIVE"] = signIn ? "Auto" : "Never";
         // A developer's shell tracing preferences must not leak HTTP credentials
         // into this pane's operation log.
         foreach (var trace in new[] { "GIT_TRACE", "GIT_TRACE_CURL", "GIT_CURL_VERBOSE", "GIT_TRACE_PACKET", "GIT_TRACE2", "GIT_TRACE2_EVENT", "GIT_TRACE2_PERF" })

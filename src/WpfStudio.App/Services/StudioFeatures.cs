@@ -17,6 +17,7 @@ public sealed class StudioFeatures : IDisposable
     public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs)
     {
         Assistant = assistant;
+        GitService = git;
         Packages = new(packages, dialogs, () => Git?.IsBusy == true ? Task.FromException<bool>(new InvalidOperationException("Wait for the Git operation to finish.")) : SaveBeforeMutation(), () => WorkspaceChanged());
         Git = new(git, _ => Packages.IsBusy ? Task.FromException<bool>(new InvalidOperationException("Wait for the package operation to finish.")) : SaveBeforeMutation()) { AutoSelect = true };
     }
@@ -24,6 +25,8 @@ public sealed class StudioFeatures : IDisposable
     public Func<Task> WorkspaceChanged { get; set; } = () => Task.CompletedTask;
     public PackagesViewModel Packages { get; }
     public GitViewModel Git { get; }
+    /// <summary>The Git CLI boundary shared by the Git pane and editors (change margin and blame).</summary>
+    public GitService GitService { get; }
     public AssistantViewModel Assistant { get; }
     public void Dispose()
     {
@@ -61,4 +64,10 @@ public static class DesktopNavigation
         Process.Start(start);
     }
     public static void Copy(string text) => Clipboard.SetText(text);
+    /// <summary>Opens an http(s) address in the default browser; other schemes are refused.</summary>
+    public static void OpenUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")) throw new InvalidOperationException("Only web addresses can be opened.");
+        Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+    }
 }
