@@ -37,6 +37,14 @@ public sealed class EditorSurface : TextEditor
     private PendingCompletion? _pendingCompletion;
     private bool _replayingInput;
     private readonly ToolTip _signature = new() { Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint, StaysOpen = false };
+    // Hover information is a popup the editor owns, below the pointer. A tooltip at the pointer covered the
+    // text, ended the hover and reopened on the next one, so it flashed; ToolTipService could also close it.
+    private readonly System.Windows.Controls.Primitives.Popup _hover = new()
+    {
+        Placement = System.Windows.Controls.Primitives.PlacementMode.Mouse, StaysOpen = true, AllowsTransparency = true,
+        PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.None
+    };
+    private readonly TextBlock _hoverText = new() { TextWrapping = TextWrapping.Wrap, MaxWidth = 640 };
     private readonly DebugMargin _margin;
     private readonly DiagnosticRenderer _diagnostics;
     private readonly SemanticColorizer _semantic = new();
@@ -81,12 +89,26 @@ public sealed class EditorSurface : TextEditor
         };
         TextArea.TextEntering += OnTextEntering;
         CommandManager.AddPreviewExecutedHandler(TextArea, OnPreviewExecuted);
-        PreviewMouseDown += (_, _) => CancelPendingCompletion();
+        PreviewMouseDown += (_, _) => { CancelPendingCompletion(); CancelHover(); };
         LostKeyboardFocus += (_, _) => CancelPendingCompletion();
         PreviewKeyDown += OnPreviewKeyDown;
-        Loaded += (_, _) => Attach(); Unloaded += (_, _) => Detach();
+        Loaded += (_, _) =>
+        {
+            Attach();
+            // An owned popup stays above other applications unless it is closed with its window.
+            if (Window.GetWindow(this) is { } window) { window.Deactivated -= OnWindowDeactivated; window.Deactivated += OnWindowDeactivated; }
+        };
+        Unloaded += (_, _) => { Detach(); if (Window.GetWindow(this) is { } window) window.Deactivated -= OnWindowDeactivated; };
+        var hoverChrome = new Border { Child = _hoverText, Padding = new Thickness(8, 5, 8, 6), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Margin = new Thickness(0, 2, 0, 0) };
+        hoverChrome.SetResourceReference(Border.BackgroundProperty, "RaisedBrush");
+        hoverChrome.SetResourceReference(Border.BorderBrushProperty, "StrongBorderBrush");
+        _hoverText.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+        _hover.Child = hoverChrome;
+        _hover.MouseLeave += (_, _) => { if (!IsMouseOver) CancelHover(); };
         MouseHover += OnMouseHover;
-        MouseHoverStopped += (_, _) => CancelHover();
+        // Moving onto the popup (to read or select from it) keeps it open.
+        MouseHoverStopped += (_, _) => { if (!_hover.IsMouseOver) CancelHover(); };
+        PreviewMouseWheel += (_, _) => CancelHover();
         ContextMenuOpening += (_, _) => { if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset); };
     }
     public EditorViewModel? ViewModel { get => (EditorViewModel?)GetValue(ViewModelProperty); set => SetValue(ViewModelProperty, value); }
@@ -240,13 +262,18 @@ public sealed class EditorSurface : TextEditor
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!token.IsCancellationRequested && vm == ViewModel) vm.LanguageStatus = ex.Message; }
     }
+    private void OnWindowDeactivated(object? sender, EventArgs e) => CancelHover();
     private void ShowHover(string text)
     {
-        _signature.Content = text; _signature.PlacementTarget = this; _signature.IsOpen = true;
+        _hoverText.FontFamily = FontFamily; _hoverText.FontSize = Math.Max(11, FontSize - 0.5);
+        // Updating an open popup in place avoids moving it when slower information arrives.
+        _hoverText.Text = text;
+        if (!_hover.IsOpen) { _hover.PlacementTarget = this; _hover.IsOpen = true; }
     }
     private void CancelHover()
     {
         _hoverRequest?.Cancel(); _hoverRequest?.Dispose(); _hoverRequest = null;
+        _hover.IsOpen = false;
         _signature.IsOpen = false;
     }
     private void OnTextEntered(object? sender, TextCompositionEventArgs e)
