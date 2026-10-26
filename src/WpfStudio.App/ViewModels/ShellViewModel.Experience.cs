@@ -320,6 +320,9 @@ public sealed partial class ShellViewModel
         yield return MemoryCommand("Set memory baseline", MemoryProfiler.SetBaselineCommand, icon: "Baseline");
         yield return MemoryCommand("Memory: go to type or address", MemoryProfiler.FocusGoToCommand, icon: "Search");
         yield return MemoryCommand("Export memory report…", MemoryProfiler.ExportReportCommand, icon: "Export", detail: "HTML report or JSON data");
+        yield return Command("View", ShowInlayHints ? "Hide inline hints" : "Show inline hints", ToggleInlayHintsCommand, icon: "Text", detail: "Parameter names for literal arguments and types of var declarations");
+        yield return Command("View", "Collapse all regions", CollapseAllCommand, icon: "Collapse");
+        yield return Command("View", "Expand all regions", ExpandAllCommand, icon: "Expand");
         yield return Command("View", "Dark theme", SetThemeCommand, "Dark", icon: "Moon");
         yield return Command("View", "Light theme", SetThemeCommand, "Light", icon: "Sun");
         yield return Command("View", "Save window layout", SaveLayoutCommand, icon: "Sidebar");

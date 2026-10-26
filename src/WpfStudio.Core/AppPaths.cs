@@ -17,6 +17,7 @@ public sealed record StudioSettings
     public string Theme { get; init; } = "Dark";
     public string Configuration { get; init; } = "Debug";
     public string? StartupProject { get; init; }
+    public bool ShowInlayHints { get; init; } = true;
 }
 public sealed class SettingsStore
 {

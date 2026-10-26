@@ -60,4 +60,20 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
         var location = Assert.Single(implementations);
         Assert.Equal(3, location.Line);
     }
+
+    [Fact]
+    public async Task DecorationsDescribeTheSynchronizedVersion()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = await File.ReadAllTextAsync(Source) + "public static class Use { public static void Run(OrderStore store) { store.Save(); var count = System.Math.Max(1, 2); } }\n";
+        await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false));
+        var decorations = await engine.GetEditorDecorationsAsync(new(Source, 1));
+        Assert.Equal(1, decorations.Version);
+        Assert.Contains(decorations.Spans, span => span.Kind == "Interface" && text.Substring(span.Start, span.Length) == "IOrderStore");
+        Assert.Contains(decorations.Spans, span => span.Kind == "Method" && text.Substring(span.Start, span.Length) == "Save");
+        Assert.Contains(decorations.Hints, hint => hint.Text == ": int" && text[..hint.Position].EndsWith("var count", StringComparison.Ordinal));
+        var stale = await Assert.ThrowsAnyAsync<Exception>(() => engine.GetEditorDecorationsAsync(new(Source, 7)));
+        Assert.Contains("stale", stale.Message);
+    }
 }

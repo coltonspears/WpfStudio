@@ -126,6 +126,15 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public event Action? NavigationRequested;
     public event Action<EditorSelection>? SelectionRequested;
     [ObservableProperty] public partial int ExecutionLine { get; set; } = -1;
+    /// <summary>Semantic colouring and inline hints for <see cref="DecorationsVersion"/>; the editor maps them through later edits.</summary>
+    public IReadOnlyList<SemanticSpan> SemanticSpans { get; private set; } = [];
+    public IReadOnlyList<InlayHint> InlayHints { get; private set; } = [];
+    public long DecorationsVersion { get; private set; } = -1;
+    public event Action? DecorationsChanged;
+    [ObservableProperty] public partial bool ShowInlayHints { get; set; } = true;
+    /// <summary>Asks the editor to collapse (true) or expand (false) every folding.</summary>
+    public event Action<bool>? FoldingRequested;
+    public void SetAllFolded(bool folded) => FoldingRequested?.Invoke(folded);
     [ObservableProperty] public partial string LanguageStatus { get; set; } = "";
     public void Navigate(int offset) { State.CaretOffset = Math.Clamp(offset, 0, State.Content.Length); NavigationRequested?.Invoke(); }
     public void RestoreSelection(int caret, int start, int length)
@@ -207,6 +216,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (debounce) await Task.Delay(350, token);
             if (!_workspace.IsConnected || !IsCurrentAnalysis(version, semanticRevision, resources.Generation, token)) return;
             IReadOnlyList<WorkspaceDiagnostic> diagnostics;
+            EditorDecorationsResult? decorations = null;
             string? status = null;
             if (State.Extension == ".xaml")
             {
@@ -225,6 +235,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 var result = await _workspace.UpdateDocumentAsync(new(State.Path, text, version), token);
                 if (!result.Accepted || result.Version != version) return;
                 diagnostics = result.Diagnostics;
+                // Colouring and hints are optional and refresh with the next analysis; diagnostics apply regardless.
+                try { decorations = await _workspace.GetEditorDecorationsAsync(new(State.Path, version), token); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { decorations = null; }
             }
             else return;
             await _dispatcher.InvokeAsync(() =>
@@ -232,6 +245,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 if (!IsCurrentAnalysis(version, semanticRevision, resources.Generation, token) || !_workspace.IsConnected) return;
                 Diagnostics.Clear(); foreach (var item in diagnostics) Diagnostics.Add(item);
                 LanguageStatus = status ?? ""; // Counts are shown by the status bar's error and warning summary.
+                if (decorations is { } current && current.Version == version)
+                {
+                    SemanticSpans = current.Spans; InlayHints = current.Hints; DecorationsVersion = version;
+                    DecorationsChanged?.Invoke();
+                }
             }, token);
         }
         catch (OperationCanceledException) { }

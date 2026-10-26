@@ -130,6 +130,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial bool AddDataTemplate { get; set; }
     [ObservableProperty] public partial string SelectedBuildAction { get; set; } = "Resource";
     [ObservableProperty] public partial string ThemeName { get; set; } = "Dark";
+    /// <summary>Inline parameter-name and type hints in C# editors.</summary>
+    [ObservableProperty] public partial bool ShowInlayHints { get; set; } = true;
+    partial void OnShowInlayHintsChanged(bool value) { foreach (var document in Documents) document.ShowInlayHints = value; }
+    [RelayCommand] private void ToggleInlayHints() { ShowInlayHints = !ShowInlayHints; Status = ShowInlayHints ? "Inline hints shown" : "Inline hints hidden"; }
+    [RelayCommand] private void CollapseAll() => ActiveDocument?.SetAllFolded(true);
+    [RelayCommand] private void ExpandAll() => ActiveDocument?.SetAllFolded(false);
     public string WindowTitle => Workspace == null ? "WpfStudio" : $"{Path.GetFileNameWithoutExtension(Workspace.Path)} — WpfStudio";
     public bool HasWorkspace => Workspace != null;
     public bool IsWelcomeVisible => Documents.Count == 0;
@@ -151,6 +157,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var settings = await _settings.LoadAsync();
         if (Features != null) await Features.Assistant.InitializeAsync();
         ThemeName = settings.Theme; ThemeChanged?.Invoke(ThemeName);
+        ShowInlayHints = settings.ShowInlayHints;
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true;
@@ -329,7 +336,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (existing != null) { ActiveDocument = existing; return; }
         var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources)
         {
-            DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null)
+            DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
+            ShowInlayHints = ShowInlayHints
         };
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
@@ -783,7 +791,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) _store.DeleteRecovery(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }

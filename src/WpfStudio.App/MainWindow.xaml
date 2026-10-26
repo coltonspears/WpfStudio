@@ -320,6 +320,10 @@
             <MenuItem Header="Debugger" c:Ui.Icon="Bug" Command="{Binding ShowToolCommand}" CommandParameter="Debugger" />
             <MenuItem Header="SQL Server" c:Ui.Icon="Database" Command="{Binding ShowToolCommand}" CommandParameter="Database" />
             <Separator />
+            <MenuItem Header="Inline hints" IsCheckable="True" IsChecked="{Binding ShowInlayHints}" ToolTip="Parameter names for literal arguments and types of var declarations in C#" />
+            <MenuItem Header="Collapse all regions" c:Ui.Icon="Collapse" Command="{Binding CollapseAllCommand}" />
+            <MenuItem Header="Expand all regions" c:Ui.Icon="Expand" Command="{Binding ExpandAllCommand}" />
+            <Separator />
             <MenuItem Header="Theme">
               <MenuItem Header="Dark" IsCheckable="False" IsChecked="{Binding IsDarkTheme, Mode=OneWay}" Command="{Binding SetThemeCommand}" CommandParameter="Dark" />
               <MenuItem Header="Light" IsCheckable="False" IsChecked="{Binding IsLightTheme, Mode=OneWay}" Command="{Binding SetThemeCommand}" CommandParameter="Light" />
