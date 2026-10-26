@@ -65,7 +65,17 @@ public partial class App : Application
         services.AddSingleton<WpfIndexService>(); services.AddSingleton<ScaffoldingService>(); services.AddSingleton<XamlCompletionService>();
         services.AddSingleton<WpfStudio.Runtime.Design.IPreviewClient, WpfStudio.Runtime.Design.PreviewClient>();
         services.AddSingleton<Features.Designer.DesignerViewModel>();
-        services.AddSingleton<DebugSession>(); services.AddSingleton<DebuggerViewModel>(); services.AddSingleton<TerminalViewModel>();
+        services.AddSingleton<WpfStudio.Core.Debugging.DebuggerInstaller>(_ => new());
+        services.AddSingleton(sp => new DebugSession { AdapterPath = sp.GetRequiredService<WpfStudio.Core.Debugging.DebuggerInstaller>().Locate() ?? Path.Combine(AppContext.BaseDirectory, "debugger", "netcoredbg.exe") });
+        services.AddSingleton(sp =>
+        {
+            var installer = sp.GetRequiredService<WpfStudio.Core.Debugging.DebuggerInstaller>();
+            return new DebuggerViewModel(sp.GetRequiredService<DebugSession>(), sp.GetRequiredService<IUiDispatcher>())
+            {
+                AdapterInstaller = installer.InstallAsync,
+                AdapterDescription = "netcoredbg " + WpfStudio.Core.Debugging.DebuggerInstaller.Version
+            };
+        }); services.AddSingleton<TerminalViewModel>();
         services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(AppPaths.DataDirectory, "sql-connections.json")));
         services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(AppPaths.DataDirectory, "sql-recovery.json")));
         services.AddDatabaseFeature(); services.AddSingleton<ShellViewModel>(); services.AddSingleton<MainWindow>();

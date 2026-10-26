@@ -188,13 +188,13 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     });
 
     [RelayCommand(CanExecute = nameof(CanOperate))]
-    private Task FetchAsync() => MutateAsync("Fetch", token => _service.FetchAsync(RepositoryRoot!, token));
+    private Task FetchAsync() => NetworkAsync("Fetch", (signIn, token) => _service.FetchAsync(RepositoryRoot!, token, signIn));
 
     [RelayCommand(CanExecute = nameof(CanOperate))]
-    private Task PullAsync() => MutateAsync("Pull (fast-forward only)", token => _service.PullAsync(RepositoryRoot!, token), save: true, changesWorkspaceFiles: true);
+    private Task PullAsync() => NetworkAsync("Pull (fast-forward only)", (signIn, token) => _service.PullAsync(RepositoryRoot!, token, signIn), save: true, changesWorkspaceFiles: true);
 
     [RelayCommand(CanExecute = nameof(CanOperate))]
-    private Task PushAsync() => MutateAsync("Push", token => _service.PushAsync(RepositoryRoot!, token));
+    private Task PushAsync() => NetworkAsync("Push", (signIn, token) => _service.PushAsync(RepositoryRoot!, token, signIn));
 
     [RelayCommand(CanExecute = nameof(CanSwitch))]
     private Task SwitchBranchAsync() => MutateAsync("Switch branch", token => _service.SwitchBranchAsync(RepositoryRoot!, SelectedBranch!, cancellationToken: token), save: true, changesWorkspaceFiles: true);
@@ -449,6 +449,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             // Notify even if the status refresh failed after Git changed files,
             // but never refresh a newly opened workspace for an old operation.
             if (changesWorkspaceFiles && version == _workspaceVersion) WorkspaceFilesChanged?.Invoke();
+            if (version == _workspaceVersion) RepositoryChanged?.Invoke();
         }
     });
 
@@ -522,6 +523,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             SelectedCommit = selectedCommit is null ? null : VisibleHistory.FirstOrDefault(x => x.Id == selectedCommit.Id);
         });
         HasMoreHistory = snapshot.History.Count > historyLimit;
+        ApplyCollaboration(snapshot);
         NotifyLists();
         NotifyCommands();
         // Git may have changed the file (stage, commit, pull), so reload its diff even when the selection is unchanged.
@@ -561,6 +563,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             UnstageAllCommand, CommitCommand, FetchCommand, PullCommand, PushCommand, SwitchBranchCommand, CreateBranchCommand,
             ViewWorkingDiffCommand, ViewStagedDiffCommand, OpenFileCommand, OpenCommitFileCommand, LoadMoreHistoryCommand })
             command.NotifyCanExecuteChanged();
+        NotifyCollaborationCommands();
     }
 
     private static void Replace<T>(ObservableCollection<T> collection, IEnumerable<T> items)

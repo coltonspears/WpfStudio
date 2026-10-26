@@ -18,6 +18,7 @@ public sealed partial class ShellViewModel
         if (IsBusy || _loading) return;
         if (StartupProject is not { } project) { Status = "Select a startup project before launching with inspection."; return; }
         if (debug && Debugger.IsActive) { Status = "Stop the current debugger before launching another application."; return; }
+        if (debug && !await EnsureDebuggerAsync()) return;
         var framework = TargetFramework ?? project.TargetFramework;
         if (framework == null || !new[] { "net8.0", "net9.0", "net10.0" }.Any(prefix => framework == prefix || framework.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase)))
         { Status = "Running-app inspection currently requires an untrimmed .NET 8, 9 or 10 WPF project."; return; }

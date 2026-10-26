@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="front" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#C4B8FF"/><stop offset="0.5" stop-color="#8573FA"/><stop offset="1" stop-color="#5B3FE0"/>
+    </linearGradient>
+    <linearGradient id="front2" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#A897FF"/><stop offset="1" stop-color="#4E35D2"/>
+    </linearGradient>
+    <linearGradient id="back" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#1E1563"/><stop offset="1" stop-color="#3A2BA3"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="0" y1="1" x2="0.3" y2="0">
+      <stop offset="0" stop-color="#0E8F86"/><stop offset="0.55" stop-color="#2CC9B6"/><stop offset="1" stop-color="#8CF5E2"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <!-- up-strokes fold behind the down-strokes -->
+    <polygon points="62,214 104,214 150,82 106,82" fill="url(#back)"/>
+    <polygon points="148,214 190,214 240,44 194,44" fill="url(#teal)"/>
+    <!-- down-strokes -->
+    <polygon points="16,44 62,44 104,214 62,214" fill="url(#front)"/>
+    <polygon points="106,82 150,82 190,214 148,214" fill="url(#front2)"/>
+    <!-- top bevel catches the light -->
+    <polygon points="16,44 62,44 64,52 18,52" fill="#FFFFFF" opacity="0.45"/>
+    <polygon points="194,44 240,44 238,52 192,52" fill="#FFFFFF" opacity="0.5"/>
+    <polygon points="106,82 150,82 152,89 108,89" fill="#FFFFFF" opacity="0.25"/>
+  </g>
+</svg>

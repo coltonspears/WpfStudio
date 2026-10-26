@@ -12,6 +12,19 @@
   <StackPanel DockPanel.Dock="Top">
    <WrapPanel><Button Content="Continue" Command="{Binding ContinueCommand}" IsEnabled="{Binding IsStopped}"/><Button Content="Pause" Command="{Binding PauseCommand}" IsEnabled="{Binding IsActive}"/><Button Content="Step over" Command="{Binding StepOverCommand}" IsEnabled="{Binding IsStopped}"/><Button Content="Step into" Command="{Binding StepIntoCommand}" IsEnabled="{Binding IsStopped}"/><Button Content="Step out" Command="{Binding StepOutCommand}" IsEnabled="{Binding IsStopped}"/><Button Content="Stop" Command="{Binding StopCommand}" IsEnabled="{Binding IsActive}"/><Button Content="Detach" Command="{Binding DetachCommand}" IsEnabled="{Binding CanDetach}" ToolTip="Detach is available for attached processes. The bundled debugger cannot detach applications it launched." ToolTipService.ShowOnDisabled="True"/></WrapPanel>
    <Expander Header="Attach to a process / exception settings" Margin="0,3,0,3"><WrapPanel Margin="0,6,0,6"><TextBlock Text="Process ID" VerticalAlignment="Center"/><TextBox Width="90" Text="{Binding AttachProcessId, UpdateSourceTrigger=PropertyChanged}" Margin="6,0"/><Button Content="Attach" Command="{Binding AttachCommand}"/><CheckBox Content="Break on thrown exceptions" IsChecked="{Binding BreakOnThrown}" Margin="12,0,0,0" VerticalAlignment="Center"/></WrapPanel></Expander>
+   <Border Padding="10,8" Margin="0,4,0,6" CornerRadius="4" Background="{DynamicResource WarningSoftBrush}">
+    <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers>
+     <DataTrigger Binding="{Binding IsAdapterMissing}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+     <DataTrigger Binding="{Binding IsInstallingAdapter}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+    </Style.Triggers></Style></Border.Style>
+    <DockPanel>
+     <Button DockPanel.Dock="Right" Content="Install debugger" Command="{Binding InstallAdapterCommand}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+     <StackPanel>
+      <TextBlock TextWrapping="Wrap"><Run Text="The debug adapter isn't installed. WpfStudio can download"/> <Run Text="{Binding AdapterDescription, Mode=OneWay}"/> <Run Text="(about 5 MB from GitHub), verify its checksum and install it in your WpfStudio profile."/></TextBlock>
+      <TextBlock Text="{Binding AdapterStatus}" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/>
+     </StackPanel>
+    </DockPanel>
+   </Border>
    <TextBlock Text="{Binding Status}" Foreground="{DynamicResource MutedBrush}" Margin="2,0,0,4"/><TextBlock Text="{Binding Error}" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap" Margin="0,4"/>
   </StackPanel>
   <TabControl SelectedIndex="{Binding SelectedTab}">

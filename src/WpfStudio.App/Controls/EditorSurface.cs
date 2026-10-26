@@ -25,7 +25,7 @@ using WpfStudio.Core.Text;
 namespace WpfStudio.App.Controls;
 
 /// <summary>Presentation adapter for AvalonEdit: caret, highlighting, adorners and completion popups.</summary>
-public sealed class EditorSurface : TextEditor
+public sealed partial class EditorSurface : TextEditor
 {
     private static readonly ConditionalWeakTable<DocumentState, TextDocument> Buffers = new();
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(nameof(ViewModel), typeof(EditorViewModel), typeof(EditorSurface), new PropertyMetadata(null, Changed));
@@ -37,6 +37,14 @@ public sealed class EditorSurface : TextEditor
     private PendingCompletion? _pendingCompletion;
     private bool _replayingInput;
     private readonly ToolTip _signature = new() { Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint, StaysOpen = false };
+    // Hover information is a popup the editor owns, below the pointer. A tooltip at the pointer covered the
+    // text, ended the hover and reopened on the next one, so it flashed; ToolTipService could also close it.
+    private readonly System.Windows.Controls.Primitives.Popup _hover = new()
+    {
+        Placement = System.Windows.Controls.Primitives.PlacementMode.Mouse, StaysOpen = true, AllowsTransparency = true,
+        PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.None
+    };
+    private readonly TextBlock _hoverText = new() { TextWrapping = TextWrapping.Wrap, MaxWidth = 640 };
     private readonly DebugMargin _margin;
     private readonly DiagnosticRenderer _diagnostics;
     private readonly SemanticColorizer _semantic = new();
@@ -70,6 +78,7 @@ public sealed class EditorSurface : TextEditor
         _diagnostics = new DiagnosticRenderer(this); TextArea.TextView.BackgroundRenderers.Add(_diagnostics);
         TextArea.TextView.LineTransformers.Add(_semantic);
         _hints = new InlayHintGenerator(this); TextArea.TextView.ElementGenerators.Add(_hints);
+        InitializeAnnotations();
         _foldingTimer = new(TimeSpan.FromMilliseconds(500), System.Windows.Threading.DispatcherPriority.Background, (_, _) => UpdateFoldings(), Dispatcher) { IsEnabled = false };
         TextChanged += OnEditorTextChanged;
         TextArea.Caret.PositionChanged += (_, _) => { if (ViewModel is { } vm && !_syncing) { vm.State.CaretOffset = CaretOffset; vm.State.CaretLine = TextArea.Caret.Line; vm.State.CaretColumn = TextArea.Caret.Column; } };
@@ -81,12 +90,26 @@ public sealed class EditorSurface : TextEditor
         };
         TextArea.TextEntering += OnTextEntering;
         CommandManager.AddPreviewExecutedHandler(TextArea, OnPreviewExecuted);
-        PreviewMouseDown += (_, _) => CancelPendingCompletion();
+        PreviewMouseDown += (_, _) => { CancelPendingCompletion(); CancelHover(); };
         LostKeyboardFocus += (_, _) => CancelPendingCompletion();
         PreviewKeyDown += OnPreviewKeyDown;
-        Loaded += (_, _) => Attach(); Unloaded += (_, _) => Detach();
+        Loaded += (_, _) =>
+        {
+            Attach();
+            // An owned popup stays above other applications unless it is closed with its window.
+            if (Window.GetWindow(this) is { } window) { window.Deactivated -= OnWindowDeactivated; window.Deactivated += OnWindowDeactivated; }
+        };
+        Unloaded += (_, _) => { Detach(); if (Window.GetWindow(this) is { } window) window.Deactivated -= OnWindowDeactivated; };
+        var hoverChrome = new Border { Child = _hoverText, Padding = new Thickness(8, 5, 8, 6), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Margin = new Thickness(0, 2, 0, 0) };
+        hoverChrome.SetResourceReference(Border.BackgroundProperty, "RaisedBrush");
+        hoverChrome.SetResourceReference(Border.BorderBrushProperty, "StrongBorderBrush");
+        _hoverText.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+        _hover.Child = hoverChrome;
+        _hover.MouseLeave += (_, _) => { if (!IsMouseOver) CancelHover(); };
         MouseHover += OnMouseHover;
-        MouseHoverStopped += (_, _) => CancelHover();
+        // Moving onto the popup (to read or select from it) keeps it open.
+        MouseHoverStopped += (_, _) => { if (!_hover.IsMouseOver) CancelHover(); };
+        PreviewMouseWheel += (_, _) => CancelHover();
         ContextMenuOpening += (_, _) => { if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset); };
     }
     public EditorViewModel? ViewModel { get => (EditorViewModel?)GetValue(ViewModelProperty); set => SetValue(ViewModelProperty, value); }
@@ -107,15 +130,19 @@ public sealed class EditorSurface : TextEditor
         ViewModel.SnippetRequested += InsertRequestedSnippet;
         ViewModel.DecorationsChanged += ApplyDecorations;
         ViewModel.FoldingRequested += SetAllFolded;
+        ViewModel.GitChanged += OnGitChanged;
+        ViewModel.CodeLensChanged += ApplyCodeLens;
         _trackedDocument = Document; Document.Changed += OnDocumentChanged;
         _hints.Enabled = ViewModel.ShowInlayHints;
         ApplyDecorations();
         InstallFolding();
+        _changeMargin?.Update(); _blameLine = -1; UpdateBlameLine(); ApplyCodeLens();
         _syncing = false; Navigate();
     }
     private void Detach()
     {
         CancelHover();
+        _changePopup.IsOpen = false;
         CancelPendingCompletion();
         _completion?.Close(); _completionRequest?.Cancel();
         if (_attached != null)
@@ -127,10 +154,12 @@ public sealed class EditorSurface : TextEditor
             _attached.SnippetRequested -= InsertRequestedSnippet;
             _attached.DecorationsChanged -= ApplyDecorations;
             _attached.FoldingRequested -= SetAllFolded;
+            _attached.GitChanged -= OnGitChanged;
+            _attached.CodeLensChanged -= ApplyCodeLens;
             UninstallFolding(_attached.State);
         }
         if (_trackedDocument != null) { _trackedDocument.Changed -= OnDocumentChanged; _trackedDocument = null; }
-        _semantic.Clear(); _hints.Clear();
+        _semantic.Clear(); _hints.Clear(); _lenses = [];
         _attached = null;
     }
     private void StateChanged(object? sender, PropertyChangedEventArgs args)
@@ -143,6 +172,8 @@ public sealed class EditorSurface : TextEditor
     {
         if (args.PropertyName == nameof(EditorViewModel.ExecutionLine)) { _margin.InvalidateVisual(); TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
         if (args.PropertyName == nameof(EditorViewModel.ShowInlayHints) && ViewModel is { } model) { _hints.Enabled = model.ShowInlayHints; TextArea.TextView.Redraw(); }
+        if (args.PropertyName == nameof(EditorViewModel.ShowInlineBlame)) { _blameLine = -1; UpdateBlameLine(); }
+        if (args.PropertyName == nameof(EditorViewModel.ShowCodeLens)) ApplyCodeLens();
         if (args.PropertyName == nameof(EditorViewModel.XamlContextRevision))
         {
             _completionRequest?.Cancel(); _completion?.Close(); CancelHover();
@@ -240,13 +271,18 @@ public sealed class EditorSurface : TextEditor
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!token.IsCancellationRequested && vm == ViewModel) vm.LanguageStatus = ex.Message; }
     }
+    private void OnWindowDeactivated(object? sender, EventArgs e) => CancelHover();
     private void ShowHover(string text)
     {
-        _signature.Content = text; _signature.PlacementTarget = this; _signature.IsOpen = true;
+        _hoverText.FontFamily = FontFamily; _hoverText.FontSize = Math.Max(11, FontSize - 0.5);
+        // Updating an open popup in place avoids moving it when slower information arrives.
+        _hoverText.Text = text;
+        if (!_hover.IsOpen) { _hover.PlacementTarget = this; _hover.IsOpen = true; }
     }
     private void CancelHover()
     {
         _hoverRequest?.Cancel(); _hoverRequest?.Dispose(); _hoverRequest = null;
+        _hover.IsOpen = false;
         _signature.IsOpen = false;
     }
     private void OnTextEntered(object? sender, TextCompositionEventArgs e)
@@ -458,8 +494,10 @@ public sealed class EditorSurface : TextEditor
     }
     private void OnDocumentChanged(object? sender, DocumentChangeEventArgs e)
     {
+        _changePopup.IsOpen = false; // Its line numbers describe the text before this edit.
         _semantic.Shift(e.Offset, e.RemovalLength, e.InsertionLength);
         _hints.Shift(e.Offset, e.RemovalLength, e.InsertionLength);
+        ShiftCodeLens(e.Offset, e.RemovalLength, e.InsertionLength);
         if (_folding != null) { _foldingTimer.Stop(); _foldingTimer.Start(); }
     }
     private void InstallFolding()

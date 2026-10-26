@@ -18,6 +18,8 @@ public sealed record StudioSettings
     public string Configuration { get; init; } = "Debug";
     public string? StartupProject { get; init; }
     public bool ShowInlayHints { get; init; } = true;
+    public bool ShowInlineBlame { get; init; } = true;
+    public bool ShowCodeLens { get; init; } = true;
 }
 public sealed class SettingsStore
 {

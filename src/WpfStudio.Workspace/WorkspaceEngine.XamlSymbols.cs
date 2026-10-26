@@ -30,8 +30,17 @@ public sealed partial class WorkspaceEngine
         if (name is not null) return await FindNameReferencesAsync(snapshot, name, cancellationToken).ConfigureAwait(false);
         var symbol = await ResolveRequestedSymbolAsync(snapshot, request, cancellationToken).ConfigureAwait(false);
         if (symbol is null) { EnsureSymbolSnapshotCurrent(snapshot); return new([], BoundedWarnings(snapshot.Warnings), false); }
-        var references = (await SymbolFinder.FindReferencesAsync(symbol, snapshot.Solution, cancellationToken).ConfigureAwait(false)).ToArray();
-        var family = await SymbolFamilyAsync(symbol, references, snapshot.Solution, cancellationToken).ConfigureAwait(false);
+        // A Toolkit [ObservableProperty] field or [RelayCommand] method is used through its generated member,
+        // so its references include that member's, matching the CodeLens count.
+        var referenceList = new List<ReferencedSymbol>();
+        var family = new Dictionary<string, ISymbol>(StringComparer.Ordinal);
+        foreach (var member in Related(symbol))
+        {
+            var found = (await SymbolFinder.FindReferencesAsync(member, snapshot.Solution, cancellationToken).ConfigureAwait(false)).ToArray();
+            referenceList.AddRange(found);
+            foreach (var (key, value) in await SymbolFamilyAsync(member, found, snapshot.Solution, cancellationToken).ConfigureAwait(false)) family.TryAdd(key, value);
+        }
+        var references = referenceList.ToArray();
         var locations = new List<SourceLocation>();
         var csharpTexts = new Dictionary<DocumentId, (SourceText Text, string Hash)>();
         foreach (var reference in references.SelectMany(item => item.Locations))

@@ -26,6 +26,8 @@ public sealed partial class ShellViewModel
         };
         features.WorkspaceChanged = async () => { await CheckExternalChangesAsync(); await ReloadWorkspaceAsync(); };
         features.Git.OpenFileRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
+        // Commits, checkouts and merges change what each editor's change margin and blame compare with.
+        features.Git.RepositoryChanged += () => { foreach (var document in Documents) _ = document.RefreshGitAsync(features.GitService, _lifetime.Token); };
         features.Git.WorkspaceFilesChanged += () => _ = GuardAsync(() => features.WorkspaceChanged());
         features.Assistant.SettingsRequested += () => _ = OpenSettingsCommand.ExecuteAsync(null);
         features.Assistant.RefreshContextRequested += UpdateAssistantContext;
