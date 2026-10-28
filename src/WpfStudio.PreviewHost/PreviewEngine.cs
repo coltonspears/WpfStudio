@@ -90,6 +90,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
             _appearanceEvidence.Clear();
             _version = request.Version;
             lock (_diagnostics) _diagnostics.Clear();
+            _assemblies.ForgetUnresolved();
             lock (_traceDiagnostics) _traceDiagnostics.Clear();
             _status = null;
             _build = null;
@@ -121,7 +122,8 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
                             ? $"Built application resources '{request.ApplicationResourcePath}' loaded; App construction and startup are not executed. Rebuild to update those resources."
                             : $"The build contains no '{request.ApplicationResourcePath}' application resource; source preview uses the view's own resources.", "Information"));
                 }
-                _assemblies.PrepareXamlNamespaces(request.Text);
+                var namespaceDiagnostics = _assemblies.PrepareXamlNamespaces(request.Text);
+                lock (_diagnostics) _diagnostics.AddRange(namespaceDiagnostics);
                 _document = PreviewDocument.Parse(request, assembly);
                 lock (_diagnostics) _diagnostics.AddRange(_document.Diagnostics);
                 // The secure source parse retains the original base URI and XML
@@ -181,6 +183,8 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
             catch (Exception exception)
             {
                 RecordException(exception, sourceCoordinates: exception is XmlException);
+                // Name every assembly the loader asked for and could not find, with the places it looked.
+                lock (_diagnostics) _diagnostics.AddRange(_assemblies.UnresolvedAssemblies().Select(message => new PreviewDiagnostic(message, "Warning")));
                 ClearPreview();
                 return Snapshot();
             }

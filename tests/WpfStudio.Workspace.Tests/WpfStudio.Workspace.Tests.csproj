@@ -19,6 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Preview namespace selection is plain metadata reading, so it is tested here without starting WPF. -->
+    <Compile Include="..\..\src\Shared\XamlNamespaceIndex.cs" Link="Preview\XamlNamespaceIndex.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\WpfStudio.Workspace\WpfStudio.Workspace.csproj" />
     <ProjectReference Include="..\..\src\WpfStudio.WorkspaceHost\WpfStudio.WorkspaceHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

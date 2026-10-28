@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/PreviewDependencyCatalog.cs" Link="PreviewDependencyCatalog.cs" />
+    <Compile Include="../Shared/XamlNamespaceIndex.cs" Link="XamlNamespaceIndex.cs" />
     <ProjectReference Include="../WpfStudio.Contracts/WpfStudio.Contracts.csproj" />
     <ProjectReference Include="../WpfStudio.Wpf.PropertyEditing/WpfStudio.Wpf.PropertyEditing.csproj" />
     <ProjectReference Include="../WpfStudio.Wpf.Diagnostics/WpfStudio.Wpf.Diagnostics.csproj" />

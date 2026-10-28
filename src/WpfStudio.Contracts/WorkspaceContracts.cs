@@ -1,7 +1,8 @@
 namespace WpfStudio.Contracts;
 
-public sealed record LoadWorkspaceRequest(string Path, string Configuration = "Debug", string? TargetFramework = null);
-public sealed record WorkspaceSnapshot(string Path, string SdkVersion, IReadOnlyList<WorkspaceProject> Projects, IReadOnlyList<WorkspaceIssue> Issues, IReadOnlyList<string>? Configurations = null);
+/// <summary><paramref name="UseCache"/> starts from the project model saved by the last full load; call RefreshAsync afterwards.</summary>
+public sealed record LoadWorkspaceRequest(string Path, string Configuration = "Debug", string? TargetFramework = null, bool UseCache = false);
+public sealed record WorkspaceSnapshot(string Path, string SdkVersion, IReadOnlyList<WorkspaceProject> Projects, IReadOnlyList<WorkspaceIssue> Issues, IReadOnlyList<string>? Configurations = null, bool Cached = false);
 public sealed record WorkspaceProject(string Id, string Name, string ProjectPath, string? TargetFramework, string? OutputPath, bool IsExecutable, IReadOnlyList<WorkspaceFile> Files, string? AssemblyName = null, string? ProjectAssetsPath = null);
 public sealed record WorkspaceFile(string Path, string Name, string Kind, bool IsGenerated = false, string? DocumentId = null, string? LogicalPath = null);
 public sealed record WorkspaceIssue(string Message, string Severity = "Warning");
@@ -56,7 +57,8 @@ public sealed record InlayHint(int Position, string Text, string Kind);
 /// Reference counts above a declaration. <paramref name="XamlReferences"/> counts verified XAML uses (bindings,
 /// event handlers); <paramref name="XamlName"/> names the generated member XAML uses, such as SaveCommand.
 /// </summary>
-public sealed record CodeLensEntry(int Line, int Position, string Name, int References, int XamlReferences, string? XamlName = null);
+/// <summary><paramref name="StartLine"/> and <paramref name="EndLine"/> span the whole declaration, attributes included.</summary>
+public sealed record CodeLensEntry(int Line, int Position, string Name, int References, int XamlReferences, string? XamlName = null, int StartLine = 0, int EndLine = 0);
 public sealed record CodeLensResult(long Version, IReadOnlyList<CodeLensEntry> Entries, bool Complete, string? Status = null);
 public sealed record EditorDecorationsResult(long Version, IReadOnlyList<SemanticSpan> Spans, IReadOnlyList<InlayHint> Hints);
 public sealed record WorkspaceEditResult(IReadOnlyList<DocumentEdits> Documents, IReadOnlyList<string> Warnings,
@@ -68,6 +70,10 @@ public interface IWorkspaceRpc
     /// <summary>An operation refreshed closed source files internally; cached semantic results are stale.</summary>
     event EventHandler? SemanticStateChanged;
     Task<WorkspaceSnapshot> LoadAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken);
+    /// <summary>Loads with MSBuild while the current solution keeps serving requests. Fails without changing anything.</summary>
+    Task<bool> PrepareRefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken);
+    /// <summary>Replaces the current solution with the prepared one; open buffers must be replayed afterwards.</summary>
+    Task<WorkspaceSnapshot> CommitRefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken);
     Task<DocumentUpdateResult> UpdateDocumentAsync(UpdateDocumentRequest request, CancellationToken cancellationToken);
     Task<XamlNameProjectionResult> ApplyXamlNameProjectionAsync(XamlNameProjectionRequest request, CancellationToken cancellationToken)
         => Task.FromResult(new XamlNameProjectionResult(false, "This language worker does not support live XAML name projection."));

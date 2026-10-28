@@ -946,4 +946,24 @@
    </ControlTemplate.Triggers>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
+ <!-- The application mark (docs/images/icon/WpfStudio-small.svg) as vectors, for the title bar and welcome page. -->
+ <DrawingImage x:Key="AppMark">
+  <DrawingImage.Drawing>
+   <DrawingGroup>
+    <GeometryDrawing Brush="Transparent" Geometry="M12,14 H244 V246 H12 Z"/>
+    <GeometryDrawing Geometry="M62,214 L104,214 L150,82 L106,82 Z">
+     <GeometryDrawing.Brush><LinearGradientBrush StartPoint="0,1" EndPoint="0,0"><GradientStop Offset="0" Color="#1E1563"/><GradientStop Offset="1" Color="#3A2BA3"/></LinearGradientBrush></GeometryDrawing.Brush>
+    </GeometryDrawing>
+    <GeometryDrawing Geometry="M148,214 L190,214 L240,44 L194,44 Z">
+     <GeometryDrawing.Brush><LinearGradientBrush StartPoint="0,1" EndPoint="0.3,0"><GradientStop Offset="0" Color="#0E8F86"/><GradientStop Offset="0.55" Color="#2CC9B6"/><GradientStop Offset="1" Color="#8CF5E2"/></LinearGradientBrush></GeometryDrawing.Brush>
+    </GeometryDrawing>
+    <GeometryDrawing Geometry="M16,44 L62,44 L104,214 L62,214 Z">
+     <GeometryDrawing.Brush><LinearGradientBrush StartPoint="0,0" EndPoint="0.35,1"><GradientStop Offset="0" Color="#C4B8FF"/><GradientStop Offset="0.5" Color="#8573FA"/><GradientStop Offset="1" Color="#5B3FE0"/></LinearGradientBrush></GeometryDrawing.Brush>
+    </GeometryDrawing>
+    <GeometryDrawing Geometry="M106,82 L150,82 L190,214 L148,214 Z">
+     <GeometryDrawing.Brush><LinearGradientBrush StartPoint="0,0" EndPoint="0.35,1"><GradientStop Offset="0" Color="#A897FF"/><GradientStop Offset="1" Color="#4E35D2"/></LinearGradientBrush></GeometryDrawing.Brush>
+    </GeometryDrawing>
+   </DrawingGroup>
+  </DrawingImage.Drawing>
+ </DrawingImage>
 </ResourceDictionary>

@@ -20,6 +20,8 @@ public sealed record StudioSettings
     public bool ShowInlayHints { get; init; } = true;
     public bool ShowInlineBlame { get; init; } = true;
     public bool ShowCodeLens { get; init; } = true;
+    /// <summary>Load files changed outside WpfStudio without asking when the editor has no unsaved edits to them.</summary>
+    public bool AutoReloadUnchangedFiles { get; init; }
 }
 public sealed class SettingsStore
 {

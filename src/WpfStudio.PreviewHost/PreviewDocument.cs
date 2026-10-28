@@ -283,6 +283,10 @@ internal sealed partial class PreviewAssemblyResolver : IDisposable
         if (_missingDependencies.TryGetValue(name.Name, out var missing))
             throw new FileNotFoundException($"Preview dependency '{name.Name}' is missing from the built output, its HintPath folder and the restored package cache. Restore and rebuild the selected project. Expected: {missing}", missing);
         if (StageFromSearchDirectories(name.Name + ".dll", name.CultureName) is { } staged) return context.LoadFromAssemblyPath(staged);
+        // Satellite and serializer probes are optional; anything else is reported if the render fails.
+        if (string.IsNullOrEmpty(name.CultureName) && !name.Name.EndsWith(".resources", StringComparison.OrdinalIgnoreCase)
+            && !name.Name.EndsWith(".XmlSerializers", StringComparison.OrdinalIgnoreCase))
+            lock (_unresolved) _unresolved.Add(name.Name);
         return null;
     }
 

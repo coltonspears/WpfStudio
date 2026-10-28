@@ -139,12 +139,19 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public event Action<CodeLensEntry, int>? CodeLensRequested;
     public void RequestCodeLens(CodeLensEntry entry, int position) => CodeLensRequested?.Invoke(entry, position);
     [ObservableProperty] public partial bool ShowCodeLens { get; set; } = true;
-    partial void OnShowCodeLensChanged(bool value) { if (value) ScheduleCodeLens(State.Version); else { CodeLenses = []; CodeLensChanged?.Invoke(); } }
+    // Lens rows also carry Git history, so declarations are still needed while blame is shown.
+    partial void OnShowCodeLensChanged(bool value) => UpdateLensRows();
+    private void UpdateLensRows()
+    {
+        if (ShowCodeLens || ShowInlineBlame) { if (CodeLensVersion != State.Version) ScheduleCodeLens(State.Version); }
+        else { _codeLens?.Cancel(); CodeLenses = []; CodeLensVersion = -1; }
+        CodeLensChanged?.Invoke();
+    }
     private CancellationTokenSource? _codeLens;
     private void ScheduleCodeLens(long version)
     {
         _codeLens?.Cancel(); _codeLens?.Dispose(); _codeLens = null;
-        if (!IsCSharp || IsReadOnly || !ShowCodeLens || _disposed || !_workspace.IsConnected) return;
+        if (!IsCSharp || IsReadOnly || !(ShowCodeLens || ShowInlineBlame) || _disposed || !_workspace.IsConnected) return;
         _codeLens = new();
         var token = _codeLens.Token;
         _ = Task.Run(async () =>

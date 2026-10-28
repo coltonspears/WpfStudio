@@ -78,6 +78,17 @@ public sealed class DocumentStore
         if (!File.Exists(document.Path)) return document.DiskHash != null;
         return Hash(await File.ReadAllBytesAsync(document.Path, cancellationToken)) != document.DiskHash;
     }
+    /// <summary>The file's current text and hash, or null when it no longer exists.</summary>
+    public async Task<(string Text, string Hash, Encoding Encoding)?> ReadDiskAsync(DocumentState document, CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(document.Path)) return null;
+        var bytes = await File.ReadAllBytesAsync(document.Path, cancellationToken);
+        using var reader = new StreamReader(new MemoryStream(bytes), document.Encoding, true);
+        var text = await reader.ReadToEndAsync(cancellationToken);
+        var encoding = reader.CurrentEncoding;
+        if (encoding.CodePage == Encoding.UTF8.CodePage && !bytes.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())) encoding = new UTF8Encoding(false);
+        return (text, Hash(bytes), encoding);
+    }
     public async Task ReloadAsync(DocumentState document, CancellationToken cancellationToken = default)
     {
         var version = document.Version;

@@ -11,35 +11,45 @@ using WpfStudio.Core.Git;
 
 namespace WpfStudio.App.Controls;
 
-/// <summary>Git change margin, current-line blame and other annotations shown after the end of a line.</summary>
+/// <summary>
+/// Git change margin, and in C# a row above each type and member with its reference counts and Git history. The
+/// row is part of the declaration's first line, so nothing clickable sits beside the code itself.
+/// </summary>
 public sealed partial class EditorSurface
 {
     private GitChangeMargin? _changeMargin;
-    private LineEndGenerator? _blameAnnotation;
-    private LineEndGenerator? _codeLensAnnotation;
-    /// <summary>Lens positions follow edits until the next count arrives.</summary>
-    private sealed class TrackedLens(int position, CodeLensEntry entry) { public int Position = position; public CodeLensEntry Entry { get; } = entry; }
+    private LensRowGenerator? _lensRows;
+    /// <summary>A declaration's lens; its offsets follow edits until the next counts arrive.</summary>
+    private sealed class TrackedLens(int position, int start, int end, CodeLensEntry entry)
+    {
+        public int Position = position, Start = start, End = end;
+        public CodeLensEntry Entry { get; } = entry;
+    }
     private List<TrackedLens> _lenses = [];
-    private int _blameLine = -1;
     private readonly Popup _changePopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Right, PopupAnimation = PopupAnimation.Fade };
+    private readonly Popup _historyPopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.Fade };
 
     private void InitializeAnnotations()
     {
         _changeMargin = new GitChangeMargin(this);
         var numbers = TextArea.LeftMargins.OfType<LineNumberMargin>().FirstOrDefault();
         TextArea.LeftMargins.Insert(numbers is null ? TextArea.LeftMargins.Count : TextArea.LeftMargins.IndexOf(numbers) + 1, _changeMargin);
-        _codeLensAnnotation = new LineEndGenerator(CreateCodeLens);
-        TextArea.TextView.ElementGenerators.Add(_codeLensAnnotation);
-        _blameAnnotation = new LineEndGenerator(line => line.LineNumber == _blameLine ? CreateBlameAnnotation(line.LineNumber) : null);
-        TextArea.TextView.ElementGenerators.Add(_blameAnnotation);
-        TextArea.Caret.PositionChanged += (_, _) => UpdateBlameLine();
+        _lensRows = new LensRowGenerator(this);
+        TextArea.TextView.ElementGenerators.Add(_lensRows);
     }
+
+    private bool ShowsLensRows => ViewModel is { IsCSharp: true } vm && (vm.ShowCodeLens || vm.ShowInlineBlame);
 
     private void ApplyCodeLens()
     {
-        _lenses = ViewModel is { ShowCodeLens: true } vm && vm.CodeLensVersion == vm.State.Version && Text == vm.State.Content
-            ? [.. vm.CodeLenses.Where(entry => entry.Position <= Document.TextLength).OrderBy(entry => entry.Position).Select(entry => new TrackedLens(entry.Position, entry))]
-            : [];
+        _lenses = [];
+        if (ShowsLensRows && ViewModel is { } vm && vm.CodeLensVersion == vm.State.Version && Text == vm.State.Content)
+            foreach (var entry in vm.CodeLenses.Where(entry => entry.Position <= Document.TextLength).OrderBy(entry => entry.Position))
+            {
+                var first = Document.GetLineByNumber(Math.Clamp(entry.StartLine > 0 ? entry.StartLine : entry.Line, 1, Document.LineCount));
+                var last = Document.GetLineByNumber(Math.Clamp(Math.Max(entry.EndLine, first.LineNumber), 1, Document.LineCount));
+                _lenses.Add(new(entry.Position, TextUtilities.GetLeadingWhitespace(Document, first).EndOffset, last.EndOffset, entry));
+            }
         TextArea.TextView.Redraw();
     }
 
@@ -48,73 +58,135 @@ public sealed partial class EditorSurface
         if (_lenses.Count == 0) return;
         var kept = new List<TrackedLens>(_lenses.Count);
         foreach (var lens in _lenses)
-            if (WpfStudio.Core.Text.DecorationOffsets.MapPoint(lens.Position, offset, removed, inserted) is { } moved) { lens.Position = moved; kept.Add(lens); }
+            if (WpfStudio.Core.Text.DecorationOffsets.MapPoint(lens.Position, offset, removed, inserted) is { } moved
+                && WpfStudio.Core.Text.DecorationOffsets.MapPoint(lens.Start, offset, removed, inserted) is { } start)
+            {
+                lens.Position = moved; lens.Start = start;
+                lens.End = WpfStudio.Core.Text.DecorationOffsets.MapPoint(lens.End, offset, removed, inserted) ?? Math.Max(start, offset + inserted);
+                kept.Add(lens);
+            }
         _lenses = kept;
-    }
-
-    private UIElement? CreateCodeLens(DocumentLine line)
-    {
-        if (_lenses.Count == 0 || ViewModel is not { ShowCodeLens: true } vm) return null;
-        var lens = _lenses.FirstOrDefault(item => item.Position >= line.Offset && item.Position <= line.EndOffset);
-        if (lens is null) return null;
-        var entry = lens.Entry;
-        var text = (entry.References == 1 ? "1 reference" : $"{entry.References} references")
-            + (entry.XamlReferences > 0 ? $" · {entry.XamlReferences} in XAML" + (entry.XamlName is { } name ? $" via {name}" : "") : "");
-        var block = Annotation(text);
-        block.Margin = new Thickness(20, 0, 0, 0);
-        block.Cursor = Cursors.Hand;
-        block.ToolTip = $"Find references to {entry.Name}, including bindings and event handlers in XAML.";
-        block.MouseLeftButtonDown += (_, e) => { e.Handled = true; vm.RequestCodeLens(entry, lens.Position); };
-        return block;
     }
 
     private void OnGitChanged()
     {
         _changePopup.IsOpen = false; // Its change no longer describes the file.
+        _historyPopup.IsOpen = false;
         _changeMargin?.Update(); // The margin appears once the file is known to be in a repository.
-        _blameLine = -1; // Redraw the annotation with the new blame.
-        UpdateBlameLine();
+        TextArea.TextView.Redraw(); // Lens rows show the new blame.
     }
 
-    private void UpdateBlameLine()
+    /// <summary>The lens row for the declarations starting on one line: counts, then Git history.</summary>
+    private UIElement? CreateLensRow(IReadOnlyList<TrackedLens> lenses)
     {
-        var line = ViewModel is { ShowInlineBlame: true } ? TextArea.Caret.Line : -1;
-        if (line == _blameLine) return;
-        var previous = _blameLine;
-        _blameLine = line;
-        RedrawLine(previous); RedrawLine(line);
-    }
-
-    private void RedrawLine(int number)
-    {
-        if (number >= 1 && number <= Document.LineCount) TextArea.TextView.Redraw(Document.GetLineByNumber(number));
-    }
-
-    private UIElement? CreateBlameAnnotation(int lineNumber)
-    {
-        if (ViewModel is not { } vm || vm.BlameVersion != vm.State.Version || lineNumber > vm.Blame.Count) return null;
-        var blame = vm.Blame[lineNumber - 1];
-        var text = Annotation(blame.Describe(DateTimeOffset.Now), italic: true);
-        text.ToolTip = blame.IsUncommitted ? "This line has changes that are not committed yet."
-            : $"{blame.Author} <{blame.AuthorEmail}>\n{blame.Time.LocalDateTime:MMM d, yyyy · HH:mm}\n{blame.ShortCommit}  {blame.Summary}\n\nClick to show this commit in Git history.";
-        if (!blame.IsUncommitted)
+        if (ViewModel is not { } vm) return null;
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        void Separator() { if (row.Children.Count > 0) row.Children.Add(Annotation("  |  ")); }
+        if (vm.ShowCodeLens)
+            foreach (var lens in lenses)
+            {
+                var entry = lens.Entry;
+                var text = (entry.References == 1 ? "1 reference" : $"{entry.References} references")
+                    + (entry.XamlReferences > 0 ? $" · {entry.XamlReferences} in XAML" + (entry.XamlName is { } name ? $" via {name}" : "") : "");
+                Separator();
+                var block = LensLink(text + (lenses.Count > 1 ? $" ({entry.Name})" : ""));
+                block.ToolTip = $"Find references to {entry.Name}, including bindings and event handlers in XAML.";
+                block.MouseLeftButtonDown += (_, e) => { e.Handled = true; vm.RequestCodeLens(entry, lens.Position); };
+                row.Children.Add(block);
+            }
+        if (vm.ShowInlineBlame && vm.BlameVersion == vm.State.Version && Text == vm.State.Content)
         {
-            text.Cursor = Cursors.Hand;
-            text.MouseLeftButtonDown += (_, e) => { e.Handled = true; vm.RequestBlameCommit(blame); };
+            var lens = lenses[0];
+            var first = Document.GetLineByOffset(Math.Min(lens.Start, Document.TextLength)).LineNumber;
+            var last = Document.GetLineByOffset(Math.Clamp(lens.End, 0, Document.TextLength)).LineNumber;
+            if (GitBlame.Summarize(vm.Blame, first, last) is { } history && (history.Changes.Count > 0 || history.UncommittedLines > 0))
+            {
+                Separator();
+                var block = LensLink(history.Describe(DateTimeOffset.Now));
+                block.ToolTip = "Show who changed " + lens.Entry.Name + " and when";
+                block.MouseLeftButtonDown += (_, e) => { e.Handled = true; ShowHistory(block, lens.Entry.Name, first, last, history); };
+                row.Children.Add(block);
+            }
         }
-        return text;
+        return row.Children.Count == 0 ? null : row;
     }
 
-    /// <summary>Subtle text placed after a line's last character, in the editor's font.</summary>
-    private TextBlock Annotation(string text, bool italic = false)
+    private TextBlock LensLink(string text)
+    {
+        var block = Annotation(text);
+        block.Margin = new Thickness(0);
+        block.Cursor = Cursors.Hand;
+        block.MouseEnter += (_, _) => block.TextDecorations = TextDecorations.Underline;
+        block.MouseLeave += (_, _) => block.TextDecorations = null;
+        return block; // Click handlers mark the press handled, so the caret stays where it is.
+    }
+
+    /// <summary>The commits behind a declaration, newest first, each opening its change to this file in Git history.</summary>
+    private void ShowHistory(FrameworkElement anchor, string name, int first, int last, BlameHistory history)
+    {
+        if (ViewModel is not { } vm) return;
+        var now = DateTimeOffset.Now;
+        var panel = new StackPanel { Width = 460 };
+        panel.Children.Add(new TextBlock { Text = name, FontWeight = FontWeights.SemiBold, FontSize = 13 });
+        var scope = $"Lines {first}–{last} · {history.Changes.Count} commit{(history.Changes.Count == 1 ? "" : "s")} by {history.Authors} author{(history.Authors == 1 ? "" : "s")}";
+        panel.Children.Add(new TextBlock { Text = scope, FontSize = 11, Margin = new Thickness(0, 2, 0, 8) }.WithResource(TextBlock.ForegroundProperty, "MutedBrush"));
+        var list = new StackPanel();
+        if (history.UncommittedLines > 0)
+            list.Children.Add(HistoryRow("Uncommitted changes", $"{history.UncommittedLines} line{(history.UncommittedLines == 1 ? "" : "s")} not committed yet · use the change bars in the margin to compare or revert", null));
+        foreach (var change in history.Changes.Take(12))
+        {
+            var commit = change.Commit;
+            var detail = $"{commit.Author} · {commit.Time.LocalDateTime:MMM d, yyyy} ({BlameLine.Relative(commit.Time, now)}) · {commit.ShortCommit} · {change.Lines} line{(change.Lines == 1 ? "" : "s")}";
+            list.Children.Add(HistoryRow(commit.Summary.Length == 0 ? commit.ShortCommit : commit.Summary, detail, commit));
+        }
+        if (history.Changes.Count > 12)
+            list.Children.Add(new TextBlock { Text = $"{history.Changes.Count - 12} older commits are in Git history.", FontSize = 11, Margin = new Thickness(6, 4, 0, 0) }.WithResource(TextBlock.ForegroundProperty, "MutedBrush"));
+        panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 360, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+        var close = new Button { Content = "Close" };
+        close.Click += (_, _) => { _historyPopup.IsOpen = false; Focus(); };
+        footer.Children.Add(close);
+        panel.Children.Add(footer);
+        var chrome = new Border { Child = panel, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) };
+        chrome.SetResourceReference(Border.BackgroundProperty, "RaisedBrush");
+        chrome.SetResourceReference(Border.BorderBrushProperty, "StrongBorderBrush");
+        _historyPopup.Child = chrome;
+        _historyPopup.PlacementTarget = anchor;
+        _historyPopup.IsOpen = true;
+
+        FrameworkElement HistoryRow(string title, string detail, BlameLine? commit)
+        {
+            var text = new StackPanel();
+            text.Children.Add(new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis });
+            text.Children.Add(new TextBlock { Text = detail, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 0) }.WithResource(TextBlock.ForegroundProperty, "MutedBrush"));
+            var content = new DockPanel();
+            if (commit is not null)
+            {
+                var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+                var show = new Button { Content = "Show change", ToolTip = "Open this commit in Git history with this file's diff selected", Margin = new Thickness(0, 0, 4, 0) };
+                show.Click += (_, _) => { _historyPopup.IsOpen = false; vm.RequestBlameCommit(commit); };
+                var copy = new Button { Content = "Copy ID", ToolTip = commit.Commit };
+                copy.Click += (_, _) => { try { Clipboard.SetText(commit.Commit); } catch (System.Runtime.InteropServices.ExternalException) { } };
+                actions.Children.Add(show); actions.Children.Add(copy);
+                DockPanel.SetDock(actions, Dock.Right);
+                content.Children.Add(actions);
+            }
+            content.Children.Add(text);
+            var row = new Border { Child = content, Padding = new Thickness(6, 5, 6, 5), CornerRadius = new CornerRadius(4), Background = Brushes.Transparent };
+            row.MouseEnter += (_, _) => row.SetResourceReference(Border.BackgroundProperty, "HoverBrush");
+            row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+            return row;
+        }
+    }
+
+    /// <summary>Subtle text in the editor's font, used for lens rows.</summary>
+    private TextBlock Annotation(string text)
     {
         var block = new TextBlock
         {
-            Text = text, FontFamily = FontFamily, FontSize = Math.Max(8, FontSize - 1.5), Margin = new Thickness(28, 0, 0, 0),
-            FontStyle = italic ? FontStyles.Italic : FontStyles.Normal, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 640
+            Text = text, FontFamily = FontFamily, FontSize = Math.Max(8, FontSize - 2), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 720
         };
         block.SetResourceReference(TextBlock.ForegroundProperty, "InlayHintBrush");
-        TextBlock.SetBaselineOffset(block, block.FontSize * FontFamily.Baseline);
         return block;
     }
 
@@ -196,21 +268,23 @@ public sealed partial class EditorSurface
             foreach (var visual in view.VisualLines)
             {
                 var number = visual.FirstDocumentLine.LineNumber;
-                var top = visual.VisualTop - view.VerticalOffset;
+                // Start at the text, below any lens row above the line.
+                var top = visual.GetTextLineVisualYPosition(visual.TextLines[0], VisualYPosition.TextTop) - view.VerticalOffset;
+                var height = visual.VisualTop + visual.Height - view.VerticalOffset - top;
                 foreach (var change in vm.LineChanges)
                 {
                     if (change.Kind == LineChangeKind.Deleted)
                     {
                         var at = Math.Min(change.StartLine, lineCount);
                         if (at != number) continue;
-                        var y = change.StartLine > lineCount ? top + visual.Height : top;
+                        var y = change.StartLine > lineCount ? top + height : top;
                         var marker = new StreamGeometry();
                         using (var g = marker.Open()) { g.BeginFigure(new Point(0, y - 4), true, true); g.LineTo(new Point(6, y), true, false); g.LineTo(new Point(0, y + 4), true, false); }
                         marker.Freeze();
                         context.DrawGeometry(deleted, null, marker);
                     }
                     else if (number >= change.StartLine && number < change.StartLine + change.LineCount)
-                        context.DrawRectangle(change.Kind == LineChangeKind.Added ? added : modified, null, new Rect(1, top, 3, visual.Height));
+                        context.DrawRectangle(change.Kind == LineChangeKind.Added ? added : modified, null, new Rect(1, top, 3, height));
                 }
             }
         }
@@ -248,26 +322,44 @@ public sealed partial class EditorSurface
         public void Update() { InvalidateMeasure(); InvalidateVisual(); }
     }
 
-    /// <summary>Places an element after the last character of chosen lines. The element takes no document text.</summary>
-    private sealed class LineEndGenerator(Func<DocumentLine, UIElement?> create) : VisualLineElementGenerator
+    /// <summary>
+    /// Adds a lens row above lines where declarations start. The row is a zero-width element at the line's first
+    /// character whose height raises the line's baseline, so the code moves down and the row fills the space above.
+    /// The caret never stops on it, and the caret and line numbers stay aligned with the text.
+    /// </summary>
+    private sealed class LensRowGenerator(EditorSurface owner) : VisualLineElementGenerator
     {
         private int _emittedAt = -1;
         public override void StartGeneration(ITextRunConstructionContext context) { base.StartGeneration(context); _emittedAt = -1; }
+
+        private List<TrackedLens> LensesOn(DocumentLine line) =>
+            owner._lenses.Where(lens => lens.Start >= line.Offset && lens.Start <= line.EndOffset).ToList();
+
         public override int GetFirstInterestedOffset(int startOffset)
         {
-            var line = CurrentContext.VisualLine.LastDocumentLine;
-            return line.EndOffset >= startOffset && line.EndOffset != _emittedAt ? line.EndOffset : -1;
+            if (!owner.ShowsLensRows || owner._lenses.Count == 0) return -1;
+            var line = CurrentContext.VisualLine.FirstDocumentLine;
+            if (LensesOn(line).Count == 0) return -1;
+            var anchor = TextUtilities.GetLeadingWhitespace(CurrentContext.Document, line).EndOffset;
+            return anchor >= startOffset && anchor != _emittedAt ? anchor : -1;
         }
-        // A folded block is one visual line: the annotation belongs to its first (header) line but is placed at its end.
+
         public override VisualLineElement? ConstructElement(int offset)
         {
-            var end = CurrentContext.VisualLine.LastDocumentLine.EndOffset;
-            if (offset != end || offset == _emittedAt || create(CurrentContext.VisualLine.FirstDocumentLine) is not { } element) return null;
+            var line = CurrentContext.VisualLine.FirstDocumentLine;
+            var lenses = LensesOn(line);
+            if (offset == _emittedAt || lenses.Count == 0 || owner.CreateLensRow(lenses) is not { } row) return null;
             _emittedAt = offset;
-            return new AnnotationElement(element);
+            var view = owner.TextArea.TextView;
+            var rowHeight = Math.Ceiling(view.DefaultLineHeight * 0.95);
+            var host = new Canvas { Width = 0, Height = rowHeight + view.DefaultBaseline, ClipToBounds = false };
+            Canvas.SetTop(row, Math.Max(0, (rowHeight - view.DefaultLineHeight) / 2 + 1));
+            host.Children.Add(row);
+            TextBlock.SetBaselineOffset(host, host.Height);
+            return new LensElement(host);
         }
     }
-    private sealed class AnnotationElement(UIElement element) : InlineObjectElement(0, element)
+    private sealed class LensElement(UIElement element) : InlineObjectElement(0, element)
     {
         public override int GetNextCaretPosition(int visualColumn, System.Windows.Documents.LogicalDirection direction, CaretPositioningMode mode) => -1;
     }

@@ -23,6 +23,8 @@ xmlns:controls="clr-namespace:MyControls;assembly=MyControls"
 xmlns:vendor="urn:my-controls"
 ```
 
+For a URL namespace, the preview loads every library at the build output root (including staged HintPath and package libraries) that declares it with `[XmlnsDefinition]`, so the XAML reader can find its types. A namespace retired with `[XmlnsCompatibleWith]` resolves to its replacement. Copies in output subfolders, Visual Studio design-time assemblies (which reference the Visual Studio designer) and reference assemblies are never loaded, because they fail outside Visual Studio and used to stop the whole preview with a missing-file error. When MSBuild could not report the references, HintPath folders are searched for a declaring library and the diagnostics say which one was used. A namespace that the markup uses but no library declares is reported by name, and if the render still fails, the diagnostics name every assembly the loader could not find together with the folders it searched.
+
 Recognizing these types before loading source lets the designer omit code-behind event handlers and preserve element source locations. Custom control constructors and markup extensions still execute inside the preview process.
 
 Referenced resource dictionaries can use either form:

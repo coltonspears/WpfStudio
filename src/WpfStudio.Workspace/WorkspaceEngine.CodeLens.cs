@@ -55,7 +55,11 @@ public sealed partial class WorkspaceEngine
                     if (uses > 0 && !SymbolEqualityComparer.Default.Equals(related, symbol)) xamlName = related.Name;
                 }
                 var line = text.Lines.GetLinePosition(identifier.SpanStart).Line + 1;
-                entries.Add(new(line, identifier.SpanStart, symbol.Name, references, xamlReferences, xamlName));
+                // The editor shows the lens above the declaration's first line and Git history for all of its lines.
+                var declaration = identifier.Parent?.AncestorsAndSelf().FirstOrDefault(node => node is MemberDeclarationSyntax) ?? identifier.Parent;
+                var span = declaration?.Span ?? identifier.Span;
+                entries.Add(new(line, identifier.SpanStart, symbol.Name, references, xamlReferences, xamlName,
+                    text.Lines.GetLinePosition(span.Start).Line + 1, text.Lines.GetLinePosition(span.End).Line + 1));
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { complete = false; break; }
         }
