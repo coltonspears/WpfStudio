@@ -8,17 +8,21 @@ namespace WpfStudio.Workspace;
 
 public sealed partial class BuildService
 {
-    public async Task<ResolvedLaunch> ResolveLaunchAsync(string projectPath, string configuration = "Debug", string? targetFramework = null, string? profileName = null, CancellationToken cancellationToken = default)
+    public Task<ResolvedLaunch> ResolveLaunchAsync(string projectPath, string configuration = "Debug", string? targetFramework = null, string? profileName = null, CancellationToken cancellationToken = default)
+        => ResolveLaunchAsync(projectPath, configuration, targetFramework, profileName, null, null, cancellationToken);
+
+    /// <summary>Evaluates with the MSBuild and SolutionDir that built the project, so the program is the one that build produced.</summary>
+    private static async Task<ResolvedLaunch> ResolveLaunchAsync(string projectPath, string configuration, string? targetFramework, string? profileName, string? solutionPath, string? msbuildPath, CancellationToken cancellationToken)
     {
         projectPath = Path.GetFullPath(projectPath);
         var directory = Path.GetDirectoryName(projectPath)!;
-        var project = await ProjectDiscovery.EvaluateAsync(projectPath, configuration, targetFramework, cancellationToken).ConfigureAwait(false);
+        var project = await ProjectDiscovery.EvaluateAsync(projectPath, configuration, targetFramework, cancellationToken, solutionPath, msbuildPath).ConfigureAwait(false);
         if (project.OutputType is not ("Exe" or "WinExe")) throw new InvalidOperationException("Choose an executable startup project.");
         if (string.IsNullOrWhiteSpace(targetFramework) && !string.IsNullOrWhiteSpace(project.TargetFrameworks))
         {
             var frameworks = project.TargetFrameworks.Split(';', StringSplitOptions.RemoveEmptyEntries);
             if (frameworks.Length > 1) throw new InvalidOperationException("Choose a target framework for the multi-target startup project.");
-            if (frameworks.Length == 1) project = await ProjectDiscovery.EvaluateAsync(projectPath, configuration, frameworks[0], cancellationToken).ConfigureAwait(false);
+            if (frameworks.Length == 1) project = await ProjectDiscovery.EvaluateAsync(projectPath, configuration, frameworks[0], cancellationToken, solutionPath, msbuildPath).ConfigureAwait(false);
         }
         var profiles = ReadLaunchProfiles(projectPath);
         var profile = string.IsNullOrWhiteSpace(profileName) ? null : profiles.FirstOrDefault(p => p.Name == profileName) ?? throw new InvalidOperationException($"Launch profile '{profileName}' was not found.");
@@ -48,7 +52,8 @@ public sealed partial class BuildService
         // Legacy project files import WPF markup compilation and other .NET Framework targets that only Visual Studio's MSBuild includes.
         var build = request.Operation == BuildOperation.Run ? request with { Operation = BuildOperation.Build } : request;
         ProcessStartInfo start;
-        if (await FindFrameworkMSBuildAsync(cancellationToken).ConfigureAwait(false) is { } msbuild)
+        var msbuild = await FindFrameworkMSBuildAsync(cancellationToken).ConfigureAwait(false);
+        if (msbuild is not null)
         {
             output.Info("Legacy .NET Framework projects use Visual Studio MSBuild: " + msbuild);
             start = ProcessRunner.Create(msbuild, directory, CreateFrameworkMSBuildArguments(build));
@@ -61,8 +66,9 @@ public sealed partial class BuildService
         }
         var result = await RunProcessAsync(start, output, cancellationToken).ConfigureAwait(false);
         if (request.Operation != BuildOperation.Run || result.ExitCode != 0 || result.Cancelled) return result;
-        // `dotnet run` needs SDK-style targets, so start the built program the way it would.
-        var launch = await ResolveLaunchAsync(path, request.Configuration, request.TargetFramework, request.LaunchProfile, cancellationToken).ConfigureAwait(false);
+        // `dotnet run` needs SDK-style targets, so start the built program the way it would. Only Visual Studio's MSBuild received SolutionDir.
+        var launch = await ResolveLaunchAsync(path, request.Configuration, request.TargetFramework, request.LaunchProfile,
+            msbuild is null ? null : request.SolutionPath, msbuild, cancellationToken).ConfigureAwait(false);
         output.Info("Starting " + launch.Program);
         return await RunProcessAsync(CreateLaunchStartInfo(launch, request.Arguments), output, cancellationToken).ConfigureAwait(false);
     }
@@ -231,9 +237,8 @@ public sealed partial class BuildService
         args.Add($"-p:Configuration={request.Configuration}");
         if (!string.IsNullOrWhiteSpace(request.TargetFramework)) args.Add($"-p:TargetFramework={request.TargetFramework}");
         if (request.XamlDebuggingInformation) args.Add("-p:XamlDebuggingInformation=true");
-        // A solution build defines SolutionDir itself. Projects use it for packages.config restore and $(SolutionDir) imports.
-        if (!string.IsNullOrWhiteSpace(request.SolutionPath) && request.Path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
-            args.Add("-p:SolutionDir=" + Path.TrimEndingDirectorySeparator(Path.GetDirectoryName(Path.GetFullPath(request.SolutionPath))!) + Path.DirectorySeparatorChar);
+        // Projects use SolutionDir for packages.config restore, $(SolutionDir) imports and output paths.
+        if (ProjectDiscovery.SolutionDirArgument(request.Path, request.SolutionPath) is { } solutionDir) args.Add(solutionDir);
         return args;
     }
 

@@ -24,11 +24,21 @@ public static partial class ProjectDiscovery
         throw new ArgumentException("Open a .sln, .slnx, or .csproj file.", nameof(workspacePath));
     }
 
-    internal static async Task<EvaluatedProject> EvaluateAsync(string projectPath, string configuration, string? framework, CancellationToken cancellationToken)
+    /// <summary>
+    /// Evaluates with the .NET SDK, or with <paramref name="msbuildPath"/> and the <paramref name="solutionPath"/> folder as SolutionDir
+    /// to see a legacy project the way Visual Studio's MSBuild built it.
+    /// </summary>
+    internal static async Task<EvaluatedProject> EvaluateAsync(string projectPath, string configuration, string? framework, CancellationToken cancellationToken,
+        string? solutionPath = null, string? msbuildPath = null)
     {
-        var arguments = new List<string> { "msbuild", projectPath, "-nologo", $"-p:Configuration={configuration}", "-getProperty:TargetFramework,TargetFrameworks,OutputType,TargetPath,AssemblyName,Configurations,ProjectAssetsFile,TargetFrameworkMoniker", "-getItem:" + string.Join(',', FileItemTypes.Concat(DependencyItemTypes)) };
+        var arguments = new List<string> { projectPath, "-nologo", $"-p:Configuration={configuration}", "-getProperty:TargetFramework,TargetFrameworks,OutputType,TargetPath,AssemblyName,Configurations,ProjectAssetsFile,TargetFrameworkMoniker", "-getItem:" + string.Join(',', FileItemTypes.Concat(DependencyItemTypes)) };
         if (!string.IsNullOrWhiteSpace(framework)) arguments.Add($"-p:TargetFramework={framework}");
-        var result = await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(System.IO.Path.GetDirectoryName(projectPath)!, arguments.ToArray()), cancellationToken);
+        if (SolutionDirArgument(projectPath, solutionPath) is { } solutionDir) arguments.Add(solutionDir);
+        var directory = System.IO.Path.GetDirectoryName(projectPath)!;
+        var result = msbuildPath is null ? (ExitCode: -1, Output: "", Error: "")
+            : await ProcessRunner.CaptureAsync(ProcessRunner.Create(msbuildPath, directory, arguments), cancellationToken);
+        // MSBuild before Visual Studio 2022 17.8 has no -getProperty switch; the .NET SDK evaluates most legacy projects too.
+        if (result.ExitCode != 0) result = await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(directory, ["msbuild", .. arguments]), cancellationToken);
         if (result.ExitCode != 0) throw new InvalidOperationException($"Project evaluation failed for {projectPath}: {result.Error} {result.Output}");
         var start = result.Output.IndexOf('{');
         if (start < 0) throw new InvalidOperationException("MSBuild did not return project evaluation data.");
@@ -72,6 +82,11 @@ public static partial class ProjectDiscovery
             string.IsNullOrWhiteSpace(Property("ProjectAssetsFile")) ? null : System.IO.Path.GetFullPath(Property("ProjectAssetsFile"), System.IO.Path.GetDirectoryName(projectPath)!),
             moniker.Length == 0 ? null : moniker, ReadEvaluatedDependencies(projectPath, items, Property("TargetFramework"), Property("TargetFrameworks"), moniker));
     }
+
+    /// <summary>A solution build defines SolutionDir itself; a project built from a solution receives it the way Visual Studio passes it.</summary>
+    internal static string? SolutionDirArgument(string targetPath, string? solutionPath) =>
+        string.IsNullOrWhiteSpace(solutionPath) || !targetPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? null
+            : "-p:SolutionDir=" + System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(solutionPath))!) + System.IO.Path.DirectorySeparatorChar;
 
     private static string? NormalizeResourcePath(string? path)
     {

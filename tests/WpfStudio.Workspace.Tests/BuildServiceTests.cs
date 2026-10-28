@@ -73,6 +73,35 @@ public class BuildServiceTests
     }
 
     [Fact]
+    public async Task LegacyLaunchEvaluationSeesTheSolutionDirTheBuildUsed()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WpfStudio.Workspace.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(directory, "App"));
+        var project = Path.Combine(directory, "App", "App.csproj");
+        await File.WriteAllTextAsync(project, """
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <AssemblyName>App</AssemblyName>
+                <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+                <OutputPath>$(SolutionDir)bin\$(Configuration)\</OutputPath>
+              </PropertyGroup>
+              <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+            </Project>
+            """);
+        // MSBuild before Visual Studio 2022 17.8 rejects -getProperty; evaluation then uses the .NET SDK with the same SolutionDir.
+        var oldMSBuild = Path.Combine(directory, OperatingSystem.IsWindows() ? "old-msbuild.cmd" : "old-msbuild.sh");
+        await File.WriteAllTextAsync(oldMSBuild, OperatingSystem.IsWindows() ? "@exit /b 1\r\n" : "#!/bin/sh\nexit 1\n");
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(oldMSBuild, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        var fromSolution = await ProjectDiscovery.EvaluateAsync(project, "Debug", null, default, Path.Combine(directory, "Shop.sln"), oldMSBuild);
+        var alone = await ProjectDiscovery.EvaluateAsync(project, "Debug", null, default);
+
+        Assert.Equal(Path.Combine(directory, "bin", "Debug", "App.exe"), fromSolution.OutputPath);
+        Assert.Equal(Path.Combine(directory, "App", "bin", "Debug", "App.exe"), alone.OutputPath);
+    }
+
+    [Fact]
     public void SolutionXmlUsesDeclaredProjects()
     {
         var path = Path.Combine(Path.GetTempPath(), $"wpfstudio-{Guid.NewGuid():N}.slnx");
