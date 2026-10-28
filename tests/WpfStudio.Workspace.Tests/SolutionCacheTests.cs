@@ -25,11 +25,8 @@ public sealed class SolutionCacheTests : IDisposable
         {
             var full = await first.LoadAsync(new LoadWorkspaceRequest(project, UseCache: true));
             Assert.False(full.Cached);
+            await WaitForSavedModelAsync(project);
         }
-        // The worker saves the model after answering; wait for it rather than for a fixed time.
-        var cache = Path.Combine(_root, "cache");
-        for (var attempt = 0; attempt < 100 && !(Directory.Exists(cache) && Directory.EnumerateFiles(cache, "*.json").Any()); attempt++) await Task.Delay(100);
-        Assert.NotEmpty(Directory.EnumerateFiles(cache, "*.json"));
 
         await using var client = new WorkspaceClient();
         var cached = await client.LoadAsync(new LoadWorkspaceRequest(project, UseCache: true));
@@ -54,13 +51,24 @@ public sealed class SolutionCacheTests : IDisposable
         await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
         await File.WriteAllTextAsync(Path.Combine(_root, "Lib", "Value.cs"), "namespace Lib; public sealed class Value { }");
         Assert.Equal(0, (await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(Path.GetDirectoryName(project)!, "restore", project), CancellationToken.None)).ExitCode);
-        await using (var first = new WorkspaceClient()) await first.LoadAsync(new LoadWorkspaceRequest(project));
-        var cache = Path.Combine(_root, "cache");
-        for (var attempt = 0; attempt < 100 && !(Directory.Exists(cache) && Directory.EnumerateFiles(cache, "*.json").Any()); attempt++) await Task.Delay(100);
+        await using (var first = new WorkspaceClient())
+        {
+            await first.LoadAsync(new LoadWorkspaceRequest(project));
+            await WaitForSavedModelAsync(project);
+        }
 
         await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Changed</RootNamespace></PropertyGroup></Project>");
         await using var client = new WorkspaceClient();
         Assert.False((await client.LoadAsync(new LoadWorkspaceRequest(project, UseCache: true))).Cached);
+    }
+
+    // The worker saves the model after answering the load, so it must stay alive until the file appears.
+    // Other test classes may start workers while this class's cache folder is set, so wait for this project's file.
+    private static async Task WaitForSavedModelAsync(string project)
+    {
+        var saved = SolutionCache.FileFor(new LoadWorkspaceRequest(project));
+        for (var attempt = 0; attempt < 600 && !File.Exists(saved); attempt++) await Task.Delay(100);
+        Assert.True(File.Exists(saved), "The worker did not save the project model.");
     }
 
     public void Dispose()

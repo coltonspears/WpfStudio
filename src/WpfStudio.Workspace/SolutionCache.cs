@@ -49,7 +49,7 @@ internal static class SolutionCache
     internal sealed record CachedParse(LanguageVersion LanguageVersion, DocumentationMode DocumentationMode, IReadOnlyList<string> PreprocessorSymbols,
         IReadOnlyDictionary<string, string> Features);
 
-    private static string FileFor(LoadWorkspaceRequest request) =>
+    internal static string FileFor(LoadWorkspaceRequest request) =>
         Path.Combine(Directory, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"{Path.GetFullPath(request.Path).ToUpperInvariant()}\n{request.Configuration}\n{request.TargetFramework}")))[..32] + ".json");
 
