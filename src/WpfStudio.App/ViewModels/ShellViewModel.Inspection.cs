@@ -43,7 +43,7 @@ public sealed partial class ShellViewModel
             {
                 foreach (var issue in lease.Issues) AppendOutput("XAML source navigation: " + issue);
                 result = await _build.RunAsync(new(project.ProjectPath, BuildOperation.Rebuild, configuration,
-                    framework, XamlDebuggingInformation: true), progress, _operation.Token);
+                    framework, XamlDebuggingInformation: true, SolutionPath: SolutionPathFor(project.ProjectPath)), progress, _operation.Token);
                 buildSources = lease.Sources;
             }
             progress.Flush();

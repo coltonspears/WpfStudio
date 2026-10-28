@@ -146,7 +146,8 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             files.TryAdd(projectPath, new WorkspaceFile(projectPath, Path.GetFileName(projectPath), "Project"));
             return (new WorkspaceProject(project?.Id.ToString() ?? projectPath, project?.Name ?? Path.GetFileNameWithoutExtension(projectPath), projectPath,
                 evaluated?.TargetFramework, evaluated?.OutputPath ?? project?.OutputFilePath, evaluated?.OutputType is "Exe" or "WinExe",
-                files.Values.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToArray(), evaluated?.AssemblyName, evaluated?.ProjectAssetsPath), projectConfigurations);
+                files.Values.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToArray(), evaluated?.AssemblyName, evaluated?.ProjectAssetsPath,
+                ProjectDiscovery.IsSdkStyle(projectPath), evaluated?.TargetFrameworkMoniker, evaluated?.Dependencies ?? ProjectDiscovery.ReadDeclaredDependencies(projectPath)), projectConfigurations);
         }
         // Projects are independent here: generator runs and evaluations proceed together, results keep solution order.
         var built = await Task.WhenAll(paths.Concat(loadedProjects.Select(p => p.FilePath).OfType<string>()).Distinct(StringComparer.OrdinalIgnoreCase)

@@ -7,6 +7,8 @@ namespace WpfStudio.Workspace;
 
 public static partial class ProjectDiscovery
 {
+    private static readonly string[] FileItemTypes = ["Compile", "Page", "ApplicationDefinition", "Resource", "Content", "None"];
+
     public static IReadOnlyList<string> GetProjectPaths(string workspacePath)
     {
         workspacePath = System.IO.Path.GetFullPath(workspacePath);
@@ -24,7 +26,7 @@ public static partial class ProjectDiscovery
 
     internal static async Task<EvaluatedProject> EvaluateAsync(string projectPath, string configuration, string? framework, CancellationToken cancellationToken)
     {
-        var arguments = new List<string> { "msbuild", projectPath, "-nologo", $"-p:Configuration={configuration}", "-getProperty:TargetFramework,TargetFrameworks,OutputType,TargetPath,AssemblyName,Configurations,ProjectAssetsFile", "-getItem:Compile,Page,ApplicationDefinition,Resource,Content,None" };
+        var arguments = new List<string> { "msbuild", projectPath, "-nologo", $"-p:Configuration={configuration}", "-getProperty:TargetFramework,TargetFrameworks,OutputType,TargetPath,AssemblyName,Configurations,ProjectAssetsFile,TargetFrameworkMoniker", "-getItem:" + string.Join(',', FileItemTypes.Concat(DependencyItemTypes)) };
         if (!string.IsNullOrWhiteSpace(framework)) arguments.Add($"-p:TargetFramework={framework}");
         var result = await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(System.IO.Path.GetDirectoryName(projectPath)!, arguments.ToArray()), cancellationToken);
         if (result.ExitCode != 0) throw new InvalidOperationException($"Project evaluation failed for {projectPath}: {result.Error} {result.Output}");
@@ -35,7 +37,8 @@ public static partial class ProjectDiscovery
         string Property(string name) => properties.TryGetProperty(name, out var value) ? value.GetString() ?? "" : "";
         var files = new Dictionary<string, WorkspaceFile>(StringComparer.OrdinalIgnoreCase);
         var resources = new List<EvaluatedXamlResource>();
-        foreach (var group in json.RootElement.GetProperty("Items").EnumerateObject())
+        var items = json.RootElement.GetProperty("Items");
+        foreach (var group in items.EnumerateObject().Where(group => FileItemTypes.Contains(group.Name)))
         foreach (var item in group.Value.EnumerateArray())
         {
             var path = item.TryGetProperty("FullPath", out var fullPath) ? fullPath.GetString() : null;
@@ -63,8 +66,11 @@ public static partial class ProjectDiscovery
                     identity is null ? "The evaluated resource output path is unavailable or unsupported." : null));
             }
         }
+        // The outer evaluation of a multi-target project falls back to Microsoft.Common's default framework identity; it has none of its own.
+        var moniker = string.IsNullOrWhiteSpace(Property("TargetFramework")) && !string.IsNullOrWhiteSpace(Property("TargetFrameworks")) ? "" : Property("TargetFrameworkMoniker");
         return new EvaluatedProject(Property("TargetFramework"), Property("TargetFrameworks"), Property("TargetPath"), Property("OutputType"), files.Values.ToArray(), Property("AssemblyName"), Property("Configurations"), resources.ToArray(),
-            string.IsNullOrWhiteSpace(Property("ProjectAssetsFile")) ? null : System.IO.Path.GetFullPath(Property("ProjectAssetsFile"), System.IO.Path.GetDirectoryName(projectPath)!));
+            string.IsNullOrWhiteSpace(Property("ProjectAssetsFile")) ? null : System.IO.Path.GetFullPath(Property("ProjectAssetsFile"), System.IO.Path.GetDirectoryName(projectPath)!),
+            moniker.Length == 0 ? null : moniker, ReadEvaluatedDependencies(projectPath, items, Property("TargetFramework"), Property("TargetFrameworks"), moniker));
     }
 
     private static string? NormalizeResourcePath(string? path)
@@ -118,5 +124,6 @@ public static partial class ProjectDiscovery
     }
 
     internal sealed record EvaluatedXamlResource(string Path, string? ResourcePath, string Kind, string? Status);
-    internal sealed record EvaluatedProject(string TargetFramework, string TargetFrameworks, string OutputPath, string OutputType, IReadOnlyList<WorkspaceFile> Files, string AssemblyName, string Configurations, IReadOnlyList<EvaluatedXamlResource> XamlResources, string? ProjectAssetsPath = null);
+    internal sealed record EvaluatedProject(string TargetFramework, string TargetFrameworks, string OutputPath, string OutputType, IReadOnlyList<WorkspaceFile> Files, string AssemblyName, string Configurations, IReadOnlyList<EvaluatedXamlResource> XamlResources, string? ProjectAssetsPath = null,
+        string? TargetFrameworkMoniker = null, IReadOnlyList<ProjectDependency>? Dependencies = null);
 }

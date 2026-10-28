@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using WpfStudio.Workspace;
 
 namespace WpfStudio.App.Features.Packages;
 
@@ -38,19 +39,28 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
         catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception) { sources = []; warnings.Add(ex.Message); }
 
         IReadOnlyList<InstalledPackage> packages;
-        try
+        if (ProjectDiscovery.FindPackagesConfig(projectPath) is { } packagesConfig)
         {
-            var sdk = await _process.RunAsync(directory, ["--version"], null, cancellationToken).ConfigureAwait(false);
-            var args = new List<string> { "list", Path.GetFullPath(projectPath), "package", "--format", "json", "--output-version", "1" };
-            if (sdk.ExitCode == 0 && int.TryParse(sdk.Output.Trim().Split('.')[0], out var major) && major >= 10) args.Add("--no-restore");
-            var result = await _process.RunAsync(directory, args, null, cancellationToken).ConfigureAwait(false);
-            if (result.ExitCode != 0) throw new InvalidDataException(ShortError(result.Output));
-            packages = ParseInstalledPackages(result.Output);
+            packages = ProjectDiscovery.ReadPackagesConfig(projectPath).Select(package => new InstalledPackage(package.Name, package.Version ?? "", package.Version ?? "", Path.GetFileName(packagesConfig)))
+                .OrderBy(package => package.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+            warnings.Add(PackagesConfigNotice);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        else
         {
-            packages = ReadProjectReferences(projectPath, central);
-            warnings.Add("Showing declared references because SDK evaluation failed. Conditions/imports may differ; restore the project to obtain resolved versions. " + ex.Message);
+            try
+            {
+                var sdk = await _process.RunAsync(directory, ["--version"], null, cancellationToken).ConfigureAwait(false);
+                var args = new List<string> { "list", Path.GetFullPath(projectPath), "package", "--format", "json", "--output-version", "1" };
+                if (sdk.ExitCode == 0 && int.TryParse(sdk.Output.Trim().Split('.')[0], out var major) && major >= 10) args.Add("--no-restore");
+                var result = await _process.RunAsync(directory, args, null, cancellationToken).ConfigureAwait(false);
+                if (result.ExitCode != 0) throw new InvalidDataException(ShortError(result.Output));
+                packages = ParseInstalledPackages(result.Output);
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                packages = ReadProjectReferences(projectPath, central);
+                warnings.Add("Showing declared references because SDK evaluation failed. Conditions/imports may differ; restore the project to obtain resolved versions. " + ex.Message);
+            }
         }
         return new(packages, sources, configs, central, warnings.Count == 0 ? null : string.Join("\n", warnings));
     }
@@ -99,10 +109,14 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
         finally { _mutation.Release(); }
     }
 
+    /// <summary>`dotnet list package` and `dotnet add package` work with PackageReference items only.</summary>
+    private const string PackagesConfigNotice = "This project lists its packages in packages.config, so they are shown read-only. Install, update or remove them with Visual Studio or nuget.exe, or migrate the project to PackageReference.";
+
     public static IReadOnlyList<string> CreateChangeArguments(string projectPath, string packageId, string? version, bool remove)
     {
         ValidatePackageId(packageId);
         if (!Path.GetExtension(projectPath).Equals(".csproj", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Select a C# project.");
+        if (ProjectDiscovery.FindPackagesConfig(projectPath) is not null) throw new ArgumentException(PackagesConfigNotice);
         if (remove) return ["remove", Path.GetFullPath(projectPath), "package", packageId];
         if (version is null || !ExactVersion.IsMatch(version)) throw new ArgumentException("Choose an exact package version, for example 8.4.2 or 9.0.0-preview.1.");
         // The legacy command order works with SDK 8, 9 and 10. The SDK owns CPM and source-mapping decisions.

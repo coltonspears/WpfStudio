@@ -76,9 +76,10 @@
       </DockPanel>
     </DataTemplate>
     <HierarchicalDataTemplate DataType="{x:Type vm:ExplorerNode}" ItemsSource="{Binding Children}">
-      <StackPanel Orientation="Horizontal">
+      <StackPanel Orientation="Horizontal" ToolTip="{Binding ToolTip}">
         <controls:StudioIcon Kind="{Binding IconKind}" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center" />
-        <TextBlock Text="{Binding Name}" ToolTip="{Binding Path}" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="{Binding Detail, Converter={StaticResource Presence}}" />
       </StackPanel>
     </HierarchicalDataTemplate>
     <Style x:Key="DocumentContainer" TargetType="dc:LayoutDocumentItem">
@@ -535,6 +536,11 @@
                     <TreeView x:Name="ExplorerTree" b:Interaction.SelectOnRightClick="True" ItemsSource="{Binding Explorer}" b:Interaction.ActivateCommand="{Binding OpenNodeCommand}" b:Interaction.SelectedNode="{Binding SelectedNode, Mode=TwoWay}">
                       <TreeView.ContextMenu>
                         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                          <MenuItem Header="Build" c:Ui.Icon="Build" Command="{Binding BuildSelectedCommand}" Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <MenuItem Header="Rebuild" Command="{Binding RebuildSelectedCommand}" Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <MenuItem Header="Clean" c:Ui.Icon="Trash" Command="{Binding CleanSelectedCommand}" Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <MenuItem Header="Restore packages" c:Ui.Icon="Package" Command="{Binding RestoreSelectedCommand}" Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <Separator Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
                           <MenuItem Header="Open" c:Ui.Icon="File" Command="{Binding OpenNodeCommand}" CommandParameter="{Binding SelectedNode}" />
                           <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
                           <Separator />
@@ -550,6 +556,7 @@
                       <TreeView.ItemContainerStyle>
                         <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
                           <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                          <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
                         </Style>
                       </TreeView.ItemContainerStyle>
                     </TreeView>

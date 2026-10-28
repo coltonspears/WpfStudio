@@ -50,6 +50,29 @@ public class BuildServiceTests
     }
 
     [Fact]
+    public void VisualStudioMSBuildRestoresPackagesConfigAndReceivesTheSolutionFolder()
+    {
+        var solution = Path.Combine(Path.GetTempPath(), "Shop", "Shop.sln");
+        var build = BuildService.CreateFrameworkMSBuildArguments(new BuildRequest("App.csproj", BuildOperation.Build, "Release", SolutionPath: solution));
+        Assert.Equal("App.csproj", build[0]);
+        Assert.Contains("-restore", build);
+        Assert.Contains("-p:RestorePackagesConfig=true", build);
+        Assert.Contains("-t:Build", build);
+        Assert.Contains("-p:Configuration=Release", build);
+        Assert.Contains("-nodeReuse:false", build);
+        Assert.Contains("-p:SolutionDir=" + Path.Combine(Path.GetTempPath(), "Shop") + Path.DirectorySeparatorChar, build);
+
+        Assert.Contains("-t:Rebuild", BuildService.CreateFrameworkMSBuildArguments(new BuildRequest("App.csproj", BuildOperation.Rebuild)));
+        Assert.Contains("-t:Restore", BuildService.CreateFrameworkMSBuildArguments(new BuildRequest("App.csproj", BuildOperation.Restore)));
+        var clean = BuildService.CreateFrameworkMSBuildArguments(new BuildRequest("App.csproj", BuildOperation.Clean));
+        Assert.Contains("-t:Clean", clean);
+        Assert.DoesNotContain("-restore", clean);
+        // A solution build defines SolutionDir itself.
+        Assert.DoesNotContain(BuildService.CreateFrameworkMSBuildArguments(new BuildRequest(solution, SolutionPath: solution)), argument => argument.StartsWith("-p:SolutionDir=", StringComparison.Ordinal));
+        Assert.Throws<ArgumentOutOfRangeException>(() => BuildService.CreateFrameworkMSBuildArguments(new BuildRequest("App.csproj", BuildOperation.Test)));
+    }
+
+    [Fact]
     public void SolutionXmlUsesDeclaredProjects()
     {
         var path = Path.Combine(Path.GetTempPath(), $"wpfstudio-{Guid.NewGuid():N}.slnx");
