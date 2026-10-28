@@ -12,6 +12,6 @@
     <ProjectReference Include="../WpfStudio.Contracts/WpfStudio.Contracts.csproj" />
     <ProjectReference Include="../WpfStudio.Wpf.PropertyEditing/WpfStudio.Wpf.PropertyEditing.csproj" />
     <ProjectReference Include="../WpfStudio.Wpf.Diagnostics/WpfStudio.Wpf.Diagnostics.csproj" />
-    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
+    <PackageReference Include="StreamJsonRpc" Version="2.26.150" />
   </ItemGroup>
 </Project>
