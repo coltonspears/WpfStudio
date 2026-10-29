@@ -222,6 +222,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before switching workspaces"; return; }
         if (Documents.Count > 0)
         {
+            // Until every tab is closed, automatic saving must not write edits that are about to be discarded.
+            using var holdAutoSave = await SuspendAutoSaveAsync();
             var closing = Documents.ToArray();
             var discard = new List<EditorViewModel>();
             foreach (var doc in closing.Where(d => d.State.IsDirty))
@@ -444,6 +446,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
     public async Task<bool> CloseDocumentAsync(EditorViewModel document, bool discardChanges = false)
     {
+        using var holdAutoSave = await SuspendAutoSaveAsync();
         if (discardChanges) _store.DeleteRecovery(document.State.Path);
         else if (document.State.IsDirty)
         {
@@ -944,6 +947,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public async Task<bool> TryCloseAsync()
     {
         if (IsPreviewOpen) { Status = "Apply or cancel the open change preview before closing"; return false; }
+        using var holdAutoSave = await SuspendAutoSaveAsync();
         if (!await Database.ConfirmCloseAllAsync()) return false;
         foreach (var doc in Documents.Where(d => d.State.IsDirty).ToArray())
         {
@@ -951,6 +955,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (decision == SaveDecision.Cancel) return false;
             if (decision == SaveDecision.Save && !await SaveDocumentAsync(doc)) return false;
         }
+        // Closing for good: documents whose edits were discarded must never be saved afterwards.
+        _autoSaveStopped = true;
         _operation?.Cancel();
         LayoutSaveRequested?.Invoke(); await SaveSettingsAsync();
         await Database.CompleteCloseAsync();

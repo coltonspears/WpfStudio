@@ -1,4 +1,5 @@
 using WpfStudio.App.Services;
+using WpfStudio.Contracts;
 using WpfStudio.Core;
 
 namespace WpfStudio.Shell.Tests;
@@ -28,6 +29,26 @@ public sealed class EditorSettingsTests
             Assert.Equal(new EditorSettings(), restored.ToSettings());
         }
         finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task AnAutomaticSaveCannotWriteEditsWhileTheSaveOrDiscardQuestionIsOpen()
+    {
+        await using var test = new ShellTestContext();
+        string path = await test.CreateFileAsync("Draft.cs", "original");
+        await test.Shell.OpenDocumentAsync(path);
+        var editor = test.Shell.ActiveDocument!;
+        editor.State.Content = "unwanted edit";
+        test.Dialogs.WhileAsking = () => test.Shell.RunAutoSaveAsync();
+        test.Dialogs.SaveDecisions.Enqueue(SaveDecision.Discard);
+        Assert.True(await test.Shell.CloseDocumentAsync(editor));
+        Assert.Equal("original", await File.ReadAllTextAsync(path));
+
+        // Outside a close, the same timed save does write.
+        await test.Shell.OpenDocumentAsync(path);
+        test.Shell.ActiveDocument!.State.Content = "kept edit";
+        await test.Shell.RunAutoSaveAsync();
+        Assert.Equal("kept edit", await File.ReadAllTextAsync(path));
     }
 
     [Fact]
