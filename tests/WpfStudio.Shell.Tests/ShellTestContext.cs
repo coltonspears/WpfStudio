@@ -84,10 +84,13 @@ internal sealed class FakeDialogs : IFileDialogService, IUserDialogService
     public List<string> Errors { get; } = [];
     public List<string> SaveQuestions { get; } = [];
     public Task<bool> ConfirmAsync(string title, string message) => Task.FromResult(Confirmations.TryDequeue(out bool answer) && answer);
-    public Task<SaveDecision> AskSaveAsync(string documentName)
+    /// <summary>Runs while the save question is open, as dispatcher work does behind a modal message box.</summary>
+    public Func<Task>? WhileAsking { get; set; }
+    public async Task<SaveDecision> AskSaveAsync(string documentName)
     {
         SaveQuestions.Add(documentName);
-        return Task.FromResult(SaveDecisions.TryDequeue(out SaveDecision answer) ? answer : SaveDecision.Cancel);
+        if (WhileAsking is { } work) await work();
+        return SaveDecisions.TryDequeue(out SaveDecision answer) ? answer : SaveDecision.Cancel;
     }
     public Task<string?> PromptAsync(string title, string message, string defaultValue = "") => Task.FromResult(Prompts.TryDequeue(out string? value) ? value : defaultValue);
     public Task ShowErrorAsync(string title, string message) { Errors.Add(title + ": " + message); return Task.CompletedTask; }

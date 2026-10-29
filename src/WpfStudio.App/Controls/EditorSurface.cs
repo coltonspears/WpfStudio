@@ -44,7 +44,7 @@ public sealed partial class EditorSurface : TextEditor
         Placement = System.Windows.Controls.Primitives.PlacementMode.Mouse, StaysOpen = true, AllowsTransparency = true,
         PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.None
     };
-    private readonly TextBlock _hoverText = new() { TextWrapping = TextWrapping.Wrap, MaxWidth = 640 };
+    private readonly Border _hoverContent = new();
     private readonly DebugMargin _margin;
     private readonly DiagnosticRenderer _diagnostics;
     private readonly SemanticColorizer _semantic = new();
@@ -79,6 +79,7 @@ public sealed partial class EditorSurface : TextEditor
         TextArea.TextView.LineTransformers.Add(_semantic);
         _hints = new InlayHintGenerator(this); TextArea.TextView.ElementGenerators.Add(_hints);
         InitializeAnnotations();
+        InitializePreferenceChrome();
         _foldingTimer = new(TimeSpan.FromMilliseconds(500), System.Windows.Threading.DispatcherPriority.Background, (_, _) => UpdateFoldings(), Dispatcher) { IsEnabled = false };
         TextChanged += OnEditorTextChanged;
         TextArea.Caret.PositionChanged += (_, _) => { if (ViewModel is { } vm && !_syncing) { vm.State.CaretOffset = CaretOffset; vm.State.CaretLine = TextArea.Caret.Line; vm.State.CaretColumn = TextArea.Caret.Column; } };
@@ -95,15 +96,19 @@ public sealed partial class EditorSurface : TextEditor
         PreviewKeyDown += OnPreviewKeyDown;
         Loaded += (_, _) =>
         {
+            ObservePreferences(true);
             Attach();
             // An owned popup stays above other applications unless it is closed with its window.
             if (Window.GetWindow(this) is { } window) { window.Deactivated -= OnWindowDeactivated; window.Deactivated += OnWindowDeactivated; }
         };
-        Unloaded += (_, _) => { Detach(); if (Window.GetWindow(this) is { } window) window.Deactivated -= OnWindowDeactivated; };
-        var hoverChrome = new Border { Child = _hoverText, Padding = new Thickness(8, 5, 8, 6), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Margin = new Thickness(0, 2, 0, 0) };
+        Unloaded += (_, _) => { Detach(); ObservePreferences(false); if (Window.GetWindow(this) is { } window) window.Deactivated -= OnWindowDeactivated; };
+        var hoverChrome = new Border
+        {
+            Child = _hoverContent, Padding = new Thickness(10, 8, 10, 8), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Margin = new Thickness(0, 2, 8, 8),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 12, ShadowDepth = 3, Opacity = 0.28, Direction = 270 }
+        };
         hoverChrome.SetResourceReference(Border.BackgroundProperty, "RaisedBrush");
         hoverChrome.SetResourceReference(Border.BorderBrushProperty, "StrongBorderBrush");
-        _hoverText.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         _hover.Child = hoverChrome;
         _hover.MouseLeave += (_, _) => { if (!IsMouseOver) CancelHover(); };
         MouseHover += OnMouseHover;
@@ -132,6 +137,7 @@ public sealed partial class EditorSurface : TextEditor
         ViewModel.FoldingRequested += SetAllFolded;
         ViewModel.GitChanged += OnGitChanged;
         ViewModel.CodeLensChanged += ApplyCodeLens;
+        ViewModel.ApplyReplacements = ApplyReplacements;
         _trackedDocument = Document; Document.Changed += OnDocumentChanged;
         _hints.Enabled = ViewModel.ShowInlayHints;
         ApplyDecorations();
@@ -156,6 +162,7 @@ public sealed partial class EditorSurface : TextEditor
             _attached.FoldingRequested -= SetAllFolded;
             _attached.GitChanged -= OnGitChanged;
             _attached.CodeLensChanged -= ApplyCodeLens;
+            if (_attached.ApplyReplacements == ApplyReplacements) _attached.ApplyReplacements = null;
             UninstallFolding(_attached.State);
         }
         if (_trackedDocument != null) { _trackedDocument.Changed -= OnDocumentChanged; _trackedDocument = null; }
@@ -246,38 +253,40 @@ public sealed partial class EditorSurface : TextEditor
     private async void OnMouseHover(object? sender, MouseEventArgs e)
     {
         CancelHover();
+        if (IsOverAdornment(e.OriginalSource) || IsOverAdornment(Mouse.DirectlyOver)) return; // Folded blocks and lens rows have their own tips.
         if (ViewModel is not { } vm || GetPositionFromPoint(e.GetPosition(this)) is not { } position) return;
         int offset = Document.GetOffset(position.Location);
         long version = vm.State.Version;
         _hoverRequest = new CancellationTokenSource();
         var token = _hoverRequest.Token;
-        var diagnostic = vm.Diagnostics.FirstOrDefault(d => offset >= d.Start && offset < d.Start + Math.Max(1, d.Length));
-        string? message = diagnostic is null ? null : diagnostic.Id + ": " + diagnostic.Message;
-        if (message is not null) ShowHover(message);
+        var parts = new HoverParts(null, null, null,
+            vm.Diagnostics.Where(d => offset >= d.Start && offset < d.Start + Math.Max(1, d.Length)).OrderBy(d => d.Severity switch { "Error" => 0, "Warning" => 1, _ => 2 }).Take(4).ToArray());
+        if (!vm.ShowQuickInfo && parts.Diagnostics.Count == 0 && vm.DataTipEvaluator is null) return;
+        ShowHover(parts);
         try
         {
             if (await vm.DataTipAsync(offset, token) is { } dataTip)
             {
                 if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
-                message = message is null ? dataTip : dataTip + Environment.NewLine + Environment.NewLine + message;
-                ShowHover(message);
+                ShowHover(parts = parts with { DataTip = dataTip });
             }
-            var hover = await vm.HoverAsync(offset, token);
-            if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
-            if (hover is not null) message = message is null ? hover.Text : message + Environment.NewLine + Environment.NewLine + hover.Text;
-            if (!string.IsNullOrEmpty(message)) ShowHover(message);
+            if (!vm.ShowQuickInfo) return;
+            if (vm.IsCSharp)
+            {
+                var info = await vm.QuickInfoAsync(offset, token);
+                if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
+                if (info is not null) ShowHover(parts = parts with { QuickInfo = info });
+            }
+            else if (await vm.HoverAsync(offset, token) is { } hover)
+            {
+                if (token.IsCancellationRequested || vm != ViewModel || version != vm.State.Version) return;
+                ShowHover(parts = parts with { Xaml = hover.Text });
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!token.IsCancellationRequested && vm == ViewModel) vm.LanguageStatus = ex.Message; }
     }
     private void OnWindowDeactivated(object? sender, EventArgs e) => CancelHover();
-    private void ShowHover(string text)
-    {
-        _hoverText.FontFamily = FontFamily; _hoverText.FontSize = Math.Max(11, FontSize - 0.5);
-        // Updating an open popup in place avoids moving it when slower information arrives.
-        _hoverText.Text = text;
-        if (!_hover.IsOpen) { _hover.PlacementTarget = this; _hover.IsOpen = true; }
-    }
     private void CancelHover()
     {
         _hoverRequest?.Cancel(); _hoverRequest?.Dispose(); _hoverRequest = null;
@@ -501,8 +510,10 @@ public sealed partial class EditorSurface : TextEditor
     }
     private void InstallFolding()
     {
+        if (!Services.EditorPreferences.Current.ShowFolding || _folding is not null) return;
         if (ViewModel is not { } vm || vm.State.Extension is not (".cs" or ".xaml" or ".xml" or ".csproj" or ".props" or ".targets" or ".resx")) return;
         _folding = FoldingManager.Install(TextArea);
+        InstallFoldingVisuals(_folding);
         UpdateFoldings();
         if (FoldedRegions.TryGetValue(vm.State, out var folded))
             foreach (var section in _folding.AllFoldings.Where(section => folded.Contains((section.StartOffset, section.EndOffset))))
@@ -513,6 +524,7 @@ public sealed partial class EditorSurface : TextEditor
         _foldingTimer.Stop();
         if (_folding is null) return;
         FoldedRegions.AddOrUpdate(state, _folding.AllFoldings.Where(section => section.IsFolded).Select(section => (section.StartOffset, section.EndOffset)).ToList());
+        UninstallFoldingVisuals();
         FoldingManager.Uninstall(_folding);
         _folding = null;
     }

@@ -44,6 +44,28 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
         Assert.Contains("no longer available", stale.Message);
     }
 
+    [Fact]
+    public async Task QuickInfoShowsTheClassifiedSignatureAndDocumentation()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "namespace Shop;\npublic sealed class Pricing\n{\n    /// <summary>Adds tax to a net amount.</summary>\n    /// <param name=\"net\">The amount before tax.</param>\n    /// <returns>The gross amount.</returns>\n    public decimal Gross(decimal net) => net * 1.2m;\n    public decimal Total => Gross(10m);\n}\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        var call = text.LastIndexOf("Gross", StringComparison.Ordinal) + 2;
+        var info = await engine.GetQuickInfoAsync(new(Source, call, 1));
+        Assert.NotNull(info);
+        Assert.Equal(text.LastIndexOf("Gross", StringComparison.Ordinal), info.Start);
+        Assert.Contains("Method", info.Tags);
+        var description = Assert.Single(info.Sections, section => section.Kind == "Description");
+        Assert.Equal("decimal Pricing.Gross(decimal net)", string.Concat(description.Runs.Select(run => run.Text)));
+        Assert.Contains(description.Runs, run => run.Tag == "Keyword" && run.Text == "decimal");
+        Assert.Contains(description.Runs, run => run.Tag == "Method" && run.Text == "Gross");
+        Assert.Contains(info.Sections, section => section.Kind == "DocumentationComments" && string.Concat(section.Runs.Select(run => run.Text)).Contains("Adds tax to a net amount."));
+        Assert.Contains(info.Sections, section => section.Kind == "ReturnsDocumentationComments");
+        // Whitespace has nothing to describe.
+        Assert.Null(await engine.GetQuickInfoAsync(new(Source, text.IndexOf("    public decimal Total", StringComparison.Ordinal) + 1, 1)));
+    }
+
     private static string Apply(string text, IReadOnlyList<TextEdit> edits) =>
         edits.OrderByDescending(edit => edit.Start).Aggregate(text, (current, edit) => current.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.NewText));
 

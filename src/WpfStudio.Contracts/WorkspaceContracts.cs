@@ -25,6 +25,12 @@ public sealed record XamlCompletionRequest(string Path, string Text, int Positio
 public sealed record XamlAnalysisResult(long Version, bool Accepted, IReadOnlyList<WorkspaceDiagnostic> Diagnostics, string? Status = null);
 public sealed record XamlCompletionResult(bool Available, CompletionResult? Completion, string? Status = null);
 public sealed record XamlHoverInfo(int Start, int Length, string Text);
+/// <summary>A run of Quick Info text; <paramref name="Tag"/> is Roslyn's text tag (Keyword, Class, Method, Punctuation, LineBreak…).</summary>
+public sealed record QuickInfoRun(string Tag, string Text);
+/// <summary><paramref name="Kind"/> is Roslyn's section kind: Description, DocumentationComments, ReturnsDocumentationComments, Usage…</summary>
+public sealed record QuickInfoSection(string Kind, IReadOnlyList<QuickInfoRun> Runs);
+/// <summary>What hovering a C# symbol shows: its signature, documentation and related notes. <paramref name="Tags"/> name its kind and accessibility.</summary>
+public sealed record QuickInfoResult(long Version, int Start, int Length, IReadOnlyList<string> Tags, IReadOnlyList<QuickInfoSection> Sections);
 public sealed record XamlCodeAction(string Title, DocumentEdits Edit, IReadOnlyList<DocumentEdits>? AdditionalEdits = null);
 public sealed record DocumentPositionRequest(string Path, int Position, long Version);
 public sealed record DocumentRequest(string Path, long Version);
@@ -96,6 +102,7 @@ public interface IWorkspaceRpc
     Task<CompletionResult> GetCompletionsAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<TextEdit?> GetCompletionEditAsync(CompletionEditRequest request, CancellationToken cancellationToken);
     Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
+    Task<QuickInfoResult?> GetQuickInfoAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     /// <summary>Implementations of an interface or abstract member, overrides of a virtual member, or types derived from the type at the position.</summary>

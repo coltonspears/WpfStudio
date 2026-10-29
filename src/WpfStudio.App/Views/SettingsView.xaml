@@ -1,0 +1,377 @@
+<UserControl x:Class="WpfStudio.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:svc="clr-namespace:WpfStudio.App.Services"
+             xmlns:vm="clr-namespace:WpfStudio.App.ViewModels"
+             xmlns:ai="clr-namespace:WpfStudio.App.Features.ColtonGpt">
+  <!-- Settings: a page list on the left, one scrolling page on the right. DataContext is the shell. -->
+  <UserControl.Resources>
+    <Style x:Key="PageTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,0,0,4" />
+      <Setter Property="TextOptions.TextFormattingMode" Value="Ideal" />
+    </Style>
+    <Style x:Key="PageIntro" TargetType="TextBlock" BasedOn="{StaticResource Caption}">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Margin" Value="0,0,0,18" />
+    </Style>
+    <Style x:Key="Group" TargetType="Border" BasedOn="{StaticResource Card}">
+      <Setter Property="Padding" Value="16,6,16,6" />
+      <Setter Property="Margin" Value="0,0,0,22" />
+    </Style>
+    <Style x:Key="GroupLabel" TargetType="TextBlock" BasedOn="{StaticResource SectionLabel}">
+      <Setter Property="Margin" Value="2,0,0,8" />
+    </Style>
+    <!-- A toggle row: name, then what it does. -->
+    <Style x:Key="Toggle" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+      <Setter Property="Margin" Value="0,9" />
+      <Setter Property="VerticalContentAlignment" Value="Top" />
+    </Style>
+    <Style x:Key="RowName" TargetType="TextBlock">
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="RowNote" TargetType="TextBlock" BasedOn="{StaticResource Caption}">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Margin" Value="0,2,0,0" />
+    </Style>
+    <Style x:Key="Divider" TargetType="Border">
+      <Setter Property="Height" Value="1" />
+      <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+      <Setter Property="Margin" Value="0,2" />
+    </Style>
+    <Style x:Key="NavItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="Margin" Value="0,1" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <DataTemplate x:Key="NavEntry">
+      <StackPanel Orientation="Horizontal">
+        <c:Glyph Kind="{Binding (c:Ui.Icon), RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Width="16" Height="16" Margin="0,0,10,0" Foreground="{DynamicResource MutedBrush}" />
+        <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+      </StackPanel>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <DockPanel>
+    <!-- Header -->
+    <Border DockPanel.Dock="Top" Padding="24,16,16,14" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+      <DockPanel>
+        <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CloseSettingsCommand}" ToolTip="Close (Esc)" />
+        <c:Glyph DockPanel.Dock="Left" Kind="Settings" Width="18" Height="18" Margin="0,0,10,0" Foreground="{DynamicResource AccentBrush}" />
+        <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" TextOptions.TextFormattingMode="Ideal" />
+        <TextBlock Text="Changes apply immediately and are saved automatically." Style="{StaticResource Caption}" FontSize="12" VerticalAlignment="Center" Margin="14,2,0,0" />
+      </DockPanel>
+    </Border>
+
+    <!-- Page list -->
+    <Border DockPanel.Dock="Left" Width="210" Padding="10,14" Background="{DynamicResource WindowBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" CornerRadius="0,0,0,10">
+      <ListBox SelectedValue="{Binding SettingsPage}" SelectedValuePath="Tag" ItemContainerStyle="{StaticResource NavItem}" AutomationProperties.Name="Settings pages">
+        <ListBoxItem Tag="{x:Static vm:ShellViewModel.AppearancePage}" c:Ui.Icon="Sun" Content="Appearance" ContentTemplate="{StaticResource NavEntry}" />
+        <ListBoxItem Tag="{x:Static vm:ShellViewModel.EditorPage}" c:Ui.Icon="Text" Content="Text editor" ContentTemplate="{StaticResource NavEntry}" />
+        <ListBoxItem Tag="{x:Static vm:ShellViewModel.IntelligencePage}" c:Ui.Icon="Bulb" Content="Code intelligence" ContentTemplate="{StaticResource NavEntry}" />
+        <ListBoxItem Tag="{x:Static vm:ShellViewModel.FilesPage}" c:Ui.Icon="Save" Content="Files and saving" ContentTemplate="{StaticResource NavEntry}" />
+        <ListBoxItem Tag="{x:Static vm:ShellViewModel.AssistantPage}" c:Ui.Icon="Chat" Content="ColtonGPT" ContentTemplate="{StaticResource NavEntry}" />
+        <ListBoxItem Tag="{x:Static vm:ShellViewModel.ShortcutsPage}" c:Ui.Icon="Keyboard" Content="Keyboard shortcuts" ContentTemplate="{StaticResource NavEntry}" />
+      </ListBox>
+    </Border>
+
+    <Grid>
+      <!-- ================================================== Appearance -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Appearance}">
+        <StackPanel Margin="28,22,28,24">
+          <TextBlock Text="Appearance" Style="{StaticResource PageTitle}" />
+          <TextBlock Text="The colour theme for the whole window, editors and tool panes." Style="{StaticResource PageIntro}" />
+          <TextBlock Text="THEME" Style="{StaticResource GroupLabel}" />
+          <UniformGrid Columns="2" Margin="0,0,0,22">
+            <RadioButton Style="{StaticResource ChoiceTile}" GroupName="Theme" IsChecked="{Binding IsDarkTheme, Mode=OneWay}" Command="{Binding SetThemeCommand}" CommandParameter="Dark" Margin="0,0,6,0">
+              <StackPanel>
+                <Border Height="64" CornerRadius="5" Background="#131417" BorderBrush="#34373F" BorderThickness="1" Margin="0,0,0,10">
+                  <Grid Margin="8">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Border Background="#18191D" CornerRadius="3" />
+                    <StackPanel Grid.Column="1" Margin="8,2,0,0">
+                      <Border Height="4" Width="70" HorizontalAlignment="Left" CornerRadius="2" Background="#A3AAFF" />
+                      <Border Height="4" Width="110" HorizontalAlignment="Left" CornerRadius="2" Background="#3A3D45" Margin="0,6,0,0" />
+                      <Border Height="4" Width="90" HorizontalAlignment="Left" CornerRadius="2" Background="#E2B883" Margin="0,6,0,0" />
+                      <Border Height="4" Width="60" HorizontalAlignment="Left" CornerRadius="2" Background="#5FCDBE" Margin="0,6,0,0" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+                <DockPanel>
+                  <c:Glyph DockPanel.Dock="Left" Kind="Moon" Width="15" Height="15" Margin="0,0,8,0" />
+                  <TextBlock Text="Graphite dark" FontWeight="SemiBold" />
+                </DockPanel>
+              </StackPanel>
+            </RadioButton>
+            <RadioButton Style="{StaticResource ChoiceTile}" GroupName="Theme" IsChecked="{Binding IsLightTheme, Mode=OneWay}" Command="{Binding SetThemeCommand}" CommandParameter="Light" Margin="6,0,0,0">
+              <StackPanel>
+                <Border Height="64" CornerRadius="5" Background="#EDEEF1" BorderBrush="#CBCED6" BorderThickness="1" Margin="0,0,0,10">
+                  <Grid Margin="8">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Border Background="#F6F7F9" CornerRadius="3" BorderBrush="#E0E1E6" BorderThickness="1" />
+                    <StackPanel Grid.Column="1" Margin="8,2,0,0">
+                      <Border Height="4" Width="70" HorizontalAlignment="Left" CornerRadius="2" Background="#4B3DC9" />
+                      <Border Height="4" Width="110" HorizontalAlignment="Left" CornerRadius="2" Background="#CBCED6" Margin="0,6,0,0" />
+                      <Border Height="4" Width="90" HorizontalAlignment="Left" CornerRadius="2" Background="#955A12" Margin="0,6,0,0" />
+                      <Border Height="4" Width="60" HorizontalAlignment="Left" CornerRadius="2" Background="#0B7A6E" Margin="0,6,0,0" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+                <DockPanel>
+                  <c:Glyph DockPanel.Dock="Left" Kind="Sun" Width="15" Height="15" Margin="0,0,8,0" />
+                  <TextBlock Text="Graphite light" FontWeight="SemiBold" />
+                </DockPanel>
+              </StackPanel>
+            </RadioButton>
+          </UniformGrid>
+          <Border Style="{StaticResource Card}" Background="{DynamicResource AccentSoftBrush}" BorderThickness="0">
+            <DockPanel>
+              <c:Glyph DockPanel.Dock="Left" Kind="Text" Width="16" Height="16" Margin="0,1,10,0" VerticalAlignment="Top" Foreground="{DynamicResource AccentBrush}" />
+              <TextBlock TextWrapping="Wrap">
+                <Run Text="The editor font, tabs and display options are under" />
+                <Hyperlink Command="{Binding ShowSettingsPageCommand}" CommandParameter="Editor">Text editor</Hyperlink><Run Text="." />
+              </TextBlock>
+            </DockPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================================================== Text editor -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Editor}">
+        <StackPanel Margin="28,22,28,24">
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Reset to defaults" Command="{Binding Editor.ResetCommand}" VerticalAlignment="Top" ToolTip="Restore every text editor setting on this page" />
+            <StackPanel>
+              <TextBlock Text="Text editor" Style="{StaticResource PageTitle}" />
+              <TextBlock Text="How code looks and behaves in every editor tab." Style="{StaticResource PageIntro}" />
+            </StackPanel>
+          </DockPanel>
+
+          <TextBlock Text="FONT" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}" Padding="16,14">
+            <StackPanel>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="150" /></Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="Font family" Style="{StaticResource RowName}" Margin="0,0,0,6" />
+                  <ComboBox IsEditable="True" ItemsSource="{Binding Editor.FontFamilies}" Text="{Binding Editor.FontFamily, UpdateSourceTrigger=LostFocus}"
+                            MaxDropDownHeight="360" AutomationProperties.Name="Editor font family" ToolTip="Fixed-width fonts are listed first. Type a list such as 'JetBrains Mono, Consolas' to fall back when a font is missing.">
+                    <ComboBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate></ComboBox.ItemsPanel>
+                    <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" FontFamily="{Binding}" FontSize="13" /></DataTemplate></ComboBox.ItemTemplate>
+                  </ComboBox>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="Size" Style="{StaticResource RowName}" Margin="0,0,0,6" />
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Plus" Command="{Binding Editor.ZoomInCommand}" ToolTip="Larger (Ctrl+Mouse wheel up)" Width="26" Height="26" Margin="2,0,0,0" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Minus" Command="{Binding Editor.ZoomOutCommand}" ToolTip="Smaller (Ctrl+Mouse wheel down)" Width="26" Height="26" Margin="4,0,0,0" />
+                    <ComboBox IsEditable="True" ItemsSource="{x:Static svc:EditorPreferences.FontSizes}" Text="{Binding Editor.FontSize, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Editor font size" />
+                  </DockPanel>
+                </StackPanel>
+              </Grid>
+              <!-- A live sample in the chosen font and the current theme's colours. -->
+              <Border Margin="0,14,0,0" Padding="14,10" CornerRadius="6" Background="{DynamicResource EditorBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <TextBlock FontFamily="{Binding Editor.EditorFont}" FontSize="{Binding Editor.FontSize}" Foreground="{DynamicResource TextBrush}" TextWrapping="NoWrap">
+                  <Run Text="[" /><Run Text="ObservableProperty" Foreground="{DynamicResource SyntaxAttribute}" /><Run Text="]" /><LineBreak />
+                  <Run Text="private" Foreground="{DynamicResource SyntaxKeyword}" /><Run Text=" " /><Run Text="string" Foreground="{DynamicResource SyntaxKeyword}" /><Run Text=" " /><Run Text="_title" Foreground="{DynamicResource SyntaxMember}" /><Run Text=" = " /><Run Text="&quot;Orders 0O il1&quot;" Foreground="{DynamicResource SyntaxString}" /><Run Text=";" /><LineBreak />
+                  <Run Text="public" Foreground="{DynamicResource SyntaxKeyword}" /><Run Text=" " /><Run Text="decimal" Foreground="{DynamicResource SyntaxKeyword}" /><Run Text=" " /><Run Text="Gross" Foreground="{DynamicResource SyntaxMethod}" /><Run Text="(" /><Run Text="decimal" Foreground="{DynamicResource SyntaxKeyword}" /><Run Text=" " /><Run Text="net" Foreground="{DynamicResource SyntaxParameter}" /><Run Text=") =&gt; " /><Run Text="net" Foreground="{DynamicResource SyntaxParameter}" /><Run Text=" * " /><Run Text="1.2m" Foreground="{DynamicResource SyntaxNumber}" /><Run Text="; " /><Run Text="// != &lt;= =&gt;" Foreground="{DynamicResource SyntaxComment}" />
+                </TextBlock>
+              </Border>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="TABS AND INDENTATION" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}" Padding="16,12">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+              <StackPanel>
+                <TextBlock Text="Indent using" Style="{StaticResource RowName}" Margin="0,0,0,6" />
+                <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" HorizontalAlignment="Left">
+                  <StackPanel Orientation="Horizontal">
+                    <RadioButton Style="{StaticResource Segment}" GroupName="Indentation" Content="Spaces" IsChecked="{Binding Editor.InsertSpaces}" />
+                    <RadioButton Style="{StaticResource Segment}" GroupName="Indentation" Content="Tabs" IsChecked="{Binding Editor.InsertSpaces, Converter={StaticResource Not}}" />
+                  </StackPanel>
+                </Border>
+                <TextBlock Text="What the Tab key and new indented lines insert." Style="{StaticResource RowNote}" Margin="0,6,0,0" />
+              </StackPanel>
+              <StackPanel Grid.Column="2">
+                <TextBlock Text="Tab size" Style="{StaticResource RowName}" Margin="0,0,0,6" />
+                <ComboBox ItemsSource="{x:Static svc:EditorPreferences.TabSizes}" SelectedItem="{Binding Editor.TabSize}" ItemStringFormat="{}{0} columns" Width="140" HorizontalAlignment="Left" AutomationProperties.Name="Tab size" />
+                <TextBlock Text="The width of a tab and of one indentation level." Style="{StaticResource RowNote}" Margin="0,6,0,0" />
+              </StackPanel>
+            </Grid>
+          </Border>
+
+          <TextBlock Text="DISPLAY" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <StackPanel>
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ShowLineNumbers}">
+                <StackPanel><TextBlock Text="Line numbers" Style="{StaticResource RowName}" /><TextBlock Text="Numbers in the gutter beside each line." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.HighlightCurrentLine}">
+                <StackPanel><TextBlock Text="Highlight the current line" Style="{StaticResource RowName}" /><TextBlock Text="A soft band behind the line with the caret." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ShowFolding}">
+                <StackPanel><TextBlock Text="Code folding" Style="{StaticResource RowName}" /><TextBlock Text="Chevrons in the gutter collapse blocks, regions, using groups and XAML elements. Hover a chevron to see what it folds." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.WordWrap}">
+                <StackPanel><TextBlock Text="Word wrap" Style="{StaticResource RowName}" /><TextBlock Text="Long lines continue below instead of scrolling sideways." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ShowWhitespace}">
+                <StackPanel><TextBlock Text="Show spaces and tabs" Style="{StaticResource RowName}" /><TextBlock Text="Faint dots for spaces and arrows for tabs." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ShowLineEndings}">
+                <StackPanel><TextBlock Text="Show line endings" Style="{StaticResource RowName}" /><TextBlock Text="Marks where each line ends, showing CRLF and LF." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" IsEnabled="{Binding Editor.ShowColumnRuler}">
+                  <TextBlock Text="at column" Style="{StaticResource Caption}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <TextBox Text="{Binding Editor.ColumnRulerPosition, UpdateSourceTrigger=LostFocus}" Width="64" AutomationProperties.Name="Column guide position" />
+                </StackPanel>
+                <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ShowColumnRuler}">
+                  <StackPanel><TextBlock Text="Column guide" Style="{StaticResource RowName}" /><TextBlock Text="A vertical line marking a preferred line length." Style="{StaticResource RowNote}" /></StackPanel>
+                </CheckBox>
+              </DockPanel>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="EDITING" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <StackPanel>
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.CutCopyWholeLine}">
+                <StackPanel><TextBlock Text="Cut and copy the whole line when nothing is selected" Style="{StaticResource RowName}" /><TextBlock Text="Ctrl+X and Ctrl+C on an empty selection take the caret's line." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.EnableTextDragDrop}">
+                <StackPanel><TextBlock Text="Drag and drop selected text" Style="{StaticResource RowName}" /><TextBlock Text="Move a selection by dragging it; hold Ctrl to copy." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.HideCursorWhileTyping}">
+                <StackPanel><TextBlock Text="Hide the mouse pointer while typing" Style="{StaticResource RowName}" /><TextBlock Text="It reappears as soon as the mouse moves." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ScrollBelowDocument}">
+                <StackPanel><TextBlock Text="Scroll past the last line" Style="{StaticResource RowName}" /><TextBlock Text="The last line can scroll up to the top of the editor." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================================================== Code intelligence -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Intelligence}">
+        <StackPanel Margin="28,22,28,24">
+          <TextBlock Text="Code intelligence" Style="{StaticResource PageTitle}" />
+          <TextBlock Text="What the language service adds to the code you write. Diagnostics and quick fixes are always available." Style="{StaticResource PageIntro}" />
+          <TextBlock Text="ON HOVER" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding ShowQuickInfo}">
+              <StackPanel>
+                <TextBlock Text="Quick Info" Style="{StaticResource RowName}" />
+                <TextBlock Text="Hovering a C# symbol shows its coloured signature, kind, documentation, return value and exceptions. In XAML it describes elements, properties, resources and bindings. Errors and debugger values under the pointer show either way." Style="{StaticResource RowNote}" />
+              </StackPanel>
+            </CheckBox>
+          </Border>
+          <TextBlock Text="IN THE EDITOR" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <StackPanel>
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding ShowInlayHints}">
+                <StackPanel><TextBlock Text="Inline hints" Style="{StaticResource RowName}" /><TextBlock Text="Parameter names before literal arguments, and the type of a var whose value does not make it obvious." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding ShowCodeLens}">
+                <StackPanel><TextBlock Text="Reference counts (CodeLens)" Style="{StaticResource RowName}" /><TextBlock Text="Above each C# type and member: its references and its uses in XAML bindings and event handlers." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding ShowInlineBlame}">
+                <StackPanel><TextBlock Text="Git history above members" Style="{StaticResource RowName}" /><TextBlock Text="Who last changed each C# type and member, and how many people and commits shaped it. Click it for the commits." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================================================== Files and saving -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Files}">
+        <StackPanel Margin="28,22,28,24">
+          <TextBlock Text="Files and saving" Style="{StaticResource PageTitle}" />
+          <TextBlock Text="When files are saved, what saving tidies, and what happens when another program changes an open file." Style="{StaticResource PageIntro}" />
+          <TextBlock Text="SAVING" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <StackPanel>
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" IsEnabled="{Binding Editor.AutoSave}">
+                  <TextBlock Text="after" Style="{StaticResource Caption}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0" />
+                  <ComboBox ItemsSource="{x:Static svc:EditorPreferences.AutoSaveDelays}" SelectedItem="{Binding Editor.AutoSaveDelaySeconds}" ItemStringFormat="{}{0} s" Width="80" AutomationProperties.Name="Automatic save delay" />
+                </StackPanel>
+                <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.AutoSave}">
+                  <StackPanel>
+                    <TextBlock Text="Save automatically" Style="{StaticResource RowName}" />
+                    <TextBlock Text="Edited files are saved after a pause in typing. New files, files changed outside WpfStudio and files in a change review still wait for Save." Style="{StaticResource RowNote}" />
+                  </StackPanel>
+                </CheckBox>
+              </DockPanel>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.TrimTrailingWhitespace}">
+                <StackPanel><TextBlock Text="Trim trailing whitespace on save" Style="{StaticResource RowName}" /><TextBlock Text="Removes spaces and tabs at the ends of lines when you save. Markdown keeps them, because they mean a line break there. Automatic saves leave the text alone." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.EnsureFinalNewline}">
+                <StackPanel><TextBlock Text="End files with a line break" Style="{StaticResource RowName}" /><TextBlock Text="Adds a final line break, in the file's own line-ending style, when you save." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+            </StackPanel>
+          </Border>
+          <TextBlock Text="CHANGES FROM OTHER PROGRAMS" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding AutoReloadUnchangedFiles}">
+              <StackPanel>
+                <TextBlock Text="Load files without unsaved edits automatically" Style="{StaticResource RowName}" />
+                <TextBlock Text="When this is off, every open file changed on disk is listed above the editors until you choose to load the disk version or keep yours. When it is on, only files you have edited are listed." Style="{StaticResource RowNote}" />
+              </StackPanel>
+            </CheckBox>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================================================== ColtonGPT -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Assistant}">
+        <StackPanel Margin="28,22,28,24">
+          <TextBlock Text="ColtonGPT" Style="{StaticResource PageTitle}" />
+          <TextBlock Text="The model and connection the assistant uses." Style="{StaticResource PageIntro}" />
+          <ai:AssistantSettingsView DataContext="{Binding Features.Assistant.Settings}" MaxWidth="10000" />
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================================================== Keyboard shortcuts -->
+      <DockPanel Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Shortcuts}" Margin="28,22,28,0">
+        <StackPanel DockPanel.Dock="Top">
+          <TextBlock Text="Keyboard shortcuts" Style="{StaticResource PageTitle}" />
+          <TextBlock Text="Every command with a shortcut. Search by name, menu or keys." Style="{StaticResource PageIntro}" Margin="0,0,0,12" />
+          <TextBox Text="{Binding ShortcutFilter, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Search shortcuts, such as 'build' or 'Ctrl+Shift'" Margin="0,0,0,12" AutomationProperties.Name="Search shortcuts" />
+        </StackPanel>
+        <ListBox ItemsSource="{Binding Shortcuts}" Focusable="False" Margin="-4,0,-4,16">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <DockPanel>
+                <ItemsControl DockPanel.Dock="Right" Style="{StaticResource KeyCaps}" ItemsSource="{Binding Shortcut, Converter={StaticResource ToKeyCaps}}" />
+                <Border DockPanel.Dock="Left" Style="{StaticResource Badge}" Width="62" Margin="0,0,12,0">
+                  <TextBlock Text="{Binding Category}" FontSize="11" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" />
+                </Border>
+                <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Grid>
+  </DockPanel>
+</UserControl>

@@ -458,6 +458,14 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         await shell.OpenSettingsCommand.ExecuteAsync(null); await Idle();
         Assert.True(shell.IsSettingsOpen);
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/settings.png"));
+        foreach (var page in new[] { ShellViewModel.EditorPage, ShellViewModel.IntelligencePage, ShellViewModel.FilesPage, ShellViewModel.ShortcutsPage })
+        {
+            shell.ShowSettingsPageCommand.Execute(page); await Idle();
+            Assert.Equal(page, shell.SettingsPage);
+            Screenshot((FrameworkElement)window.Content, Path.Combine(root, $"artifacts/screenshots/settings-{page.ToLowerInvariant()}.png"));
+        }
+        Assert.NotEmpty(shell.Shortcuts);
+        shell.ShowSettingsPageCommand.Execute(ShellViewModel.AppearancePage);
         shell.CloseSettingsCommand.Execute(null);
         await shell.CloseActiveCommand.ExecuteAsync(null); await Idle();
         Assert.DoesNotContain(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Git");

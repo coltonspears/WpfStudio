@@ -324,6 +324,12 @@
             <MenuItem Header="Inline hints" IsCheckable="True" IsChecked="{Binding ShowInlayHints}" ToolTip="Parameter names for literal arguments and types of var declarations in C#" />
             <MenuItem Header="Reference counts (CodeLens)" IsCheckable="True" IsChecked="{Binding ShowCodeLens}" ToolTip="C# references and XAML bindings or handlers, above each C# type and member" />
             <MenuItem Header="Git history above members" IsCheckable="True" IsChecked="{Binding ShowInlineBlame}" ToolTip="Who last changed each C# type and member; click it for the commits behind it" />
+            <MenuItem Header="Quick Info on hover" IsCheckable="True" IsChecked="{Binding ShowQuickInfo}" ToolTip="Signature, documentation and kind of the C# symbol under the pointer" />
+            <Separator />
+            <MenuItem Header="Zoom in" c:Ui.Icon="ZoomIn" Command="{Binding Editor.ZoomInCommand}" InputGestureText="Ctrl+Wheel" />
+            <MenuItem Header="Zoom out" c:Ui.Icon="ZoomOut" Command="{Binding Editor.ZoomOutCommand}" InputGestureText="Ctrl+Wheel" />
+            <MenuItem Header="Reset zoom" c:Ui.Icon="ActualSize" Command="{Binding Editor.ResetZoomCommand}" />
+            <MenuItem Header="Text editor settings…" c:Ui.Icon="Settings" Command="{Binding OpenSettingsCommand}" CommandParameter="Editor" />
             <MenuItem Header="Collapse all regions" c:Ui.Icon="Collapse" Command="{Binding CollapseAllCommand}" />
             <MenuItem Header="Expand all regions" c:Ui.Icon="Expand" Command="{Binding ExpandAllCommand}" />
             <Separator />
@@ -1194,61 +1200,8 @@
       <Grid.InputBindings>
         <KeyBinding Key="Escape" Command="{Binding CloseSettingsCommand}" />
       </Grid.InputBindings>
-      <Border Style="{StaticResource OverlayCard}" Width="700" MaxHeight="800" Margin="20" VerticalAlignment="Center" Padding="0">
-        <DockPanel>
-          <Border DockPanel.Dock="Top" Padding="28,20,18,16" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-            <DockPanel>
-              <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CloseSettingsCommand}" ToolTip="Close (Esc)" />
-              <TextBlock Text="Settings" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" TextOptions.TextFormattingMode="Ideal" />
-            </DockPanel>
-          </Border>
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="28,20,28,24">
-              <TextBlock Text="APPEARANCE" Style="{StaticResource SectionLabel}" Margin="0,0,0,10" />
-              <UniformGrid Columns="2" Margin="0,0,0,28">
-                <RadioButton Style="{StaticResource ChoiceTile}" GroupName="Theme" IsChecked="{Binding IsDarkTheme, Mode=OneWay}" Command="{Binding SetThemeCommand}" CommandParameter="Dark" Margin="0,0,6,0">
-                  <StackPanel>
-                    <Border Height="54" CornerRadius="5" Background="#131417" BorderBrush="#34373F" BorderThickness="1" Margin="0,0,0,10">
-                      <Grid Margin="8">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                        <Border Background="#18191D" CornerRadius="3" />
-                        <StackPanel Grid.Column="1" Margin="8,2,0,0">
-                          <Border Height="4" Width="70" HorizontalAlignment="Left" CornerRadius="2" Background="#A3AAFF" />
-                          <Border Height="4" Width="110" HorizontalAlignment="Left" CornerRadius="2" Background="#3A3D45" Margin="0,6,0,0" />
-                          <Border Height="4" Width="90" HorizontalAlignment="Left" CornerRadius="2" Background="#E2B883" Margin="0,6,0,0" />
-                        </StackPanel>
-                      </Grid>
-                    </Border>
-                    <DockPanel>
-                      <c:Glyph DockPanel.Dock="Left" Kind="Moon" Width="15" Height="15" Margin="0,0,8,0" />
-                      <TextBlock Text="Graphite dark" FontWeight="SemiBold" />
-                    </DockPanel>
-                  </StackPanel>
-                </RadioButton>
-                <RadioButton Style="{StaticResource ChoiceTile}" GroupName="Theme" IsChecked="{Binding IsLightTheme, Mode=OneWay}" Command="{Binding SetThemeCommand}" CommandParameter="Light" Margin="6,0,0,0">
-                  <StackPanel>
-                    <Border Height="54" CornerRadius="5" Background="#EDEEF1" BorderBrush="#CBCED6" BorderThickness="1" Margin="0,0,0,10">
-                      <Grid Margin="8">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="40" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                        <Border Background="#F6F7F9" CornerRadius="3" BorderBrush="#E0E1E6" BorderThickness="1" />
-                        <StackPanel Grid.Column="1" Margin="8,2,0,0">
-                          <Border Height="4" Width="70" HorizontalAlignment="Left" CornerRadius="2" Background="#4B3DC9" />
-                          <Border Height="4" Width="110" HorizontalAlignment="Left" CornerRadius="2" Background="#CBCED6" Margin="0,6,0,0" />
-                          <Border Height="4" Width="90" HorizontalAlignment="Left" CornerRadius="2" Background="#955A12" Margin="0,6,0,0" />
-                        </StackPanel>
-                      </Grid>
-                    </Border>
-                    <DockPanel>
-                      <c:Glyph DockPanel.Dock="Left" Kind="Sun" Width="15" Height="15" Margin="0,0,8,0" />
-                      <TextBlock Text="Graphite light" FontWeight="SemiBold" />
-                    </DockPanel>
-                  </StackPanel>
-                </RadioButton>
-              </UniformGrid>
-              <ai:AssistantSettingsView DataContext="{Binding Features.Assistant.Settings}" MaxWidth="10000" />
-            </StackPanel>
-          </ScrollViewer>
-        </DockPanel>
+      <Border Style="{StaticResource OverlayCard}" Width="1000" Height="740" MaxWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=Grid}}" MaxHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Grid}}" Margin="24" VerticalAlignment="Center" Padding="0">
+        <views:SettingsView />
       </Border>
     </Grid>
   </Grid>
