@@ -518,7 +518,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
                     if (doc.IsReadOnly) continue;
                     var disk = await _store.ReadDiskAsync(doc.State);
                     var pending = ExternalChanges.FirstOrDefault(change => ReferenceEquals(change.Document, doc));
-                    if (disk?.Hash == doc.State.DiskHash) { if (pending is not null) ExternalChanges.Remove(pending); continue; }
+                    // The disk is back to what the editor last loaded or saved: nothing is left to decide.
+                    if (disk?.Hash == doc.State.DiskHash) { if (pending is not null || doc.State.HasExternalChange) ForgetExternalChange(doc); continue; }
                     if (disk is { } same && same.Text == doc.State.Content)
                     {
                         // The disk now holds exactly the editor text, e.g. the same edit made elsewhere.

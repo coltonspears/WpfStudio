@@ -121,6 +121,7 @@ internal static class SolutionCache
         foreach (var project in projectPaths)
         {
             files.Add(project);
+            files.Add(Path.Combine(Path.GetDirectoryName(project)!, "packages.config")); // Legacy projects restore from it.
             var obj = Path.Combine(Path.GetDirectoryName(project)!, "obj");
             files.Add(Path.Combine(obj, "project.assets.json"));
             files.Add(Path.Combine(obj, Path.GetFileName(project) + ".nuget.g.props"));

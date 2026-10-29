@@ -305,6 +305,15 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>The file editor history asked for, once; null when none was asked for or the commit did not change it.</summary>
+    private GitCommitFile? TakePreferredFile(IReadOnlyList<GitCommitFile> files)
+    {
+        var preferred = _preferredCommitFile;
+        _preferredCommitFile = null;
+        return preferred is null ? null : files.FirstOrDefault(file => string.Equals(file.Path.Replace('\\', '/'), preferred, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(file.OriginalPath?.Replace('\\', '/'), preferred, StringComparison.OrdinalIgnoreCase));
+    }
+
     private Task LoadCommit(GitCommit? commit)
     {
         _commitLoad?.Cancel();
@@ -331,12 +340,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             Quietly(() =>
             {
                 Replace(CommitFiles, details.Files);
-                var preferred = _preferredCommitFile;
-                _preferredCommitFile = null;
-                SelectedCommitFile = details.Files.FirstOrDefault(file => preferred is not null
-                    && (string.Equals(file.Path.Replace('\\', '/'), preferred, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(file.OriginalPath?.Replace('\\', '/'), preferred, StringComparison.OrdinalIgnoreCase)))
-                    ?? details.Files.FirstOrDefault();
+                SelectedCommitFile = TakePreferredFile(details.Files) ?? details.Files.FirstOrDefault();
             });
             await LoadCommitFile(SelectedCommitFile);
         }

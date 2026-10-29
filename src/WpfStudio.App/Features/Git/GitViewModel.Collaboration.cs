@@ -106,6 +106,8 @@ public sealed partial class GitViewModel
         SelectedTab = HistoryTab;
         SelectedCommit = VisibleHistory.FirstOrDefault(commit => commit.Id == line.Commit)
             ?? new GitCommit(line.Commit, line.ShortCommit, line.Author, line.Time.ToString("O"), line.Summary);
+        // Already showing this commit: its details do not load again, so switch to the requested file here.
+        if (CommitDetails?.Id == line.Commit && TakePreferredFile(CommitDetails.Files) is { } file) SelectedCommitFile = file;
     }
 
     // ------------------------------------------------------------------ Sign-in

@@ -102,6 +102,22 @@ public sealed class ShellDocumentTests
     }
 
     [Fact]
+    public async Task AnOutsideChangeThatIsUndoneClearsThePromptAndTheTabMarker()
+    {
+        await using var test = new ShellTestContext();
+        string path = await test.CreateFileAsync("Undone.cs", "original");
+        await test.Shell.OpenDocumentAsync(path);
+        await File.WriteAllTextAsync(path, "external");
+        await test.Shell.CheckExternalChangesAsync();
+        Assert.Single(test.Shell.ExternalChanges);
+        await File.WriteAllTextAsync(path, "original");
+        await test.Shell.CheckExternalChangesAsync();
+        Assert.Empty(test.Shell.ExternalChanges);
+        Assert.False(test.Store.Find(path)!.HasExternalChange);
+        Assert.DoesNotContain("⚠", test.Store.Find(path)!.Title);
+    }
+
+    [Fact]
     public async Task ADeletedFileOffersToCloseItsTabOrKeepItForSaving()
     {
         await using var test = new ShellTestContext();
