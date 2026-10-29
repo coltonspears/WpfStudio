@@ -66,6 +66,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         InitializeExperience();
         InitializeProjectXamlAnalysis();
         InitializeExternalChanges();
+        InitializeSettings();
         debugger.SourceRequested += (path, line) => _ = GuardAsync(() => NavigateAsync(path, line, 1, true));
         debugger.Breakpoints.CollectionChanged += (_, _) => ObserveBreakpoints();
         debugger.PropertyChanged += (_, e) =>
@@ -171,6 +172,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ShowInlineBlame = settings.ShowInlineBlame;
         ShowCodeLens = settings.ShowCodeLens;
         AutoReloadUnchangedFiles = settings.AutoReloadUnchangedFiles;
+        ShowQuickInfo = settings.ShowQuickInfo;
+        Editor.Load(settings.Editor);
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true;
@@ -407,8 +410,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
             ShowInlayHints = ShowInlayHints,
             ShowInlineBlame = ShowInlineBlame,
-            ShowCodeLens = ShowCodeLens
+            ShowCodeLens = ShowCodeLens,
+            ShowQuickInfo = ShowQuickInfo
         };
+        state.ContentChanged += (_, _) => ScheduleAutoSave();
         vm.CodeLensRequested += (entry, position) => _ = GuardAsync(async () =>
         {
             ActiveDocument = vm;
@@ -470,6 +475,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (doc.IsReadOnly) { Status = "Generated source snapshots are read-only"; return !doc.State.IsDirty; }
         try
         {
+            TidyBeforeSave(doc);
             await _store.SaveAsync(doc.State);
             if (doc.IsXaml) _xamlResources.Invalidate();
             RequestProjectXamlAnalysis();
@@ -952,7 +958,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) _store.DeleteRecovery(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = AutoReloadUnchangedFiles });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, Editor = Editor.ToSettings() });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }

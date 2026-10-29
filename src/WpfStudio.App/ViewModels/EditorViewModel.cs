@@ -362,6 +362,26 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (DataTipEvaluator is not { } evaluate || DebugExpressionAt(offset) is not { } expression) return null;
         return await evaluate(expression, token);
     }
+    /// <summary>Set by the attached editor, so tidying edits keep the caret, selection and undo history; false when it cannot apply them.</summary>
+    public Func<IReadOnlyList<WpfStudio.Core.Text.TextReplacement>, bool>? ApplyReplacements { get; set; }
+    /// <summary>Trims trailing whitespace and adds a final line break, as the settings ask, before an explicit save.</summary>
+    public void TidyForSave(bool trimTrailingWhitespace, bool ensureFinalNewline)
+    {
+        if (IsReadOnly || !(trimTrailingWhitespace || ensureFinalNewline)) return;
+        var edits = WpfStudio.Core.Text.WhitespaceCleanup.Edits(State.Content, State.Extension, trimTrailingWhitespace, ensureFinalNewline);
+        if (edits.Count == 0) return;
+        if (ApplyReplacements?.Invoke(edits) != true) State.Content = WpfStudio.Core.Text.WhitespaceCleanup.Apply(State.Content, edits);
+    }
+    /// <summary>Hovering code shows its signature and documentation; diagnostics and debugger values show either way.</summary>
+    [ObservableProperty] public partial bool ShowQuickInfo { get; set; } = true;
+    public async Task<QuickInfoResult?> QuickInfoAsync(int offset, CancellationToken token = default)
+    {
+        if (!IsCSharp || IsReadOnly || _disposed || !_workspace.IsConnected) return null;
+        await SyncAsync(token);
+        var version = State.Version;
+        var result = await _workspace.GetQuickInfoAsync(new(State.Path, Math.Clamp(offset, 0, State.Content.Length), version), token);
+        return result is not null && result.Version == version && version == State.Version ? result : null;
+    }
     public async Task<XamlHoverInfo?> HoverAsync(int offset, CancellationToken token = default)
     {
         if (!IsXaml || _disposed || !_workspace.IsConnected || _xamlContextUnavailable is not null) return null;

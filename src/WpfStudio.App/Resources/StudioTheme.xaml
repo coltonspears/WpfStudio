@@ -69,6 +69,8 @@
  <c:EqualsConverter x:Key="EqualsText"/>
  <c:TreeIndentConverter x:Key="TreeIndent"/>
  <c:SeverityGlyphConverter x:Key="SeverityGlyph"/>
+ <c:EqualsVisibilityConverter x:Key="EqualsVisibility"/>
+ <c:NotConverter x:Key="Not"/>
 
  <!-- ================================================================ Base -->
  <Style TargetType="Window">
@@ -279,6 +281,23 @@
   </ControlTemplate></Setter.Value></Setter>
  </Style>
  <!-- Selectable tile (theme picker, segmented choices). -->
+ <!-- One option of a segmented choice; put several in a rounded border. -->
+ <Style x:Key="Segment" TargetType="RadioButton">
+  <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+  <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+  <Setter Property="Cursor" Value="Hand"/>
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+   <Border x:Name="Chrome" Background="Transparent" CornerRadius="5" Padding="12,0" Height="26" Margin="1">
+    <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
+   </Border>
+   <ControlTemplate.Triggers>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
+    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/><Setter TargetName="Chrome" Property="BorderThickness" Value="1"/></Trigger>
+    <Trigger Property="IsChecked" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource RaisedBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
+   </ControlTemplate.Triggers>
+  </ControlTemplate></Setter.Value></Setter>
+ </Style>
  <Style x:Key="ChoiceTile" TargetType="RadioButton">
   <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
   <Setter Property="Background" Value="{DynamicResource EditorBrush}"/>

@@ -99,7 +99,7 @@ public static class CSharpFolding
                 if (quote < text.Length && text[quote] == '"')
                 { index = text[(index + 1)..quote].Contains('@') ? SkipVerbatim(text, quote) : SkipLiteral(text, quote); continue; }
             }
-            if (c == '{') braces.Push(index);
+            if (c == '{') braces.Push(BraceFoldStart(text, index));
             else if (c == '}' && braces.TryPop(out var open) && text.AsSpan(open, index - open).Contains('\n'))
                 regions.Add(new(open, index + 1, "{ … }"));
             index++;
@@ -108,6 +108,27 @@ public static class CSharpFolding
         CloseGroup(regions, ref usingStart, ref usingEnd, ref usingCount, "using …");
         regions.Sort((a, b) => a.Start != b.Start ? a.Start.CompareTo(b.Start) : b.End.CompareTo(a.End));
         return regions;
+    }
+
+    /// <summary>
+    /// A brace on a line of its own (Allman style) folds from the end of the declaration above it, so the folded
+    /// block reads <c>void Save() { … }</c> on one line instead of leaving the brace line behind.
+    /// </summary>
+    private static int BraceFoldStart(string text, int brace)
+    {
+        var lineStart = brace;
+        while (lineStart > 0 && text[lineStart - 1] is ' ' or '\t') lineStart--;
+        if (lineStart == 0 || text[lineStart - 1] != '\n') return brace;
+        var previousEnd = lineStart - 1;
+        if (previousEnd > 0 && text[previousEnd - 1] == '\r') previousEnd--;
+        var contentEnd = previousEnd;
+        while (contentEnd > 0 && text[contentEnd - 1] is ' ' or '\t') contentEnd--;
+        var previousStart = text.LastIndexOf('\n', Math.Max(0, contentEnd - 1)) + 1;
+        if (contentEnd <= previousStart || contentEnd > 0 && text[contentEnd - 1] is ';' or '{' or '}') return brace;
+        var previous = text.AsSpan(previousStart, contentEnd - previousStart).TrimStart();
+        // A comment or directive above the brace is not the declaration it belongs to.
+        if (previous.Length == 0 || previous.StartsWith("#") || previous.Contains("//", StringComparison.Ordinal) || previous.Contains("*/", StringComparison.Ordinal)) return brace;
+        return contentEnd;
     }
 
     private static void CloseGroup(List<FoldRegion> regions, ref int start, ref int end, ref int count, string title)

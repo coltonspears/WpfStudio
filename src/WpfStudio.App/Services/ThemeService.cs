@@ -63,6 +63,13 @@ public static class ThemeService
         ("SyntaxParameter",       "#8FC6EA", "#1E6894"),
         ("InlayHintBrush",        "#8A8F9B", "#767B86"),
         ("InlayHintBackgroundBrush","#26282F", "#EFF0F3"),
+        // Code folding: gutter chevrons, the band over a region about to fold, and the folded-block pill.
+        ("FoldMarkerBrush",       "#4A4E58", "#B4B7BF"),
+        ("FoldMarkerHotBrush",    "#9397A1", "#5B5F69"),
+        ("FoldRegionBrush",       "#168C94FF", "#124A52D4"),
+        ("FoldPlaceholderBrush",  "#A9AEBA", "#4E525C"),
+        ("FoldPlaceholderBackgroundBrush", "#272A35", "#EEEFF5"),
+        ("FoldPlaceholderBorderBrush", "#363A48", "#D6D8E2"),
         // Categorical data colours (profiler treemaps, generation bars). Fixed order, validated for colour-vision
         // deficiency on both surfaces; use them for identity only and never for status.
         ("Chart1Brush",           "#3987E5", "#2A78D6"),

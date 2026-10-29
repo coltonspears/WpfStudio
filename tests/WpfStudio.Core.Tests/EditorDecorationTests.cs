@@ -68,7 +68,9 @@ public sealed class EditorDecorationTests
         Assert.Contains(regions, r => r.Title == "/* … */");
         var blocks = regions.Where(r => r.Title == "{ … }").Select(Folded).ToArray();
         Assert.Equal(2, blocks.Length); // The class and Load(); single-line and literal braces are ignored.
-        Assert.StartsWith("{\n    /* multi", blocks[0]);
+        // A brace on its own line folds from the end of its declaration line.
+        Assert.StartsWith("\n{\n    /* multi", blocks[0]);
+        Assert.Equal("public class Customer", text[..regions.First(r => r.Title == "{ … }").Start].Split('\n')[^1].TrimStart());
         Assert.EndsWith("}", blocks[1]);
         Assert.Equal(regions.OrderBy(r => r.Start), regions);
     }
@@ -78,5 +80,27 @@ public sealed class EditorDecorationTests
     {
         Assert.Empty(CSharpFolding.Find("class C {\n void M() {\n"));
         Assert.Empty(CSharpFolding.Find("}\n}\n"));
+    }
+}
+
+public sealed class WhitespaceCleanupTests
+{
+    [Fact]
+    public void TrimsTrailingWhitespaceAndAddsAFinalLineBreakInTheFilesStyle()
+    {
+        const string text = "class C  \r\n{\t\r\n    int x; \r\n}";
+        var edits = WhitespaceCleanup.Edits(text, ".cs", trimTrailingWhitespace: true, ensureFinalNewline: true);
+        Assert.Equal("class C\r\n{\r\n    int x;\r\n}\r\n", WhitespaceCleanup.Apply(text, edits));
+        Assert.Equal("a\nb\n", WhitespaceCleanup.Apply("a\nb", WhitespaceCleanup.Edits("a\nb", ".cs", true, true)));
+        Assert.Empty(WhitespaceCleanup.Edits("tidy\n", ".cs", true, true));
+        Assert.Empty(WhitespaceCleanup.Edits("", ".cs", true, true));
+    }
+
+    [Fact]
+    public void MarkdownKeepsTrailingSpacesAndEachOptionIsIndependent()
+    {
+        Assert.Empty(WhitespaceCleanup.Edits("line  \nnext", ".md", trimTrailingWhitespace: true, ensureFinalNewline: false));
+        Assert.Equal("x \n", WhitespaceCleanup.Apply("x ", WhitespaceCleanup.Edits("x ", ".cs", trimTrailingWhitespace: false, ensureFinalNewline: true)));
+        Assert.Equal("x", WhitespaceCleanup.Apply("x ", WhitespaceCleanup.Edits("x ", ".cs", trimTrailingWhitespace: true, ensureFinalNewline: false)));
     }
 }

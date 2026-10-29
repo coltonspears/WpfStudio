@@ -352,7 +352,7 @@ public sealed partial class EditorSurface
             _emittedAt = offset;
             var view = owner.TextArea.TextView;
             var rowHeight = Math.Ceiling(view.DefaultLineHeight * 0.95);
-            var host = new Canvas { Width = 0, Height = rowHeight + view.DefaultBaseline, ClipToBounds = false };
+            var host = new Canvas { Width = 0, Height = rowHeight + view.DefaultBaseline, ClipToBounds = false, Tag = AdornmentTag };
             Canvas.SetTop(row, Math.Max(0, (rowHeight - view.DefaultLineHeight) / 2 + 1));
             host.Children.Add(row);
             TextBlock.SetBaselineOffset(host, host.Height);

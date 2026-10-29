@@ -29,7 +29,7 @@ public sealed partial class ShellViewModel
         // Commits, checkouts and merges change what each editor's change margin and blame compare with.
         features.Git.RepositoryChanged += () => { foreach (var document in Documents) _ = document.RefreshGitAsync(features.GitService, _lifetime.Token); };
         features.Git.WorkspaceFilesChanged += () => _ = GuardAsync(() => features.WorkspaceChanged());
-        features.Assistant.SettingsRequested += () => _ = OpenSettingsCommand.ExecuteAsync(null);
+        features.Assistant.SettingsRequested += () => _ = OpenSettingsCommand.ExecuteAsync(AssistantPage);
         features.Assistant.RefreshContextRequested += UpdateAssistantContext;
     }
     partial void OnActiveDocumentChanged(EditorViewModel? value)
@@ -60,7 +60,12 @@ public sealed partial class ShellViewModel
             _ = GuardAsync(() => Features.Packages.ActivateAsync());
         }
     }
-    [RelayCommand] private Task OpenSettingsAsync() => GuardAsync(async () => { if (Features != null) await Features.Assistant.InitializeAsync(); IsSettingsOpen = true; });
+    [RelayCommand] private Task OpenSettingsAsync(string? page) => GuardAsync(async () =>
+    {
+        if (Features != null) await Features.Assistant.InitializeAsync();
+        if (!string.IsNullOrEmpty(page)) SettingsPage = page;
+        IsSettingsOpen = true;
+    });
     [RelayCommand] private void CloseSettings() => IsSettingsOpen = false;
     [RelayCommand] private Task OpenPackagesAsync() => GuardAsync(async () =>
     {

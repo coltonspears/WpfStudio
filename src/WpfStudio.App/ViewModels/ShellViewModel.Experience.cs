@@ -337,7 +337,12 @@ public sealed partial class ShellViewModel
             yield return Command("Tools", git.PullRequestText, git.CreatePullRequestCommand, icon: "Link", detail: "Opens " + git.Remote.HostName + " for the current branch");
         }
         yield return Command("Tools", "Git changes", OpenGitCommand, icon: "Git", detail: "Stage, commit, branches and history");
-        yield return Command("Tools", "Settings", OpenSettingsCommand, shortcut: "Ctrl+,", icon: "Settings", detail: "Appearance and ColtonGPT");
+        yield return Command("Tools", "Settings", OpenSettingsCommand, shortcut: "Ctrl+,", icon: "Settings", detail: "Appearance, text editor, code intelligence, files, ColtonGPT and shortcuts");
+        yield return Command("Tools", "Text editor settings", OpenSettingsCommand, EditorPage, icon: "Text", detail: "Font, tabs and indentation, display and editing");
+        yield return Command("Tools", "Keyboard shortcuts", OpenSettingsCommand, ShortcutsPage, icon: "Keyboard", detail: "Every command with a shortcut");
+        yield return Command("View", "Zoom in", Editor.ZoomInCommand, shortcut: "Ctrl+Mouse wheel", icon: "ZoomIn", detail: "A larger editor font");
+        yield return Command("View", "Zoom out", Editor.ZoomOutCommand, icon: "ZoomOut", detail: "A smaller editor font");
+        yield return Command("View", "Reset zoom", Editor.ResetZoomCommand, icon: "ActualSize", detail: "The default editor font size");
         yield return Command("Tools", "Reload workspace", ReloadWorkspaceCommand, icon: "Refresh");
         yield return Command("Tools", "Restart language service", RestartWorkspaceCommand, icon: "Restart");
         yield return Command("Help", "Open WpfStudio data folder", OpenDataFolderCommand, icon: "FolderOpen", detail: "Settings, layouts, logs and recovery files");
