@@ -6,10 +6,16 @@ internal static class ProcessRunner
 {
     public static ProcessStartInfo DotNet(string directory, params string[] arguments)
     {
-        var start = new ProcessStartInfo("dotnet") { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-        ClearInheritedToolchain(start);
+        var start = Create("dotnet", directory, arguments);
         start.Environment["DOTNET_NOLOGO"] = "1";
         start.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+        return start;
+    }
+
+    public static ProcessStartInfo Create(string fileName, string directory, IEnumerable<string> arguments)
+    {
+        var start = new ProcessStartInfo(fileName) { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        ClearInheritedToolchain(start);
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         return start;
     }

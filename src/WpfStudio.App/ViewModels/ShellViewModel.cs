@@ -260,13 +260,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
             StartupProject = Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
             _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            Explorer.Clear();
-            foreach (var project in Projects)
-            {
-                var local = project;
-                var projectFiles = project.Files.Where(f => !f.IsGenerated).Select(f => f.Path).Append(project.ProjectPath).ToArray();
-                Explorer.Add(new ExplorerNode(project.Name, project.ProjectPath, true, () => ExplorerNode.FromFiles(Path.GetDirectoryName(local.ProjectPath)!, projectFiles, local.ProjectPath), local.ProjectPath));
-            }
+            RebuildExplorer(keepState: false);
             if (Explorer.Count == 0) foreach (var node in ExplorerNode.FromFiles(directory, _allFiles)) Explorer.Add(node);
             foreach (var issue in Workspace.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
             RecentWorkspaces.Remove(path); RecentWorkspaces.Insert(0, path); while (RecentWorkspaces.Count > 10) RecentWorkspaces.RemoveAt(10);
@@ -302,20 +296,24 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (Workspace is null) return;
         RefreshConfigurations();
-        var previousFiles = Projects.Select(project => project.ProjectPath + "|" + string.Join("|", project.Files.Where(f => !f.IsGenerated).Select(f => f.Path))).ToArray();
         Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
         StartupProject = Projects.FirstOrDefault(p => p.ProjectPath == startupPath) ?? Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
         _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        // Rebuilding the tree collapses it, so keep it when the projects still contain the same files.
-        var currentFiles = Projects.Select(project => project.ProjectPath + "|" + string.Join("|", project.Files.Where(f => !f.IsGenerated).Select(f => f.Path))).ToArray();
-        if (Explorer.Count > 0 && previousFiles.SequenceEqual(currentFiles, StringComparer.OrdinalIgnoreCase)) return;
+        RebuildExplorer(keepState: true);
+    }
+    /// <summary>
+    /// A solution appears as one node above its projects; an opened project file appears on its own. A reload, such as the one
+    /// after each build, keeps the nodes that were expanded and selected.
+    /// </summary>
+    private void RebuildExplorer(bool keepState)
+    {
+        var state = ExplorerNode.CaptureState(Explorer);
         Explorer.Clear();
-        foreach (var project in Projects)
-        {
-            var local = project;
-            var projectFiles = project.Files.Where(f => !f.IsGenerated).Select(f => f.Path).Append(project.ProjectPath).ToArray();
-            Explorer.Add(new ExplorerNode(project.Name, project.ProjectPath, true, () => ExplorerNode.FromFiles(Path.GetDirectoryName(local.ProjectPath)!, projectFiles, local.ProjectPath), local.ProjectPath));
-        }
+        var projects = Projects.Select(ExplorerNode.ForProject).ToArray();
+        if (Workspace is { } workspace && projects.Length > 0 && !Path.GetExtension(workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase))
+            Explorer.Add(ExplorerNode.ForSolution(workspace.Path, projects));
+        else foreach (var project in projects) Explorer.Add(project);
+        if (keepState) ExplorerNode.RestoreState(Explorer, state);
     }
     private static IEnumerable<string> EnumerateSourceFiles(string root)
     {
@@ -380,7 +378,19 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Configuration = current;
         _updatingChoices = false;
     }
-    [RelayCommand] private Task OpenNodeAsync(ExplorerNode? node) => node == null || node.IsFolder ? Task.CompletedTask : GuardAsync(() => OpenDocumentAsync(node.Path));
+    [RelayCommand] private Task OpenNodeAsync(ExplorerNode? node) => node switch
+    {
+        { Kind: ExplorerNodeKind.Dependency } => GuardAsync(() => OpenDependencyAsync(node)),
+        null or { IsFolder: true } => Task.CompletedTask,
+        _ => GuardAsync(() => OpenDocumentAsync(node.Path))
+    };
+    /// <summary>A package opens the package manager for its project and a project reference opens that project file. Assemblies and frameworks have no source to open.</summary>
+    private async Task OpenDependencyAsync(ExplorerNode node)
+    {
+        if (node.Dependency?.Kind == "Package") await OpenProjectPackagesAsync(node.ProjectPath);
+        else if (node.Dependency?.Kind == "Project" && File.Exists(node.Path)) await OpenDocumentAsync(node.Path);
+        else Status = node.ToolTip;
+    }
     public async Task OpenDocumentAsync(string path)
     {
         if (Path.GetExtension(path).ToLowerInvariant() is ".dll" or ".exe" or ".pdb" or ".png" or ".jpg" or ".jpeg" or ".ico" or ".ttf" or ".otf" or ".zip")
@@ -549,21 +559,38 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task CleanAsync() => RunBuildAsync(BuildOperation.Clean);
     [RelayCommand] private Task RunAsync() => RunBuildAsync(BuildOperation.Run);
     [RelayCommand] private Task TestAsync() => RunBuildAsync(BuildOperation.Test);
+    [RelayCommand] private Task BuildSelectedAsync() => RunSelectedBuildAsync(BuildOperation.Build);
+    [RelayCommand] private Task RebuildSelectedAsync() => RunSelectedBuildAsync(BuildOperation.Rebuild);
+    [RelayCommand] private Task CleanSelectedAsync() => RunSelectedBuildAsync(BuildOperation.Clean);
+    [RelayCommand] private Task RestoreSelectedAsync() => RunSelectedBuildAsync(BuildOperation.Restore);
     [RelayCommand] private void CancelOperation() { _operation?.Cancel(); Status = "Cancelling…"; }
-    private Task RunBuildAsync(BuildOperation operation) => GuardAsync(async () =>
+    /// <summary>Builds the solution or project chosen in Solution Explorer instead of the whole workspace.</summary>
+    private Task RunSelectedBuildAsync(BuildOperation operation)
+    {
+        if (SelectedNode is { CanBuild: true } node) return RunBuildAsync(operation, node.Path);
+        Status = "Select a solution or project in Solution Explorer";
+        return Task.CompletedTask;
+    }
+    /// <summary>The opened solution, for a project built from it.</summary>
+    private string? SolutionPathFor(string path) => Workspace is { } workspace && path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+        && !workspace.Path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? workspace.Path : null;
+    private Task RunBuildAsync(BuildOperation operation, string? target = null) => GuardAsync(async () =>
     {
         if (Workspace == null || IsBusy || _loading) return;
         IsBusy = true; _operation = new(); ToolRequested?.Invoke("Output"); Output = "";
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
-            var path = operation == BuildOperation.Run ? StartupProject?.ProjectPath ?? Workspace.Path : Workspace.Path;
-            Status = operation + "…";
-            var framework = Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? TargetFramework : null;
+            var path = target ?? (operation == BuildOperation.Run ? StartupProject?.ProjectPath ?? Workspace.Path : Workspace.Path);
+            var label = target == null ? operation.ToString() : $"{operation} {Path.GetFileNameWithoutExtension(path)}";
+            Status = label + "…";
+            // The selected framework belongs to the startup project; another project builds each of its frameworks.
+            var framework = Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase)
+                && (target == null || path.Equals(StartupProject?.ProjectPath, StringComparison.OrdinalIgnoreCase)) ? TargetFramework : null;
             using var progress = CreateBuildProgress();
-            var result = await _build.RunAsync(new(path, operation, Configuration, framework, LaunchProfile), progress, _operation.Token);
+            var result = await _build.RunAsync(new(path, operation, Configuration, framework, LaunchProfile, SolutionPath: SolutionPathFor(path)), progress, _operation.Token);
             progress.Flush();
-            Status = result.Cancelled ? "Cancelled" : result.ExitCode == 0 ? operation + " succeeded" : operation + $" failed (exit {result.ExitCode})";
+            Status = result.Cancelled ? "Cancelled" : result.ExitCode == 0 ? label + " succeeded" : label + $" failed (exit {result.ExitCode})";
             if (result.ExitCode == 0 && operation is BuildOperation.Build or BuildOperation.Rebuild or BuildOperation.Restore) await ReloadWorkspaceAsync();
         }
         finally { _operation.Dispose(); _operation = null; IsBusy = false; if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
@@ -573,6 +600,14 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (Debugger.IsStopped) { await Debugger.ContinueCommand.ExecuteAsync(null); return; }
         if (Debugger.IsActive) { Status = "The debugger is already running"; return; }
         if (IsBusy || _loading || StartupProject == null) return;
+        if (ProjectDiscovery.TargetsNetFramework(StartupProject, TargetFramework))
+        {
+            // netcoredbg debugs .NET (Core) processes only; the .NET Framework runtime needs Visual Studio's debugger.
+            if (await _dialogs.ConfirmAsync("Run without debugging", $"{StartupProject.Name} targets .NET Framework. The bundled debugger supports .NET 5 and later only. Run it without debugging instead?"))
+                await RunCommand.ExecuteAsync(null);
+            else Status = "Debugging .NET Framework applications isn't supported. Use Run without debugging (Ctrl+F5).";
+            return;
+        }
         if (!await EnsureDebuggerAsync()) return;
         IsBusy = true; _operation = new(); ToolRequested?.Invoke("Debugger");
         try
@@ -584,7 +619,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var profile = LaunchProfile;
             Status = "Building for debug…";
             using var progress = CreateBuildProgress();
-            var result = await _build.RunAsync(new(project.ProjectPath, BuildOperation.Build, configuration, framework), progress, _operation.Token);
+            var result = await _build.RunAsync(new(project.ProjectPath, BuildOperation.Build, configuration, framework, SolutionPath: SolutionPathFor(project.ProjectPath)), progress, _operation.Token);
             progress.Flush();
             if (result.ExitCode != 0 || result.Cancelled) { Status = "Debug launch cancelled: build did not succeed"; return; }
             var launch = await _build.ResolveLaunchAsync(project.ProjectPath, configuration, framework, profile, _operation.Token);

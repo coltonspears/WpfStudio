@@ -3,7 +3,15 @@ namespace WpfStudio.Contracts;
 /// <summary><paramref name="UseCache"/> starts from the project model saved by the last full load; call RefreshAsync afterwards.</summary>
 public sealed record LoadWorkspaceRequest(string Path, string Configuration = "Debug", string? TargetFramework = null, bool UseCache = false);
 public sealed record WorkspaceSnapshot(string Path, string SdkVersion, IReadOnlyList<WorkspaceProject> Projects, IReadOnlyList<WorkspaceIssue> Issues, IReadOnlyList<string>? Configurations = null, bool Cached = false);
-public sealed record WorkspaceProject(string Id, string Name, string ProjectPath, string? TargetFramework, string? OutputPath, bool IsExecutable, IReadOnlyList<WorkspaceFile> Files, string? AssemblyName = null, string? ProjectAssetsPath = null);
+/// <summary>
+/// <paramref name="IsSdkStyle"/> is false for a legacy project file, which only Visual Studio's MSBuild builds completely.
+/// <paramref name="TargetFrameworkMoniker"/> is the evaluated framework identity, such as <c>.NETFramework,Version=v4.8</c>;
+/// it is null for a multi-target project evaluated without a selected framework.
+/// </summary>
+public sealed record WorkspaceProject(string Id, string Name, string ProjectPath, string? TargetFramework, string? OutputPath, bool IsExecutable, IReadOnlyList<WorkspaceFile> Files, string? AssemblyName = null, string? ProjectAssetsPath = null,
+    bool IsSdkStyle = true, string? TargetFrameworkMoniker = null, IReadOnlyList<ProjectDependency>? Dependencies = null);
+/// <summary>A project's reference. Kind is Framework, Package, Project or Assembly; Path is the referenced project or assembly file when known.</summary>
+public sealed record ProjectDependency(string Kind, string Name, string? Version = null, string? Path = null);
 public sealed record WorkspaceFile(string Path, string Name, string Kind, bool IsGenerated = false, string? DocumentId = null, string? LogicalPath = null);
 public sealed record WorkspaceIssue(string Message, string Severity = "Warning");
 public sealed record UpdateDocumentRequest(string Path, string Text, long Version, bool Analyze = true);
@@ -109,7 +117,9 @@ public interface IWorkspaceRpc
 }
 
 public enum BuildOperation { Restore, Build, Rebuild, Clean, Run, Test }
-public sealed record BuildRequest(string Path, BuildOperation Operation = BuildOperation.Build, string Configuration = "Debug", string? TargetFramework = null, string? LaunchProfile = null, string? Arguments = null, bool XamlDebuggingInformation = false);
+/// <summary><paramref name="SolutionPath"/> is the solution a project is built from; Visual Studio's MSBuild receives its folder as SolutionDir, as Visual Studio passes it.</summary>
+public sealed record BuildRequest(string Path, BuildOperation Operation = BuildOperation.Build, string Configuration = "Debug", string? TargetFramework = null, string? LaunchProfile = null, string? Arguments = null, bool XamlDebuggingInformation = false,
+    string? SolutionPath = null);
 public sealed record BuildOutputEvent(string Text, bool IsError = false, WorkspaceDiagnostic? Diagnostic = null);
 public sealed record BuildResult(int ExitCode, bool Cancelled, IReadOnlyList<WorkspaceDiagnostic> Diagnostics);
 public sealed record LaunchProfile(string Name, string? CommandName, string? CommandLineArgs, string? WorkingDirectory, IReadOnlyDictionary<string, string> EnvironmentVariables, string? ExecutablePath = null);
