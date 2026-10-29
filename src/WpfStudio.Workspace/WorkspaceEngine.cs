@@ -20,7 +20,7 @@ namespace WpfStudio.Workspace;
 /// <summary>Lives exclusively in WorkspaceHost. User project assemblies are never loaded into the editor process.</summary>
 public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 {
-    private MSBuildWorkspace? _workspace;
+    private Microsoft.CodeAnalysis.Workspace? _workspace;
     private Solution? _solution;
     private readonly object _gate = new();
     private readonly Dictionary<string, long> _versions = new(StringComparer.OrdinalIgnoreCase);
@@ -41,7 +41,9 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         }
         try
         {
-            var snapshot = await LoadCoreAsync(request, cancellationToken).ConfigureAwait(false);
+            var acquired = request.UseCache ? await AcquireCachedAsync(request, cancellationToken).ConfigureAwait(false) : null;
+            acquired ??= await AcquireAsync(request, cancellationToken).ConfigureAwait(false);
+            var snapshot = await PublishAsync(request, acquired, cancellationToken).ConfigureAwait(false);
             // Discovering Roslyn's code fix providers takes a few seconds; do it before the first Ctrl+.
             _ = Task.Run(CodeActionCatalog.Warm, CancellationToken.None);
             lock (_gate) _workspaceInventoryReady = _solution is not null;
@@ -59,17 +61,58 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         }
     }
 
-    private async Task<WorkspaceSnapshot> LoadCoreAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
+    private Acquired? _prepared;
+
+    /// <summary>
+    /// Loads the workspace with MSBuild and runs its source generators while the current (usually cached) solution
+    /// keeps answering requests. <see cref="CommitRefreshAsync"/> then replaces it. A failed load leaves the current
+    /// solution in place.
+    /// </summary>
+    public async Task<bool> PrepareRefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
     {
-        lock (_gate)
+        var acquired = await AcquireAsync(request, cancellationToken).ConfigureAwait(false);
+        try
         {
-            _solution = null;
-            ResetPageProjection();
-            _semanticRevision++;
-            ResetProjectAnalysis();
+            if (acquired.Solution is not { } solution)
+                throw new InvalidOperationException(string.Join(" ", acquired.Issues.Select(issue => issue.Message)) is { Length: > 0 } reason
+                    ? reason : "MSBuild could not load the workspace.");
+            // Generators would otherwise run while publishing, when the client waits.
+            foreach (var project in solution.Projects)
+                await project.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch { acquired.Workspace?.Dispose(); throw; }
+        Interlocked.Exchange(ref _prepared, acquired)?.Workspace?.Dispose();
+        return true;
+    }
+
+    /// <summary>Replaces the current solution with the prepared one. Open buffers are not carried over; the client replays them.</summary>
+    public async Task<WorkspaceSnapshot> CommitRefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
+    {
+        var acquired = Interlocked.Exchange(ref _prepared, null) ?? throw new InvalidOperationException("No refreshed project model is ready.");
+        lock (_gate) { _workspaceInventoryReady = false; _workspaceLoadsInProgress++; }
+        try
+        {
+            var snapshot = await PublishAsync(request, acquired, cancellationToken).ConfigureAwait(false);
+            lock (_gate) _workspaceInventoryReady = _solution is not null;
+            return snapshot;
+        }
+        finally
+        {
+            lock (_gate) { _workspaceLoadsInProgress--; _semanticRevision++; }
+            SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>What a load produced before it replaces the engine's state: a solution, evaluations and timings.</summary>
+    private sealed record Acquired(Microsoft.CodeAnalysis.Workspace? Workspace, Solution? Solution, string Sdk, bool Cached, IReadOnlyList<string> Paths,
+        ConcurrentQueue<WorkspaceIssue> Issues, Func<string, Task<ProjectDiscovery.EvaluatedProject?>> Evaluate, LoadTimings Timings,
+        IReadOnlyDictionary<string, WorkspaceProject> CachedModels);
+
+    private static async Task<Acquired> AcquireAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
+    {
         var path = Path.GetFullPath(request.Path);
         var issues = new ConcurrentQueue<WorkspaceIssue>();
+        var timings = new LoadTimings();
         var paths = ProjectDiscovery.GetProjectPaths(path);
         // Each evaluation is a separate `dotnet msbuild` process that does not depend on the Roslyn
         // solution. Start them now so they overlap the solution load instead of running one by one after it.
@@ -84,24 +127,80 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         }, cancellationToken));
         foreach (var projectPath in paths) _ = Evaluate(projectPath);
         var sdk = "Unavailable";
+        MSBuildWorkspace? workspace = null;
+        Solution? loaded = null;
         try
         {
             sdk = await ToolchainResolver.RegisterAsync(path, cancellationToken).ConfigureAwait(false);
-            _workspace?.Dispose();
+            timings.Mark("SDK");
             var properties = new Dictionary<string, string> { ["Configuration"] = request.Configuration };
             if (!string.IsNullOrWhiteSpace(request.TargetFramework)) properties["TargetFramework"] = request.TargetFramework;
-            _workspace = MSBuildWorkspace.Create(properties);
-            _workspace.RegisterWorkspaceFailedHandler(args => issues.Enqueue(new WorkspaceIssue(args.Diagnostic.Message, args.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "Error" : "Warning")));
-            Solution loaded;
+            workspace = MSBuildWorkspace.Create(properties);
+            workspace.RegisterWorkspaceFailedHandler(args => issues.Enqueue(new WorkspaceIssue(args.Diagnostic.Message, args.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "Error" : "Warning")));
             if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
-                loaded = (await _workspace.OpenProjectAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false)).Solution;
-            else loaded = await _workspace.OpenSolutionAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
-            lock (_gate) { SetAuthoredSolution(loaded); _semanticRevision++; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _codeActions.Clear(); _xamlProjects.Clear(); }
+                loaded = (await workspace.OpenProjectAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false)).Solution;
+            else loaded = await workspace.OpenSolutionAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
+            timings.Mark("projects");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) { workspace?.Dispose(); throw; }
+        catch (Exception ex)
         {
             issues.Enqueue(new WorkspaceIssue($"Language workspace could not load: {ex.Message}. File navigation remains available.", "Error"));
-            lock (_gate) { _solution = null; _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _codeActions.Clear(); _xamlProjects.Clear(); }
+            workspace?.Dispose(); workspace = null; loaded = null;
+        }
+        return new(workspace, loaded, sdk, false, paths, issues, Evaluate, timings, new Dictionary<string, WorkspaceProject>());
+    }
+
+    // The model saved by the last full load, when nothing it depends on has changed since.
+    private static async Task<Acquired?> AcquireCachedAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
+    {
+        var timings = new LoadTimings();
+        try
+        {
+            var path = Path.GetFullPath(request.Path);
+            var sdk = await ToolchainResolver.RegisterAsync(path, cancellationToken).ConfigureAwait(false);
+            var entry = await SolutionCache.ReadAsync(request, sdk, cancellationToken).ConfigureAwait(false);
+            var paths = ProjectDiscovery.GetProjectPaths(path);
+            if (entry is null || !paths.All(project => entry.Evaluations.Any(evaluation => string.Equals(evaluation.ProjectPath, project, StringComparison.OrdinalIgnoreCase))))
+                return null;
+            var (workspace, solution) = SolutionCache.Create(entry);
+            timings.Mark("cached projects");
+            var evaluations = entry.Evaluations.ToDictionary(item => item.ProjectPath, item => Task.FromResult<ProjectDiscovery.EvaluatedProject?>(item.Project), StringComparer.OrdinalIgnoreCase);
+            return new(workspace, solution, sdk, true, paths, new(),
+                projectPath => evaluations.GetValueOrDefault(projectPath) ?? Task.FromResult<ProjectDiscovery.EvaluatedProject?>(null), timings,
+                entry.Models.ToDictionary(model => model.ProjectPath, StringComparer.OrdinalIgnoreCase));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A cache that cannot be read or rebuilt is only a missed shortcut; the full load follows.
+            SolutionCache.Delete(request);
+            return null;
+        }
+    }
+
+    private async Task<WorkspaceSnapshot> PublishAsync(LoadWorkspaceRequest request, Acquired acquired, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            _solution = null;
+            ResetPageProjection();
+            _semanticRevision++;
+            ResetProjectAnalysis();
+        }
+        var path = Path.GetFullPath(request.Path);
+        var issues = acquired.Issues;
+        var timings = acquired.Timings;
+        var paths = acquired.Paths;
+        var sdk = acquired.Sdk;
+        Task<ProjectDiscovery.EvaluatedProject?> Evaluate(string projectPath) => acquired.Evaluate(projectPath);
+        var previous = _workspace;
+        _workspace = acquired.Workspace;
+        if (!ReferenceEquals(previous, _workspace)) previous?.Dispose();
+        lock (_gate)
+        {
+            if (acquired.Solution is { } loaded) { SetAuthoredSolution(loaded); _semanticRevision++; }
+            else _solution = null;
+            _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _codeActions.Clear(); _xamlProjects.Clear();
         }
         var configurations = new HashSet<string>(ProjectDiscovery.GetDeclaredConfigurations(path), StringComparer.OrdinalIgnoreCase);
         var loadedProjects = _solution?.Projects.ToArray() ?? [];
@@ -134,8 +233,13 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                     var generated = IsGenerated(documentPath);
                     files[documentPath] = new WorkspaceFile(documentPath, document.Name, "Compile", generated, document.Id.ToString(), files.GetValueOrDefault(documentPath)?.LogicalPath);
                 }
+                // A cached start lists the generated files the last full load saw; running generators here would compile
+                // every project before the editor is usable. The background refresh lists them afresh.
+                if (acquired.Cached && acquired.CachedModels.TryGetValue(projectPath, out var cachedModel))
+                    foreach (var generatedFile in cachedModel.Files.Where(file => file.Kind == "Generated" && File.Exists(file.Path)))
+                        files[generatedFile.Path] = generatedFile;
                 // Roslyn runs source generators; exposing these documents makes generated Toolkit members navigable.
-                foreach (var document in await project.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false))
+                else foreach (var document in await project.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false))
                     if (document.FilePath is { } generatedPath)
                     {
                         var generatedText = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
@@ -153,6 +257,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var built = await Task.WhenAll(paths.Concat(loadedProjects.Select(p => p.FilePath).OfType<string>()).Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(BuildProjectAsync)).ConfigureAwait(false);
         var models = built.Select(result => result.Model).ToList();
+        timings.Mark(acquired.Cached ? "project model" : "evaluation and generators");
         foreach (var configuration in built.SelectMany(result => result.Configurations)) configurations.Add(configuration);
         lock (_gate)
         {
@@ -167,9 +272,34 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             }
         }
         await RefreshPageProjectionSourcesAsync(null, cancellationToken).ConfigureAwait(false);
-        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
+        // Every semantic request waits for the projection itself, so a cached start returns without it.
+        if (acquired.Cached) _ = Task.Run(WarmPageProjectionAsync, CancellationToken.None);
+        else await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
+        timings.Mark("XAML pages");
+        issues.Enqueue(new WorkspaceIssue(acquired.Cached
+            ? $"Language services started from the saved project model in {timings}; MSBuild is refreshing it in the background."
+            : $"Language services loaded in {timings}.", "Info"));
         if (configurations.Count == 0) { configurations.Add("Debug"); configurations.Add("Release"); }
-        return new WorkspaceSnapshot(path, sdk, models, issues.ToArray(), configurations.OrderBy(value => value == "Debug" ? 0 : value == "Release" ? 1 : 2).ThenBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray());
+        if (!acquired.Cached && acquired.Solution is { } fresh)
+        {
+            // Saved off the request path; a failure only means the next start loads from MSBuild again.
+            var evaluated = new Dictionary<string, ProjectDiscovery.EvaluatedProject?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var projectPath in paths) evaluated[projectPath] = await Evaluate(projectPath).ConfigureAwait(false);
+            var saved = models.ToArray();
+            _ = Task.Run(() =>
+            {
+                try { SolutionCache.Write(request, sdk, fresh, evaluated, saved); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
+                { Console.Error.WriteLine("Workspace cache: " + exception.Message); }
+            }, CancellationToken.None);
+        }
+        return new WorkspaceSnapshot(path, sdk, models, issues.ToArray(), configurations.OrderBy(value => value == "Debug" ? 0 : value == "Release" ? 1 : 2).ThenBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(), acquired.Cached);
+    }
+
+    private async Task WarmPageProjectionAsync()
+    {
+        try { await EnsurePageProjectionAsync(CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception) { Console.Error.WriteLine("XAML page projection: " + exception.Message); }
     }
 
     public async Task<DocumentUpdateResult> UpdateDocumentAsync(UpdateDocumentRequest request, CancellationToken cancellationToken)
@@ -472,5 +602,24 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             ResetPageProjection();
         }
         _workspace?.Dispose();
+        Interlocked.Exchange(ref _prepared, null)?.Workspace?.Dispose();
     }
+}
+
+/// <summary>Elapsed time per workspace load phase, reported in Output so slow loads can be attributed.</summary>
+internal sealed class LoadTimings
+{
+    private readonly System.Diagnostics.Stopwatch _total = System.Diagnostics.Stopwatch.StartNew();
+    private readonly List<(string Phase, TimeSpan Elapsed)> _phases = [];
+    private TimeSpan _last;
+
+    public void Mark(string phase)
+    {
+        var now = _total.Elapsed;
+        _phases.Add((phase, now - _last));
+        _last = now;
+    }
+
+    public override string ToString() =>
+        $"{_total.Elapsed.TotalSeconds:0.0} s ({string.Join(" · ", _phases.Select(item => $"{item.Phase} {item.Elapsed.TotalSeconds:0.0} s"))})";
 }

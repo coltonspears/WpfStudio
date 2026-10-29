@@ -56,7 +56,8 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             StopWorker();
             lock (_bufferGate) { _buffers.Clear(); _nameProjections.Clear(); }
-            _lastLoad = request;
+            // A restart reloads from MSBuild; only the first start of a session uses the saved model.
+            _lastLoad = request with { UseCache = false };
             await StartWorkerAsync(request.Path, cancellationToken).ConfigureAwait(false);
             // RPC cancellation otherwise waits for the server to acknowledge it. User build tasks may ignore cancellation.
             var snapshot = await Proxy.LoadAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -80,26 +81,62 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             StopWorker();
             await StartWorkerAsync(request.Path, cancellationToken).ConfigureAwait(false);
             var snapshot = await Proxy.LoadAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
-            UpdateDocumentRequest[] buffers;
-            lock (_bufferGate) buffers = _buffers.Values.ToArray();
-            foreach (var buffer in buffers)
-            {
-                var synchronized = await Proxy.UpdateDocumentAsync(buffer, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
-                if (synchronized.Accepted && synchronized.Version == buffer.Version) RememberAcceptedDocument(buffer);
-            }
-            var replayPlans = NameProjectionPlans();
-            foreach (var plan in replayPlans)
-            {
-                var result = await Proxy.ApplyXamlNameProjectionAsync(new(plan, buffers, Replay: true), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
-                if (!result.Accepted) throw new InvalidOperationException("Generated-name projection could not be restored: " + result.Status);
-                if (result.BaselineRefreshed) ForgetNameProjection(plan);
-            }
-            NotifyNameProjectionChanged();
-            SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+            await ReplayBuffersAsync(cancellationToken).ConfigureAwait(false);
             return snapshot;
         }
         catch { StopWorker(); throw; }
         finally { _lifecycle.Release(); }
+    }
+
+    /// <summary>
+    /// Replaces a cached start with a full MSBuild load in the same worker. The load runs outside the lifecycle lock,
+    /// so typing keeps updating the current solution; open buffers are replayed into the new one afterwards.
+    /// </summary>
+    public async Task<WorkspaceSnapshot> RefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken = default)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        cancellationToken = lifetime.Token;
+        IWorkspaceRpc proxy;
+        Process? process;
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { ObjectDisposedException.ThrowIf(_disposed, this); proxy = Proxy; process = _process; }
+        finally { _lifecycle.Release(); }
+        request = request with { UseCache = false };
+        await proxy.PrepareRefreshAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!ReferenceEquals(process, _process)) throw new OperationCanceledException("The language worker restarted while the project model was refreshing.");
+            var snapshot = await Proxy.CommitRefreshAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            await ReplayBuffersAsync(cancellationToken).ConfigureAwait(false);
+            return snapshot;
+        }
+        finally { _lifecycle.Release(); }
+    }
+
+    // RefreshAsync is the supported entry point; these satisfy the shared contract.
+    Task<bool> IWorkspaceRpc.PrepareRefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken) => Proxy.PrepareRefreshAsync(request, cancellationToken);
+    Task<WorkspaceSnapshot> IWorkspaceRpc.CommitRefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken) => Proxy.CommitRefreshAsync(request, cancellationToken);
+
+    // Called with the lifecycle lock held, after the worker replaced its solution.
+    private async Task ReplayBuffersAsync(CancellationToken cancellationToken)
+    {
+        UpdateDocumentRequest[] buffers;
+        lock (_bufferGate) buffers = _buffers.Values.ToArray();
+        foreach (var buffer in buffers)
+        {
+            var synchronized = await Proxy.UpdateDocumentAsync(buffer, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (synchronized.Accepted && synchronized.Version == buffer.Version) RememberAcceptedDocument(buffer);
+        }
+        var replayPlans = NameProjectionPlans();
+        foreach (var plan in replayPlans)
+        {
+            var result = await Proxy.ApplyXamlNameProjectionAsync(new(plan, buffers, Replay: true), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (!result.Accepted) throw new InvalidOperationException("Generated-name projection could not be restored: " + result.Status);
+            if (result.BaselineRefreshed) ForgetNameProjection(plan);
+        }
+        NotifyNameProjectionChanged();
+        SemanticStateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public async Task<DocumentUpdateResult> UpdateDocumentAsync(UpdateDocumentRequest request, CancellationToken cancellationToken = default)

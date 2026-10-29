@@ -9,6 +9,7 @@
         xmlns:ai="clr-namespace:WpfStudio.App.Features.ColtonGpt"
         xmlns:controls="clr-namespace:WpfStudio.App.Controls"
         xmlns:c="clr-namespace:WpfStudio.App.Controls"
+        xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff"
         xmlns:b="clr-namespace:WpfStudio.App.Behaviors"
         xmlns:term="clr-namespace:WpfStudio.Runtime.Terminal;assembly=WpfStudio.Runtime"
         xmlns:debug="clr-namespace:WpfStudio.Runtime.Debugging;assembly=WpfStudio.Runtime"
@@ -253,9 +254,8 @@
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <StackPanel Orientation="Horizontal">
-        <Border Width="20" Height="20" CornerRadius="5" Background="{DynamicResource AccentFillBrush}" Margin="14,0,8,0" VerticalAlignment="Center" ToolTip="WpfStudio">
-          <c:Glyph Kind="Window" Width="15" Height="15" Foreground="White" StrokeWeight="1.6" />
-        </Border>
+        <Image Source="{StaticResource AppMark}" Width="20" Height="20" Margin="14,0,8,0" VerticalAlignment="Center" ToolTip="WpfStudio"
+               RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="WpfStudio" />
         <Menu x:Name="MainMenu" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True">
           <MenuItem Header="_File">
             <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
@@ -322,8 +322,8 @@
             <MenuItem Header="SQL Server" c:Ui.Icon="Database" Command="{Binding ShowToolCommand}" CommandParameter="Database" />
             <Separator />
             <MenuItem Header="Inline hints" IsCheckable="True" IsChecked="{Binding ShowInlayHints}" ToolTip="Parameter names for literal arguments and types of var declarations in C#" />
-            <MenuItem Header="Reference counts (CodeLens)" IsCheckable="True" IsChecked="{Binding ShowCodeLens}" ToolTip="C# references and XAML bindings or handlers after each declaration" />
-            <MenuItem Header="Line blame" IsCheckable="True" IsChecked="{Binding ShowInlineBlame}" ToolTip="Show who last changed the caret's line, after the line" />
+            <MenuItem Header="Reference counts (CodeLens)" IsCheckable="True" IsChecked="{Binding ShowCodeLens}" ToolTip="C# references and XAML bindings or handlers, above each C# type and member" />
+            <MenuItem Header="Git history above members" IsCheckable="True" IsChecked="{Binding ShowInlineBlame}" ToolTip="Who last changed each C# type and member; click it for the commits behind it" />
             <MenuItem Header="Collapse all regions" c:Ui.Icon="Collapse" Command="{Binding CollapseAllCommand}" />
             <MenuItem Header="Expand all regions" c:Ui.Icon="Expand" Command="{Binding ExpandAllCommand}" />
             <Separator />
@@ -514,7 +514,75 @@
     </Border>
 
     <!-- ============================================================ Docking workspace -->
-    <dock:DockingManager x:Name="DockManager" Grid.Row="2" Margin="6,0,6,0" DocumentsSource="{Binding Documents}" LayoutItemContainerStyleSelector="{StaticResource DocumentStyles}" b:DockingBehavior.Shell="{Binding}"
+    <!-- ============================================================ Files changed outside WpfStudio -->
+    <DockPanel Grid.Row="2">
+    <Border DockPanel.Dock="Top" Margin="6,0,6,6" Padding="14,10,12,10" CornerRadius="6" BorderThickness="1"
+            Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource WarningBrush}"
+            Visibility="{Binding HasExternalChanges, Converter={StaticResource BooleanToVisibility}}" AutomationProperties.Name="Files changed outside WpfStudio">
+      <StackPanel>
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+            <Button Content="Load all disk versions" Command="{Binding LoadAllDiskVersionsCommand}" Margin="0,0,6,0"
+                    ToolTip="Every listed editor shows its file as it is on disk now. Unsaved edits in those files are discarded; deleted files' tabs close." />
+            <Button Content="Keep all my versions" Command="{Binding KeepAllEditorVersionsCommand}" Margin="0,0,6,0"
+                    ToolTip="Every listed editor keeps its text and is marked unsaved (•). Saving replaces the disk versions with yours." />
+            <Button Style="{StaticResource ToolbarButton}" Content="{Binding ExternalChangesToggleText}" Command="{Binding ToggleExternalChangesCommand}" />
+          </StackPanel>
+          <c:Glyph Kind="Warning" Width="18" Height="18" Margin="0,1,10,0" VerticalAlignment="Top" Foreground="{DynamicResource WarningBrush}" />
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock Text="{Binding ExternalChangesTitle}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding ExternalChangesHint}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
+          </StackPanel>
+        </DockPanel>
+        <StackPanel Visibility="{Binding IsExternalChangesExpanded, Converter={StaticResource BooleanToVisibility}}" Margin="28,8,0,0">
+          <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding ExternalChanges}" Focusable="False">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,8,0,8">
+                    <StackPanel>
+                      <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                          <Button Style="{StaticResource AccentButton}" Content="{Binding LoadLabel}" ToolTip="{Binding LoadConsequence}" Margin="0,0,6,0"
+                                  Command="{Binding DataContext.LoadDiskVersionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                          <Button Content="Keep my version" ToolTip="{Binding KeepConsequence}" Margin="0,0,6,0"
+                                  Command="{Binding DataContext.KeepEditorVersionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                          <ToggleButton Style="{StaticResource ToolbarToggle}" Content="Compare" IsChecked="{Binding IsComparing}" IsEnabled="{Binding CanCompare}"
+                                        ToolTip="Show what loading the disk version would change in the editor" />
+                        </StackPanel>
+                        <StackPanel>
+                          <TextBlock TextTrimming="CharacterEllipsis">
+                            <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" />
+                            <Run Text="{Binding Summary, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}" />
+                          </TextBlock>
+                          <TextBlock Text="{Binding Situation}" Margin="0,2,0,0" />
+                          <TextBlock Text="{Binding Path}" FontSize="11" Foreground="{DynamicResource SubtleBrush}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" ToolTip="{Binding Path}" />
+                        </StackPanel>
+                      </DockPanel>
+                      <!-- Both choices are spelled out, not hidden behind Yes and No. -->
+                      <Border Margin="0,6,0,0" Padding="8,5" CornerRadius="4" Background="{DynamicResource SurfaceBrush}">
+                        <StackPanel>
+                          <TextBlock Text="{Binding LoadConsequence}" TextWrapping="Wrap" FontSize="11.5" />
+                          <TextBlock Text="{Binding KeepConsequence}" TextWrapping="Wrap" FontSize="11.5" Margin="0,2,0,0" />
+                        </StackPanel>
+                      </Border>
+                      <diff:DiffView Height="280" Margin="0,8,0,0"
+                                     Visibility="{Binding IsComparing, Converter={StaticResource BooleanToVisibility}}"
+                                     Before="{Binding CompareBefore, Mode=OneWay}" After="{Binding CompareAfter, Mode=OneWay}" FilePath="{Binding Path}"
+                                     OldLabel="In WpfStudio (your version)" NewLabel="On disk (changed outside)" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+          <CheckBox IsChecked="{Binding AutoReloadUnchangedFiles}" Margin="0,6,0,0"
+                    Content="Load files without unsaved edits automatically. Only files you have edited will be listed here."
+                    ToolTip="When this is on, a file you have not edited in WpfStudio simply shows its new disk version, as after a Git checkout." />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+    <dock:DockingManager x:Name="DockManager" Margin="6,0,6,0" DocumentsSource="{Binding Documents}" LayoutItemContainerStyleSelector="{StaticResource DocumentStyles}" b:DockingBehavior.Shell="{Binding}"
                          Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}" GridSplitterWidth="5" GridSplitterHeight="5"
                          DocumentPaneControlStyle="{DynamicResource StudioDocumentPaneStyle}" AnchorablePaneControlStyle="{DynamicResource StudioAnchorablePaneStyle}"
                          DocumentHeaderTemplate="{DynamicResource StudioDocumentHeaderTemplate}" AnchorableHeaderTemplate="{DynamicResource StudioAnchorableHeaderTemplate}" AnchorableTitleTemplate="{DynamicResource StudioAnchorableTitleTemplate}">
@@ -581,9 +649,7 @@
                       <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <StackPanel Orientation="Horizontal">
-                      <Border Width="48" Height="48" CornerRadius="12" Background="{DynamicResource AccentFillBrush}" VerticalAlignment="Center">
-                        <c:Glyph Kind="Window" Width="32" Height="32" Foreground="White" StrokeWeight="1.5" />
-                      </Border>
+                      <Image Source="{StaticResource AppMark}" Width="48" Height="48" VerticalAlignment="Center" AutomationProperties.Name="WpfStudio" />
                       <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
                         <TextBlock Text="WpfStudio" FontSize="28" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" />
                         <TextBlock Text="An IDE for WPF, XAML and MVVM — with the data and tools behind your app." Foreground="{DynamicResource MutedBrush}" FontSize="14" Margin="0,2,0,0" />
@@ -823,6 +889,7 @@
         </layout:LayoutPanel>
       </layout:LayoutRoot>
     </dock:DockingManager>
+    </DockPanel>
 
     <!-- ============================================================ Status bar -->
     <Border Grid.Row="3">
@@ -1105,7 +1172,7 @@
                 </ListBox>
               </DockPanel>
             </Border>
-            <diff:DiffView xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff" Grid.Column="1" x:Name="ReviewDiff"
+            <diff:DiffView Grid.Column="1" x:Name="ReviewDiff"
                            Before="{Binding SelectedPreviewChange.Before}" After="{Binding SelectedPreviewChange.After}" FilePath="{Binding SelectedPreviewChange.Path}"
                            OldLabel="Current" NewLabel="After applying" AutomationProperties.Name="Change diff">
               <diff:DiffView.Header>

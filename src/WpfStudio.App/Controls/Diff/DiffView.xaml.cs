@@ -1,6 +1,7 @@
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -302,8 +303,13 @@ public partial class DiffView : UserControl
         _syncing = true;
         try
         {
-            if (Math.Abs(target.VerticalOffset - source.VerticalOffset) > 0.5) target.ScrollToVerticalOffset(source.VerticalOffset);
-            if (Math.Abs(target.HorizontalOffset - source.HorizontalOffset) > 0.5) target.ScrollToHorizontalOffset(source.HorizontalOffset);
+            // Read and write the text views directly. The editors' ScrollViewer offsets lag one layout pass behind,
+            // and ScrollToVerticalOffset is deferred until then: copying a stale position and echoing it back later
+            // pulled the scrolled side backwards while the wheel was still turning.
+            IScrollInfo from = source.TextArea.TextView, to = target.TextArea.TextView;
+            if (Math.Abs(to.VerticalOffset - from.VerticalOffset) > 0.5) to.SetVerticalOffset(from.VerticalOffset);
+            if (Math.Abs(to.HorizontalOffset - from.HorizontalOffset) > 0.5) to.SetHorizontalOffset(from.HorizontalOffset);
+            to.ScrollOwner?.InvalidateScrollInfo();
         }
         finally { _syncing = false; }
         UpdateRulerViewport();

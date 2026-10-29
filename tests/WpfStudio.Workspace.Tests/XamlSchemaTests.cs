@@ -62,6 +62,13 @@ public sealed class XamlSchemaTests
         Assert.Contains(result.Items, item => item.DisplayText == "w:ReferenceWidget");
     }
 
+    [Fact]
+    public void RetiredXmlnsCompatibleWithNamespacesResolveLikeTheirReplacement()
+    {
+        var text = $"<Window {Namespaces} xmlns:old=\"urn:widgets-2019\">\n<old:ReferenceWidget Caption=\"Ready\" />\n</Window>";
+        Assert.Empty(Analyze(text));
+    }
+
     [Theory]
     [InlineData("<Bu$$tton />", "Button", "Button")]
     [InlineData("<c:Cust$$omerControl />", "c:CustomerControl", "c:CustomerControl")]
@@ -248,6 +255,7 @@ public sealed class XamlSchemaTests
             .Concat(wpfPaths.Select(path => MetadataReference.CreateFromFile(path))).ToArray();
         var library = CSharpCompilation.Create("SchemaWidgets", [CSharpSyntaxTree.ParseText("""
             [assembly: System.Windows.Markup.XmlnsDefinition("urn:widgets", "ReferenceWidgets")]
+            [assembly: System.Windows.Markup.XmlnsCompatibleWith("urn:widgets-2019", "urn:widgets")]
             namespace ReferenceWidgets;
             public class ReferenceWidget : System.Windows.Controls.Control
             {

@@ -95,13 +95,19 @@ public sealed partial class GitViewModel
         catch (Exception ex) { Error = ex.Message; }
     }
 
-    /// <summary>Shows a commit from editor blame in History, loading its details even when it is not in the loaded page.</summary>
-    public void ShowCommit(BlameLine line)
+    /// <summary>
+    /// Shows a commit from editor blame in History, loading its details even when it is not in the loaded page.
+    /// With <paramref name="relativePath"/>, that file's diff is selected instead of the commit's first file.
+    /// </summary>
+    public void ShowCommit(BlameLine line, string? relativePath = null)
     {
         if (!HasRepository || line.IsUncommitted) return;
+        _preferredCommitFile = relativePath?.Replace('\\', '/');
         SelectedTab = HistoryTab;
         SelectedCommit = VisibleHistory.FirstOrDefault(commit => commit.Id == line.Commit)
             ?? new GitCommit(line.Commit, line.ShortCommit, line.Author, line.Time.ToString("O"), line.Summary);
+        // Already showing this commit: its details do not load again, so switch to the requested file here.
+        if (CommitDetails?.Id == line.Commit && TakePreferredFile(CommitDetails.Files) is { } file) SelectedCommitFile = file;
     }
 
     // ------------------------------------------------------------------ Sign-in

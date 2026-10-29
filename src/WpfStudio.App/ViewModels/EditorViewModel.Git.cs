@@ -13,7 +13,7 @@ public sealed partial class EditorViewModel
     /// <summary>The committed version of this file; null outside a repository or before it is read.</summary>
     public GitFileBase? GitBase { get; private set; }
     public IReadOnlyList<LineChange> LineChanges { get; private set; } = [];
-    /// <summary>Blame for <see cref="BlameVersion"/>; empty while not computed or when inline blame is off.</summary>
+    /// <summary>Blame for <see cref="BlameVersion"/>; empty while not computed, when Git history is hidden, or outside C#.</summary>
     public IReadOnlyList<BlameLine> Blame { get; private set; } = [];
     public long BlameVersion { get; private set; } = -1;
     public event Action? GitChanged;
@@ -21,7 +21,7 @@ public sealed partial class EditorViewModel
     public bool ShowInlineBlame
     {
         get => _showInlineBlame;
-        set { if (_showInlineBlame == value) return; _showInlineBlame = value; OnPropertyChanged(); if (value) ScheduleBlame(); else { Blame = []; GitChanged?.Invoke(); } }
+        set { if (_showInlineBlame == value) return; _showInlineBlame = value; OnPropertyChanged(); if (value) ScheduleBlame(); else { Blame = []; GitChanged?.Invoke(); } UpdateLensRows(); }
     }
     private bool _showInlineBlame = true;
 
@@ -77,7 +77,8 @@ public sealed partial class EditorViewModel
     private void ScheduleBlame()
     {
         _gitBlame?.Cancel(); _gitBlame?.Dispose(); _gitBlame = null;
-        if (!_showInlineBlame || _git is not { } git || GitBase is not { IsTracked: true, HeadCommit: not null } gitBase) return;
+        // Blame is shown above C# declarations only.
+        if (!_showInlineBlame || !IsCSharp || _git is not { } git || GitBase is not { IsTracked: true, HeadCommit: not null } gitBase) return;
         _gitBlame = new();
         var token = _gitBlame.Token;
         var text = State.Content;

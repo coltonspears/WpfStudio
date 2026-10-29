@@ -136,13 +136,13 @@ public sealed partial class EditorSurface : TextEditor
         _hints.Enabled = ViewModel.ShowInlayHints;
         ApplyDecorations();
         InstallFolding();
-        _changeMargin?.Update(); _blameLine = -1; UpdateBlameLine(); ApplyCodeLens();
+        _changeMargin?.Update(); ApplyCodeLens();
         _syncing = false; Navigate();
     }
     private void Detach()
     {
         CancelHover();
-        _changePopup.IsOpen = false;
+        _changePopup.IsOpen = false; _historyPopup.IsOpen = false;
         CancelPendingCompletion();
         _completion?.Close(); _completionRequest?.Cancel();
         if (_attached != null)
@@ -172,8 +172,7 @@ public sealed partial class EditorSurface : TextEditor
     {
         if (args.PropertyName == nameof(EditorViewModel.ExecutionLine)) { _margin.InvalidateVisual(); TextArea.TextView.InvalidateLayer(KnownLayer.Background); }
         if (args.PropertyName == nameof(EditorViewModel.ShowInlayHints) && ViewModel is { } model) { _hints.Enabled = model.ShowInlayHints; TextArea.TextView.Redraw(); }
-        if (args.PropertyName == nameof(EditorViewModel.ShowInlineBlame)) { _blameLine = -1; UpdateBlameLine(); }
-        if (args.PropertyName == nameof(EditorViewModel.ShowCodeLens)) ApplyCodeLens();
+        if (args.PropertyName is nameof(EditorViewModel.ShowInlineBlame) or nameof(EditorViewModel.ShowCodeLens)) ApplyCodeLens();
         if (args.PropertyName == nameof(EditorViewModel.XamlContextRevision))
         {
             _completionRequest?.Cancel(); _completion?.Close(); CancelHover();

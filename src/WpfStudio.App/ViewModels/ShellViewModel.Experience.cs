@@ -322,8 +322,8 @@ public sealed partial class ShellViewModel
         yield return MemoryCommand("Memory: go to type or address", MemoryProfiler.FocusGoToCommand, icon: "Search");
         yield return MemoryCommand("Export memory report…", MemoryProfiler.ExportReportCommand, icon: "Export", detail: "HTML report or JSON data");
         yield return Command("View", ShowInlayHints ? "Hide inline hints" : "Show inline hints", ToggleInlayHintsCommand, icon: "Text", detail: "Parameter names for literal arguments and types of var declarations");
-        yield return Command("View", ShowCodeLens ? "Hide reference counts (CodeLens)" : "Show reference counts (CodeLens)", ToggleCodeLensCommand, icon: "Search", detail: "C# references and XAML bindings after each declaration");
-        yield return Command("View", ShowInlineBlame ? "Hide line blame" : "Show line blame", ToggleInlineBlameCommand, icon: "Git", detail: "Author, age and summary of the commit that last changed the caret's line");
+        yield return Command("View", ShowCodeLens ? "Hide reference counts (CodeLens)" : "Show reference counts (CodeLens)", ToggleCodeLensCommand, icon: "Search", detail: "C# references and XAML bindings above each declaration");
+        yield return Command("View", ShowInlineBlame ? "Hide Git history above members" : "Show Git history above members", ToggleInlineBlameCommand, icon: "Git", detail: "Who last changed each C# type and member, with the commits behind it");
         yield return Command("View", "Collapse all regions", CollapseAllCommand, icon: "Collapse");
         yield return Command("View", "Expand all regions", ExpandAllCommand, icon: "Expand");
         yield return Command("View", "Dark theme", SetThemeCommand, "Dark", icon: "Moon");

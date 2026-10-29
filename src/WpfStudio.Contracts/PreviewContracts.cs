@@ -18,7 +18,18 @@ public sealed record PreviewRequest(string Path, string Text, long Version, doub
     string? AssemblyPath = null, string? ProjectDirectory = null, PreviewMode Mode = PreviewMode.Source,
     string? ViewTypeName = null, string? ApplicationResourcePath = "App.xaml",
     PreviewScenario? Scenario = null, bool UseDesignTimeValues = true, bool SizeToRoot = false,
-    string? ProjectAssetsPath = null);
+    string? ProjectAssetsPath = null, PreviewReferenceSet? References = null);
+/// <summary>
+/// A non-package assembly the project references, as MSBuild resolved it: a HintPath or file reference, a project
+/// reference's output, or a dependency or satellite found beside one. <see cref="RelativePath"/> is its place in
+/// the output folder, for example <c>Vendor.Controls.dll</c> or <c>fr/Vendor.Controls.resources.dll</c>.
+/// </summary>
+public sealed record PreviewReference(string Path, string RelativePath);
+/// <summary>
+/// The references MSBuild resolved for the previewed project and its project references, and the folders their
+/// HintPaths point to, which the preview also searches for assemblies loaded later.
+/// </summary>
+public sealed record PreviewReferenceSet(IReadOnlyList<PreviewReference> Assemblies, IReadOnlyList<string> SearchDirectories, IReadOnlyList<string> Warnings);
 public sealed record PreviewBuildProvenance(string AssemblyPath, string AssemblyName, string AssemblySha256,
     string ModuleVersionId, string ViewTypeName, string? ApplicationResourcePath);
 public sealed record PreviewBounds(double X, double Y, double Width, double Height);

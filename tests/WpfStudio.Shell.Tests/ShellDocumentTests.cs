@@ -39,7 +39,7 @@ public sealed class ShellDocumentTests
     }
 
     [Fact]
-    public async Task ExternalChangeReloadsCleanBuffersAndMarksDirtyBuffers()
+    public async Task ExternalChangesWaitForAChoiceAndNeverReplaceTheEditorTextOnTheirOwn()
     {
         await using var test = new ShellTestContext();
         string clean = await test.CreateFileAsync("Clean.cs", "clean original");
@@ -50,10 +50,88 @@ public sealed class ShellDocumentTests
         await File.WriteAllTextAsync(clean, "clean external");
         await File.WriteAllTextAsync(dirty, "dirty external");
         await test.Shell.CheckExternalChangesAsync();
+        Assert.Equal("clean original", test.Store.Find(clean)!.Content);
+        Assert.Equal("my edit", test.Store.Find(dirty)!.Content);
+        Assert.Equal(["Clean.cs", "Dirty.cs"], test.Shell.ExternalChanges.Select(change => change.Name).Order());
+        Assert.True(test.Store.Find(dirty)!.HasExternalChange);
+        Assert.Contains("⚠", test.Store.Find(dirty)!.Title);
+        var dirtyChange = test.Shell.ExternalChanges.Single(change => change.Name == "Dirty.cs");
+        Assert.True(dirtyChange.HasUnsavedEdits);
+        Assert.Contains("unsaved edits are discarded", dirtyChange.LoadConsequence);
+
+        // A second check of the same disk versions does not duplicate the prompt.
+        await test.Shell.CheckExternalChangesAsync();
+        Assert.Equal(2, test.Shell.ExternalChanges.Count);
+
+        await test.Shell.LoadDiskVersionCommand.ExecuteAsync(test.Shell.ExternalChanges.Single(change => change.Name == "Clean.cs"));
         Assert.Equal("clean external", test.Store.Find(clean)!.Content);
         Assert.False(test.Store.Find(clean)!.IsDirty);
+
+        test.Shell.KeepEditorVersionCommand.Execute(dirtyChange);
+        Assert.Empty(test.Shell.ExternalChanges);
         Assert.Equal("my edit", test.Store.Find(dirty)!.Content);
-        Assert.True(test.Store.Find(dirty)!.HasExternalChange);
+        Assert.True(test.Store.Find(dirty)!.IsDirty);
+        Assert.False(test.Store.Find(dirty)!.HasExternalChange);
+        // Keeping your version accepts the disk version as the one being replaced: saving needs no further question.
+        await test.Shell.SaveAllCommand.ExecuteAsync(null);
+        Assert.Equal("my edit", await File.ReadAllTextAsync(dirty));
+    }
+
+    [Fact]
+    public async Task AutomaticReloadAppliesOnlyToFilesWithoutUnsavedEdits()
+    {
+        await using var test = new ShellTestContext();
+        string clean = await test.CreateFileAsync("Clean.cs", "clean original");
+        string dirty = await test.CreateFileAsync("Dirty.cs", "dirty original");
+        await test.Shell.OpenDocumentAsync(clean);
+        await test.Shell.OpenDocumentAsync(dirty);
+        test.Shell.AutoReloadUnchangedFiles = true;
+        test.Store.Find(dirty)!.Content = "my edit";
+        await File.WriteAllTextAsync(clean, "clean external");
+        await File.WriteAllTextAsync(dirty, "dirty external");
+        await test.Shell.CheckExternalChangesAsync();
+        Assert.Equal("clean external", test.Store.Find(clean)!.Content);
+        Assert.False(test.Store.Find(clean)!.IsDirty);
+        Assert.Equal("Dirty.cs", Assert.Single(test.Shell.ExternalChanges).Name);
+
+        // The same text arriving on disk resolves the prompt without a choice.
+        await File.WriteAllTextAsync(dirty, "my edit");
+        await test.Shell.CheckExternalChangesAsync();
+        Assert.Empty(test.Shell.ExternalChanges);
+        Assert.False(test.Store.Find(dirty)!.IsDirty);
+    }
+
+    [Fact]
+    public async Task AnOutsideChangeThatIsUndoneClearsThePromptAndTheTabMarker()
+    {
+        await using var test = new ShellTestContext();
+        string path = await test.CreateFileAsync("Undone.cs", "original");
+        await test.Shell.OpenDocumentAsync(path);
+        await File.WriteAllTextAsync(path, "external");
+        await test.Shell.CheckExternalChangesAsync();
+        Assert.Single(test.Shell.ExternalChanges);
+        await File.WriteAllTextAsync(path, "original");
+        await test.Shell.CheckExternalChangesAsync();
+        Assert.Empty(test.Shell.ExternalChanges);
+        Assert.False(test.Store.Find(path)!.HasExternalChange);
+        Assert.DoesNotContain("⚠", test.Store.Find(path)!.Title);
+    }
+
+    [Fact]
+    public async Task ADeletedFileOffersToCloseItsTabOrKeepItForSaving()
+    {
+        await using var test = new ShellTestContext();
+        string path = await test.CreateFileAsync("Gone.cs", "original");
+        await test.Shell.OpenDocumentAsync(path);
+        File.Delete(path);
+        await test.Shell.CheckExternalChangesAsync();
+        var change = Assert.Single(test.Shell.ExternalChanges);
+        Assert.True(change.IsDeleted);
+        Assert.Equal("Close tab", change.LoadLabel);
+        test.Shell.KeepEditorVersionCommand.Execute(change);
+        Assert.True(test.Store.Find(path)!.IsDirty);
+        await test.Shell.SaveAllCommand.ExecuteAsync(null);
+        Assert.Equal("original", await File.ReadAllTextAsync(path));
     }
 
     [Fact]

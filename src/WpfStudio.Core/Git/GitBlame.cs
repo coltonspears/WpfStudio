@@ -24,8 +24,46 @@ public sealed record BlameLine(string Commit, string Author, string AuthorEmail,
     }
 }
 
+/// <summary>One commit's share of a range of lines.</summary>
+public sealed record BlameChange(BlameLine Commit, int Lines);
+
+/// <summary>Who changed a member, from the blame of its lines: newest commit first, uncommitted lines last.</summary>
+public sealed record BlameHistory(IReadOnlyList<BlameChange> Changes, int UncommittedLines)
+{
+    public BlameLine? Latest => Changes.FirstOrDefault()?.Commit;
+    public int Authors => Changes.Select(change => change.Commit.AuthorEmail.Length > 0 ? change.Commit.AuthorEmail : change.Commit.Author)
+        .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+
+    /// <summary>A lens such as "Ada Lovelace, 3 days ago · 2 authors, 5 changes".</summary>
+    public string Describe(DateTimeOffset now)
+    {
+        var parts = new List<string>();
+        if (UncommittedLines > 0) parts.Add("Uncommitted changes");
+        if (Latest is { } latest) parts.Add($"{latest.Author}, {BlameLine.Relative(latest.Time, now)}");
+        if (Changes.Count > 1) parts.Add($"{Authors} author{(Authors == 1 ? "" : "s")}, {Changes.Count} changes");
+        return string.Join(" · ", parts);
+    }
+}
+
 public static class GitBlame
 {
+    /// <summary>Summarizes lines <paramref name="first"/> to <paramref name="last"/> (1-based, inclusive); null when none are blamed.</summary>
+    public static BlameHistory? Summarize(IReadOnlyList<BlameLine> blame, int first, int last)
+    {
+        first = Math.Max(1, first);
+        last = Math.Min(blame.Count, last);
+        if (first > last) return null;
+        var counts = new Dictionary<string, (BlameLine Line, int Count)>(StringComparer.Ordinal);
+        var uncommitted = 0;
+        for (var line = first; line <= last; line++)
+        {
+            var entry = blame[line - 1];
+            if (entry.IsUncommitted) { uncommitted++; continue; }
+            counts[entry.Commit] = counts.TryGetValue(entry.Commit, out var known) ? (known.Line, known.Count + 1) : (entry, 1);
+        }
+        return new(counts.Values.OrderByDescending(item => item.Line.Time).Select(item => new BlameChange(item.Line, item.Count)).ToArray(), uncommitted);
+    }
+
     /// <summary>
     /// Parses <c>git blame --porcelain</c>: one entry per final line, 1-based in order. Commit details are given on a
     /// commit's first line only and reused for its later lines.

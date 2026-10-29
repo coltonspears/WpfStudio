@@ -52,12 +52,16 @@ internal sealed class SchemaTypeResolver
             if (!StringComparer.OrdinalIgnoreCase.Equals(assembly.Identity.Name, fullName)) AddName(fullName, assembly);
         }
         var mappings = ImmutableArray.CreateBuilder<Mapping>();
+        var compatible = new List<(string Old, string New)>();
         foreach (var assembly in assemblies)
         {
             token.ThrowIfCancellationRequested();
             foreach (var attribute in assembly.GetAttributes())
             {
                 token.ThrowIfCancellationRequested();
+                if (attribute.AttributeClass?.ToDisplayString() == "System.Windows.Markup.XmlnsCompatibleWithAttribute"
+                    && attribute.ConstructorArguments is [{ Value: string retired }, { Value: string current }])
+                { compatible.Add((retired, current)); continue; }
                 if (attribute.AttributeClass?.ToDisplayString() != "System.Windows.Markup.XmlnsDefinitionAttribute"
                     || attribute.ConstructorArguments.Length < 2
                     || attribute.ConstructorArguments[0].Value is not string uri
@@ -66,6 +70,15 @@ internal sealed class SchemaTypeResolver
                 var owner = string.IsNullOrEmpty(name) ? assembly : assemblyNames.TryGetValue(name, out var candidates) && candidates.Count == 1 ? candidates[0] : null;
                 if (owner is not null) mappings.Add(new(uri, clrNamespace, owner));
             }
+        }
+        // A retired namespace (XmlnsCompatibleWith) resolves like its replacement, through a few renames at most.
+        for (int pass = 0; pass < 4 && compatible.Count > 0; pass++)
+        {
+            var known = mappings.Select(mapping => (mapping.Uri, mapping.Namespace, mapping.Assembly)).ToHashSet();
+            var added = compatible.SelectMany(pair => mappings.Where(mapping => mapping.Uri == pair.New).Select(mapping => mapping with { Uri = pair.Old }).ToArray())
+                .Where(mapping => known.Add((mapping.Uri, mapping.Namespace, mapping.Assembly))).ToArray();
+            if (added.Length == 0) break;
+            mappings.AddRange(added);
         }
         token.ThrowIfCancellationRequested();
         var result = new Metadata(assemblies, mappings.ToImmutable(),

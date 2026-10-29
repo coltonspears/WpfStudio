@@ -38,7 +38,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private bool _initialized;
     private bool _disposed;
     private bool _loading;
-    private bool _checkingFiles;
+    private Task? _externalCheck;
     private bool _contextReloadPending;
     private bool _updatingChoices;
     private int _launchChoicesGeneration;
@@ -65,6 +65,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         InitializeFeatures(features);
         InitializeExperience();
         InitializeProjectXamlAnalysis();
+        InitializeExternalChanges();
         debugger.SourceRequested += (path, line) => _ = GuardAsync(() => NavigateAsync(path, line, 1, true));
         debugger.Breakpoints.CollectionChanged += (_, _) => ObserveBreakpoints();
         debugger.PropertyChanged += (_, e) =>
@@ -140,7 +141,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial bool ShowCodeLens { get; set; } = true;
     partial void OnShowCodeLensChanged(bool value) { foreach (var document in Documents) document.ShowCodeLens = value; }
     [RelayCommand] private void ToggleCodeLens() { ShowCodeLens = !ShowCodeLens; Status = ShowCodeLens ? "Reference counts shown" : "Reference counts hidden"; }
-    [RelayCommand] private void ToggleInlineBlame() { ShowInlineBlame = !ShowInlineBlame; Status = ShowInlineBlame ? "Line blame shown" : "Line blame hidden"; }
+    [RelayCommand] private void ToggleInlineBlame() { ShowInlineBlame = !ShowInlineBlame; Status = ShowInlineBlame ? "Git history shown above C# members" : "Git history above members hidden"; }
     [RelayCommand] private void ToggleInlayHints() { ShowInlayHints = !ShowInlayHints; Status = ShowInlayHints ? "Inline hints shown" : "Inline hints hidden"; }
     [RelayCommand] private void CollapseAll() => ActiveDocument?.SetAllFolded(true);
     [RelayCommand] private void ExpandAll() => ActiveDocument?.SetAllFolded(false);
@@ -169,6 +170,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ShowInlayHints = settings.ShowInlayHints;
         ShowInlineBlame = settings.ShowInlineBlame;
         ShowCodeLens = settings.ShowCodeLens;
+        AutoReloadUnchangedFiles = settings.AutoReloadUnchangedFiles;
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true;
@@ -247,7 +249,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Terminal.WorkingDirectory = directory;
             TargetFramework = null;
             // Start the worker first: listing files overlaps its process start and SDK resolution, and the tree appears before language services finish.
-            var loading = _workspace.LoadAsync(new(path, Configuration), token);
+            // The project model saved by the last session answers at once; MSBuild refreshes it in the background below.
+            var loading = _workspace.LoadAsync(new(path, Configuration, UseCache: true), token);
             try { _allFiles = await Task.Run(() => EnumerateSourceFiles(directory).ToArray(), token); }
             catch (IOException ex) { _allFiles = []; AppendOutput("File listing: " + ex.Message); }
             Explorer.Clear(); foreach (var node in ExplorerNode.FromFiles(directory, _allFiles)) Explorer.Add(node);
@@ -264,10 +267,39 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await Debugger.SetWorkspaceAsync(path);
             if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(path);
             await RefreshWpfAsync();
-            Status = $"{Projects.Count} projects · SDK {Workspace.SdkVersion}";
+            Status = $"{Projects.Count} projects · SDK {Workspace.SdkVersion}" + (Workspace.Cached ? " · refreshing project model…" : "");
             await SaveSettingsAsync();
         }
         finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; RequestProjectXamlAnalysis(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
+        if (Workspace is { Cached: true } cached && !_contextReloadPending) _ = RefreshSavedProjectModelAsync(cached.Path, Configuration);
+    }
+    // A cached start is replaced by a full MSBuild load while the editor stays usable.
+    private async Task RefreshSavedProjectModelAsync(string path, string configuration)
+    {
+        try
+        {
+            var snapshot = await _workspace.RefreshAsync(new(path, configuration), _lifetime.Token);
+            // A workspace opened or reloaded meanwhile restarted the worker and supersedes this result.
+            if (_loading || Workspace?.Path != snapshot.Path || Configuration != configuration) return;
+            Workspace = snapshot;
+            ApplyWorkspaceProjects(StartupProject?.ProjectPath);
+            foreach (var issue in snapshot.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
+            foreach (var doc in Documents) await doc.SyncAsync();
+            await RefreshWpfAsync();
+            if (Status.EndsWith("refreshing project model…", StringComparison.Ordinal)) Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}";
+            RequestProjectXamlAnalysis();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { AppendOutput("Project model refresh: " + exception.Message); }
+    }
+    private void ApplyWorkspaceProjects(string? startupPath)
+    {
+        if (Workspace is null) return;
+        RefreshConfigurations();
+        Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
+        StartupProject = Projects.FirstOrDefault(p => p.ProjectPath == startupPath) ?? Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
+        _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        RebuildExplorer(keepState: true);
     }
     /// <summary>
     /// A solution appears as one node above its projects; an opened project file appears on its own. A reload, such as the one
@@ -312,11 +344,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Status = "Updating project context…";
             var startupPath = StartupProject?.ProjectPath;
             Workspace = await _workspace.LoadAsync(new(Workspace.Path, requestedConfiguration, Path.GetExtension(Workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? requestedFramework : null));
-            RefreshConfigurations();
-            Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
-            StartupProject = Projects.FirstOrDefault(p => p.ProjectPath == startupPath) ?? Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
-            _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            RebuildExplorer(keepState: true);
+            ApplyWorkspaceProjects(startupPath);
             foreach (var doc in Documents) await doc.SyncAsync();
             await RefreshWpfAsync(); Status = "Workspace refreshed";
             if (requestedConfiguration != Configuration || requestedFramework != TargetFramework) _contextReloadPending = true;
@@ -388,7 +416,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await FindReferencesCommand.ExecuteAsync(null);
         });
         if (Features?.GitService is { } git) _ = vm.RefreshGitAsync(git, _lifetime.Token);
-        vm.BlameCommitRequested += line => _ = GuardAsync(async () => { await OpenGitCommand.ExecuteAsync(null); Features?.Git.ShowCommit(line); });
+        vm.BlameCommitRequested += line => _ = GuardAsync(async () => { await OpenGitCommand.ExecuteAsync(null); Features?.Git.ShowCommit(line, vm.GitBase?.RelativePath); });
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
         vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
@@ -409,9 +437,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         TrackDiagnosticDocument(state);
         OnPropertyChanged(nameof(IsWelcomeVisible));
     }
-    public async Task<bool> CloseDocumentAsync(EditorViewModel document)
+    public async Task<bool> CloseDocumentAsync(EditorViewModel document, bool discardChanges = false)
     {
-        if (document.State.IsDirty)
+        if (discardChanges) _store.DeleteRecovery(document.State.Path);
+        else if (document.State.IsDirty)
         {
             var decision = await _dialogs.AskSaveAsync(document.State.Name);
             if (decision == SaveDecision.Cancel) return false;
@@ -464,27 +493,67 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (Documents.Any(d => d.State.IsDirty)) { Status = "Documents changed while saving. Save again before building or debugging."; return false; }
         return true;
     }
-    public async Task CheckExternalChangesAsync()
+    /// <summary>
+    /// Compares open files with disk. Files whose disk version changed are offered for review instead of being
+    /// replaced silently. <paramref name="fromAppOperation"/> marks changes WpfStudio made itself (a Git checkout,
+    /// pull or merge): files without unsaved edits then follow the disk at once.
+    /// </summary>
+    public Task CheckExternalChangesAsync(bool fromAppOperation = false)
     {
-        if (_checkingFiles) return; _checkingFiles = true;
+        // A check already running reads the files again before it finishes; callers wait for that pass.
+        if (_externalCheck is { IsCompleted: false } running) { _recheckFiles = true; _recheckFromApp |= fromAppOperation; return running; }
+        return _externalCheck = CheckExternalChangesCoreAsync(fromAppOperation);
+    }
+    private async Task CheckExternalChangesCoreAsync(bool fromAppOperation)
+    {
+        var reloaded = new List<string>();
         try
         {
-            foreach (var doc in Documents.ToArray())
+            do
             {
-                if (!await _store.IsExternallyChangedAsync(doc.State)) continue;
-                if (doc.State.IsDirty || !File.Exists(doc.State.Path)) doc.State.HasExternalChange = true;
-                else await _store.ReloadAsync(doc.State);
-            }
+                fromAppOperation |= _recheckFromApp;
+                _recheckFiles = false; _recheckFromApp = false;
+                foreach (var doc in Documents.ToArray())
+                {
+                    if (doc.IsReadOnly) continue;
+                    var disk = await _store.ReadDiskAsync(doc.State);
+                    var pending = ExternalChanges.FirstOrDefault(change => ReferenceEquals(change.Document, doc));
+                    // The disk is back to what the editor last loaded or saved: nothing is left to decide.
+                    if (disk?.Hash == doc.State.DiskHash) { if (pending is not null || doc.State.HasExternalChange) ForgetExternalChange(doc); continue; }
+                    if (disk is { } same && same.Text == doc.State.Content)
+                    {
+                        // The disk now holds exactly the editor text, e.g. the same edit made elsewhere.
+                        doc.State.MarkSavedSnapshot(same.Text, same.Hash);
+                        if (pending is not null) ExternalChanges.Remove(pending);
+                        continue;
+                    }
+                    if (disk is not null && !doc.State.IsDirty && (fromAppOperation || AutoReloadUnchangedFiles))
+                    {
+                        await _store.ReloadAsync(doc.State);
+                        reloaded.Add(doc.State.Name);
+                        if (pending is not null) ExternalChanges.Remove(pending);
+                        continue;
+                    }
+                    if (pending is null) ExternalChanges.Add(pending = new ExternalChange(doc));
+                    pending.Update(disk?.Text, disk?.Hash);
+                    doc.State.HasExternalChange = true;
+                }
+            } while (_recheckFiles);
         }
-        catch (Exception ex) { AppendOutput(ex.Message); }
+        catch (Exception ex) { AppendOutput("Checking files changed outside WpfStudio: " + ex.Message); }
         finally
         {
-            _checkingFiles = false; RequestProjectXamlAnalysis();
+            RequestProjectXamlAnalysis();
+            if (reloaded.Count > 0)
+            {
+                Status = reloaded.Count == 1 ? $"Loaded {reloaded[0]} from disk; it changed outside WpfStudio" : $"Loaded {reloaded.Count} files from disk that changed outside WpfStudio";
+                AppendOutput("Loaded from disk after outside changes: " + string.Join(", ", reloaded));
+            }
             // A commit or checkout in the terminal changes what change margins and blame compare with.
             if (Features?.GitService is { } git) foreach (var document in Documents) _ = document.RefreshGitAsync(git, _lifetime.Token);
         }
     }
-    [RelayCommand] private Task ReloadDocumentAsync() => GuardAsync(async () => { if (ActiveDocument == null) return; if (ActiveDocument.State.IsDirty && !await _dialogs.ConfirmAsync("Reload document", "Discard editor changes and reload this file from disk?")) return; await _store.ReloadAsync(ActiveDocument.State); });
+    [RelayCommand] private Task ReloadDocumentAsync() => GuardAsync(async () => { if (ActiveDocument == null) return; if (ActiveDocument.State.IsDirty && !await _dialogs.ConfirmAsync("Reload document", "Discard editor changes and reload this file from disk?")) return; await _store.ReloadAsync(ActiveDocument.State); ForgetExternalChange(ActiveDocument); });
     [RelayCommand] private Task BuildAsync() => RunBuildAsync(BuildOperation.Build);
     [RelayCommand] private Task RestoreAsync() => RunBuildAsync(BuildOperation.Restore);
     [RelayCommand] private Task RebuildAsync() => RunBuildAsync(BuildOperation.Rebuild);
@@ -883,7 +952,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) _store.DeleteRecovery(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = AutoReloadUnchangedFiles });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }
@@ -894,7 +963,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        DisposeProjectXamlAnalysis();
+        DisposeProjectXamlAnalysis(); _documentWatcher?.Dispose();
         foreach (var breakpoint in _observedBreakpoints) breakpoint.PropertyChanged -= BreakpointChanged;
         Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;

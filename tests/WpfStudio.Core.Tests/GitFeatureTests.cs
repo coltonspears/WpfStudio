@@ -87,6 +87,25 @@ public sealed class GitFeatureTests
     }
 
     [Fact]
+    public void MemberHistorySummarizesTheBlameOfItsLines()
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        var old = new BlameLine(new string('a', 40), "Ada Lovelace", "ada@example.com", now.AddDays(-40), "Add the parser");
+        var recent = new BlameLine(new string('b', 40), "Grace Hopper", "grace@example.com", now.AddDays(-2), "Handle comments");
+        var again = new BlameLine(new string('c', 40), "Ada L.", "ADA@example.com", now.AddDays(-10), "Rename");
+        var pending = new BlameLine(new string('0', 40), "Not Committed Yet", "not.committed.yet", now, "");
+        BlameLine[] blame = [old, old, recent, again, pending, old];
+
+        var history = GitBlame.Summarize(blame, 2, 5)!;
+        Assert.Equal([(recent, 1), (again, 1), (old, 1)], history.Changes.Select(change => (change.Commit, change.Lines)));
+        Assert.Equal(1, history.UncommittedLines);
+        Assert.Equal(2, history.Authors); // The same address with a different name is one author.
+        Assert.Equal("Uncommitted changes · Grace Hopper, 2 days ago · 2 authors, 3 changes", history.Describe(now));
+        Assert.Equal("Ada Lovelace, 1 month ago", GitBlame.Summarize(blame, 1, 2)!.Describe(now));
+        Assert.Null(GitBlame.Summarize(blame, 7, 9));
+    }
+
+    [Fact]
     public void LineChangesMarkAddedModifiedAndDeletedBlocks()
     {
         const string original = "one\ntwo\nthree\nfour\nfive\n";

@@ -64,6 +64,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial GitCommitDetails? CommitDetails { get; set; }
     [ObservableProperty] public partial bool IsCommitLoading { get; set; }
     [ObservableProperty] public partial GitCommitFile? SelectedCommitFile { get; set; }
+    // Set by editor history so the commit opens on the file it was opened from.
+    private string? _preferredCommitFile;
     /// <summary>The selected commit file's diff against the commit's first parent.</summary>
     [ObservableProperty] public partial GitDiff? CommitDiff { get; set; }
 
@@ -303,6 +305,15 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>The file editor history asked for, once; null when none was asked for or the commit did not change it.</summary>
+    private GitCommitFile? TakePreferredFile(IReadOnlyList<GitCommitFile> files)
+    {
+        var preferred = _preferredCommitFile;
+        _preferredCommitFile = null;
+        return preferred is null ? null : files.FirstOrDefault(file => string.Equals(file.Path.Replace('\\', '/'), preferred, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(file.OriginalPath?.Replace('\\', '/'), preferred, StringComparison.OrdinalIgnoreCase));
+    }
+
     private Task LoadCommit(GitCommit? commit)
     {
         _commitLoad?.Cancel();
@@ -329,7 +340,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             Quietly(() =>
             {
                 Replace(CommitFiles, details.Files);
-                SelectedCommitFile = details.Files.FirstOrDefault();
+                SelectedCommitFile = TakePreferredFile(details.Files) ?? details.Files.FirstOrDefault();
             });
             await LoadCommitFile(SelectedCommitFile);
         }

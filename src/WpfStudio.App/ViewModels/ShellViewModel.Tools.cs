@@ -24,7 +24,7 @@ public sealed partial class ShellViewModel
             if (IsBusy || _loading || IsPreviewOpen || Debugger.IsActive) throw new InvalidOperationException("Finish the current build, debug session, or change preview before modifying the workspace.");
             return await SaveAllDocumentsAsync();
         };
-        features.WorkspaceChanged = async () => { await CheckExternalChangesAsync(); await ReloadWorkspaceAsync(); };
+        features.WorkspaceChanged = async () => { await CheckExternalChangesAsync(fromAppOperation: true); await ReloadWorkspaceAsync(); };
         features.Git.OpenFileRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
         // Commits, checkouts and merges change what each editor's change margin and blame compare with.
         features.Git.RepositoryChanged += () => { foreach (var document in Documents) _ = document.RefreshGitAsync(features.GitService, _lifetime.Token); };

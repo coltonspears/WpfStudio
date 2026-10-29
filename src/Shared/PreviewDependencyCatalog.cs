@@ -35,8 +35,42 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
         }
         string depsPath = Path.ChangeExtension(assembly, ".deps.json");
         inputs.Add(depsPath);
-        using var deps = ReadJson(depsPath);
-        if (deps is null) return new([], inputs.ToArray());
+        var selected = new Dictionary<string, (PreviewDependencyAsset Asset, int Rank)>(StringComparer.OrdinalIgnoreCase);
+        using (var deps = ReadJson(depsPath))
+            if (deps is not null) AddPackageAssets(request, deps, depsPath, output, selected, inputs);
+        AddReferences(request.References, output, selected);
+        foreach (var item in selected.Values) inputs.Add(item.Asset.Source);
+        // A rebuilt or newly added assembly in a HintPath folder must restart the preview like an output change.
+        foreach (string directory in SearchDirectories(request))
+            foreach (string file in Directory.EnumerateFiles(directory, "*.dll").Take(2_000)) inputs.Add(file);
+        return new(selected.Values.Select(item => item.Asset).ToArray(), inputs.ToArray());
+    }
+
+    /// <summary>Existing local folders MSBuild resolved HintPath references from; the host searches them for late loads.</summary>
+    public static IReadOnlyList<string> SearchDirectories(PreviewRequest request) =>
+        (request.References?.SearchDirectories ?? []).Where(IsLocalAbsolute).Select(Path.GetFullPath).Where(Directory.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray();
+
+    // Network shares are refused like the preview assembly itself; copy such libraries into a local folder.
+    private static bool IsLocalAbsolute(string path) => Path.IsPathFullyQualified(path) && !path.StartsWith(@"\\", StringComparison.Ordinal) && !path.StartsWith("//", StringComparison.Ordinal);
+
+    // MSBuild-resolved references that the build did not copy (Private=false, or found beside a HintPath) are staged
+    // at their output location. Output files and the build's package assets take precedence.
+    private static void AddReferences(PreviewReferenceSet? references, string output, Dictionary<string, (PreviewDependencyAsset Asset, int Rank)> selected)
+    {
+        foreach (var reference in references?.Assemblies ?? [])
+        {
+            if (!IsLocalAbsolute(reference.Path)) continue;
+            string relative = reference.RelativePath.Replace('\\', '/');
+            string key = "managed/" + relative;
+            if (selected.ContainsKey(key) || File.Exists(Within(output, relative))) continue;
+            selected[key] = (new(Path.GetFullPath(reference.Path), relative, false), 2000);
+            if (selected.Count > 8192) throw new InvalidDataException("The preview runtime dependency graph exceeds 8,192 assets.");
+        }
+    }
+
+    private static void AddPackageAssets(PreviewRequest request, JsonDocument deps, string depsPath, string output, Dictionary<string, (PreviewDependencyAsset Asset, int Rank)> selected, HashSet<string> inputs)
+    {
         string? assetsPath = request.ProjectAssetsPath ?? (request.ProjectDirectory is null ? null : Path.Combine(request.ProjectDirectory, "obj", "project.assets.json"));
         using var restore = assetsPath is null ? null : ReadJson(assetsPath);
         if (assetsPath is not null) inputs.Add(Path.GetFullPath(assetsPath));
@@ -58,7 +92,6 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
                         if (!rids.Contains(rid, StringComparer.Ordinal)) rids.Add(rid);
         foreach (string rid in new[] { "win-" + RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant(), "win", "any" })
             if (!rids.Contains(rid, StringComparer.Ordinal)) rids.Add(rid);
-        var selected = new Dictionary<string, (PreviewDependencyAsset Asset, int Rank)>(StringComparer.OrdinalIgnoreCase);
         foreach (var library in target.EnumerateObject())
         {
             if (!libraries.TryGetProperty(library.Name, out var description)
@@ -93,8 +126,6 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
                 }
             }
         }
-        foreach (var item in selected.Values) inputs.Add(item.Asset.Source);
-        return new(selected.Values.Select(item => item.Asset).ToArray(), inputs.ToArray());
     }
 
     public string Fingerprint()

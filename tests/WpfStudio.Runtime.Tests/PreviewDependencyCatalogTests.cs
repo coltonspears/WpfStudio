@@ -47,6 +47,44 @@ public sealed class PreviewDependencyCatalogTests : IDisposable
         Assert.Throws<InvalidDataException>(() => PreviewDependencyCatalog.Read(request));
     }
 
+    [Fact]
+    public void HintPathReferencesOutsideTheOutputAreStagedAndTheirFolderIsWatched()
+    {
+        string lib = Directory.CreateDirectory(Path.Combine(_root, "lib")).FullName;
+        string controls = Path.Combine(lib, "Vendor.Controls.dll");
+        File.WriteAllText(controls, "controls");
+        File.WriteAllText(Path.Combine(lib, "Vendor.Core.dll"), "core");
+        string satellite = Directory.CreateDirectory(Path.Combine(lib, "de")).FullName;
+        File.WriteAllText(Path.Combine(satellite, "Vendor.Controls.resources.dll"), "de");
+        var request = Fixture() with
+        {
+            References = new(
+                [new(controls, "Vendor.Controls.dll"), new(Path.Combine(satellite, "Vendor.Controls.resources.dll"), "de/Vendor.Controls.resources.dll"),
+                 new(@"\\server\share\Remote.dll", "Remote.dll")],
+                [lib, @"\\server\share"], [])
+        };
+        var catalog = PreviewDependencyCatalog.Read(request);
+        Assert.Contains(catalog.Assets, asset => asset.Source == controls && asset.RelativePath == "Vendor.Controls.dll");
+        Assert.Contains(catalog.Assets, asset => asset.RelativePath.Replace('\\', '/') == "de/Vendor.Controls.resources.dll");
+        Assert.DoesNotContain(catalog.Assets, asset => asset.RelativePath == "Remote.dll");
+        Assert.Equal([lib], PreviewDependencyCatalog.SearchDirectories(request));
+
+        // A dependency rebuilt beside the hint library restarts the preview.
+        string fingerprint = catalog.Fingerprint();
+        File.WriteAllText(Path.Combine(lib, "Vendor.Core.dll"), "core v2");
+        Assert.NotEqual(fingerprint, PreviewDependencyCatalog.Read(request).Fingerprint());
+    }
+
+    [Fact]
+    public void BuiltOutputCopyWinsOverTheHintPathOriginal()
+    {
+        string lib = Directory.CreateDirectory(Path.Combine(_root, "lib")).FullName;
+        File.WriteAllText(Path.Combine(lib, "Vendor.dll"), "original");
+        var request = Fixture() with { References = new([new(Path.Combine(lib, "Vendor.dll"), "Vendor.dll")], [lib], []) };
+        File.WriteAllText(Path.Combine(_root, "bin", "Vendor.dll"), "copy local");
+        Assert.DoesNotContain(PreviewDependencyCatalog.Read(request).Assets, asset => asset.Source.StartsWith(lib, StringComparison.OrdinalIgnoreCase));
+    }
+
     private PreviewRequest Fixture(string? runtimePath = null)
     {
         Assert.Equal(Architecture.X64, RuntimeInformation.ProcessArchitecture);
