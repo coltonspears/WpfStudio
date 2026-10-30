@@ -88,6 +88,20 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         finally { _lifecycle.Release(); }
     }
 
+    /// <summary>Stops the language worker and forgets the loaded workspace, as when its solution is closed.</summary>
+    public async Task UnloadAsync(CancellationToken cancellationToken = default)
+    {
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return;
+            StopWorker();
+            lock (_bufferGate) { _buffers.Clear(); _nameProjections.Clear(); }
+            _lastLoad = null;
+        }
+        finally { _lifecycle.Release(); }
+    }
+
     /// <summary>
     /// Replaces a cached start with a full MSBuild load in the same worker. The load runs outside the lifecycle lock,
     /// so typing keeps updating the current solution; open buffers are replayed into the new one afterwards.

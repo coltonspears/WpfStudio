@@ -23,6 +23,8 @@ public sealed record StudioSettings
     /// <summary>Load files changed outside WpfStudio without asking when the editor has no unsaved edits to them.</summary>
     public bool AutoReloadUnchangedFiles { get; init; }
     public bool ShowQuickInfo { get; init; } = true;
+    /// <summary>Solution Explorer nests code-behind under its XAML and partial files under their main file.</summary>
+    public bool NestRelatedFiles { get; init; } = true;
     public EditorSettings Editor { get; init; } = new();
 }
 

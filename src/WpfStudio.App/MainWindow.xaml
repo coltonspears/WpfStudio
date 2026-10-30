@@ -286,6 +286,8 @@
             <MenuItem Header="Reload from disk" Command="{Binding ReloadDocumentCommand}" />
             <Separator />
             <MenuItem Header="Close document" Command="{Binding CloseActiveCommand}" InputGestureText="Ctrl+W" />
+            <MenuItem Header="Close solution" c:Ui.Icon="Close" Command="{Binding CloseSolutionCommand}" IsEnabled="{Binding HasWorkspace}" />
+            <Separator />
             <MenuItem Header="Exit" Command="{x:Static SystemCommands.CloseWindowCommand}" InputGestureText="Alt+F4" />
           </MenuItem>
           <MenuItem Header="_Edit">
@@ -309,6 +311,7 @@
             <MenuItem Header="Go to file…" c:Ui.Icon="Search" Command="{Binding QuickOpenCommand}" InputGestureText="Ctrl+P" />
             <Separator />
             <MenuItem Header="Solution Explorer" c:Ui.Icon="Folder" Command="{Binding ShowToolCommand}" CommandParameter="Explorer" />
+            <MenuItem Header="File Groups" c:Ui.Icon="Pin" Command="{Binding ShowToolCommand}" CommandParameter="FileGroups" />
             <MenuItem Header="WPF Explorer" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="WpfTools" />
             <MenuItem Header="XAML Designer" c:Ui.Icon="Layers" Command="{Binding OpenDesignerCommand}" />
             <MenuItem Header="Live XAML" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="LiveInspection" />
@@ -316,6 +319,7 @@
             <Separator />
             <MenuItem Header="Output" c:Ui.Icon="Output" Command="{Binding ShowToolCommand}" CommandParameter="Output" />
             <MenuItem Header="Problems" c:Ui.Icon="Warning" Command="{Binding ShowToolCommand}" CommandParameter="Problems" />
+            <MenuItem Header="Task List" c:Ui.Icon="Check" Command="{Binding ShowToolCommand}" CommandParameter="TaskList" />
             <MenuItem Header="Search results" Command="{Binding ShowToolCommand}" CommandParameter="Search" />
             <MenuItem Header="Terminal" c:Ui.Icon="Terminal" Command="{Binding ShowToolCommand}" CommandParameter="Terminal" InputGestureText="Ctrl+`" />
             <MenuItem Header="Debugger" c:Ui.Icon="Bug" Command="{Binding ShowToolCommand}" CommandParameter="Debugger" />
@@ -414,9 +418,25 @@
             <Separator />
             <MenuItem Header="Settings…" c:Ui.Icon="Settings" Command="{Binding OpenSettingsCommand}" InputGestureText="Ctrl+," />
           </MenuItem>
+          <MenuItem Header="_Window">
+            <MenuItem Header="Close all tabs" c:Ui.Icon="Close" Command="{Binding CloseAllDocumentsCommand}" IsEnabled="{Binding HasDocuments}" />
+            <MenuItem Header="Close other tabs" Command="{Binding CloseOtherDocumentsCommand}" IsEnabled="{Binding HasDocuments}" />
+            <MenuItem Header="Close saved tabs" Command="{Binding CloseSavedDocumentsCommand}" IsEnabled="{Binding HasDocuments}" ToolTip="Close every tab without unsaved edits" />
+            <MenuItem Header="Close tabs to the right" Command="{Binding CloseDocumentsToRightCommand}" IsEnabled="{Binding HasDocuments}" />
+            <Separator />
+            <MenuItem Header="Pin open tabs as a file group…" c:Ui.Icon="Pin" Command="{Binding AddOpenTabsToFileGroupCommand}" IsEnabled="{Binding HasDocuments}" />
+            <MenuItem Header="Add file to a file group…" Command="{Binding AddActiveToFileGroupCommand}" IsEnabled="{Binding HasDocuments}" />
+            <MenuItem Header="File groups" Command="{Binding ShowToolCommand}" CommandParameter="FileGroups" />
+            <Separator />
+            <MenuItem Header="Save current layout" c:Ui.Icon="Sidebar" Command="{Binding SaveLayoutCommand}" />
+            <MenuItem Header="Reset to default layout" Command="{Binding ResetLayoutCommand}" />
+          </MenuItem>
           <MenuItem Header="_Help">
             <MenuItem Header="All commands and shortcuts…" c:Ui.Icon="Keyboard" Command="{Binding ShowShortcutsCommand}" />
+            <MenuItem Header="What's new" c:Ui.Icon="Bulb" Command="{Binding ShowWhatsNewCommand}" />
+            <Separator />
             <MenuItem Header="Open data folder" c:Ui.Icon="FolderOpen" Command="{Binding OpenDataFolderCommand}" />
+            <MenuItem Header="About WpfStudio" c:Ui.Icon="Info" Command="{Binding ShowAboutCommand}" />
           </MenuItem>
         </Menu>
       </StackPanel>
@@ -600,13 +620,23 @@
                 <DockPanel Background="{DynamicResource SurfaceBrush}">
                   <DockPanel DockPanel.Dock="Top" Margin="12,0,6,4" Height="28">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                      <ToggleButton Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Tree" IsChecked="{Binding NestRelatedFiles}" ToolTip="Nest related files: code-behind under XAML, partial files under their main file" Height="26" />
                       <Button Style="{StaticResource IconButton}" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" ToolTip="New WPF item (Ctrl+Shift+N)" Width="26" Height="26" />
                       <Button Style="{StaticResource IconButton}" c:Ui.Icon="Refresh" Command="{Binding ReloadWorkspaceCommand}" ToolTip="Reload workspace" Width="26" Height="26" />
                       <Button Style="{StaticResource IconButton}" c:Ui.Icon="FolderOpen" Command="{Binding OpenWorkspaceCommand}" ToolTip="Open solution or project (Ctrl+Shift+O)" Width="26" Height="26" />
                     </StackPanel>
                     <TextBlock Text="{Binding WorkspaceSummary}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                   </DockPanel>
+                  <DockPanel DockPanel.Dock="Top" Margin="10,0,8,6" Visibility="{Binding HasWorkspace, Converter={StaticResource BooleanToVisibility}}">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding ClearExplorerFilterCommand}" ToolTip="Clear filter (Esc)" Width="24" Height="24" Visibility="{Binding IsExplorerFiltered, Converter={StaticResource BooleanToVisibility}}" />
+                    <TextBox Text="{Binding ExplorerFilter, UpdateSourceTrigger=PropertyChanged, Delay=200}" c:Ui.Placeholder="Filter files and dependencies" ToolTip="Show files whose name contains this text; include / to match folders">
+                      <TextBox.InputBindings>
+                        <KeyBinding Key="Escape" Command="{Binding ClearExplorerFilterCommand}" />
+                      </TextBox.InputBindings>
+                    </TextBox>
+                  </DockPanel>
                   <Grid>
+                    <TextBlock Text="No files match the filter" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" Margin="0,24,0,0" Visibility="{Binding ShowExplorerNoMatches, Converter={StaticResource BooleanToVisibility}}" />
                     <TreeView x:Name="ExplorerTree" b:Interaction.SelectOnRightClick="True" ItemsSource="{Binding Explorer}" b:Interaction.ActivateCommand="{Binding OpenNodeCommand}" b:Interaction.SelectedNode="{Binding SelectedNode, Mode=TwoWay}">
                       <TreeView.ContextMenu>
                         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
@@ -617,6 +647,7 @@
                           <Separator Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
                           <MenuItem Header="Open" c:Ui.Icon="File" Command="{Binding OpenNodeCommand}" CommandParameter="{Binding SelectedNode}" />
                           <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
+                          <MenuItem Header="Add to file group…" c:Ui.Icon="Pin" Command="{Binding AddSelectedToFileGroupCommand}" />
                           <Separator />
                           <MenuItem Header="Set as startup project" c:Ui.Icon="Target" Command="{Binding SetStartupProjectCommand}" />
                           <MenuItem Header="Edit project file" Command="{Binding EditProjectCommand}" />
@@ -634,12 +665,72 @@
                         </Style>
                       </TreeView.ItemContainerStyle>
                     </TreeView>
-                    <StackPanel VerticalAlignment="Center" Margin="22,0,22,40" Visibility="{Binding Explorer.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+                    <StackPanel VerticalAlignment="Center" Margin="22,0,22,40" Visibility="{Binding ShowExplorerPlaceholder, Converter={StaticResource BooleanToVisibility}}">
                       <c:Glyph Kind="FolderOpen" Width="30" Height="30" Foreground="{DynamicResource SubtleBrush}" StrokeWeight="1.1" />
                       <TextBlock Text="No workspace open" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,4" />
                       <TextBlock Text="Open a solution or project to browse its files, WPF components and resources." Style="{StaticResource Caption}" TextAlignment="Center" />
                       <Button Style="{StaticResource AccentButton}" Content="Open solution…" Command="{Binding OpenWorkspaceCommand}" HorizontalAlignment="Center" Margin="0,14,0,0" />
                       <Button Style="{StaticResource QuietButton}" Content="Try the sample app" Command="{Binding OpenSampleCommand}" HorizontalAlignment="Center" Foreground="{DynamicResource AccentBrush}" Visibility="{Binding HasSample, Converter={StaticResource BooleanToVisibility}}" />
+                    </StackPanel>
+                  </Grid>
+                </DockPanel>
+              </layout:LayoutAnchorable>
+              <layout:LayoutAnchorable Title="File Groups" ContentId="FileGroups" CanClose="False" CanHide="True" CanAutoHide="True">
+                <DockPanel Background="{DynamicResource SurfaceBrush}">
+                  <DockPanel DockPanel.Dock="Top" Margin="12,0,6,4" Height="28">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                      <Button Style="{StaticResource IconButton}" c:Ui.Icon="Pin" Command="{Binding AddOpenTabsToFileGroupCommand}" ToolTip="Pin the open tabs as a group" Width="26" Height="26" />
+                      <Button Style="{StaticResource IconButton}" c:Ui.Icon="Plus" Command="{Binding AddActiveToFileGroupCommand}" ToolTip="Add the active file to a group" Width="26" Height="26" />
+                    </StackPanel>
+                    <TextBlock Text="Files you open together" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" />
+                  </DockPanel>
+                  <Grid>
+                    <TreeView ItemsSource="{Binding FileGroups}" b:Interaction.SelectOnRightClick="True">
+                      <TreeView.Resources>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:FileGroupViewModel}" ItemsSource="{Binding Files}">
+                          <DockPanel Background="Transparent">
+                            <DockPanel.InputBindings>
+                              <MouseBinding Gesture="LeftDoubleClick" Command="{Binding DataContext.OpenFileGroupCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
+                            </DockPanel.InputBindings>
+                            <DockPanel.ContextMenu>
+                              <ContextMenu>
+                                <MenuItem Header="Open all" c:Ui.Icon="FolderOpen" Command="{Binding PlacementTarget.Tag.OpenFileGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <MenuItem Header="Switch to this group" ToolTip="Close other tabs, then open this group" Command="{Binding PlacementTarget.Tag.SwitchToFileGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <Separator />
+                                <MenuItem Header="Rename…" Command="{Binding PlacementTarget.Tag.RenameFileGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <MenuItem Header="Delete group" c:Ui.Icon="Trash" Command="{Binding PlacementTarget.Tag.DeleteFileGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                              </ContextMenu>
+                            </DockPanel.ContextMenu>
+                            <DockPanel.Tag><Binding Path="DataContext" RelativeSource="{RelativeSource AncestorType=TreeView}" /></DockPanel.Tag>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="FolderOpen" Width="22" Height="22" ToolTip="Open all files in this group"
+                                    Command="{Binding DataContext.OpenFileGroupCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
+                            <c:Glyph DockPanel.Dock="Left" Kind="Pin" Width="14" Height="14" Margin="0,0,7,0" Foreground="{DynamicResource AccentBrush}" />
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center" />
+                          </DockPanel>
+                        </HierarchicalDataTemplate>
+                        <DataTemplate DataType="{x:Type vm:FileGroupEntry}">
+                          <DockPanel Background="Transparent" ToolTip="{Binding Path}">
+                            <DockPanel.InputBindings>
+                              <MouseBinding Gesture="LeftDoubleClick" Command="{Binding DataContext.OpenFileGroupEntryCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
+                            </DockPanel.InputBindings>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="20" Height="20" ToolTip="Remove from group"
+                                    Command="{Binding DataContext.RemoveFileGroupEntryCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
+                            <controls:StudioIcon DockPanel.Dock="Left" Kind="{Binding IconKind}" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                          </DockPanel>
+                        </DataTemplate>
+                      </TreeView.Resources>
+                      <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                          <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay, FallbackValue=False}" />
+                        </Style>
+                      </TreeView.ItemContainerStyle>
+                    </TreeView>
+                    <StackPanel VerticalAlignment="Center" Margin="22,0,22,40" Visibility="{Binding FileGroups.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+                      <c:Glyph Kind="Pin" Width="26" Height="26" Foreground="{DynamicResource SubtleBrush}" StrokeWeight="1.1" />
+                      <TextBlock Text="No file groups" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,4" />
+                      <TextBlock Text="Pin the files of a feature together, then open them all in one step. Use the pin button to group the open tabs, or right-click a file in Solution Explorer." Style="{StaticResource Caption}" TextAlignment="Center" TextWrapping="Wrap" />
                     </StackPanel>
                   </Grid>
                 </DockPanel>
@@ -828,9 +919,19 @@
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                 <DockPanel Margin="10,3,8,3">
                   <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Check XAML" Command="{Binding RefreshProjectXamlAnalysisCommand}" ToolTip="Refresh XAML diagnostics across the loaded projects, including closed files." />
-                  <TextBlock Text="{Binding XamlAnalysisStatus}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding XamlAnalysisStatus}" />
+                  <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding ProblemScopes}" SelectedItem="{Binding ProblemScope}" Width="110" Margin="6,0" ToolTip="Which files' problems to list" />
+                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Info" Content="{Binding MessageCount}" IsChecked="{Binding ShowMessageProblems}" ToolTip="Show messages" Height="26" />
+                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Warning" Content="{Binding WarningCount}" IsChecked="{Binding ShowWarningProblems}" ToolTip="Show warnings" Height="26" />
+                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Error" Content="{Binding ErrorCount}" IsChecked="{Binding ShowErrorProblems}" ToolTip="Show errors" Height="26" />
+                  <TextBox DockPanel.Dock="Left" Width="220" Text="{Binding ProblemFilter, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter problems" ToolTip="Match code, message, file or project. Separate terms with spaces; prefix a term with - to exclude it.">
+                    <TextBox.InputBindings>
+                      <KeyBinding Key="Escape" Command="{Binding ClearProblemFilterCommand}" />
+                    </TextBox.InputBindings>
+                  </TextBox>
+                  <Button DockPanel.Dock="Left" Style="{StaticResource QuietButton}" Content="{Binding ProblemFilterSummary}" Command="{Binding ClearProblemFilterCommand}" ToolTip="Clear every Problems filter" Margin="6,0" Visibility="{Binding ProblemFilterSummary, Converter={StaticResource Presence}}" />
+                  <TextBlock Text="{Binding XamlAnalysisStatus}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding XamlAnalysisStatus}" />
                 </DockPanel>
-                <DataGrid Grid.Row="1" ItemsSource="{Binding Diagnostics}" SelectedItem="{Binding SelectedDiagnostic}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
+                <DataGrid Grid.Row="1" ItemsSource="{Binding VisibleDiagnostics}" SelectedItem="{Binding SelectedDiagnostic}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
                   <DataGrid.Columns>
                     <DataGridTemplateColumn Header="" Width="34">
                       <DataGridTemplateColumn.CellTemplate>
@@ -850,6 +951,70 @@
                   <c:Glyph Kind="Check" Width="22" Height="22" Foreground="{DynamicResource SuccessBrush}" />
                   <TextBlock Text="No reported problems" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" HorizontalAlignment="Center" />
                 </StackPanel>
+                <TextBlock Grid.Row="1" Text="No problems match the filter" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24,0,0" IsHitTestVisible="False">
+                  <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="Visibility" Value="Collapsed" />
+                      <Style.Triggers>
+                        <MultiDataTrigger>
+                          <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding VisibleDiagnostics.Count}" Value="0" />
+                            <Condition Binding="{Binding IsProblemFilterActive}" Value="True" />
+                          </MultiDataTrigger.Conditions>
+                          <Setter Property="Visibility" Value="{Binding Diagnostics.Count, Converter={StaticResource Presence}}" />
+                        </MultiDataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </TextBlock.Style>
+                </TextBlock>
+              </Grid>
+            </layout:LayoutAnchorable>
+            <layout:LayoutAnchorable Title="Task List" ContentId="TaskList" CanClose="False" CanHide="True">
+              <Grid Background="{DynamicResource SurfaceBrush}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="5" /><ColumnDefinition Width="320" MinWidth="200" /></Grid.ColumnDefinitions>
+                <!-- TODO-style comments found in the workspace -->
+                <DockPanel>
+                  <DockPanel DockPanel.Dock="Top" Margin="10,3,8,3">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Refresh" Command="{Binding RefreshTaskListCommand}" ToolTip="Rescan the workspace for TODO, HACK, FIXME, UNDONE and BUG comments" Width="26" Height="26" />
+                    <TextBox DockPanel.Dock="Left" Width="220" Text="{Binding TaskFilter, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter comments" />
+                    <TextBlock Text="{Binding TaskListStatus}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
+                  </DockPanel>
+                  <DataGrid ItemsSource="{Binding TaskCommentItems}" SelectedItem="{Binding SelectedTaskComment}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateTaskCommentCommand}">
+                    <DataGrid.Columns>
+                      <DataGridTextColumn Header="Token" Binding="{Binding Token}" Width="70" />
+                      <DataGridTextColumn Header="Description" Binding="{Binding Text}" Width="*" />
+                      <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="90" />
+                      <DataGridTextColumn Header="File" Binding="{Binding Location}" Width="200" />
+                    </DataGrid.Columns>
+                  </DataGrid>
+                </DockPanel>
+                <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}" />
+                <!-- The user's own to-do items for this workspace -->
+                <DockPanel Grid.Column="2">
+                  <DockPanel DockPanel.Dock="Top" Margin="10,3,8,3">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Clear done" Command="{Binding ClearCompletedUserTasksCommand}" ToolTip="Remove checked tasks" />
+                    <TextBlock Text="MY TASKS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="0" />
+                  </DockPanel>
+                  <TextBox DockPanel.Dock="Top" Margin="10,0,8,6" Text="{Binding NewTaskText, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Add a task (start with @ to link the caret line)">
+                    <TextBox.InputBindings>
+                      <KeyBinding Key="Enter" Command="{Binding AddUserTaskCommand}" />
+                    </TextBox.InputBindings>
+                  </TextBox>
+                  <ListBox ItemsSource="{Binding UserTasks}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" b:Interaction.ActivateCommand="{Binding NavigateUserTaskCommand}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="22" Height="22" ToolTip="Remove task"
+                                  Command="{Binding DataContext.RemoveUserTaskCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
+                          <TextBlock DockPanel.Dock="Right" Text="{Binding Location}" Foreground="{DynamicResource AccentBrush}" Margin="6,0" VerticalAlignment="Center" Visibility="{Binding HasLocation, Converter={StaticResource BooleanToVisibility}}" />
+                          <CheckBox IsChecked="{Binding IsDone}" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                          </CheckBox>
+                        </DockPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </DockPanel>
               </Grid>
             </layout:LayoutAnchorable>
             <layout:LayoutAnchorable Title="Search" ContentId="Search" CanClose="False" CanHide="True">
@@ -1191,6 +1356,65 @@
               </diff:DiffView.Header>
             </diff:DiffView>
           </Grid>
+        </DockPanel>
+      </Border>
+    </Grid>
+
+    <!-- ============================================================ About / What's new -->
+    <Grid Grid.RowSpan="4" Panel.ZIndex="55" Background="{DynamicResource OverlayBrush}" Visibility="{Binding IsAboutOpen, Converter={StaticResource BooleanToVisibility}}">
+      <Grid.InputBindings>
+        <KeyBinding Key="Escape" Command="{Binding CloseAboutCommand}" />
+      </Grid.InputBindings>
+      <Border Style="{StaticResource OverlayCard}" Width="620" MaxHeight="640" VerticalAlignment="Center" Padding="28,24">
+        <DockPanel>
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CloseAboutCommand}" ToolTip="Close (Esc)" b:Interaction.FocusWhenVisible="True" />
+            <StackPanel Orientation="Horizontal">
+              <Button Style="{StaticResource QuietButton}" Content="About" Command="{Binding ShowAboutCommand}" FontWeight="SemiBold" />
+              <Button Style="{StaticResource QuietButton}" Content="What's new" Command="{Binding ShowWhatsNewCommand}" FontWeight="SemiBold" Margin="4,0,0,0" />
+            </StackPanel>
+          </DockPanel>
+          <!-- About -->
+          <StackPanel Visibility="{Binding IsWhatsNewPage, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+            <TextBlock Text="WpfStudio" FontSize="22" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" />
+            <TextBlock Text="A native IDE for WPF, C#, CommunityToolkit.Mvvm and SQL Server." Style="{StaticResource Caption}" FontSize="12" Margin="0,2,0,18" />
+            <TextBlock Text="VERSION" Style="{StaticResource SectionLabel}" />
+            <TextBlock Margin="0,0,0,12"><Run Text="{Binding ProductVersion, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding BuildCommit, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" /></TextBlock>
+            <TextBlock Text="RUNTIME" Style="{StaticResource SectionLabel}" />
+            <TextBlock Text="{Binding RuntimeDescription}" Margin="0,0,0,2" />
+            <TextBlock Text="{Binding OperatingSystemDescription}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12" />
+            <TextBlock Text="DATA FOLDER" Style="{StaticResource SectionLabel}" />
+            <TextBlock Text="{Binding DataFolder}" FontFamily="{StaticResource CodeFont}" TextTrimming="CharacterEllipsis" ToolTip="{Binding DataFolder}" Margin="0,0,0,4" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
+              <Button Content="Open data folder" c:Ui.Icon="FolderOpen" Command="{Binding OpenDataFolderCommand}" />
+              <Button Content="Copy version info" c:Ui.Icon="Copy" Command="{Binding CopyAboutTextCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" />
+            </StackPanel>
+          </StackPanel>
+          <!-- What's new -->
+          <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsWhatsNewPage, Converter={StaticResource BooleanToVisibility}}">
+            <ItemsControl ItemsSource="{Binding ReleaseNotes}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel Margin="0,0,0,18">
+                    <DockPanel>
+                      <TextBlock DockPanel.Dock="Right" Text="{Binding Date}" Style="{StaticResource Caption}" VerticalAlignment="Bottom" />
+                      <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
+                    </DockPanel>
+                    <ItemsControl ItemsSource="{Binding Highlights}" Margin="0,6,0,0">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <DockPanel Margin="0,2">
+                            <TextBlock DockPanel.Dock="Left" Text="•" Foreground="{DynamicResource AccentBrush}" Margin="2,0,8,0" />
+                            <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                          </DockPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
         </DockPanel>
       </Border>
     </Grid>

@@ -35,6 +35,7 @@ public sealed partial class ShellViewModel
     partial void OnActiveDocumentChanged(EditorViewModel? value)
     {
         if (value != null) { ActiveWorkbench = null; _assistantContextDocument = value; }
+        if (ProblemScope == CurrentFileScope) RefreshVisibleProblems();
         UpdateAssistantContext();
     }
     private void UpdateAssistantContext()

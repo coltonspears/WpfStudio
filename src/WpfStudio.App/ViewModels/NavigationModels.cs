@@ -60,14 +60,45 @@ public sealed partial class ExplorerNode : ObservableObject
         return node;
     }
 
-    public static ExplorerNode ForProject(WorkspaceProject project)
+    public static ExplorerNode ForProject(WorkspaceProject project, bool nestRelated = true)
     {
         var files = project.Files.Where(f => !f.IsGenerated).Select(f => f.Path).Append(project.ProjectPath).ToArray();
         return new(project.Name, project.ProjectPath, ExplorerNodeKind.Project, () =>
         {
-            var children = FromFiles(System.IO.Path.GetDirectoryName(project.ProjectPath)!, files, project.ProjectPath);
+            var children = FromFiles(System.IO.Path.GetDirectoryName(project.ProjectPath)!, files, project.ProjectPath, nestRelated);
             return project.Dependencies is { Count: > 0 } dependencies ? children.Prepend(ForDependencies(project, dependencies)) : children;
         }, project.ProjectPath);
+    }
+
+    /// <summary>
+    /// The project with only the files and dependencies whose name contains <paramref name="filter"/>, or null when nothing matches.
+    /// A filter with a path separator matches the path relative to the project folder instead.
+    /// </summary>
+    public static ExplorerNode? ForFilteredProject(WorkspaceProject project, string filter, bool nestRelated = true)
+    {
+        var root = System.IO.Path.GetDirectoryName(project.ProjectPath)!;
+        var byPath = filter.Contains('/') || filter.Contains('\\');
+        var needle = byPath ? filter.Replace('/', System.IO.Path.DirectorySeparatorChar).Replace('\\', System.IO.Path.DirectorySeparatorChar) : filter;
+        bool Matches(string path) => (byPath ? System.IO.Path.GetRelativePath(root, path) : System.IO.Path.GetFileName(path)).Contains(needle, StringComparison.OrdinalIgnoreCase);
+        var files = project.Files.Where(f => !f.IsGenerated).Select(f => f.Path).Append(project.ProjectPath).Where(Matches).ToArray();
+        ProjectDependency[] dependencies = byPath ? [] : (project.Dependencies ?? []).Where(d => d.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (files.Length == 0 && dependencies.Length == 0) return null;
+        return new(project.Name, project.ProjectPath, ExplorerNodeKind.Project, () =>
+        {
+            var children = FromFiles(root, files, project.ProjectPath, nestRelated);
+            return dependencies.Length > 0 ? children.Prepend(ForDependencies(project, dependencies)) : children;
+        }, project.ProjectPath, detail: files.Length == 1 ? "1 match" : $"{files.Length} matches");
+    }
+
+    /// <summary>Expands every node that has children, loading them, so a filtered tree shows all its matches.</summary>
+    public static void ExpandAll(IEnumerable<ExplorerNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.Children.Count == 0) continue;
+            node.IsExpanded = true;
+            ExpandAll(node.Children);
+        }
     }
 
     /// <summary>Dependency kinds in the order Visual Studio lists them.</summary>
@@ -109,16 +140,45 @@ public sealed partial class ExplorerNode : ObservableObject
             if (node.IsExpanded) RestoreState(node.Children, state);
         }
     }
-    public static IEnumerable<ExplorerNode> FromFiles(string root, IEnumerable<string> paths, string? projectPath = null)
+    public static IEnumerable<ExplorerNode> FromFiles(string root, IEnumerable<string> paths, string? projectPath = null, bool nestRelated = true)
     {
         var files = paths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var groups = files.GroupBy(path => { var relative = System.IO.Path.GetRelativePath(root, path); var split = relative.IndexOf(System.IO.Path.DirectorySeparatorChar); return split < 0 ? "" : relative[..split]; });
         foreach (var group in groups.Where(g => g.Key != "").OrderBy(g => g.Key))
         {
             var subRoot = System.IO.Path.Combine(root, group.Key); var subFiles = group.ToArray();
-            yield return new ExplorerNode(group.Key, subRoot, true, () => FromFiles(subRoot, subFiles, projectPath), projectPath);
+            yield return new ExplorerNode(group.Key, subRoot, true, () => FromFiles(subRoot, subFiles, projectPath, nestRelated), projectPath);
         }
-        foreach (var path in groups.Where(g => g.Key == "").SelectMany(g => g).OrderBy(System.IO.Path.GetFileName)) yield return new ExplorerNode(System.IO.Path.GetFileName(path), path, false, projectPath: projectPath);
+        var level = groups.Where(g => g.Key == "").SelectMany(g => g).OrderBy(System.IO.Path.GetFileName, StringComparer.OrdinalIgnoreCase).ToArray();
+        var nodes = level.ToDictionary(System.IO.Path.GetFileName, path => new ExplorerNode(System.IO.Path.GetFileName(path), path, false, projectPath: projectPath), StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(nodes.Keys, StringComparer.OrdinalIgnoreCase);
+        foreach (var path in level)
+        {
+            var name = System.IO.Path.GetFileName(path);
+            var parent = nestRelated ? NestingParent(name, names) : null;
+            if (parent == null) yield return nodes[name];
+            else nodes[parent].Children.Add(nodes[name]);
+        }
+    }
+
+    private static readonly string[] DesignerOwners = [".resx", ".settings"];
+    /// <summary>
+    /// The file in the same folder that <paramref name="fileName"/> belongs under, the way Visual Studio nests files:
+    /// MainWindow.xaml.cs under MainWindow.xaml, Resources.Designer.cs under Resources.resx, and ShellViewModel.Tools.cs or
+    /// appsettings.Development.json under ShellViewModel.cs or appsettings.json. Null when the file stands on its own.
+    /// </summary>
+    /// <param name="siblings">The file names in the folder, compared without regard to case.</param>
+    public static string? NestingParent(string fileName, IReadOnlySet<string> siblings)
+    {
+        bool Has(string candidate) => !candidate.Equals(fileName, StringComparison.OrdinalIgnoreCase) && siblings.Contains(candidate);
+        var stem = System.IO.Path.GetFileNameWithoutExtension(fileName);
+        var extension = System.IO.Path.GetExtension(fileName);
+        if (stem.Contains('.') && Has(stem)) return stem;
+        if (stem.EndsWith(".Designer", StringComparison.OrdinalIgnoreCase))
+            foreach (var owner in DesignerOwners) if (Has(stem[..^".Designer".Length] + owner)) return stem[..^".Designer".Length] + owner;
+        for (var dot = stem.LastIndexOf('.'); dot > 0; dot = stem.LastIndexOf('.', dot - 1))
+            if (Has(stem[..dot] + extension)) return stem[..dot] + extension;
+        return null;
     }
 }
 public sealed record NavigationResult(string Path, int Line, int Column, string Text, int Start = 0,

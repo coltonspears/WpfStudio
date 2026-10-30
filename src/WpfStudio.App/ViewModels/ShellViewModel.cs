@@ -64,6 +64,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         LiveInspection.SourceEditRequested += EditInspectionSourceAsync;
         InitializeFeatures(features);
         InitializeExperience();
+        InitializeWorkbench();
         InitializeProjectXamlAnalysis();
         InitializeExternalChanges();
         InitializeSettings();
@@ -173,6 +174,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ShowCodeLens = settings.ShowCodeLens;
         AutoReloadUnchangedFiles = settings.AutoReloadUnchangedFiles;
         ShowQuickInfo = settings.ShowQuickInfo;
+        NestRelatedFiles = settings.NestRelatedFiles;
         Editor.Load(settings.Editor);
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
@@ -220,28 +222,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before switching workspaces"; return; }
-        if (Documents.Count > 0)
-        {
-            // Until every tab is closed, automatic saving must not write edits that are about to be discarded.
-            using var holdAutoSave = await SuspendAutoSaveAsync();
-            var closing = Documents.ToArray();
-            var discard = new List<EditorViewModel>();
-            foreach (var doc in closing.Where(d => d.State.IsDirty))
-            {
-                var decision = await _dialogs.AskSaveAsync(doc.State.Name);
-                if (decision == SaveDecision.Cancel) return;
-                if (decision == SaveDecision.Save && !await SaveDocumentAsync(doc)) return;
-                if (decision == SaveDecision.Discard) discard.Add(doc);
-            }
-            // Do not discard anything until all close decisions have succeeded.
-            foreach (var doc in closing)
-            {
-                if (discard.Contains(doc)) _store.DeleteRecovery(doc.State.Path);
-                if (Designer.SourcePath == doc.State.Path) await Designer.CloseAsync();
-                doc.Dispose(); Documents.Remove(doc); _store.Close(doc.State); UntrackDiagnosticDocument(doc.State);
-            }
-            ActiveDocument = null; OnPropertyChanged(nameof(IsWelcomeVisible));
-        }
+        if (!await CloseAllDocumentsForWorkspaceAsync()) return;
         if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
         if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(null);
         IsBusy = true; _loading = true; _operation = new();
@@ -250,6 +231,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             Status = "Loading " + Path.GetFileName(path) + "…";
             _history.Clear();
+            _explorerStateBeforeFilter = null; ExplorerFilter = "";
             var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
             Terminal.WorkingDirectory = directory;
             TargetFramework = null;
@@ -258,7 +240,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var loading = _workspace.LoadAsync(new(path, Configuration, UseCache: true), token);
             try { _allFiles = await Task.Run(() => EnumerateSourceFiles(directory).ToArray(), token); }
             catch (IOException ex) { _allFiles = []; AppendOutput("File listing: " + ex.Message); }
-            Explorer.Clear(); foreach (var node in ExplorerNode.FromFiles(directory, _allFiles)) Explorer.Add(node);
+            Explorer.Clear(); foreach (var node in ExplorerNode.FromFiles(directory, _allFiles, nestRelated: NestRelatedFiles)) Explorer.Add(node);
             Status = "Loading language services for " + Path.GetFileName(path) + "…";
             Workspace = await loading;
             RefreshConfigurations();
@@ -266,17 +248,47 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             StartupProject = Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
             _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             RebuildExplorer(keepState: false);
-            if (Explorer.Count == 0) foreach (var node in ExplorerNode.FromFiles(directory, _allFiles)) Explorer.Add(node);
+            if (Explorer.Count == 0 && !IsExplorerFiltered) foreach (var node in ExplorerNode.FromFiles(directory, _allFiles, nestRelated: NestRelatedFiles)) Explorer.Add(node);
             foreach (var issue in Workspace.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
             RecentWorkspaces.Remove(path); RecentWorkspaces.Insert(0, path); while (RecentWorkspaces.Count > 10) RecentWorkspaces.RemoveAt(10);
             await Debugger.SetWorkspaceAsync(path);
             if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(path);
             await RefreshWpfAsync();
+            await LoadUserTasksAsync(); await LoadFileGroupsAsync();
+            _ = GuardAsync(ScanTaskCommentsAsync);
             Status = $"{Projects.Count} projects · SDK {Workspace.SdkVersion}" + (Workspace.Cached ? " · refreshing project model…" : "");
             await SaveSettingsAsync();
         }
         finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; RequestProjectXamlAnalysis(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
         if (Workspace is { Cached: true } cached && !_contextReloadPending) _ = RefreshSavedProjectModelAsync(cached.Path, Configuration);
+    }
+    /// <summary>
+    /// Closes every tab before the workspace changes, asking about each unsaved document first. Nothing is closed when any
+    /// answer is Cancel or a save fails.
+    /// </summary>
+    private async Task<bool> CloseAllDocumentsForWorkspaceAsync()
+    {
+        if (Documents.Count == 0) return true;
+        // Until every tab is closed, automatic saving must not write edits that are about to be discarded.
+        using var holdAutoSave = await SuspendAutoSaveAsync();
+        var closing = Documents.ToArray();
+        var discard = new List<EditorViewModel>();
+        foreach (var doc in closing.Where(d => d.State.IsDirty))
+        {
+            var decision = await _dialogs.AskSaveAsync(doc.State.Name);
+            if (decision == SaveDecision.Cancel) return false;
+            if (decision == SaveDecision.Save && !await SaveDocumentAsync(doc)) return false;
+            if (decision == SaveDecision.Discard) discard.Add(doc);
+        }
+        // Do not discard anything until all close decisions have succeeded.
+        foreach (var doc in closing)
+        {
+            if (discard.Contains(doc)) _store.DeleteRecovery(doc.State.Path);
+            if (Designer.SourcePath == doc.State.Path) await Designer.CloseAsync();
+            doc.Dispose(); Documents.Remove(doc); _store.Close(doc.State); UntrackDiagnosticDocument(doc.State);
+        }
+        ActiveDocument = null; OnPropertyChanged(nameof(IsWelcomeVisible));
+        return true;
     }
     // A cached start is replaced by a full MSBuild load while the editor stays usable.
     private async Task RefreshSavedProjectModelAsync(string path, string configuration)
@@ -314,11 +326,15 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         var state = ExplorerNode.CaptureState(Explorer);
         Explorer.Clear();
-        var projects = Projects.Select(ExplorerNode.ForProject).ToArray();
+        var filter = ExplorerFilter.Trim();
+        var projects = Projects.Select(project => filter.Length == 0 ? ExplorerNode.ForProject(project, NestRelatedFiles) : ExplorerNode.ForFilteredProject(project, filter, NestRelatedFiles))
+            .OfType<ExplorerNode>().ToArray();
         if (Workspace is { } workspace && projects.Length > 0 && !Path.GetExtension(workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase))
             Explorer.Add(ExplorerNode.ForSolution(workspace.Path, projects));
         else foreach (var project in projects) Explorer.Add(project);
-        if (keepState) ExplorerNode.RestoreState(Explorer, state);
+        // A filtered tree shows every match; the unfiltered layout comes back when the filter is cleared.
+        if (filter.Length > 0) ExplorerNode.ExpandAll(Explorer);
+        else if (keepState) ExplorerNode.RestoreState(Explorer, state);
     }
     private static IEnumerable<string> EnumerateSourceFiles(string root)
     {
@@ -480,6 +496,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             TidyBeforeSave(doc);
             await _store.SaveAsync(doc.State);
+            UpdateTaskComments(doc.State.Path, doc.State.Content);
             if (doc.IsXaml) _xamlResources.Invalidate();
             RequestProjectXamlAnalysis();
             Status = doc.State.IsDirty ? "The document changed while saving. Save again to include the latest edits." : "Saved " + doc.State.Name;
@@ -675,6 +692,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private void RefreshEditorDiagnostics()
     {
         Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(CurrentProjectXamlDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Distinct()) Diagnostics.Add(item);
+        RefreshVisibleProblems();
         RefreshWpfIssues();
     }
     private IEnumerable<WorkspaceDiagnostic> CurrentWpfIndexDiagnostics() => (_wpfIndex?.Diagnostics ?? []).Where(issue =>
@@ -964,7 +982,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) _store.DeleteRecovery(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, Editor = Editor.ToSettings() });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = NestRelatedFiles, Editor = Editor.ToSettings() });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }
@@ -975,7 +993,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        DisposeProjectXamlAnalysis(); _documentWatcher?.Dispose();
+        DisposeProjectXamlAnalysis(); _documentWatcher?.Dispose(); _taskScan?.Cancel(); _taskScan?.Dispose();
         foreach (var breakpoint in _observedBreakpoints) breakpoint.PropertyChanged -= BreakpointChanged;
         Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
