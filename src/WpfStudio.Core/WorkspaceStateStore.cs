@@ -22,8 +22,27 @@ public sealed class WorkspaceStateStore<T>(string folder, string? directory = nu
         catch (JsonException) { return []; }
         catch (IOException) { return []; }
     }
-    public Task SaveAsync(string workspacePath, IEnumerable<T> items, CancellationToken token = default)
-        => DocumentStore.AtomicWriteAsync(PathFor(workspacePath), JsonSerializer.SerializeToUtf8Bytes(items.ToList(), new JsonSerializerOptions { WriteIndented = true }), token);
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private readonly Dictionary<string, long> _written = new(StringComparer.OrdinalIgnoreCase);
+    private long _sequence;
+    /// <summary>
+    /// Writes a snapshot of <paramref name="items"/> taken when this is called. Overlapping saves are written one at a time,
+    /// and a snapshot older than one already written is skipped, so the file always ends with the latest call's items.
+    /// </summary>
+    public async Task SaveAsync(string workspacePath, IEnumerable<T> items, CancellationToken token = default)
+    {
+        var path = PathFor(workspacePath);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(items.ToList(), new JsonSerializerOptions { WriteIndented = true });
+        var sequence = Interlocked.Increment(ref _sequence);
+        await _writeGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (_written.TryGetValue(path, out var newest) && newest > sequence) return;
+            await DocumentStore.AtomicWriteAsync(path, bytes, token).ConfigureAwait(false);
+            _written[path] = sequence;
+        }
+        finally { _writeGate.Release(); }
+    }
 }
 
 /// <summary>A to-do item the user added by hand to the Task List.</summary>

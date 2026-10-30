@@ -53,4 +53,19 @@ public sealed class TaskCommentTests
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
+
+    [Fact]
+    public async Task OverlappingSavesEndWithTheLatestSnapshot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "WpfStudio-TaskTests-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new WorkspaceStateStore<UserTaskItem>("tasks", root);
+            var saves = Enumerable.Range(1, 20).Select(i => store.SaveAsync(@"C:\Work\Shop.sln", [new("Task " + i)])).ToArray();
+            await Task.WhenAll(saves);
+
+            Assert.Equal("Task 20", Assert.Single(await store.LoadAsync(@"C:\Work\Shop.sln")).Text);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
 }

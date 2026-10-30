@@ -127,7 +127,10 @@ internal static class CSharpTypingService
         return new(true, open);
     }
 
-    /// <summary>The offset just after the string literal starting at <paramref name="start"/>: regular, verbatim, interpolated or raw.</summary>
+    /// <summary>
+    /// The offset just after the string literal starting at <paramref name="start"/>: regular, verbatim, interpolated or raw.
+    /// An unterminated literal returns one past the end of the text, so a caret at the end of the file still counts as inside it.
+    /// </summary>
     private static int SkipString(string text, int start)
     {
         int i = start; bool verbatim = false;
@@ -137,7 +140,7 @@ internal static class CSharpTypingService
         if (quotes >= 3)
         {
             var close = text.IndexOf(new string('"', quotes), i + quotes, StringComparison.Ordinal);
-            return close < 0 ? text.Length : close + quotes;
+            return close < 0 ? text.Length + 1 : close + quotes;
         }
         i++;
         while (i < text.Length)
@@ -148,7 +151,7 @@ internal static class CSharpTypingService
             else if (c == '"' || c == '\n') return i + 1;
             i++;
         }
-        return text.Length;
+        return text.Length + 1;
     }
 
     private static string? PreviousNonBlankLine(string text, int lineStart)

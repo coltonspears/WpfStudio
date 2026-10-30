@@ -55,9 +55,19 @@ public sealed class CSharpTypingTests
     [InlineData("// {|")]
     [InlineData("/* {| */")]
     [InlineData("var s = @\"{|\";")]
+    [InlineData("var s = @\"{|")]
+    [InlineData("var s = \"\"\"\n    {|")]
     public void StringsAndCommentsKeepTheDefaultBehaviour(string marked) => Assert.Null(Type(marked, "\n"));
 
     [Fact]
     public void BracesInsideStringsDoNotCountAsBlocks()
         => Assert.Equal("    void M()\n    {\n        var s = \"}\";\n    }|", Type("    void M()\n    {\n        var s = \"}\";\n        |", "}"));
+
+    [Fact]
+    public void AClosedStringBeforeTheCaretLeavesItInCode()
+        => Assert.Equal("    if (name == \"x\")\n        |", Type("    if (name == \"x\")|", "\n"));
+
+    [Fact]
+    public void UnterminatedVerbatimStringKeepsItsWhitespaceWhenAClosingBraceIsTyped()
+        => Assert.Null(Type("void M()\n{\n    var s = @\"\n        |", "}"));
 }
