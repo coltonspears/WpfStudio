@@ -346,5 +346,6 @@ public sealed partial class ShellViewModel
         yield return Command("Tools", "Reload workspace", ReloadWorkspaceCommand, icon: "Refresh");
         yield return Command("Tools", "Restart language service", RestartWorkspaceCommand, icon: "Restart");
         yield return Command("Help", "Open WpfStudio data folder", OpenDataFolderCommand, icon: "FolderOpen", detail: "Settings, layouts, logs and recovery files");
+        foreach (var entry in WorkbenchCommands()) yield return entry;
     }
 }

@@ -351,10 +351,13 @@ public sealed partial class EditorSurface : TextEditor
     // typed character and generated suffix, including input replayed after completion.
     private bool TryXamlTyping(string input)
     {
-        if ((_replayingInput ? _attached : ViewModel) is not { IsXaml: true } || IsReadOnly || TextArea.OverstrikeMode || !TextArea.Selection.IsEmpty ||
+        if ((_replayingInput ? _attached : ViewModel) is not ({ IsXaml: true } or { IsCSharp: true }) || IsReadOnly || TextArea.OverstrikeMode || !TextArea.Selection.IsEmpty ||
             Document.TextLength > XamlTypingService.MaximumCharacters || !TextArea.ReadOnlySectionProvider.CanInsert(CaretOffset)) return false;
-        var plan = XamlTypingService.GetEdit(Text, CaretOffset, SelectionLength, input, Options.IndentationString,
-            TextUtilities.GetNewLineFromDocument(Document, TextArea.Caret.Line));
+        var newLine = TextUtilities.GetNewLineFromDocument(Document, TextArea.Caret.Line);
+        // C# gets brace-aware indentation for Enter, { and }; XAML closes tags and quotes.
+        var plan = (_replayingInput ? _attached : ViewModel)!.IsXaml
+            ? XamlTypingService.GetEdit(Text, CaretOffset, SelectionLength, input, Options.IndentationString, newLine)
+            : CSharpTypingService.GetEdit(Text, CaretOffset, SelectionLength, input, Options.IndentationString, newLine);
         if (plan is null) return false;
         if (plan.Edit.Length > 0)
         {

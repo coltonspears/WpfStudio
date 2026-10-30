@@ -45,6 +45,8 @@ public sealed class ContentGlyphConverter : IValueConverter
         "ColtonGPT" => "Chat",
         "Output" => "Output",
         "Problems" => "Warning",
+        "TaskList" => "Check",
+        "FileGroups" => "Pin",
         "Search" => "Search",
         "Terminal" => "Terminal",
         "Debugger" => "Bug",
