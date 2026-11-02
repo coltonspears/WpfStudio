@@ -42,6 +42,7 @@ public sealed partial class AssistantSettingsViewModel(AssistantSettingsStore st
             NotifySaved();
         }
         catch (Exception ex) when (IsRecoverable(ex)) { Status = ErrorMessage(ex); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "ColtonGPT settings failed unexpectedly: " + ex.Message; }
     }
 
     public string? GetApiKey() => store.ReadKey(_saved);
@@ -73,6 +74,7 @@ public sealed partial class AssistantSettingsViewModel(AssistantSettingsStore st
             NotifySaved();
         }
         catch (Exception ex) when (IsRecoverable(ex)) { Status = ErrorMessage(ex); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "ColtonGPT settings failed unexpectedly: " + ex.Message; }
         finally { IsSaving = false; }
     }
 
@@ -89,6 +91,7 @@ public sealed partial class AssistantSettingsViewModel(AssistantSettingsStore st
             NotifySaved();
         }
         catch (Exception ex) when (IsRecoverable(ex)) { Status = ErrorMessage(ex); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "ColtonGPT settings failed unexpectedly: " + ex.Message; }
         finally { IsSaving = false; }
     }
 
@@ -107,6 +110,7 @@ public sealed partial class AssistantSettingsViewModel(AssistantSettingsStore st
         }
         catch (OperationCanceledException) { Status = "Model catalog request canceled."; }
         catch (Exception ex) when (IsRecoverable(ex)) { Status = ErrorMessage(ex); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "ColtonGPT settings failed unexpectedly: " + ex.Message; }
     }
 
     private void NotifySaved()

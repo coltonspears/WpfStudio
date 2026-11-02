@@ -225,7 +225,8 @@ public static class DockingBehavior
         private void Reset()
         {
             Capture(); if (defaultLayout is null) return;
-            using var stream = new MemoryStream(defaultLayout); RestoreFrom(stream);
+            try { using var stream = new MemoryStream(defaultLayout); RestoreFrom(stream); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { shell.Status = "The default docking layout could not be applied: " + ex.Message; }
         }
         private void RestoreFrom(Stream stream)
         {

@@ -64,7 +64,12 @@ public static class Interaction
         catch (Exception ex) { vm.Status = "Could not close safely: " + ex.Message; vm.AppendOutput(ex.ToString()); }
         finally { window.IsEnabled = true; ClosingWindows.Remove(window); }
     }
-    private static async void Activated(object? sender, EventArgs args) { if (sender is Window window && GetCloseGuard(window) is { } vm) await vm.CheckExternalChangesAsync(); }
+    private static async void Activated(object? sender, EventArgs args)
+    {
+        if (sender is not Window window || GetCloseGuard(window) is not { } vm) return;
+        try { await vm.CheckExternalChangesAsync(); }
+        catch (Exception ex) { vm.Status = "Could not check for external changes: " + ex.Message; vm.AppendOutput(ex.ToString()); }
+    }
     /// <summary>Runs <see cref="ActivateCommandProperty"/> on a single click of a list item (palette-style lists).</summary>
     public static readonly DependencyProperty ActivateOnClickProperty = DependencyProperty.RegisterAttached("ActivateOnClick", typeof(bool), typeof(Interaction), new PropertyMetadata(false, ActivateOnClickChanged));
     public static void SetActivateOnClick(DependencyObject target, bool value) => target.SetValue(ActivateOnClickProperty, value);

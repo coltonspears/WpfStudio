@@ -13,14 +13,19 @@ public sealed class KnownSourceFileWatcher : IDisposable
     private readonly string[] _roots;
     private readonly List<FileSystemWatcher> _watchers = [];
     private readonly Action<KnownSourceChange> _changed;
+    private readonly Action<Exception>? _failed;
     private readonly Timer? _fallback;
     private int _disposed;
     public string? Status { get; }
 
+    /// <param name="failed">
+    /// Receives an exception thrown by <paramref name="changed"/> or <paramref name="reconcile"/>. Notifications arrive on
+    /// watcher and timer threads, where an unhandled exception would end the process, so they are never allowed to escape.
+    /// </param>
     public KnownSourceFileWatcher(IEnumerable<string> paths, Action<KnownSourceChange> changed, TimeSpan? fallbackInterval = null,
-        Action? reconcile = null, IEnumerable<string>? contextFiles = null)
+        Action? reconcile = null, IEnumerable<string>? contextFiles = null, Action<Exception>? failed = null)
     {
-        _changed = changed;
+        _changed = changed; _failed = failed;
         var candidates = paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).Take(MaximumFiles + 1).ToArray();
         _paths = candidates.Take(MaximumFiles).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var allDirectories = _paths.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(path => path.Length).ToArray();
@@ -70,16 +75,16 @@ public sealed class KnownSourceFileWatcher : IDisposable
         // directories. It deliberately does not trust timestamps as text identity.
         var interval = fallbackInterval ?? TimeSpan.FromSeconds(15);
         if (interval > TimeSpan.Zero) _fallback = new Timer(_ =>
-        { if (Volatile.Read(ref _disposed) == 0) { if (reconcile is null) Notify(null); else reconcile(); } }, null, interval, interval);
+        { if (Volatile.Read(ref _disposed) == 0) { if (reconcile is null) Notify(null); else Guarded(reconcile); } }, null, interval, interval);
     }
 
-    private void Changed(object sender, FileSystemEventArgs args)
+    private void Changed(object sender, FileSystemEventArgs args) => Guarded(() =>
     {
         if (Ignored(args.FullPath)) return;
         if (IsProjectShape(args.FullPath) || IsSource(args.FullPath) && !_paths.Contains(args.FullPath)) Notify(args.FullPath, true);
         else if (_paths.Contains(args.FullPath)) Notify(args.FullPath);
-    }
-    private void MembershipChanged(object sender, FileSystemEventArgs args)
+    });
+    private void MembershipChanged(object sender, FileSystemEventArgs args) => Guarded(() =>
     {
         if (Ignored(args.FullPath)) return;
         if (IsKnownSourceDirectory(args.FullPath)) { Notify(args.FullPath, true); return; }
@@ -89,13 +94,13 @@ public sealed class KnownSourceFileWatcher : IDisposable
         // Editors may replace a file atomically. Allow the replacement to finish
         // before treating a known file's disappearance as project membership loss.
         _ = ConfirmDeletionAsync(args.FullPath);
-    }
+    });
     private async Task ConfirmDeletionAsync(string path)
     {
         await Task.Delay(200).ConfigureAwait(false);
-        Notify(path, !File.Exists(path));
+        Guarded(() => Notify(path, !File.Exists(path)));
     }
-    private void Renamed(object sender, RenamedEventArgs args)
+    private void Renamed(object sender, RenamedEventArgs args) => Guarded(() =>
     {
         if (Ignored(args.FullPath) && Ignored(args.OldFullPath)) return;
         // Atomic saves commonly rename a temporary file over an existing source.
@@ -103,6 +108,16 @@ public sealed class KnownSourceFileWatcher : IDisposable
         if (_paths.Contains(args.FullPath) && !_paths.Contains(args.OldFullPath) && !IsProjectShape(args.FullPath)) Notify(args.FullPath);
         else if (IsSource(args.FullPath) || IsSource(args.OldFullPath) || IsProjectShape(args.FullPath) || IsProjectShape(args.OldFullPath)
             || IsKnownSourceDirectory(args.OldFullPath) || Directory.Exists(args.FullPath)) Notify(args.FullPath, true);
+    });
+    /// <summary>Runs a notification on a watcher or timer thread, where an escaping exception would end the process.</summary>
+    private void Guarded(Action action)
+    {
+        try { action(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            try { _failed?.Invoke(exception); }
+            catch { /* The failure handler is the caller's last resort; a fault in it has nowhere further to go. */ }
+        }
     }
     private static bool IsSource(string path) => Path.GetExtension(path).ToLowerInvariant() is ".cs" or ".xaml";
     private bool IsKnownSourceDirectory(string path) => _paths.Any(source => source.StartsWith(path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
@@ -116,9 +131,9 @@ public sealed class KnownSourceFileWatcher : IDisposable
             .Any(part => part.Equals("obj", StringComparison.OrdinalIgnoreCase) || part.Equals("bin", StringComparison.OrdinalIgnoreCase)
                 || part.Equals(".git", StringComparison.OrdinalIgnoreCase) || part.Equals("artifacts", StringComparison.OrdinalIgnoreCase));
     }
-    private void Error(object sender, ErrorEventArgs args) => Notify(null, true);
+    private void Error(object sender, ErrorEventArgs args) => Guarded(() => Notify(null, true));
     private void Notify(string? path, bool requiresReload = false) { if (Volatile.Read(ref _disposed) == 0) _changed(new(path, requiresReload)); }
-    public void Reconcile() => Notify(null, true);
+    public void Reconcile() => Guarded(() => Notify(null, true));
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;

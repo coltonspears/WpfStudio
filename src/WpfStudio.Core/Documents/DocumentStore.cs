@@ -122,7 +122,10 @@ public sealed class DocumentStore
     {
         var records = new List<RecoveryDocument>();
         if (!Directory.Exists(_recoveryDirectory)) return records;
-        foreach (var file in Directory.EnumerateFiles(_recoveryDirectory, "*.json"))
+        string[] files;
+        try { files = Directory.EnumerateFiles(_recoveryDirectory, "*.json").ToArray(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return records; }
+        foreach (var file in files)
         {
             try
             {
@@ -130,7 +133,7 @@ public sealed class DocumentStore
                 if (value != null) records.Add(value);
             }
             catch (JsonException) { /* A damaged recovery record must not prevent other records loading. */ }
-            catch (IOException) { /* A record removed concurrently must not prevent other records loading. */ }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* A record removed or locked concurrently must not prevent other records loading. */ }
         }
         return records;
     }

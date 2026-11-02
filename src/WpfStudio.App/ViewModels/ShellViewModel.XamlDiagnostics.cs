@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
@@ -99,7 +100,11 @@ public sealed partial class ShellViewModel
             {
                 if (!_disposed && ReferenceEquals(workspace, Workspace) && !IsProjectXamlAnalysisRunning)
                     _ = _projectAnalysis?.Schedule();
-            }), contextFiles: ProjectContextFiles(workspace));
+            }), contextFiles: ProjectContextFiles(workspace), failed: exception =>
+            {
+                _logger.LogError(exception, "Source change notification failed");
+                _dispatcher.Post(() => { if (!_disposed) AppendOutput("Source watcher: " + exception.Message); });
+            });
         }
         RequestProjectXamlAnalysis();
     }

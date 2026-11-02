@@ -262,7 +262,8 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
         if (session != null)
         {
             if (_stateChanged != null) session.StateChanged -= _stateChanged;
-            await session.DisposeAsync();
+            try { await session.DisposeAsync(); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { Status = "Inspector disconnected, but the session did not close cleanly: " + exception.Message; }
         }
         _stateChanged = null; _debugging = false;
         UpdateState();

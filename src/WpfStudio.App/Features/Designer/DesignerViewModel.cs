@@ -492,6 +492,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         ClearCanvas();
         try { await _client.StopAsync(_lifetime.Token); Status = "Preview stopped. Refresh to resume."; }
         catch (OperationCanceledException) { }
+        catch (Exception exception) { Status = "Preview stopped with an error: " + exception.Message; }
     }
     public async Task CloseAsync()
     {

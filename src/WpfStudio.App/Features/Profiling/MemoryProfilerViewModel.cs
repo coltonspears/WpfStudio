@@ -244,7 +244,11 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         }
         finally { _updating = false; }
         CurrentSnapshot = null; RefreshSnapshotCards(); RefreshComparison();
-        if (session is not null) await session.DisposeAsync();
+        if (session is not null)
+        {
+            try { await session.DisposeAsync(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "Memory capture closed, but the profiling host did not shut down cleanly: " + ex.Message; return; }
+        }
         Status = "Memory capture closed. The target application keeps running.";
     }
 

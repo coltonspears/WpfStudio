@@ -24,6 +24,9 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        DispatcherUnhandledException += (_, args) => args.Handled = ReportUnhandled(args.Exception, "UI thread");
+        TaskScheduler.UnobservedTaskException += (_, args) => { args.SetObserved(); ReportUnhandled(args.Exception, "background task"); };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) => ReportUnhandled(args.ExceptionObject as Exception ?? new InvalidOperationException(args.ExceptionObject?.ToString()), "process");
         try
         {
             Directory.CreateDirectory(AppPaths.DataDirectory);
@@ -53,6 +56,25 @@ public partial class App : Application
             if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync();
             Shutdown(1);
         }
+    }
+    /// <summary>
+    /// Last line of defence for an exception nobody caught: it is logged and shown in the shell instead of ending the
+    /// process. Faults that leave the runtime itself unsafe are logged and allowed to terminate.
+    /// </summary>
+    private bool ReportUnhandled(Exception exception, string source)
+    {
+        try { _host?.Services.GetService<ILogger<App>>()?.LogError(exception, "Unhandled exception on {Source}", source); }
+        catch { /* The host may already be disposed during shutdown; the file below still records the fault. */ }
+        try
+        {
+            Directory.CreateDirectory(AppPaths.DataDirectory);
+            File.AppendAllText(Path.Combine(AppPaths.DataDirectory, "unhandled-error.log"), $"{DateTimeOffset.Now:O} [{source}] {exception}{Environment.NewLine}");
+        }
+        catch { /* Nowhere left to report to. */ }
+        if (exception is OutOfMemoryException or StackOverflowException or AccessViolationException) return false;
+        if (MainWindow?.DataContext is ShellViewModel shell)
+            Dispatcher.BeginInvoke(() => { shell.Status = "Unexpected error: " + exception.Message; shell.AppendOutput($"[{source}] {exception}"); });
+        return true;
     }
     public void ConfigureServices(IServiceCollection services)
     {

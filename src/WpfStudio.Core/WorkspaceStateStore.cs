@@ -20,7 +20,7 @@ public sealed class WorkspaceStateStore<T>(string folder, string? directory = nu
         var path = PathFor(workspacePath);
         try { return File.Exists(path) ? JsonSerializer.Deserialize<List<T>>(await File.ReadAllTextAsync(path, token)) ?? [] : []; }
         catch (JsonException) { return []; }
-        catch (IOException) { return []; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
     }
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly Dictionary<string, long> _written = new(StringComparer.OrdinalIgnoreCase);
