@@ -378,7 +378,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         Assert.Contains(shell.ActiveDocument.BreakpointMarkers, marker => marker.Bound && marker.Condition == "Count > 3");
         breakpoint.Enabled = false;
         Assert.Contains(shell.ActiveDocument.BreakpointMarkers, marker => !marker.Enabled);
-        shell.ShowBreakpointsCommand.Execute(null); await Idle();
+        shell.Breakpoints.ShowCommand.Execute(null); await Idle();
         Assert.Equal(2, shell.Debugger.SelectedTab);
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/breakpoints.png"));
         shell.Debugger.Breakpoints.Remove(breakpoint);

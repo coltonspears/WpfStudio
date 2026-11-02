@@ -323,3 +323,8 @@ Structural work (S1), step 6:
 - **Automatic saving** moved to `Features/Documents/AutoSaveCoordinator.cs`: the typing pause, suspension while documents close, the stop at shutdown and the save pass itself, behind `IAutoSaveHost` (open editors, review-open flag, status, output, and hooks for a saved XAML document, a completed pass and an external change). It subscribes to the editor preferences itself and unsubscribes on dispose; the shell's own preference subscription is now a named handler removed at dispose as well.
 - **WPF Explorer** moved to `Features/WpfExplorer/WpfExplorerViewModel.cs`: the index, items, category and text filters, selection, descriptions, resolved references, the issue list and the resource-at-offset lookup. The shell still computes the index and the XAML issue list and hands them over; `WpfExplorerPane.xaml` binds through `WpfExplorer`.
 - `WpfExplorerViewModelTests` covers the explorer over a hand-built index. `ShellViewModel` is now 2,771 lines across 16 partials.
+
+Structural work (S1), step 7:
+
+- **Breakpoint editing** moved to `Features/Debugging/BreakpointEditingViewModel.cs`: toggling at the caret, conditions, hit counts, tracepoint messages, watches, the Show breakpoints shortcut, and the margin markers kept in sync with the debugger's breakpoint list (with the breakpoint subscriptions it observes released on dispose). It reaches the shell through `IBreakpointEditingHost` (active and open editors, dialogs, status, tool activation). Menus, the F9 key binding, the palette and editor actions go through `Breakpoints`.
+- `BreakpointEditingTests` drives the hit-count, tracepoint, disable and toggle paths through the shell's debugger and dialog fakes. `ShellViewModel` is now 2,700 lines across 16 partials.

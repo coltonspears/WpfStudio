@@ -3,6 +3,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using WpfStudio.App.Features.Debugging;
 using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.WpfExplorer;
@@ -60,7 +61,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         TaskList = new(this); FileGroups = new(this); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
         Palette = new(this); ChangeReview = new(this, dispatcher);
         XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token);
-        Explorer = new(this, Projects); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher);
+        Explorer = new(this, Projects); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
         ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) OnPropertyChanged(nameof(IsPreviewOpen)); };
         InitializeDesignerContext();
         LiveInspection = new(dispatcher);
@@ -73,7 +74,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         InitializeWorkbench();
         InitializeSettings();
         debugger.SourceRequested += (path, line) => _ = GuardAsync(() => NavigateAsync(path, line, 1, true));
-        debugger.Breakpoints.CollectionChanged += (_, _) => ObserveBreakpoints();
         debugger.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName != nameof(DebuggerViewModel.IsStopped)) return;
@@ -426,7 +426,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         vm.Diagnostics.CollectionChanged += (_, _) => RefreshEditorDiagnostics();
         vm.OpenRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
         RefreshRelated(vm);
-        Documents.Add(vm); ActiveDocument = vm; RefreshBreakpointMarkers();
+        Documents.Add(vm); ActiveDocument = vm; Breakpoints.RefreshMarkers();
         XamlAnalysis.TrackDocument(state);
         OnPropertyChanged(nameof(IsWelcomeVisible));
     }
@@ -586,19 +586,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             foreach (var entry in batch.Where(e => e.Diagnostic != null)) { if (_buildDiagnostics.Count >= 2000) _buildDiagnostics.RemoveAt(0); _buildDiagnostics.Add(entry.Diagnostic!); }
             RefreshEditorDiagnostics();
         });
-    }
-    [RelayCommand] private Task ToggleBreakpointAsync() => ActiveDocument?.State.Extension != ".cs" ? Task.CompletedTask : GuardAsync(() => Debugger.ToggleBreakpointAsync(ActiveDocument.State.Path, ActiveDocument.State.CaretLine));
-    private void RefreshBreakpointMarkers()
-    {
-        foreach (var doc in Documents)
-        {
-            doc.BreakpointLines.Clear(); doc.BreakpointMarkers.Clear();
-            foreach (var bp in Debugger.Breakpoints.Where(b => b.Path.Equals(doc.State.Path, StringComparison.OrdinalIgnoreCase)))
-            {
-                if (bp.Enabled) doc.BreakpointLines.Add(bp.Line);
-                doc.BreakpointMarkers.Add(new(bp.Line, bp.Enabled, bp.Status == "Bound", bp.Condition, bp.Status, bp.HitCondition, bp.LogMessage));
-            }
-        }
     }
     private void RefreshEditorDiagnostics()
     {
@@ -893,7 +880,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
         XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Palette.Dispose();
-        foreach (var breakpoint in _observedBreakpoints) breakpoint.PropertyChanged -= BreakpointChanged;
+        Breakpoints.Dispose();
         Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
         foreach (var document in Documents) document.Dispose();

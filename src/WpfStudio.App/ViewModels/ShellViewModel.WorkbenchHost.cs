@@ -1,3 +1,4 @@
+using WpfStudio.App.Features.Debugging;
 using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.Workbench;
@@ -9,7 +10,7 @@ using WpfStudio.Contracts;
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -21,6 +22,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     public SolutionExplorerViewModel Explorer { get; }
     public WpfExplorerViewModel WpfExplorer { get; }
     public AutoSaveCoordinator AutoSave { get; }
+    public BreakpointEditingViewModel Breakpoints { get; }
     /// <summary>True while a change review is open; workspace operations wait for the decision.</summary>
     public bool IsPreviewOpen => ChangeReview.IsOpen;
     private Action? _openDocumentsChanged, _documentsChanged;
@@ -91,6 +93,14 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     void IAutoSaveHost.DocumentAutoSaved(EditorViewModel document) { if (document.IsXaml) _xamlResources.Invalidate(); }
     void IAutoSaveHost.AutoSaveCompleted() => XamlAnalysis.Request();
     void IAutoSaveHost.ExternalChangeDetected() => _ = CheckExternalChangesAsync();
+
+    // ------------------------------------------------------------------ IBreakpointEditingHost
+    EditorViewModel? IBreakpointEditingHost.ActiveDocument => ActiveDocument;
+    IReadOnlyList<EditorViewModel> IBreakpointEditingHost.Documents => Documents;
+    IUserDialogService IBreakpointEditingHost.Dialogs => _dialogs;
+    Task IBreakpointEditingHost.GuardAsync(Func<Task> action) => GuardAsync(action);
+    void IBreakpointEditingHost.ReportStatus(string status) => Status = status;
+    void IBreakpointEditingHost.ShowTool(string toolId) => ShowToolCommand.Execute(toolId);
 
     // ------------------------------------------------------------------ WPF Explorer
     /// <summary>The resource declared at, or referenced from, the active caret; null (with a status) when the index no longer matches the buffer.</summary>
