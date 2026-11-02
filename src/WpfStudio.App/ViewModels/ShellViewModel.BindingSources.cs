@@ -25,7 +25,7 @@ public sealed partial class ShellViewModel
     private async Task<string> NavigateInspectionBindingSourceAsync(InspectionBindingSourceNavigation request, CancellationToken token)
     {
         if (request.Declaration.Source is not { } hint) return request.Declaration.UnavailableReason ?? "WPF supplied no binding declaration source.";
-        var verification = await VerifyInspectionSourceAsync(hint, request.Modules, request.IsCurrent,
+        var verification = await InspectionSources.VerifyAsync(hint, request.Modules, request.IsCurrent,
             (path, text) => XamlBindingSourceLocator.Locate(path, text, hint.Line, hint.Column, request.Declaration.Kind), token);
         if (verification.Source is not { } source) return verification.Status;
         using (source)

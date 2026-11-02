@@ -334,3 +334,9 @@ Structural work (C1 and S1), step 8:
 - **Feature callbacks became a typed host.** `StudioFeatures` no longer exposes the mutable `SaveBeforeMutation` and `WorkspaceChanged` function properties; it takes the shell once through `Attach(IWorkspaceMutationHost)`, whose two methods save open documents before a tool rewrites project files and re-check and reload after one did. A tool that runs before the shell attached now fails with a clear message instead of silently skipping the save.
 - **Explorer context commands** (reveal, copy path, edit project file, set startup project) moved into `SolutionExplorerViewModel` behind `ISolutionExplorerHost`, which adds the startup project to the workbench host.
 - `ShellViewModel` is now 2,704 lines across 16 partials.
+
+Structural work (S1), step 9:
+
+- **Inspection source verification** moved to `Features/Inspection/InspectionSourceVerifier.cs` with the `VerifiedInspectionSource` lease record: the build inputs captured at launch, the checksum and file-hash checks, and the buffer comparison that lets navigation and source edits trust the running application's offsets. Its only shell dependency is the current workspace (`IInspectionSourceHost`); the navigation and edit flows in the shell call `InspectionSources.VerifyAsync`.
+- **Designer source tracking** moved to `Features/Designer/DesignerSourceTracker.cs`: it follows the editor the designer previews and closes the preview when that editor's XAML project context changes, releasing its subscriptions on dispose.
+- `ShellViewModel` is now 2,594 lines across 16 partials.

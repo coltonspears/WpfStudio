@@ -82,7 +82,7 @@ public sealed class InspectionSourceVerificationTests
         Assert.Empty(context.Shell.Documents);
     }
 
-    private static ShellViewModel.VerifiedInspectionSource Lease(DocumentStore store, DocumentState document, Func<bool>? current = null) =>
+    private static VerifiedInspectionSource Lease(DocumentStore store, DocumentState document, Func<bool>? current = null) =>
         new(store, document, Source, XamlRuntimeSourceLocator.Locate(document.Path, Source, 1, 1, "System.Windows.Controls.Button", null),
             new("Demo", "Demo", Path.Combine(Path.GetDirectoryName(document.Path)!, "Demo.dll"), Guid.NewGuid()),
             current ?? (() => true), new FileStream(document.Path, FileMode.Open, FileAccess.Read, FileShare.Read));

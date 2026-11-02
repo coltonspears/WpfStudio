@@ -57,8 +57,7 @@ public sealed partial class ShellViewModel
             }
             var launch = await _build.ResolveLaunchAsync(project.ProjectPath, configuration, framework, profile, _operation.Token);
             await LiveInspection.DisconnectCommand.ExecuteAsync(null);
-            _inspectionBuildSources = buildSources;
-            _inspectionSourceWorkspace = sourceWorkspace;
+            InspectionSources.Capture(buildSources, sourceWorkspace);
             session = new InspectionSession();
             var environment = InspectionLaunch.CreateEnvironment(launch.Environment, session, hook);
             ToolRequested?.Invoke("LiveInspection");

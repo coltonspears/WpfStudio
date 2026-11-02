@@ -1,5 +1,7 @@
 using WpfStudio.App.Features.Debugging;
+using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Documents;
+using WpfStudio.App.Features.Inspection;
 using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Features.WpfExplorer;
@@ -11,7 +13,7 @@ using WpfStudio.Contracts;
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IWorkspaceMutationHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IWorkspaceMutationHost, IInspectionSourceHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -24,6 +26,8 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     public WpfExplorerViewModel WpfExplorer { get; }
     public AutoSaveCoordinator AutoSave { get; }
     public BreakpointEditingViewModel Breakpoints { get; }
+    public InspectionSourceVerifier InspectionSources { get; }
+    public DesignerSourceTracker DesignerContext { get; }
     /// <summary>True while a change review is open; workspace operations wait for the decision.</summary>
     public bool IsPreviewOpen => ChangeReview.IsOpen;
     private Action? _openDocumentsChanged, _documentsChanged;
@@ -114,6 +118,8 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     Task IWorkspaceMutationHost.WorkspaceChangedAsync() => WorkspaceMutatedAsync();
     /// <summary>After a tool changed workspace files: re-check open files against disk, then reload the project model.</summary>
     private async Task WorkspaceMutatedAsync() { await CheckExternalChangesAsync(fromAppOperation: true); await ReloadWorkspaceAsync(); }
+
+    WorkspaceSnapshot? IInspectionSourceHost.Workspace => Workspace;
 
     // ------------------------------------------------------------------ WPF Explorer
     /// <summary>The resource declared at, or referenced from, the active caret; null (with a status) when the index no longer matches the buffer.</summary>

@@ -1,6 +1,5 @@
 #nullable enable
 using System.IO;
-using System.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.Contracts;
@@ -11,52 +10,6 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class ShellViewModel
 {
     public DesignerViewModel Designer { get; }
-    private EditorViewModel? _designerEditor;
-    private DesignerProjectIdentity? _designerProjectIdentity;
-    private Task _designerContextClose = Task.CompletedTask;
-    private sealed record DesignerProjectIdentity(string? Path, string? Framework, string? Output, string? Assembly, string? Assets = null);
-    private static DesignerProjectIdentity DesignerIdentity(EditorViewModel editor) => editor.XamlProjectPath is { } path
-        ? new(path, editor.XamlProject?.TargetFramework, editor.XamlProject?.OutputPath, editor.XamlProject?.AssemblyName, editor.XamlProject?.ProjectAssetsPath)
-        : new(null, null, null, null);
-    private void InitializeDesignerContext() => Designer.PropertyChanged += DesignerSourceChanged;
-    private void TrackDesignerEditor(EditorViewModel editor)
-    {
-        DetachDesignerEditor();
-        _designerEditor = editor;
-        _designerProjectIdentity = DesignerIdentity(editor);
-        editor.PropertyChanged += DesignerEditorChanged;
-    }
-    private void DetachDesignerEditor()
-    {
-        if (_designerEditor is { } editor) editor.PropertyChanged -= DesignerEditorChanged;
-        _designerEditor = null; _designerProjectIdentity = null;
-    }
-    private void DesignerSourceChanged(object? sender, PropertyChangedEventArgs args)
-    {
-        if (args.PropertyName == nameof(DesignerViewModel.SourcePath) && _designerEditor is { } editor
-            && !string.Equals(Designer.SourcePath, editor.State.Path, StringComparison.OrdinalIgnoreCase)) DetachDesignerEditor();
-    }
-    private void DesignerEditorChanged(object? sender, PropertyChangedEventArgs args)
-    {
-        if (_disposed || args.PropertyName != nameof(EditorViewModel.XamlProjectPath) || _designerEditor is not { } editor
-            || !ReferenceEquals(sender, editor) || DesignerIdentity(editor) == _designerProjectIdentity) return;
-        DetachDesignerEditor();
-        // CloseAsync clears the document and invalidates its preview revision
-        // synchronously before waiting for the owned process to stop. A pending
-        // source-edit review therefore becomes invalid in this same UI turn.
-        _designerContextClose = GuardAsync(async () =>
-        {
-            await Designer.CloseAsync();
-            if (!_disposed && Designer.SourcePath is null)
-                Designer.Status = "XAML project context changed. Open Preview again to use the selected project.";
-        });
-    }
-    private async Task DisposeDesignerContextAsync()
-    {
-        DetachDesignerEditor();
-        Designer.PropertyChanged -= DesignerSourceChanged;
-        await _designerContextClose;
-    }
     private bool _revealingDesignerSelection;
 
     /// <summary>
@@ -123,7 +76,7 @@ public sealed partial class ShellViewModel
     }
     [RelayCommand] private Task OpenDesignerAsync() => GuardAsync(async () =>
     {
-        await _designerContextClose;
+        await DesignerContext.PendingClose;
         var document = ActiveDocument ?? Documents.FirstOrDefault(d => d.State.Path == Designer.SourcePath);
         ToolRequested?.Invoke("Designer");
         if (document?.State.Extension != ".xaml") { Status = "Open a XAML document to preview it"; return; }
@@ -140,7 +93,7 @@ public sealed partial class ShellViewModel
         if (assembly != null && Directory.Exists(assembly)) assembly = Path.Combine(assembly, (project!.AssemblyName ?? project.Name) + ".dll");
         // Keep the evaluated output path even before the first build. Refresh can
         // then discover the new assembly without requiring the designer to reopen.
-        TrackDesignerEditor(document);
+        DesignerContext.Track(document);
         await Designer.OpenAsync(document.State, assembly,
             project == null ? Path.GetDirectoryName(document.State.Path) : Path.GetDirectoryName(project.ProjectPath), project?.AssemblyName, project?.ProjectAssetsPath,
             project is null ? null : token => _build.ResolvePreviewReferencesAsync(project.ProjectPath, Configuration, project.TargetFramework, token));

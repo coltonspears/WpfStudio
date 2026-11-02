@@ -12,7 +12,7 @@ public sealed partial class ShellViewModel
     private async Task<InspectionSourceEditOutcome> EditInspectionSourceAsync(InspectionSourceEditRequest request, CancellationToken token)
     {
         if (IsPreviewOpen) return new(false, "Finish the existing source review before preparing another change.");
-        var verification = await VerifyInspectionSourceAsync(request.Node, request.Modules, request.IsCurrent, token);
+        var verification = await InspectionSources.VerifyAsync(request.Node, request.Modules, request.IsCurrent, token);
         if (verification.Source is not { } source) return new(false, verification.Status);
         var document = source.Document;
         var version = document.Version;
@@ -58,7 +58,7 @@ public sealed partial class ShellViewModel
         if (!CanApply()) return StaleSourceEdit();
         var modules = await request.RefreshModulesAsync(token);
         if (!CanApply()) return StaleSourceEdit();
-        var checkedAgain = await VerifyInspectionSourceAsync(request.Node, modules, CanApply, token);
+        var checkedAgain = await InspectionSources.VerifyAsync(request.Node, modules, CanApply, token);
         if (checkedAgain.Source is not { } finalSource) return new(false, checkedAgain.Status);
         using (finalSource)
         {

@@ -62,8 +62,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Palette = new(this); ChangeReview = new(this, dispatcher);
         XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token);
         Explorer = new(this, Projects); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
+        InspectionSources = new(this, store); DesignerContext = new(Designer, this);
         ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) OnPropertyChanged(nameof(IsPreviewOpen)); };
-        InitializeDesignerContext();
         LiveInspection = new(dispatcher);
         LiveInspection.LaunchRequested += debug => LaunchWithInspectionAsync(debug);
         LiveInspection.SourceRequested += NavigateInspectionSourceAsync;
@@ -887,7 +887,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         // Dispose UI-bound commands while the shell still owns its dispatcher
         // context; DI may continue its remaining asynchronous disposal off-thread.
         await Database.DisposeAsync();
-        await DisposeDesignerContextAsync();
+        await DesignerContext.DisposeAsync();
         await Designer.DisposeAsync();
         await LiveInspection.DisposeAsync();
         await MemoryProfiler.DisposeAsync();
