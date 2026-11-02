@@ -39,7 +39,7 @@ public sealed partial class ScaffoldingService
         if (kind is ScaffoldKind.ViewAndViewModel or ScaffoldKind.ViewModel)
         {
             Add(vmName + ".cs", $"using System.Threading;\nusing System.Threading.Tasks;\nusing CommunityToolkit.Mvvm.ComponentModel;\nusing CommunityToolkit.Mvvm.Input;\n\nnamespace {ns};\n\npublic partial class {vmName} : ObservableObject\n{{\n{PropertyTemplate("Title", partialProperties)}\n    [RelayCommand]\n    private async Task RefreshAsync(CancellationToken cancellationToken)\n    {{\n        await Task.CompletedTask;\n    }}\n}}\n");
-            if (context?.HasToolkit != true && !project.Descendants().Any(e => e.Name.LocalName == "PackageReference" && (string?)e.Attribute("Include") == "CommunityToolkit.Mvvm"))
+            if (context?.HasToolkit != true && !project.Descendants().Any(e => e.Name.LocalName == "PackageReference" && IsToolkitPackage(e)))
             {
                 var group = new XElement(project.Root!.Name.Namespace + "ItemGroup");
                 var package = new XElement(project.Root.Name.Namespace + "PackageReference", new XAttribute("Include", "CommunityToolkit.Mvvm"));
@@ -49,7 +49,7 @@ public sealed partial class ScaffoldingService
                 {
                     var centralText = await File.ReadAllTextAsync(centralPath, token);
                     var central = XDocument.Parse(centralText, LoadOptions.PreserveWhitespace);
-                    if (!central.Descendants().Any(e => e.Name.LocalName == "PackageVersion" && (string?)e.Attribute("Include") == "CommunityToolkit.Mvvm"))
+                    if (!central.Descendants().Any(e => e.Name.LocalName == "PackageVersion" && IsToolkitPackage(e)))
                     {
                         var centralNamespace = central.Root!.Name.Namespace;
                         central.Root.Add(new XElement(centralNamespace + "ItemGroup", new XElement(centralNamespace + "PackageVersion", new XAttribute("Include", "CommunityToolkit.Mvvm"), new XAttribute("Version", "8.4.2"))));
@@ -83,6 +83,8 @@ public sealed partial class ScaffoldingService
         }
         return changes;
     }
+    /// <summary>NuGet package ids are case-insensitive, so a project that references <c>communitytoolkit.mvvm</c> already has the toolkit.</summary>
+    private static bool IsToolkitPackage(XElement element) => string.Equals((string?)element.Attribute("Include"), "CommunityToolkit.Mvvm", StringComparison.OrdinalIgnoreCase);
     private static string SafeIdentifier(string value)
     {
         var safe = Regex.Replace(value, "[^A-Za-z0-9_]", "_");

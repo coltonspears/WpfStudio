@@ -276,3 +276,16 @@ Fixed on this branch (safety-net pass, see `tests/WpfStudio.Shell.Tests/CrashGua
 - **B8** `Interaction.Activated` reports instead of faulting the dispatcher.
 - **B9** `DockingBehavior.Reset` no longer lets a default-layout failure escape startup.
 - **A3 (partial)** the profiler's memory monitor loop reports an unexpected failure and clears `_monitor` so monitoring can restart.
+
+Fixed on this branch (hang and data-integrity pass):
+
+- **B4** every RPC awaited under the `WorkspaceClient` lifecycle lock is bounded with `WaitAsync(token)`, and `DisposeAsync` waits at most five seconds for the lock before stopping the worker anyway. **B23** the client keeps the last 20 stderr lines instead of one.
+- **B5** `DocumentStore.DeleteRecovery` is now `DeleteRecoveryAsync`; `WorkspaceEditTransaction.Undo` became `UndoAsync` to call it.
+- **B24** a caller-cancelled query (pick, appearance, binding source) no longer kills the preview host; it holds the gate until the host acknowledges, like a superseded render. **B25** `PreviewProcessLease.Terminate` never throws and `Dispose` always completes.
+- **B10** the profiling host exposes only `IMemoryProfilerRpc` over the pipe.
+- **B7** `ConPtySession` retains the process handle so a reused PID cannot be killed on close.
+- **B11** debugger state is written through a uniquely named temporary file.
+- **B12** reload, debug and inspection launches re-check `IsBusy` after their awaits before claiming the operation token.
+- **B18** conflict resolution writes the file back in its detected encoding (`Core/Text/TextEncoding.cs`). **B19** `Win32Exception` from `Kill` no longer masks the original Git failure. **B20** a failed Git refresh no longer wipes a newer successful one.
+- **B14** saving the connected profile keeps the schema tree; **B15** column completion inserts `[Column]`; **B16** a profile whose password cannot be unlocked loads with an empty password instead of hiding every profile.
+- **B17** the scaffolder's fallback scan matches the toolkit package id case-insensitively.

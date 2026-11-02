@@ -56,8 +56,17 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
         if (value is null) return;
         ProfileName = value.Name; Server = value.Server; DatabaseName = value.Database; WindowsAuthentication = value.WindowsAuthentication;
         UserName = value.UserName; Password = value.Password; RememberPassword = value.RememberPassword; TrustServerCertificate = value.TrustServerCertificate;
-        Schema.Clear(); CompletionItems.Clear(); IsConnected = false;
+        // Saving the connected profile re-selects its new record; the schema tree loaded from that same connection stays.
+        if (_schemaProfile is { } loaded && SameConnection(loaded, value)) return;
+        ClearSchema();
     }
+    private void ClearSchema() { Schema.Clear(); CompletionItems.Clear(); IsConnected = false; _schemaProfile = null; }
+    private static bool SameConnection(ConnectionProfile left, ConnectionProfile right) =>
+        string.Equals(left.Server, right.Server, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(left.Database, right.Database, StringComparison.OrdinalIgnoreCase)
+        && left.WindowsAuthentication == right.WindowsAuthentication
+        && (left.WindowsAuthentication || string.Equals(left.UserName, right.UserName, StringComparison.Ordinal))
+        && left.TrustServerCertificate == right.TrustServerCertificate;
 
     [RelayCommand]
     private async Task InitializeAsync(CancellationToken cancellationToken)
@@ -152,7 +161,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
     {
         SelectedProfile = null; ProfileName = "New connection"; Server = "localhost"; DatabaseName = "master";
         WindowsAuthentication = true; UserName = ""; Password = ""; RememberPassword = false; TrustServerCertificate = false;
-        Schema.Clear(); CompletionItems.Clear(); IsConnected = false;
+        ClearSchema();
     }
 
     [RelayCommand]
@@ -205,7 +214,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
                     var children = await _database.GetChildrenAsync(profile, parent, loadLifetime.Token);
                     loadLifetime.Token.ThrowIfCancellationRequested();
                     foreach (SchemaItem child in children.Where(child => child.Kind is SchemaNodeKind.Table or SchemaNodeKind.View or SchemaNodeKind.Procedure or SchemaNodeKind.Column))
-                        if (!CompletionItems.Contains(child.QualifiedName)) CompletionItems.Add(child.QualifiedName);
+                        if (!CompletionItems.Contains(child.CompletionText)) CompletionItems.Add(child.CompletionText);
                     return children;
                 }));
             IsConnected = true; Status = $"{databases.Count} databases available. Expand to browse.";

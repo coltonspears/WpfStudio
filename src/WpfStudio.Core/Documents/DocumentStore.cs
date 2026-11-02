@@ -137,9 +137,10 @@ public sealed class DocumentStore
         }
         return records;
     }
-    public void DeleteRecovery(string path)
+    /// <summary>Removes a document's recovery record. Asynchronous because the gate is held across the recovery writer's disk writes.</summary>
+    public async Task DeleteRecoveryAsync(string path, CancellationToken cancellationToken = default)
     {
-        _recoveryGate.Wait();
+        await _recoveryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { DeleteRecoveryCore(path); }
         finally { _recoveryGate.Release(); }
     }

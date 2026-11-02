@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using StreamJsonRpc;
+using WpfStudio.Contracts.Profiling;
 using WpfStudio.Profiling;
 
 var index = Array.IndexOf(args, "--pipe");
@@ -14,7 +15,8 @@ try
     // System.Text.Json serializes the large analysis results several times faster than the default Newtonsoft formatter.
     // The client must use the same formatter.
     using var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(pipe, pipe, new SystemTextJsonFormatter()));
-    rpc.AddLocalRpcTarget(engine); rpc.StartListening();
+    // Expose the contract only: the engine's Dispose and other public members must not be callable over the pipe.
+    rpc.AddLocalRpcTarget<IMemoryProfilerRpc>(engine, null); rpc.StartListening();
     await rpc.Completion;
     return 0;
 }

@@ -23,6 +23,8 @@ public sealed record SchemaItem(string Name, SchemaNodeKind Kind, string Databas
     public bool CanExpand => Kind is SchemaNodeKind.Database or SchemaNodeKind.Tables or SchemaNodeKind.Views or SchemaNodeKind.Procedures or SchemaNodeKind.Table or SchemaNodeKind.View or SchemaNodeKind.Columns or SchemaNodeKind.Keys or SchemaNodeKind.Indexes;
     public bool HasDefinition => Kind is SchemaNodeKind.Table or SchemaNodeKind.View or SchemaNodeKind.Procedure;
     public string QualifiedName => Schema is null ? Name : $"[{Schema.Replace("]", "]]", StringComparison.Ordinal)}].[{Name.Replace("]", "]]", StringComparison.Ordinal)}]";
+    /// <summary>What completion inserts: schema-qualified objects, but a bare bracketed name for a column, whose schema belongs to its table.</summary>
+    public string CompletionText => Kind == SchemaNodeKind.Column ? $"[{Name.Replace("]", "]]", StringComparison.Ordinal)}]" : QualifiedName;
 }
 
 public sealed record SqlBatch(string Text, int StartLine, int StartOffset);

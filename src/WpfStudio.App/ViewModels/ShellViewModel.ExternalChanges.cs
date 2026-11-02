@@ -78,7 +78,7 @@ public sealed partial class ShellViewModel
         if (change.IsDeleted) { await CloseDocumentAsync(change.Document, discardChanges: true); ForgetExternalChange(change.Document); return; }
         await _store.ReloadAsync(change.Document.State);
         ForgetExternalChange(change.Document);
-        _store.DeleteRecovery(change.Document.State.Path);
+        await _store.DeleteRecoveryAsync(change.Document.State.Path);
         Status = $"Loaded {change.Name} from disk";
     }
 

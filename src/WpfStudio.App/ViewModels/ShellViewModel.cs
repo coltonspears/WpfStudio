@@ -198,7 +198,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             foreach (var item in recovered)
                 await GuardAsync(async () => { var state = File.Exists(item.Path) ? await _store.OpenAsync(item.Path) : _store.Create(item.Path); state.Content = item.Content; AddDocument(state); });
         }
-        else foreach (var item in recovered) _store.DeleteRecovery(item.Path);
+        else foreach (var item in recovered) await _store.DeleteRecoveryAsync(item.Path);
         LayoutRestoreRequested?.Invoke();
         _recoveryLoop = RecoveryLoopAsync(_lifetime.Token);
     }
@@ -225,6 +225,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (!await CloseAllDocumentsForWorkspaceAsync()) return;
         if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
         if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(null);
+        // The awaits above let another operation start; claiming the operation token now would orphan its cancellation.
+        if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
         IsBusy = true; _loading = true; _operation = new();
         var token = _operation.Token;
         try
@@ -283,7 +285,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         // Do not discard anything until all close decisions have succeeded.
         foreach (var doc in closing)
         {
-            if (discard.Contains(doc)) _store.DeleteRecovery(doc.State.Path);
+            if (discard.Contains(doc)) await _store.DeleteRecoveryAsync(doc.State.Path);
             if (Designer.SourcePath == doc.State.Path) await Designer.CloseAsync();
             doc.Dispose(); Documents.Remove(doc); _store.Close(doc.State); UntrackDiagnosticDocument(doc.State);
         }
@@ -463,13 +465,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public async Task<bool> CloseDocumentAsync(EditorViewModel document, bool discardChanges = false)
     {
         using var holdAutoSave = await SuspendAutoSaveAsync();
-        if (discardChanges) _store.DeleteRecovery(document.State.Path);
+        if (discardChanges) await _store.DeleteRecoveryAsync(document.State.Path);
         else if (document.State.IsDirty)
         {
             var decision = await _dialogs.AskSaveAsync(document.State.Name);
             if (decision == SaveDecision.Cancel) return false;
             if (decision == SaveDecision.Save && !await SaveDocumentAsync(document)) return false;
-            if (decision == SaveDecision.Discard) _store.DeleteRecovery(document.State.Path);
+            if (decision == SaveDecision.Discard) await _store.DeleteRecoveryAsync(document.State.Path);
         }
         if (Designer.SourcePath == document.State.Path) await Designer.CloseAsync();
         document.Dispose(); Documents.Remove(document); _store.Close(document.State);
@@ -636,6 +638,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             return;
         }
         if (!await EnsureDebuggerAsync()) return;
+        if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
         IsBusy = true; _operation = new(); ToolRequested?.Invoke("Debugger");
         try
         {
@@ -747,7 +750,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task RenameSymbolAsync() => GuardAsync(RenameLanguageSymbolAsync);
     [RelayCommand] private Task UndoWorkspaceEditAsync() => GuardAsync(async () =>
     {
-        foreach (var path in _edits.Undo())
+        foreach (var path in await _edits.UndoAsync())
         {
             var document = Documents.FirstOrDefault(d => d.State.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
             if (document != null) { document.Dispose(); Documents.Remove(document); }
@@ -979,7 +982,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         LayoutSaveRequested?.Invoke(); await SaveSettingsAsync();
         await Database.CompleteCloseAsync();
         _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
-        foreach (var doc in Documents) _store.DeleteRecovery(doc.State.Path);
+        foreach (var doc in Documents) await _store.DeleteRecoveryAsync(doc.State.Path);
         return true;
     }
     private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = NestRelatedFiles, Editor = Editor.ToSettings() });

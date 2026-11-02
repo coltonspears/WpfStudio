@@ -22,7 +22,14 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private IWorkspaceRpc? _proxy;
     private LoadWorkspaceRequest? _lastLoad;
     private bool _disposed;
-    private string _workerError = "";
+    private readonly Queue<string> _workerErrorLines = new();
+    private const int WorkerErrorTailLines = 20;
+    /// <summary>The last lines the worker wrote to stderr, so a crash report keeps its exception message, not only the final stack frame.</summary>
+    private string WorkerError { get { lock (_workerErrorLines) return string.Join(Environment.NewLine, _workerErrorLines); } }
+    private void RecordWorkerError(string line)
+    {
+        lock (_workerErrorLines) { _workerErrorLines.Enqueue(line); while (_workerErrorLines.Count > WorkerErrorTailLines) _workerErrorLines.Dequeue(); }
+    }
 
     public WorkspaceClient(string? hostPath = null) => _hostPath = hostPath;
     public event EventHandler<WorkspaceDiagnosticEvent>? DiagnosticsReceived;
@@ -173,7 +180,9 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         var proxy = Proxy;
         cancellationToken.ThrowIfCancellationRequested();
         DocumentUpdateResult result;
-        try { result = await proxy.UpdateDocumentAsync(request, cancellationToken).ConfigureAwait(false); }
+        // WaitAsync bounds the call by our token even when the worker never acknowledges the cancellation; this runs
+        // under the lifecycle lock, so an unbounded wait here would also block close, reload and shutdown.
+        try { result = await proxy.UpdateDocumentAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false); }
         catch
         {
             // The worker can commit authored text before cancellable projection
@@ -237,7 +246,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             {
                 var proxy = Proxy;
                 lifetime.Token.ThrowIfCancellationRequested();
-                try { await proxy.CloseDocumentAsync(path, lifetime.Token).ConfigureAwait(false); }
+                try { await proxy.CloseDocumentAsync(path, lifetime.Token).WaitAsync(lifetime.Token).ConfigureAwait(false); }
                 catch { ForgetAcceptedDocument(path); throw; }
             }
             ForgetAcceptedDocument(path);
@@ -259,7 +268,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
                 if (!_nameProjections.ContainsKey(request.Plan.XamlPath) && _nameProjections.Count >= 32)
                     return new(false, "The generated-name projection limit was reached. Save, build and reload before another page rename.");
             ValidateProjectionBuffers(request.Documents);
-            var result = await Proxy.ApplyXamlNameProjectionAsync(request, lifetime.Token).ConfigureAwait(false);
+            var result = await Proxy.ApplyXamlNameProjectionAsync(request, lifetime.Token).WaitAsync(lifetime.Token).ConfigureAwait(false);
             if (result.Accepted)
             {
                 foreach (var document in request.Documents) { RememberBuffer(document); RememberAcceptedDocument(document); }
@@ -298,7 +307,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             var statuses = new List<string>();
             foreach (var plan in plans)
             {
-                var result = await Proxy.ApplyXamlNameProjectionAsync(new(plan, documents, Replay: true), lifetime.Token).ConfigureAwait(false);
+                var result = await Proxy.ApplyXamlNameProjectionAsync(new(plan, documents, Replay: true), lifetime.Token).WaitAsync(lifetime.Token).ConfigureAwait(false);
                 if (!result.Accepted) return result;
                 if (result.BaselineRefreshed) ForgetNameProjection(plan);
                 if (!string.IsNullOrWhiteSpace(result.Status)) statuses.Add(result.Status);
@@ -337,7 +346,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
         try
         {
-            var result = await Proxy.RefreshDiskDocumentsAsync(request, lifetime.Token).ConfigureAwait(false);
+            var result = await Proxy.RefreshDiskDocumentsAsync(request, lifetime.Token).WaitAsync(lifetime.Token).ConfigureAwait(false);
             if (result.Changed) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }
             return result;
         }
@@ -364,7 +373,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public Task<CodeActionsResult> GetCodeActionsAsync(CodeActionsRequest request, CancellationToken cancellationToken = default) => Proxy.GetCodeActionsAsync(request, cancellationToken);
     public Task<WorkspaceEditResult> ApplyCodeActionAsync(ApplyCodeActionRequest request, CancellationToken cancellationToken = default) => Proxy.ApplyCodeActionAsync(request, cancellationToken);
 
-    private IWorkspaceRpc Proxy => _proxy ?? throw new InvalidOperationException($"Workspace worker is not connected. Reopen or restart the workspace. {_workerError}");
+    private IWorkspaceRpc Proxy => _proxy ?? throw new InvalidOperationException($"Workspace worker is not connected. Reopen or restart the workspace. {WorkerError}");
 
     private async Task StartWorkerAsync(string workspacePath, CancellationToken cancellationToken)
     {
@@ -381,8 +390,8 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         start.ArgumentList.Add("--pipe"); start.ArgumentList.Add(pipeName);
         start.ArgumentList.Add("--workspace"); start.ArgumentList.Add(Path.GetFullPath(workspacePath));
         var process = new Process { StartInfo = start, EnableRaisingEvents = true };
-        _workerError = "";
-        process.ErrorDataReceived += (_, args) => { if (args.Data is { } line) _workerError = line; };
+        lock (_workerErrorLines) _workerErrorLines.Clear();
+        process.ErrorDataReceived += (_, args) => { if (args.Data is { } line) RecordWorkerError(line); };
         process.OutputDataReceived += (_, _) => { };
         process.Exited += (_, _) =>
         {
@@ -390,7 +399,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             {
                 SemanticStateChanged?.Invoke(this, EventArgs.Empty);
                 NotifyNameProjectionChanged();
-                WorkerExited?.Invoke(this, _workerError);
+                WorkerExited?.Invoke(this, WorkerError);
             }
         };
         _process = process;
@@ -414,7 +423,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         }
         catch
         {
-            var error = _workerError;
+            var error = WorkerError;
             StopWorker();
             cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException($"Workspace worker failed to connect. {error}");
@@ -447,11 +456,15 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         if (process is not null) { ProcessRunner.Kill(process); process.Dispose(); }
     }
 
+    /// <summary>How long shutdown waits for an in-flight call to let go of the lifecycle lock before the worker is stopped regardless.</summary>
+    internal static TimeSpan DisposeTimeout { get; set; } = TimeSpan.FromSeconds(5);
     public async ValueTask DisposeAsync()
     {
         _shutdown.Cancel();
-        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        // Cancelling the shutdown token ends every bounded call. A caller that still holds the lock after that is
+        // stuck in the worker; killing the worker is what releases it, so do not wait forever to do so.
+        bool acquired = await _lifecycle.WaitAsync(DisposeTimeout).ConfigureAwait(false);
         try { if (_disposed) return; _disposed = true; StopWorker(); }
-        finally { _lifecycle.Release(); }
+        finally { if (acquired) _lifecycle.Release(); }
     }
 }

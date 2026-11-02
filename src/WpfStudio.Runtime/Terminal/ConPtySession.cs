@@ -48,7 +48,9 @@ public sealed class ConPtySession : IAsyncDisposable
             var startup = new StartupInfoEx { StartupInfo = new StartupInfo { cb = Marshal.SizeOf<StartupInfoEx>(), dwFlags = 0x00000100 }, AttributeList = attributes };
             var command = new StringBuilder('"' + executable + '"' + (string.IsNullOrWhiteSpace(arguments) ? "" : " " + arguments));
             Check(Native.CreateProcess(executable, command, 0, 0, false, 0x00080000 | 0x00000400, 0, workingDirectory, ref startup, out var information));
-            try { process = Process.GetProcessById(information.ProcessId); }
+            // Opening Handle while the creation handle is still open retains the OS process object, so the id cannot be
+            // reused by an unrelated process before Kill(entireProcessTree) looks it up on close.
+            try { process = Process.GetProcessById(information.ProcessId); _ = process.Handle; }
             finally { Native.CloseHandle(information.Process); Native.CloseHandle(information.Thread); }
             inputStream = new FileStream(writeInput, FileAccess.Write, 4096, false);
             outputStream = new FileStream(readOutput, FileAccess.Read, 16384, false);

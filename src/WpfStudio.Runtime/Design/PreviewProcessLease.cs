@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace WpfStudio.Runtime.Design;
@@ -33,19 +34,27 @@ internal sealed class PreviewProcessLease : IDisposable
     }
     public bool HasExited { get { lock (_ownership) return _disposed || _process.HasExited; } }
 
+    /// <summary>Revokes the lease and ends the process. Never throws: callers run this inside their own cleanup, which must finish.</summary>
     public void Terminate(string reason)
     {
         lock (_ownership)
         {
             if (_disposed) return;
-            _revoked = true;
-            _reason ??= reason;
-            // Keep the lock through Kill and WaitForExit. A concurrent Dispose may not
-            // close the handle after revocation but before the watchdog actually kills.
-            if (!_process.HasExited) _process.Kill();
-            if (!_process.WaitForExit(5000))
-                throw new TimeoutException("The owned preview process has not exited. Its native parent must remain alive.");
+            TerminateCore(reason);
         }
+    }
+
+    // Called with _ownership held. Keep the lock through Kill and WaitForExit: a concurrent Dispose may not close the
+    // handle after revocation but before the watchdog actually kills.
+    private void TerminateCore(string reason)
+    {
+        _revoked = true;
+        _reason ??= reason;
+        try { if (!_process.HasExited) _process.Kill(); }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception) { /* Already gone, or exiting on its own. */ }
+        // A process that ignores Kill for five seconds is left to the OS. Throwing here would abandon the caller's
+        // cleanup half way through, which costs more than a stray process the OS reaps later.
+        _process.WaitForExit(5000);
     }
 
     public void Dispose()
@@ -53,9 +62,8 @@ internal sealed class PreviewProcessLease : IDisposable
         lock (_ownership)
         {
             if (_disposed) return;
-            Terminate("Preview process disposed.");
-            _process.Dispose();
-            _disposed = true;
+            try { TerminateCore("Preview process disposed."); }
+            finally { _disposed = true; _process.Dispose(); }
         }
     }
 }

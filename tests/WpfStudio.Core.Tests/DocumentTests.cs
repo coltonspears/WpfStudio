@@ -76,9 +76,9 @@ public class DocumentTests
         await transaction.ApplyAsync([new FileChange(document.Path, "before", "after", "rename")]);
         Assert.Equal("after", document.Content);
         document.Content = "newer";
-        Assert.Throws<InvalidOperationException>(() => transaction.Undo());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.UndoAsync());
         document.Content = "after";
-        transaction.Undo();
+        await transaction.UndoAsync();
         Assert.Equal("before", document.Content);
     }
 
@@ -107,11 +107,11 @@ public class DocumentTests
         Assert.Equal(2, (await store.ReadRecoveryAsync()).Count);
         var generated = store.Find(generatedPath)!;
         generated.Content = "newer user changes";
-        Assert.Throws<InvalidOperationException>(() => transaction.Undo());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.UndoAsync());
         Assert.Equal("after", existing.Content);
         Assert.Same(generated, store.Find(generatedPath));
         generated.Content = "class GeneratedViewModel {}";
-        Assert.Equal([generatedPath], transaction.Undo());
+        Assert.Equal([generatedPath], await transaction.UndoAsync());
         Assert.Null(store.Find(generatedPath));
         Assert.Same(existing, store.Find(existing.Path));
         Assert.Equal("before", existing.Content);
@@ -131,7 +131,7 @@ public class DocumentTests
         await transaction.ApplyAsync([new(generatedPath, "", "class Generated {}", "create")]);
         var generated = store.Find(generatedPath)!;
         await store.SaveAsync(generated);
-        Assert.Empty(transaction.Undo());
+        Assert.Empty(await transaction.UndoAsync());
         Assert.Same(generated, store.Find(generatedPath));
         Assert.Equal("class Generated {}", await File.ReadAllTextAsync(generatedPath));
         Assert.Equal("", generated.Content);
