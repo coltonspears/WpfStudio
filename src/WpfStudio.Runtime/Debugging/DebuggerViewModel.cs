@@ -405,9 +405,14 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     {
         if (statePath is null) return;
         Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
-        var temporary = statePath + ".tmp";
-        await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new DebugWorkspaceState(Breakpoints.Select(x => x.ToModel()).ToArray(), watchExpressions.ToArray())));
-        File.Move(temporary, statePath, true);
+        // A unique temporary name lets overlapping saves (rapid breakpoint toggles) each complete; the last move wins.
+        var temporary = statePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new DebugWorkspaceState(Breakpoints.Select(x => x.ToModel()).ToArray(), watchExpressions.ToArray())));
+            File.Move(temporary, statePath, true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     private void EndSession() { IsActive = false; IsStopped = false; Status = "Session ended"; foreach (var breakpoint in Breakpoints) breakpoint.Status = "Pending"; stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
     private void AppendOutput(string value)

@@ -40,13 +40,13 @@ public sealed class XamlSymbolRefactoringTests
         Task operation = test.Shell.PreviewSymbolRenameAsync(editor, Rename(editor, code, prerequisite));
         await PreviewReadyAsync(test, operation);
 
-        Assert.Equal(2, test.Shell.PreviewChanges.Count);
-        Assert.DoesNotContain(test.Shell.PreviewChanges, change => change.Path == prerequisite);
-        Assert.Contains("unknown runtime", test.Shell.PreviewWarnings);
+        Assert.Equal(2, test.Shell.ChangeReview.Changes.Count);
+        Assert.DoesNotContain(test.Shell.ChangeReview.Changes, change => change.Path == prerequisite);
+        Assert.Contains("unknown runtime", test.Shell.ChangeReview.Warnings);
         Assert.Equal(Markup, editor.State.Content);
         Assert.DoesNotContain(test.Shell.Documents, document => document.State.Path == prerequisite);
         if (!codeAlreadyOpen) Assert.DoesNotContain(test.Shell.Documents, document => document.State.Path == code);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation;
 
         Assert.Contains("{Binding FullName}", editor.State.Content);
@@ -80,14 +80,14 @@ public sealed class XamlSymbolRefactoringTests
         var result = Rename(editor, code, prerequisite, editSource: false);
         Task cancelled = test.Shell.PreviewSymbolRenameAsync(editor, result);
         await PreviewReadyAsync(test, cancelled);
-        Assert.Single(test.Shell.PreviewChanges);
-        test.Shell.CancelPreviewCommand.Execute(null);
+        Assert.Single(test.Shell.ChangeReview.Changes);
+        test.Shell.ChangeReview.CancelCommand.Execute(null);
         await cancelled;
         Assert.Single(test.Shell.Documents);
         Assert.Null(test.Store.Find(code));
         Task applied = test.Shell.PreviewSymbolRenameAsync(editor, result);
         await PreviewReadyAsync(test, applied);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await applied;
         Assert.False(editor.State.IsDirty);
         Assert.Equal(version, editor.State.Version);
@@ -144,7 +144,7 @@ public sealed class XamlSymbolRefactoringTests
         }
         try
         {
-            test.Shell.AcceptPreviewCommand.Execute(null);
+            test.Shell.ChangeReview.AcceptCommand.Execute(null);
             await Assert.ThrowsAnyAsync<Exception>(() => operation);
             Assert.Equal(Markup, editor.State.Content);
             Assert.Equal(Code, targetState.Content);
@@ -166,7 +166,7 @@ public sealed class XamlSymbolRefactoringTests
         var result = Rename(editor, code, prerequisite);
         Task first = test.Shell.PreviewSymbolRenameAsync(editor, result);
         await PreviewReadyAsync(test, first);
-        test.Shell.CancelPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.CancelCommand.Execute(null);
         await first;
         Assert.Null(test.Store.Find(code));
         Assert.Null(test.Store.Find(prerequisite));
@@ -179,8 +179,8 @@ public sealed class XamlSymbolRefactoringTests
         { ExpectedTextHash = edit.Path == code ? Hash(newCode) : edit.Path == prerequisite ? Hash(newPrerequisite) : edit.ExpectedTextHash }).ToArray() };
         Task second = test.Shell.PreviewSymbolRenameAsync(editor, fresh);
         await PreviewReadyAsync(test, second);
-        Assert.Contains(test.Shell.PreviewChanges, change => change.Path == code && change.Before == newCode);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        Assert.Contains(test.Shell.ChangeReview.Changes, change => change.Path == code && change.Before == newCode);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await second;
         Assert.Contains("changed after cancel", test.Store.Find(code)!.Content);
         Assert.Contains("string FullName", test.Store.Find(code)!.Content);
@@ -326,12 +326,12 @@ public sealed class XamlSymbolRefactoringTests
         test.Dialogs.Prompts.Enqueue("FullName");
         Task operation = test.Shell.RenameSymbolCommand.ExecuteAsync(null);
         await PreviewReadyAsync(test, operation);
-        Assert.Equal(3, test.Shell.PreviewChanges.Count);
+        Assert.Equal(3, test.Shell.ChangeReview.Changes.Count);
         // Simulate a different C# buffer reaching the worker while review is open.
         // The source editor is C#, so XAML-only editor epochs cannot guard this.
         string changedModel = codeEditor.State.Content + "\n// refreshed semantic model";
         await test.Workspace.UpdateDocumentAsync(new(code, changedModel, codeEditor.State.Version + 1, Analyze: false));
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation;
         Assert.DoesNotContain("FullName", codeEditor.State.Content);
         Assert.Equal(Markup, xamlEditor.State.Content);

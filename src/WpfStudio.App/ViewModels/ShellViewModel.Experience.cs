@@ -1,9 +1,9 @@
 using System.ComponentModel;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Controls;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
 using WpfStudio.Core;
 
@@ -21,7 +21,6 @@ public sealed partial class ShellViewModel
 
     private void InitializeExperience()
     {
-        Diagnostics.CollectionChanged += (_, _) => { OnPropertyChanged(nameof(ErrorCount)); OnPropertyChanged(nameof(WarningCount)); };
         Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
         if (Features?.Assistant.Settings is INotifyPropertyChanged settings)
             settings.PropertyChanged += (_, e) => { if (e.PropertyName == "HasApiKey") OnPropertyChanged(nameof(IsColtonGptReady)); };
@@ -43,8 +42,6 @@ public sealed partial class ShellViewModel
     public string WorkspaceSummary => Workspace == null ? "" : $"{Workspace.Projects.Count} project{(Workspace.Projects.Count == 1 ? "" : "s")} · .NET SDK {Workspace.SdkVersion}";
     public string CommandCenterText => Workspace == null ? "Search files and commands" : WorkspaceName;
     public bool HasDocuments => Documents.Count > 0;
-    public int ErrorCount => Diagnostics.Count(d => d.Severity.Equals("Error", IgnoreCase));
-    public int WarningCount => Diagnostics.Count(d => d.Severity.Equals("Warning", IgnoreCase));
     public bool IsColtonGptReady => Features?.Assistant.Settings.HasApiKey == true;
     private void NotifyWorkspaceSummary()
     {
@@ -72,164 +69,31 @@ public sealed partial class ShellViewModel
     {
         if (ActiveDocument is not { IsReadOnly: false } document || !WpfStudio.Core.Text.SnippetCatalog.For(document.State.Extension).Any())
         { Status = "Snippets are available in C# and XAML editors"; return; }
-        IsCommandPalette = true; PaletteQuery = "> Snippet: "; IsPaletteOpen = true; RefreshPalette();
+        Palette.OpenCommands("> Snippet: ");
     }
-    [RelayCommand] private void ShowShortcuts() { IsCommandPalette = true; PaletteQuery = ">"; IsPaletteOpen = true; RefreshPalette(); }
+    [RelayCommand] private void ShowShortcuts() => Palette.OpenCommands();
 
     // ------------------------------------------------------------------ Related files
     /// <summary>Conventional pairs, in the order <see cref="SwitchRelatedCommand"/> cycles through them.</summary>
-    private List<string> ConventionalRelated(string path)
-    {
-        var files = _allFiles.Concat(Documents.Select(d => d.State.Path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var candidates = new List<string>();
-        void AddName(string name)
-        {
-            candidates.Add(Path.Combine(Path.GetDirectoryName(path)!, name));
-            candidates.AddRange(files.Where(f => Path.GetFileName(f).Equals(name, IgnoreCase)));
-        }
-        if (path.EndsWith(".xaml.cs", IgnoreCase))
-        {
-            var view = Path.GetFileName(path)[..^8];
-            AddName(view + "Model.cs"); AddName(view + "ViewModel.cs"); AddName(view + ".xaml");
-        }
-        else if (path.EndsWith(".xaml", IgnoreCase))
-        {
-            var view = Path.GetFileNameWithoutExtension(path);
-            AddName(view + ".xaml.cs"); AddName(view + "Model.cs"); AddName(view + "ViewModel.cs");
-        }
-        else if (path.EndsWith("ViewModel.cs", IgnoreCase))
-        {
-            var stem = Path.GetFileName(path)[..^12];
-            AddName(stem + ".xaml"); AddName(stem + "View.xaml");
-        }
-        return candidates.Where(p => !p.Equals(path, IgnoreCase) && (File.Exists(p) || _store.Find(p) != null)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
+    private List<string> ConventionalRelated(string path) =>
+        RelatedFileLocator.Conventional(path, _allFiles.Concat(Documents.Select(d => d.State.Path)), candidate => File.Exists(candidate) || _store.Find(candidate) != null);
     /// <summary>Views and view models linked through a declared DataContext, found in the WPF index.</summary>
-    private List<string> DataContextRelated(string path)
-    {
-        var results = new List<string>();
-        if (_wpfIndex == null) return results;
-        if (path.EndsWith(".xaml", IgnoreCase))
-        {
-            var text = _store.Find(path)?.Content ?? (_wpfIndex.Texts.TryGetValue(path, out var indexed) ? indexed : null);
-            if (text != null && DataContextType(text) is { } type)
-                results.AddRange(_wpfIndex.Items.Where(i => i.Path.EndsWith(".cs", IgnoreCase) && (i.Name == type || i.Name.EndsWith("." + type, StringComparison.Ordinal))).Select(i => i.Path));
-        }
-        else if (path.EndsWith(".cs", IgnoreCase) && _wpfIndex.Texts.TryGetValue(path, out var source))
-        {
-            var types = Regex.Matches(source, @"\b(?:class|record)\s+(\w+)").Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
-            foreach (var (xamlPath, xaml) in _wpfIndex.Texts.Where(t => t.Key.EndsWith(".xaml", IgnoreCase)))
-                if (DataContextType(xaml) is { } type && types.Contains(type)) results.Add(xamlPath);
-        }
-        return results.Where(p => !p.Equals(path, IgnoreCase) && File.Exists(p)).Distinct(StringComparer.OrdinalIgnoreCase).Take(4).ToList();
-    }
-
-    private static string? DataContextType(string xaml)
-    {
-        var match = Regex.Match(xaml, @"d:DataContext\s*=\s*[""']\{d:DesignInstance\s+(?:Type\s*=\s*)?(?:\w+:)?(?<type>\w+)");
-        if (!match.Success) match = Regex.Match(xaml, @"<\w+\.DataContext\s*>\s*<(?:\w+:)?(?<type>\w+)\b");
-        return match.Success ? match.Groups["type"].Value : null;
-    }
-
-    private static string RoleFor(string source, string related)
-    {
-        if (related.EndsWith(".xaml.cs", IgnoreCase)) return "Code-behind";
-        if (related.EndsWith(".xaml", IgnoreCase)) return "View";
-        if (related.EndsWith(".cs", IgnoreCase)) return source.EndsWith(".xaml.cs", IgnoreCase) || source.EndsWith(".xaml", IgnoreCase) ? "View model" : "Related";
-        return "Related";
-    }
-
+    private List<string> DataContextRelated(string path) => RelatedFileLocator.DataContext(path, WpfExplorer.Index, candidate => _store.Find(candidate)?.Content);
     private void RefreshRelated(EditorViewModel document)
     {
         var path = document.State.Path;
-        document.Location = LocationFor(path);
+        document.Location = RelatedFileLocator.LocationFor(path, WorkspaceRoot);
         var related = ConventionalRelated(path).Concat(DataContextRelated(path)).Distinct(StringComparer.OrdinalIgnoreCase).Take(4).ToList();
         if (document.RelatedFiles.Select(r => r.Path).SequenceEqual(related, StringComparer.OrdinalIgnoreCase)) return;
         document.RelatedFiles.Clear();
-        foreach (var file in related) document.RelatedFiles.Add(new RelatedFile(RoleFor(path, file), file));
+        foreach (var file in related) document.RelatedFiles.Add(new RelatedFile(RelatedFileLocator.RoleFor(path, file), file));
     }
     private void RefreshAllRelated() { foreach (var document in Documents) RefreshRelated(document); }
-
     private string WorkspaceRoot => Workspace == null ? "" : Path.GetDirectoryName(Path.GetFullPath(Workspace.Path)) ?? "";
-    private string RelativeDirectory(string path)
-    {
-        var directory = Path.GetDirectoryName(path) ?? "";
-        var root = WorkspaceRoot;
-        if (root.Length > 0 && (directory.Equals(root, IgnoreCase) || directory.StartsWith(root + Path.DirectorySeparatorChar, IgnoreCase)))
-        {
-            var relative = Path.GetRelativePath(root, directory);
-            return relative == "." ? Path.GetFileName(root) : Path.Combine(Path.GetFileName(root), relative);
-        }
-        return directory;
-    }
-    private string LocationFor(string path)
-    {
-        var parts = RelativeDirectory(path).Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length > 4) parts = ["…", .. parts[^3..]];
-        return string.Join("  ›  ", parts);
-    }
+    private string RelativeDirectory(string path) => RelatedFileLocator.RelativeDirectory(path, WorkspaceRoot);
 
-    // ------------------------------------------------------------------ Command palette
-    public string PalettePlaceholder => IsCommandPalette ? "Type a command name" : "Go to file by name — # for a type or member, > to run a command";
-    partial void OnIsCommandPaletteChanged(bool value) => OnPropertyChanged(nameof(PalettePlaceholder));
-    [RelayCommand] private void PaletteNext() => MovePalette(1);
-    [RelayCommand] private void PalettePrevious() => MovePalette(-1);
-    private void MovePalette(int delta)
-    {
-        if (PaletteResults.Count == 0) return;
-        var index = SelectedPaletteEntry == null ? -1 : PaletteResults.IndexOf(SelectedPaletteEntry);
-        SelectedPaletteEntry = PaletteResults[Math.Clamp(index + delta, 0, PaletteResults.Count - 1)];
-    }
-
-    private void RefreshPalette()
-    {
-        PaletteResults.Clear();
-        var query = PaletteQuery.TrimStart();
-        var commandMode = query.StartsWith('>');
-        if (IsCommandPalette != commandMode) IsCommandPalette = commandMode;
-        if (commandMode) query = query[1..].Trim();
-        else if (query.StartsWith('#')) { RefreshSymbolPalette(query[1..].Trim()); return; }
-        _symbolSearch?.Cancel();
-        IEnumerable<PaletteEntry> results;
-        if (commandMode)
-        {
-            var commands = CommandEntries().ToList();
-            results = query.Length == 0 ? commands : commands
-                .Select(entry => (entry, score: Best(FuzzyScore(entry.Label, query), FuzzyScore(entry.Category + " " + entry.Label, query) - 6)))
-                .Where(x => x.score != null).OrderByDescending(x => x.score).Select(x => x.entry);
-        }
-        else
-        {
-            var files = Documents.Select(d => d.State.Path).Reverse().Concat(_allFiles).Distinct(StringComparer.OrdinalIgnoreCase);
-            results = query.Length == 0 ? files.Select(FileEntry) : files
-                .Select(path => (path, score: Best(FuzzyScore(Path.GetFileName(path), query), FuzzyScore(Path.GetRelativePath(WorkspaceRoot.Length > 0 ? WorkspaceRoot : Path.GetPathRoot(path) ?? "", path), query) - 20)))
-                .Where(x => x.score != null).OrderByDescending(x => x.score).ThenBy(x => x.path.Length).Select(x => FileEntry(x.path));
-        }
-        foreach (var entry in results.Take(80)) PaletteResults.Add(entry);
-        SelectedPaletteEntry = PaletteResults.FirstOrDefault();
-    }
-
-    private static int? Best(int? first, int? second) => first == null ? second : second == null ? first : Math.Max(first.Value, second.Value);
+    // ------------------------------------------------------------------ Command palette entries
     private PaletteEntry FileEntry(string path) => new(Path.GetFileName(path), RelativeDirectory(path), () => { RecordNavigationOrigin(); return OpenDocumentAsync(path); }, IconKind: FileIconKindConverter.KindFor(path));
-
-    /// <summary>Case-insensitive subsequence match favouring prefixes, word starts and runs; null when absent.</summary>
-    internal static int? FuzzyScore(string candidate, string query)
-    {
-        if (query.Length == 0) return 0;
-        int score = 0, matched = 0, previous = -2;
-        for (var i = 0; i < candidate.Length && matched < query.Length; i++)
-        {
-            if (char.ToLowerInvariant(candidate[i]) != char.ToLowerInvariant(query[matched])) continue;
-            var wordStart = i == 0 || !char.IsLetterOrDigit(candidate[i - 1]) || (char.IsUpper(candidate[i]) && char.IsLower(candidate[i - 1]));
-            score += 1 + (wordStart ? 8 : 0) + (i == previous + 1 ? 5 : 0);
-            previous = i; matched++;
-        }
-        if (matched < query.Length) return null;
-        if (candidate.StartsWith(query, IgnoreCase)) score += 30;
-        else if (candidate.Contains(query, IgnoreCase)) score += 14;
-        return score - candidate.Length / 10;
-    }
 
     private PaletteEntry Command(string category, string label, ICommand command, object? parameter = null, string shortcut = "", string icon = "", string detail = "")
         => new(label, detail, async () =>
@@ -294,11 +158,11 @@ public sealed partial class ShellViewModel
         yield return Command("Debug", "Start debugging", DebugCommand, shortcut: "F5", icon: "Play");
         yield return Command("Debug", "Run without debugging", RunCommand, shortcut: "Ctrl+F5", icon: "PlayOutline");
         yield return Command("Debug", "Stop debugging", Debugger.StopCommand, shortcut: "Shift+F5", icon: "Stop");
-        yield return Command("Debug", "Toggle breakpoint", ToggleBreakpointCommand, shortcut: "F9");
-        yield return Command("Debug", "Breakpoint hit count…", BreakpointHitCountCommand, icon: "Bug", detail: "Break on a hit number, from a hit, or every Nth hit");
-        yield return Command("Debug", "Tracepoint log message…", BreakpointLogMessageCommand, icon: "Bug", detail: "Log a message with {expressions} and continue");
-        yield return Command("Debug", "Add watch", AddWatchAtCaretCommand, icon: "Eye", detail: "Watch the expression at the caret or the selection");
-        yield return Command("Debug", "Show breakpoints", ShowBreakpointsCommand, icon: "Bug", detail: "Conditions, enabled state and binding status");
+        yield return Command("Debug", "Toggle breakpoint", Breakpoints.ToggleCommand, shortcut: "F9");
+        yield return Command("Debug", "Breakpoint hit count…", Breakpoints.HitCountCommand, icon: "Bug", detail: "Break on a hit number, from a hit, or every Nth hit");
+        yield return Command("Debug", "Tracepoint log message…", Breakpoints.LogMessageCommand, icon: "Bug", detail: "Log a message with {expressions} and continue");
+        yield return Command("Debug", "Add watch", Breakpoints.AddWatchCommand, icon: "Eye", detail: "Watch the expression at the caret or the selection");
+        yield return Command("Debug", "Show breakpoints", Breakpoints.ShowCommand, icon: "Bug", detail: "Conditions, enabled state and binding status");
         yield return Command("Debug", "Install or reinstall the debugger", Debugger.InstallAdapterCommand, icon: "Bug", detail: "Download netcoredbg into your WpfStudio profile");
         yield return Command("Debug", "Attach to process…", ShowToolCommand, "Debugger", icon: "Plug");
         yield return Command("View", "Solution Explorer", ShowToolCommand, "Explorer", icon: "Folder");

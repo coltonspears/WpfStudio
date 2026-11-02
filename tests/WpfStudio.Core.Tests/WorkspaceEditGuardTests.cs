@@ -45,7 +45,7 @@ public sealed class WorkspaceEditGuardTests
         Assert.Equal("class Customer { }", store.Find(created)!.Content);
         Assert.False(File.Exists(created));
         await Assert.ThrowsAsync<InvalidOperationException>(() => transaction.PrepareAsync(new([edit], [])));
-        Assert.Equal([created], transaction.Undo());
+        Assert.Equal([created], await transaction.UndoAsync());
         Assert.Null(store.Find(created));
     }
 
@@ -61,7 +61,7 @@ public sealed class WorkspaceEditGuardTests
         Assert.Equal(1, calls);
         Assert.Equal("after", document.Content);
         Assert.True(transaction.CanUndo);
-        transaction.Undo();
+        await transaction.UndoAsync();
         Assert.Equal("before", document.Content);
     }
 
@@ -96,7 +96,7 @@ public sealed class WorkspaceEditGuardTests
         Assert.Equal(version, source.Version);
         Assert.False(source.IsDirty);
         source.Content = "<View Tag=\"later edit\" />";
-        transaction.Undo();
+        await transaction.UndoAsync();
         Assert.Equal("class View {}", store.Find(code)!.Content);
         Assert.Equal("<View Tag=\"later edit\" />", source.Content);
         Assert.False(transaction.CanUndo);
@@ -133,7 +133,7 @@ public sealed class WorkspaceEditGuardTests
         Assert.NotNull(store.Find(absent));
         Assert.False(File.Exists(absent));
         Assert.True(transaction.CanUndo);
-        transaction.Undo();
+        await transaction.UndoAsync();
         Assert.Null(store.Find(absent));
         Assert.False(transaction.CanUndo);
     }

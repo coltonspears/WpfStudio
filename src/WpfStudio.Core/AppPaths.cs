@@ -61,7 +61,7 @@ public sealed class SettingsStore
     {
         try { return File.Exists(_path) ? JsonSerializer.Deserialize<StudioSettings>(await File.ReadAllTextAsync(_path, token)) ?? new() : new(); }
         catch (JsonException) { return new(); }
-        catch (IOException) { return new(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return new(); }
     }
     public Task SaveAsync(StudioSettings settings, CancellationToken token = default) => DocumentStore.AtomicWriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(settings, new JsonSerializerOptions { WriteIndented = true }), token);
 }

@@ -39,7 +39,12 @@ public sealed partial class EditorViewModel
             ScheduleGitChanges(immediate: true);
             ScheduleBlame();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { GitBase = null; LineChanges = []; Blame = []; GitChanged?.Invoke(); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A newer refresh may already have succeeded; an older failure must not wipe its result.
+            if (_disposed || revision != _gitBaseRevision) return;
+            GitBase = null; LineChanges = []; Blame = []; GitChanged?.Invoke();
+        }
     }
 
     public void RequestBlameCommit(BlameLine line) => BlameCommitRequested?.Invoke(line);

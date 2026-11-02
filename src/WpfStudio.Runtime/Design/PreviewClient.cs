@@ -96,7 +96,7 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         // host until that stop has finished cleaning up its predecessor.
         await stopBarrier.WaitAsync(lifetime.Token).ConfigureAwait(false);
         await _gate.WaitAsync(lifetime.Token).ConfigureAwait(false);
-        bool releaseGate = true;
+        bool releaseGate = true, abandoned = false;
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -139,12 +139,22 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
                     _ = DrainSupersededAsync(call);
                     throw new SupersededRequestException(token);
                 }
+                catch (OperationCanceledException) when (render is null && token.IsCancellationRequested
+                    && !_shutdown.IsCancellationRequested && !epoch.IsCancellationRequested)
+                {
+                    // The caller lost interest in a query (a pick while the pointer moved on). The host is healthy:
+                    // hold the gate until it acknowledges, as for a superseded render, rather than kill and cold-start it.
+                    releaseGate = false; abandoned = true;
+                    _ = DrainSupersededAsync(call);
+                    throw new OperationCanceledException("The preview request was cancelled.", token);
+                }
                 lifetime.Token.ThrowIfCancellationRequested();
                 if (result is PreviewSnapshot snapshot) RememberSurface(snapshot);
                 else if (result is PreviewEditResult edit) RememberSurface(edit.Snapshot);
                 return result;
             }
             catch (SupersededRequestException) { throw; }
+            catch (OperationCanceledException) when (abandoned) { throw; }
             catch (OperationCanceledException) when (!lifetime.IsCancellationRequested)
             {
                 await StopCoreAsync().ConfigureAwait(false);

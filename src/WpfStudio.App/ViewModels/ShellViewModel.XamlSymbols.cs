@@ -4,6 +4,8 @@ using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 
+using WpfStudio.App.Features.XamlAnalysis;
+
 namespace WpfStudio.App.ViewModels;
 
 public sealed partial class ShellViewModel
@@ -20,21 +22,21 @@ public sealed partial class ShellViewModel
         var selection = editor.SelectionRevision;
         var projectRevision = editor.XamlProjectRevision;
         var semanticRevision = Volatile.Read(ref _symbolSemanticRevision);
-        var sourceEpoch = Volatile.Read(ref _diagnosticSourceEpoch);
+        var sourceEpoch = XamlAnalysis.SourceEpoch;
         var contextRevision = editor.XamlContextRevision;
         var connected = _workspace.IsConnected;
-        var reloadRequired = _projectReloadRequired;
-        var typesPending = _projectTypesPending;
+        var reloadRequired = XamlAnalysis.ProjectReloadRequired;
+        var typesPending = XamlAnalysis.ProjectTypesPending;
         var openEditors = Documents.ToArray();
         var buffers = _store.Documents.Select(document => (Document: document, document.Version)).ToArray();
         return () => !_disposed && ReferenceEquals(ActiveDocument, editor) && _store.Find(source.Path) == source
             && ReferenceEquals(Workspace, workspace) && Configuration == configuration
-            && _projectReloadRequired == reloadRequired && _projectTypesPending == typesPending
+            && XamlAnalysis.ProjectReloadRequired == reloadRequired && XamlAnalysis.ProjectTypesPending == typesPending
             && editor.SelectionRevision == selection && editor.XamlProjectRevision == projectRevision
             && Documents.Count == openEditors.Length && openEditors.All(Documents.Contains)
             && buffers.All(buffer => _store.Find(buffer.Document.Path) == buffer.Document && buffer.Document.Version == buffer.Version)
             && (!includeSemantic || connected == _workspace.IsConnected && contextRevision == editor.XamlContextRevision
-                && semanticRevision == Volatile.Read(ref _symbolSemanticRevision) && sourceEpoch == Volatile.Read(ref _diagnosticSourceEpoch));
+                && semanticRevision == Volatile.Read(ref _symbolSemanticRevision) && sourceEpoch == XamlAnalysis.SourceEpoch);
     }
 
     private async Task SynchronizeSymbolBuffersAsync(EditorViewModel editor)
@@ -60,7 +62,7 @@ public sealed partial class ShellViewModel
 
     private bool CanQueryLanguageSymbols()
     {
-        if (_projectReloadRequired || _projectTypesPending)
+        if (XamlAnalysis.ProjectReloadRequired || XamlAnalysis.ProjectTypesPending)
         {
             Status = "Project sources changed. Refresh or reload the workspace before finding or renaming symbols.";
             return false;
@@ -119,7 +121,7 @@ public sealed partial class ShellViewModel
             Status = "Place the caret on a resolved binding member, named element, event handler or resource key" + SymbolWarnings(warnings ?? []);
             return;
         }
-        foreach (var usage in _wpfIndex!.Usages.Where(usage => usage.ResolvedPath == declaration.Path && usage.ResolvedDeclarationStart == declaration.ValueStart))
+        foreach (var usage in WpfExplorer.Index!.Usages.Where(usage => usage.ResolvedPath == declaration.Path && usage.ResolvedDeclarationStart == declaration.ValueStart))
             SearchResults.Add(new(usage.Path, usage.Line, 1, (usage.IsDynamic ? "DynamicResource " : "StaticResource ") + usage.Key));
         ToolRequested?.Invoke("Search");
         Status = $"{SearchResults.Count} resolved resource reference(s); runtime and code resource references are not indexed" + SymbolWarnings(warnings ?? []);
@@ -163,7 +165,7 @@ public sealed partial class ShellViewModel
             Status = "Place the caret on a resolved binding member, named element, event handler or resource key" + SymbolWarnings(warnings ?? []);
             return;
         }
-        SelectedWpfItem = _wpfIndex!.Items.FirstOrDefault(item => item.Path == declaration.Path && item.Line == declaration.Line && item.Key == declaration.Key);
+        WpfExplorer.SelectedItem = WpfExplorer.Index!.Items.FirstOrDefault(item => item.Path == declaration.Path && item.Line == declaration.Line && item.Key == declaration.Key);
         await RenameResourceCommand.ExecuteAsync(null);
     }
 
@@ -259,16 +261,16 @@ public sealed partial class ShellViewModel
             await NavigateAsync(result.Path, result.Line, result.Column);
             return;
         }
-        bool WorkspaceCurrent() => !_disposed && !_projectReloadRequired && !_projectTypesPending
+        bool WorkspaceCurrent() => !_disposed && !XamlAnalysis.ProjectReloadRequired && !XamlAnalysis.ProjectTypesPending
             && (!_symbolReferenceOrigins.TryGetValue(result, out var origin) || ReferenceEquals(origin.Workspace, Workspace));
         var workspace = Workspace;
         var text = _store.Find(result.Path)?.Content ?? await ProjectXamlDiagnosticText.ReadAsync(result.Path, _lifetime.Token);
-        if (!WorkspaceCurrent() || !ReferenceEquals(workspace, Workspace) || text is null || TextHash(text) != result.ExpectedTextHash)
+        if (!WorkspaceCurrent() || !ReferenceEquals(workspace, Workspace) || text is null || ProjectXamlAnalysisCoordinator.TextHash(text) != result.ExpectedTextHash)
         { Status = "The reference source or project changed. Find references again before navigating."; return; }
         RecordNavigationOrigin();
         await OpenDocumentAsync(result.Path);
         if (ActiveDocument is not { } editor || !editor.State.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase)
-            || !WorkspaceCurrent() || !ReferenceEquals(workspace, Workspace) || TextHash(editor.State.Content) != result.ExpectedTextHash)
+            || !WorkspaceCurrent() || !ReferenceEquals(workspace, Workspace) || ProjectXamlAnalysisCoordinator.TextHash(editor.State.Content) != result.ExpectedTextHash)
         { Status = "The reference source or project changed. Find references again before navigating."; return; }
         if (editor.IsXaml && result.ProjectPath is { } projectPath)
         {

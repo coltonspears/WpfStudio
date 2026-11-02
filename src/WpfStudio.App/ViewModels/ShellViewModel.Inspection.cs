@@ -19,6 +19,8 @@ public sealed partial class ShellViewModel
         if (StartupProject is not { } project) { Status = "Select a startup project before launching with inspection."; return; }
         if (debug && Debugger.IsActive) { Status = "Stop the current debugger before launching another application."; return; }
         if (debug && !await EnsureDebuggerAsync()) return;
+        // The install prompt above keeps the dispatcher running; a build started meanwhile owns the operation token.
+        if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
         var framework = TargetFramework ?? project.TargetFramework;
         if (framework == null || !new[] { "net8.0", "net9.0", "net10.0" }.Any(prefix => framework == prefix || framework.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase)))
         { Status = "Running-app inspection currently requires an untrimmed .NET 8, 9 or 10 WPF project."; return; }
@@ -55,8 +57,7 @@ public sealed partial class ShellViewModel
             }
             var launch = await _build.ResolveLaunchAsync(project.ProjectPath, configuration, framework, profile, _operation.Token);
             await LiveInspection.DisconnectCommand.ExecuteAsync(null);
-            _inspectionBuildSources = buildSources;
-            _inspectionSourceWorkspace = sourceWorkspace;
+            InspectionSources.Capture(buildSources, sourceWorkspace);
             session = new InspectionSession();
             var environment = InspectionLaunch.CreateEnvironment(launch.Environment, session, hook);
             ToolRequested?.Invoke("LiveInspection");

@@ -50,9 +50,9 @@ public sealed partial class DesignerTests
         Assert.True(context.Shell.IsPreviewOpen, model.Status);
         Assert.Equal(BoundSource, document.Content);
         Assert.Empty(client.Edits); // Validation and the diff never mutate the runtime value.
-        Assert.Contains("binding", context.Shell.PreviewWarnings, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Text=\"A &amp; B\"", Assert.Single(context.Shell.PreviewChanges).After);
-        context.Shell.AcceptPreviewCommand.Execute(null);
+        Assert.Contains("binding", context.Shell.ChangeReview.Warnings, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Text=\"A &amp; B\"", Assert.Single(context.Shell.ChangeReview.Changes).After);
+        context.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
 
         Assert.Contains("Text=\"A &amp; B\"", document.Content);
@@ -77,14 +77,14 @@ public sealed partial class DesignerTests
         model.EditedValue = "Replacement";
         var cancelled = model.WritePropertyToSourceCommand.ExecuteAsync(null);
         Assert.True(context.Shell.IsPreviewOpen, model.Status);
-        context.Shell.CancelPreviewCommand.Execute(null);
+        context.Shell.ChangeReview.CancelCommand.Execute(null);
         await cancelled;
         Assert.Equal(BoundSource, document.Content);
 
         var stale = model.WritePropertyToSourceCommand.ExecuteAsync(null);
         Assert.True(context.Shell.IsPreviewOpen, model.Status);
         document.Content += "\n<!-- newer edit -->";
-        context.Shell.AcceptPreviewCommand.Execute(null);
+        context.Shell.ChangeReview.AcceptCommand.Execute(null);
         await stale;
         Assert.Equal(BoundSource + "\n<!-- newer edit -->", document.Content);
         Assert.Contains("changed", model.Status, StringComparison.OrdinalIgnoreCase);
@@ -104,8 +104,8 @@ public sealed partial class DesignerTests
         SelectWritableProperty(model);
         var pending = model.RemovePropertyFromSourceCommand.ExecuteAsync(null);
         Assert.True(context.Shell.IsPreviewOpen, model.Status);
-        Assert.DoesNotContain("{Binding Name}", Assert.Single(context.Shell.PreviewChanges).After);
-        context.Shell.AcceptPreviewCommand.Execute(null);
+        Assert.DoesNotContain("{Binding Name}", Assert.Single(context.Shell.ChangeReview.Changes).After);
+        context.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
         Assert.DoesNotContain("Text=", document.Content);
         await context.Shell.UndoWorkspaceEditCommand.ExecuteAsync(null);

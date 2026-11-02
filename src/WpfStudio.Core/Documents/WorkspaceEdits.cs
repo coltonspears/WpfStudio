@@ -71,7 +71,7 @@ public sealed class WorkspaceEditTransaction
         if (applied.Count > 0) _undo.Push(applied);
     }
     /// <summary>Restores buffers and returns newly-created, never-saved documents removed from the store.</summary>
-    public IReadOnlyList<string> Undo()
+    public async Task<IReadOnlyList<string>> UndoAsync(CancellationToken cancellationToken = default)
     {
         if (!_undo.TryPeek(out var changes)) return [];
         foreach (var applied in changes)
@@ -85,7 +85,7 @@ public sealed class WorkspaceEditTransaction
             if (applied.Created && document.DiskHash == null && !File.Exists(document.Path))
             {
                 _store.Close(document);
-                _store.DeleteRecovery(document.Path);
+                await _store.DeleteRecoveryAsync(document.Path, cancellationToken).ConfigureAwait(false);
                 removed.Add(document.Path);
             }
             else document.Content = applied.Change.Before;

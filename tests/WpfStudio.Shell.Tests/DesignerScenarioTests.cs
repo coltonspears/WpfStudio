@@ -399,7 +399,7 @@ public sealed partial class DesignerTests
         editor.XamlProject = owners[1];
         Assert.False(model.IsCurrent);
         Assert.Null(model.SourcePath);
-        context.Shell.AcceptPreviewCommand.Execute(null);
+        context.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
         Assert.Equal(BoundSource, editor.State.Content);
         Assert.Contains("project context changed", model.Status);
@@ -422,7 +422,7 @@ public sealed partial class DesignerTests
         var pending = model.WritePropertyToSourceCommand.ExecuteAsync(null);
         Assert.True(context.Shell.IsPreviewOpen, model.Status);
         model.SelectedScenario = Assert.Single(model.Scenarios, scenario => scenario.Name == "Populated");
-        context.Shell.AcceptPreviewCommand.Execute(null);
+        context.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
         Assert.Equal(BoundSource, context.Shell.ActiveDocument!.State.Content);
         Assert.Contains("preview changed", model.Status);

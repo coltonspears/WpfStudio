@@ -89,12 +89,12 @@ public sealed partial class ShellSmokeTests
             Assert.True(shell.IsPreviewOpen, model.Status);
         }
         finally { shell.PropertyChanged -= changed; }
-        var change = Assert.Single(shell.PreviewChanges);
+        var change = Assert.Single(shell.ChangeReview.Changes);
         Assert.Contains("Width=\"264\" Height=\"42\" Content=\"Create workspace\"", change.After);
         Assert.Equal(source, document.State.Content);
         await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-layout-editing-review.png"));
-        shell.AcceptPreviewCommand.Execute(null);
+        shell.ChangeReview.AcceptCommand.Execute(null);
         await commit;
         Assert.Equal(change.After, document.State.Content);
         Assert.Equal(source, await File.ReadAllTextAsync(path));

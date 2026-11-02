@@ -70,14 +70,14 @@ public sealed partial class DesignerTests
         Assert.Empty(client.Edits);
         var pending = designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.TopLeft, -10, -5, true));
         Assert.True(test.Shell.IsPreviewOpen, designer.Status);
-        var change = Assert.Single(test.Shell.PreviewChanges);
+        var change = Assert.Single(test.Shell.ChangeReview.Changes);
         Assert.Contains("Canvas.Left='10'", change.After);
         Assert.Contains("Canvas.Top='25'", change.After);
         Assert.Contains("Width='110'", change.After);
         Assert.Contains("Height='45'", change.After);
         Assert.Contains("Content='Keep'", change.After);
         Assert.Single(client.LayoutValidations);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
         Assert.Equal(change.After, document.Content);
         Assert.Equal(2, client.LayoutValidations.Count);
@@ -107,7 +107,7 @@ public sealed partial class DesignerTests
         await BeginLayoutAsync(designer, XamlLayoutHandle.Move, 20, 15);
         var pending = designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 20, 15, true));
         Assert.True(test.Shell.IsPreviewOpen, designer.Status);
-        test.Shell.CancelPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.CancelCommand.Execute(null);
         await pending;
         Assert.Equal(LayoutSource, document.Content);
         Assert.Same(property, designer.SelectedProperty);
@@ -134,7 +134,7 @@ public sealed partial class DesignerTests
         else if (change == "mode") designer.Mode = PreviewMode.Compiled;
         else designer.IsLayoutEditingEnabled = false;
         string expected = document.Content;
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
         Assert.Equal(expected, document.Content);
         Assert.Contains("changed", designer.Status, StringComparison.OrdinalIgnoreCase);
@@ -153,7 +153,7 @@ public sealed partial class DesignerTests
         await BeginLayoutAsync(designer, XamlLayoutHandle.Move, 15, 0);
         var pending = designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 15, 0, true));
         Assert.True(test.Shell.IsPreviewOpen, designer.Status);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
         Assert.Equal(2, validations);
         Assert.Equal(LayoutSource, test.Shell.ActiveDocument!.State.Content);

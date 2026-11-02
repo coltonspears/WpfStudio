@@ -13,13 +13,13 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (startup, library, asset) = await CreateProjectsAsync(test);
-        test.Shell.SelectedWpfItem = new WpfItem("Asset", "logo.png", asset, 1);
+        test.Shell.WpfExplorer.SelectedItem = new WpfItem("Asset", "logo.png", asset, 1);
         test.Shell.SelectedBuildAction = "Content";
 
         Task operation = test.Shell.SetBuildActionCommand.ExecuteAsync(null);
         await WaitForPreviewAsync(test);
-        Assert.Equal(library.ProjectPath, Assert.Single(test.Shell.PreviewChanges).Path);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        Assert.Equal(library.ProjectPath, Assert.Single(test.Shell.ChangeReview.Changes).Path);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Contains("<Content Include=\"Assets\\logo.png\"", test.Store.Find(library.ProjectPath)!.Content);
@@ -33,7 +33,7 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (_, _, asset) = await CreateProjectsAsync(test);
-        test.Shell.SelectedWpfItem = new WpfItem("Asset", "logo.png", asset, 1);
+        test.Shell.WpfExplorer.SelectedItem = new WpfItem("Asset", "logo.png", asset, 1);
 
         await test.Shell.ShowPackUriCommand.ExecuteAsync(null);
 
@@ -46,7 +46,7 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (startup, library, asset) = await CreateProjectsAsync(test, shared: true);
-        test.Shell.SelectedWpfItem = new WpfItem("Asset", "logo.png", asset, 1);
+        test.Shell.WpfExplorer.SelectedItem = new WpfItem("Asset", "logo.png", asset, 1);
 
         await test.Shell.SetBuildActionCommand.ExecuteAsync(null);
         Assert.False(test.Shell.IsPreviewOpen);
@@ -62,7 +62,7 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (_, library, asset) = await CreateProjectsAsync(test, shared: true);
-        test.Shell.SelectedNode = new ExplorerNode("logo.png", asset, false, projectPath: library.ProjectPath);
+        test.Shell.Explorer.SelectedNode = new ExplorerNode("logo.png", asset, false, projectPath: library.ProjectPath);
         await test.Shell.ShowPackUriCommand.ExecuteAsync(null);
         Assert.Equal("pack://application:,,,/Company.Controls;component/Images/logo.png", test.Shell.Status);
     }
@@ -72,13 +72,13 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (startup, library, asset) = await CreateProjectsAsync(test, shared: true);
-        test.Shell.SelectedNode = new ExplorerNode("logo.png", asset, false, projectPath: library.ProjectPath);
+        test.Shell.Explorer.SelectedNode = new ExplorerNode("logo.png", asset, false, projectPath: library.ProjectPath);
         test.Shell.SelectedBuildAction = "Resource";
 
         Task operation = test.Shell.SetBuildActionCommand.ExecuteAsync(null);
         await WaitForPreviewAsync(test);
-        Assert.Equal(library.ProjectPath, Assert.Single(test.Shell.PreviewChanges).Path);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        Assert.Equal(library.ProjectPath, Assert.Single(test.Shell.ChangeReview.Changes).Path);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Contains("<Resource Include=\"..\\Shared\\logo.png\"", test.Store.Find(library.ProjectPath)!.Content);

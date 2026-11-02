@@ -291,6 +291,12 @@ public sealed partial class MemoryProfilerViewModel
             do SampleMemory(); while (await timer.WaitForNextTickAsync(token));
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { if (!_disposed) LiveMemoryText = "Memory sampling stopped: " + ex.Message; }
+        finally
+        {
+            // A loop that ended for any reason must not leave its source registered, or monitoring could never restart.
+            if (_monitor is { } monitor && monitor.Token == token) { monitor.Dispose(); _monitor = null; }
+        }
     }
 
     /// <summary>Takes one process-memory sample for the timeline. Public so tests can drive the timeline without a timer.</summary>

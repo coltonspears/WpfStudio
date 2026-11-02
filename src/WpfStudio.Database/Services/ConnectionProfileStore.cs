@@ -54,7 +54,11 @@ public sealed class ConnectionProfileStore : IConnectionProfileStore
     private static string Decrypt(string? encrypted)
     {
         if (string.IsNullOrEmpty(encrypted)) return "";
-        byte[] bytes = ProtectedData.Unprotect(Convert.FromBase64String(encrypted), Entropy, DataProtectionScope.CurrentUser);
+        byte[] bytes;
+        // A blob protected by another Windows account or machine cannot be unlocked here. The profile stays usable
+        // once its password is typed again, and must not take every other saved connection down with it.
+        try { bytes = ProtectedData.Unprotect(Convert.FromBase64String(encrypted), Entropy, DataProtectionScope.CurrentUser); }
+        catch (Exception exception) when (exception is CryptographicException or FormatException) { return ""; }
         try { return Encoding.UTF8.GetString(bytes); }
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }

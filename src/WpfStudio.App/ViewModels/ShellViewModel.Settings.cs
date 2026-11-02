@@ -14,10 +14,7 @@ public sealed partial class ShellViewModel
 {
     public const string AppearancePage = "Appearance", EditorPage = "Editor", IntelligencePage = "Intelligence",
         FilesPage = "Files", AssistantPage = "Assistant", ShortcutsPage = "Shortcuts";
-    private CancellationTokenSource? _settingsSave, _autoSave;
-    private int _autoSaveSuspensions;
-    private bool _autoSaveStopped;
-    private Task _autoSaveRun = Task.CompletedTask;
+    private CancellationTokenSource? _settingsSave;
 
     public EditorPreferences Editor => EditorPreferences.Current;
     [ObservableProperty] public partial string SettingsPage { get; set; } = AppearancePage;
@@ -55,14 +52,8 @@ public sealed partial class ShellViewModel
 
     [RelayCommand] private void ShowSettingsPage(string? page) { if (!string.IsNullOrEmpty(page)) SettingsPage = page; }
 
-    private void InitializeSettings()
-    {
-        Editor.PropertyChanged += (_, args) =>
-        {
-            ScheduleSettingsSave();
-            if (args.PropertyName is nameof(EditorPreferences.AutoSave) or nameof(EditorPreferences.AutoSaveDelaySeconds)) ScheduleAutoSave();
-        };
-    }
+    private void InitializeSettings() => Editor.PropertyChanged += EditorPreferenceChanged;
+    private void EditorPreferenceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args) => ScheduleSettingsSave();
 
     // Settings are written after a short pause, so dragging through font sizes writes once.
     private void ScheduleSettingsSave()
@@ -75,75 +66,6 @@ public sealed partial class ShellViewModel
             if (pending.IsCancellationRequested || _disposed) return;
             _ = GuardAsync(SaveSettingsAsync);
         }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
-    }
-
-    /// <summary>
-    /// Saves edited files after a pause in typing. Files that changed on disk, were never saved, are read-only or
-    /// are part of an open change review are left for an explicit save. Whitespace is not tidied, so text you are
-    /// typing does not move.
-    /// </summary>
-    private void ScheduleAutoSave()
-    {
-        _autoSave?.Cancel(); _autoSave?.Dispose(); _autoSave = null;
-        if (!Editor.AutoSave || !_initialized || _autoSaveSuspensions > 0 || _autoSaveStopped) return;
-        var pending = _autoSave = new();
-        _ = Task.Delay(TimeSpan.FromSeconds(Editor.AutoSaveDelaySeconds), pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
-        {
-            if (!pending.IsCancellationRequested && !_disposed) _autoSaveRun = AutoSaveAsync();
-        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
-    }
-
-    /// <summary>
-    /// Holds automatic saving while documents close. A save-or-discard prompt is modal but keeps the dispatcher
-    /// running, so a timed save could otherwise write edits the user is about to discard. A save that is already
-    /// writing finishes before the question is asked, so its document is then simply clean.
-    /// </summary>
-    private async Task<IDisposable> SuspendAutoSaveAsync()
-    {
-        _autoSaveSuspensions++;
-        _autoSave?.Cancel();
-        try { await _autoSaveRun; }
-        catch (Exception exception) { AppendOutput("Automatic save: " + exception.Message); }
-        return new AutoSaveSuspension(this);
-    }
-
-    private sealed class AutoSaveSuspension(ShellViewModel owner) : IDisposable
-    {
-        private bool _released;
-        public void Dispose()
-        {
-            if (_released) return;
-            _released = true;
-            if (--owner._autoSaveSuspensions == 0) owner.ScheduleAutoSave();
-        }
-    }
-
-    private bool AutoSaveHeld => _autoSaveSuspensions > 0 || _autoSaveStopped;
-
-    /// <summary>Runs the timed save now, as the timer would; for tests.</summary>
-    internal Task RunAutoSaveAsync() => _autoSaveRun = AutoSaveAsync();
-
-    private async Task AutoSaveAsync()
-    {
-        if (AutoSaveHeld) return;
-        if (IsPreviewOpen) { ScheduleAutoSave(); return; }
-        var saved = 0;
-        foreach (var document in Documents.Where(document => document.State.IsDirty && document.State.DiskHash is not null && !document.IsReadOnly
-                     && !document.State.HasExternalChange && File.Exists(document.State.Path)).ToArray())
-        {
-            if (AutoSaveHeld || !Documents.Contains(document)) break;
-            try
-            {
-                await _store.SaveAsync(document.State);
-                if (document.IsXaml) _xamlResources.Invalidate();
-                saved++;
-            }
-            catch (ExternalFileChangedException) { _ = CheckExternalChangesAsync(); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { AppendOutput("Automatic save: " + exception.Message); }
-        }
-        if (saved == 0) return;
-        RequestProjectXamlAnalysis();
-        Status = saved == 1 ? "Saved automatically" : $"Saved {saved} files automatically";
     }
 
     /// <summary>Applies the whitespace settings to a document before an explicit save.</summary>

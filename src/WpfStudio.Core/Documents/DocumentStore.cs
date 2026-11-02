@@ -122,7 +122,10 @@ public sealed class DocumentStore
     {
         var records = new List<RecoveryDocument>();
         if (!Directory.Exists(_recoveryDirectory)) return records;
-        foreach (var file in Directory.EnumerateFiles(_recoveryDirectory, "*.json"))
+        string[] files;
+        try { files = Directory.EnumerateFiles(_recoveryDirectory, "*.json").ToArray(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return records; }
+        foreach (var file in files)
         {
             try
             {
@@ -130,13 +133,14 @@ public sealed class DocumentStore
                 if (value != null) records.Add(value);
             }
             catch (JsonException) { /* A damaged recovery record must not prevent other records loading. */ }
-            catch (IOException) { /* A record removed concurrently must not prevent other records loading. */ }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* A record removed or locked concurrently must not prevent other records loading. */ }
         }
         return records;
     }
-    public void DeleteRecovery(string path)
+    /// <summary>Removes a document's recovery record. Asynchronous because the gate is held across the recovery writer's disk writes.</summary>
+    public async Task DeleteRecoveryAsync(string path, CancellationToken cancellationToken = default)
     {
-        _recoveryGate.Wait();
+        await _recoveryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { DeleteRecoveryCore(path); }
         finally { _recoveryGate.Release(); }
     }

@@ -2,6 +2,8 @@ using System.IO;
 using WpfStudio.Contracts;
 using WpfStudio.Workspace.Xaml;
 
+using WpfStudio.App.Features.XamlAnalysis;
+
 namespace WpfStudio.App.ViewModels;
 
 public sealed partial class ShellViewModel
@@ -16,15 +18,15 @@ public sealed partial class ShellViewModel
         var workspace = Workspace;
         var configuration = Configuration;
         var semanticRevision = Volatile.Read(ref _symbolSemanticRevision);
-        var sourceEpoch = Volatile.Read(ref _diagnosticSourceEpoch);
+        var sourceEpoch = XamlAnalysis.SourceEpoch;
         var connected = _workspace.IsConnected;
         return () => !_disposed && ReferenceEquals(ActiveDocument, editor) && Documents.Contains(editor)
             && ReferenceEquals(_store.Find(state.Path), state) && !editor.IsReadOnly
             && state.Version == version && state.Content == text && editor.SelectionRevision == selectionRevision
             && editor.XamlProjectRevision == projectRevision && ReferenceEquals(Workspace, workspace) && Configuration == configuration
-            && (!usesSemanticContext || !_projectReloadRequired && !_projectTypesPending
+            && (!usesSemanticContext || !XamlAnalysis.ProjectReloadRequired && !XamlAnalysis.ProjectTypesPending
                 && connected == _workspace.IsConnected && semanticRevision == Volatile.Read(ref _symbolSemanticRevision)
-                && sourceEpoch == Volatile.Read(ref _diagnosticSourceEpoch));
+                && sourceEpoch == XamlAnalysis.SourceEpoch);
     }
 
     private async Task FormatActiveDocumentAsync()
@@ -46,7 +48,7 @@ public sealed partial class ShellViewModel
         }
         var inputsCurrent = CaptureFormattingContext(editor, usesSemanticContext: false);
         bool hadProjectContext = Workspace is not null || editor.XamlProjects.Count > 0 || _workspace.IsConnected;
-        bool useProjectTypes = _workspace.IsConnected && !_projectReloadRequired && !_projectTypesPending;
+        bool useProjectTypes = _workspace.IsConnected && !XamlAnalysis.ProjectReloadRequired && !XamlAnalysis.ProjectTypesPending;
         string? fallbackReason = useProjectTypes ? null : "Project types are unavailable; conservative XAML formatting was used.";
         if (useProjectTypes)
         {
@@ -61,7 +63,7 @@ public sealed partial class ShellViewModel
             }
         }
         if (!inputsCurrent()) throw new InvalidOperationException("The document or formatting context changed. Request formatting again.");
-        if (useProjectTypes && (!_workspace.IsConnected || _projectReloadRequired || _projectTypesPending))
+        if (useProjectTypes && (!_workspace.IsConnected || XamlAnalysis.ProjectReloadRequired || XamlAnalysis.ProjectTypesPending))
         {
             useProjectTypes = false;
             fallbackReason = "Project types are unavailable; conservative XAML formatting was used.";
@@ -80,7 +82,7 @@ public sealed partial class ShellViewModel
             {
                 var result = new XamlFormattingService().Format(xamlRequest.Text, options: xamlRequest.Options, token: token);
                 return new WorkspaceEditResult(result.Accepted
-                    ? [new DocumentEdits(xamlRequest.Path, xamlRequest.Version, result.Edits, TextHash(xamlRequest.Text))] : [],
+                    ? [new DocumentEdits(xamlRequest.Path, xamlRequest.Version, result.Edits, ProjectXamlAnalysisCoordinator.TextHash(xamlRequest.Text))] : [],
                     fallbackReason is null ? result.Warnings : result.Accepted
                         ? [fallbackReason, .. result.Warnings] : [.. result.Warnings, fallbackReason]);
             }, token));

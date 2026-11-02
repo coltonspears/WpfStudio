@@ -144,6 +144,11 @@ public sealed partial class AssistantViewModel : ObservableObject, IDisposable
             if (response is not null) { response.Text = output.ToString(); response.Detail = "Request failed · not included in future conversation context"; }
             Status = ex is IOException ? "The response connection was interrupted. Partial text remains available; check your network and try again." : AssistantSettingsViewModel.ErrorMessage(ex);
         }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            if (response is not null) { response.Text = output.ToString(); response.Detail = "Request failed · not included in future conversation context"; }
+            Status = "The request failed unexpectedly: " + ex.Message;
+        }
         finally
         {
             IsBusy = false;

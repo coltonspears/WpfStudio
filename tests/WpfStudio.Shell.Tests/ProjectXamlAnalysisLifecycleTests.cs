@@ -160,10 +160,10 @@ public sealed class ProjectXamlAnalysisLifecycleTests
         var view = await test.CreateFileAsync("Views/Closed.xaml", "<Grid />");
         var project = await test.CreateFileAsync("Fixture.csproj", "<Project />");
         test.Shell.Workspace = new(project, "Test", [new("id", "Fixture", project, null, null, false, [new(view, "Closed.xaml", "Page")])], []);
-        await test.Shell.RefreshProjectXamlAnalysisAsync();
+        await test.Shell.XamlAnalysis.RefreshAsync();
         Assert.Empty(test.Shell.Documents); Assert.Null(test.Store.Find(view));
-        Assert.Contains("disconnected", test.Shell.XamlAnalysisStatus);
-        Assert.False(test.Shell.IsProjectXamlAnalysisRunning);
+        Assert.Contains("disconnected", test.Shell.XamlAnalysis.Status);
+        Assert.False(test.Shell.XamlAnalysis.IsRunning);
     }
 
     [Fact]
@@ -183,15 +183,15 @@ public sealed class ProjectXamlAnalysisLifecycleTests
 
         await test.CreateFileAsync("NewModel.cs", "class NewModel { }");
 
-        await WaitAsync(() => test.Shell.XamlAnalysisStatus.Contains("Reload the workspace", StringComparison.Ordinal));
+        await WaitAsync(() => test.Shell.XamlAnalysis.Status.Contains("Reload the workspace", StringComparison.Ordinal));
         Assert.Empty(editor.Diagnostics);
-        Assert.Empty(test.Shell.WpfIssues);
+        Assert.Empty(test.Shell.WpfExplorer.Issues);
         Assert.Equal("<Grid><!-- unsaved --></Grid>", editor.State.Content);
         Assert.Equal(version, editor.State.Version);
         Assert.True(editor.XamlContextRevision > revision);
         Assert.Equal(project, editor.XamlProjectPath);
-        await test.Shell.RefreshProjectXamlAnalysisAsync();
-        Assert.Contains("Reload the workspace", test.Shell.XamlAnalysisStatus);
+        await test.Shell.XamlAnalysis.RefreshAsync();
+        Assert.Contains("Reload the workspace", test.Shell.XamlAnalysis.Status);
     }
 
     [Fact]

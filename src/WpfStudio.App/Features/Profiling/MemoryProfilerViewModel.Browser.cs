@@ -195,9 +195,14 @@ public sealed partial class MemoryProfilerViewModel
     {
         if (_session is not { } session || node.ObjectId is not int id) return;
         var selection = _inspectionRevision;
-        var children = await session.GetChildrenAsync(new(id, Raw: node.IsRaw), _inspection?.Token ?? _lifetime.Token);
-        if (selection != _inspectionRevision) return;
-        node.ReplaceChildren(NodesFor(children, node.Depth + 1, node));
+        try
+        {
+            var children = await session.GetChildrenAsync(new(id, Raw: node.IsRaw), _inspection?.Token ?? _lifetime.Token);
+            if (selection != _inspectionRevision) return;
+            node.ReplaceChildren(NodesFor(children, node.Depth + 1, node));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { if (selection == _inspectionRevision) Status = "Could not load object members: " + ex.Message; }
     }
 
     [RelayCommand]
@@ -206,13 +211,18 @@ public sealed partial class MemoryProfilerViewModel
         if (more is not { IsMore: true, ObjectId: int id } || _session is not { } session) return;
         var selection = _inspectionRevision;
         var raw = more.MoreParent?.IsRaw == true;
-        var children = await session.GetChildrenAsync(new(id, more.NextSkip, Raw: raw), _inspection?.Token ?? _lifetime.Token);
-        if (selection != _inspectionRevision) return;
-        var target = more.MoreParent?.Children ?? FieldNodes;
-        var index = target.IndexOf(more);
-        if (index < 0) return;
-        target.RemoveAt(index);
-        foreach (var node in NodesFor(children, more.Depth, more.MoreParent)) target.Insert(index++, node);
+        try
+        {
+            var children = await session.GetChildrenAsync(new(id, more.NextSkip, Raw: raw), _inspection?.Token ?? _lifetime.Token);
+            if (selection != _inspectionRevision) return;
+            var target = more.MoreParent?.Children ?? FieldNodes;
+            var index = target.IndexOf(more);
+            if (index < 0) return;
+            target.RemoveAt(index);
+            foreach (var node in NodesFor(children, more.Depth, more.MoreParent)) target.Insert(index++, node);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { if (selection == _inspectionRevision) Status = "Could not load more members: " + ex.Message; }
     }
 
     [RelayCommand(CanExecute = nameof(CanEstimate), IncludeCancelCommand = true)] private Task EstimateObjectAsync(CancellationToken token) => EstimateAsync(null, token);

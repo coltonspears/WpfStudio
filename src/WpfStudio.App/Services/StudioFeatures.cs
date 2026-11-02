@@ -10,19 +10,33 @@ using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Services;
 
+/// <summary>What the optional tools need from the shell when they change workspace files.</summary>
+public interface IWorkspaceMutationHost
+{
+    /// <summary>
+    /// Saves every open document before a tool rewrites project files; false when the user cancelled. Throws while a
+    /// build, debug session or change review is in progress.
+    /// </summary>
+    Task<bool> SaveBeforeMutationAsync();
+    /// <summary>A tool changed workspace files (a package install, a checkout): re-check open files and reload the project model.</summary>
+    Task WorkspaceChangedAsync();
+}
+
 /// <summary>Composition and workspace coordination for optional tools.</summary>
 public sealed class StudioFeatures : IDisposable
 {
+    private IWorkspaceMutationHost? _host;
     private bool _disposed;
     public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs)
     {
         Assistant = assistant;
         GitService = git;
-        Packages = new(packages, dialogs, () => Git?.IsBusy == true ? Task.FromException<bool>(new InvalidOperationException("Wait for the Git operation to finish.")) : SaveBeforeMutation(), () => WorkspaceChanged());
-        Git = new(git, _ => Packages.IsBusy ? Task.FromException<bool>(new InvalidOperationException("Wait for the package operation to finish.")) : SaveBeforeMutation()) { AutoSelect = true };
+        Packages = new(packages, dialogs, () => Git?.IsBusy == true ? Task.FromException<bool>(new InvalidOperationException("Wait for the Git operation to finish.")) : Host.SaveBeforeMutationAsync(), () => Host.WorkspaceChangedAsync());
+        Git = new(git, _ => Packages.IsBusy ? Task.FromException<bool>(new InvalidOperationException("Wait for the package operation to finish.")) : Host.SaveBeforeMutationAsync()) { AutoSelect = true };
     }
-    public Func<Task<bool>> SaveBeforeMutation { get; set; } = () => Task.FromResult(false);
-    public Func<Task> WorkspaceChanged { get; set; } = () => Task.CompletedTask;
+    private IWorkspaceMutationHost Host => _host ?? throw new InvalidOperationException("The shell has not attached to the workspace tools yet.");
+    /// <summary>Connects the tools to the shell that owns the documents and the project model; the shell calls this once.</summary>
+    public void Attach(IWorkspaceMutationHost host) => _host = host;
     public PackagesViewModel Packages { get; }
     public GitViewModel Git { get; }
     /// <summary>The Git CLI boundary shared by the Git pane and editors (change margin and blame).</summary>

@@ -44,7 +44,7 @@ internal sealed class ShellTestContext : IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        if (Shell.IsPreviewOpen) Shell.CancelPreviewCommand.Execute(null);
+        if (Shell.IsPreviewOpen) Shell.ChangeReview.CancelCommand.Execute(null);
         await Shell.DisposeAsync();
         await _debugger.DisposeAsync();
         await _terminal.DisposeAsync();

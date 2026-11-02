@@ -181,9 +181,9 @@ public sealed class GitService
         var current = await ReadWorkingFileAsync(conflict.FullPath, cancellationToken);
         if (current.Text != conflict.Text) throw new InvalidOperationException("The file changed since the conflicts were loaded. Reload it and resolve again.");
         if (WpfStudio.Core.Git.MergeConflicts.Parse(resolved).Count > 0) throw new InvalidOperationException("The result still contains conflict markers.");
+        // Write the file back in the encoding it was read in (UTF-16 stays UTF-16; a UTF-8 mark is kept only if present).
         var bytes = await File.ReadAllBytesAsync(conflict.FullPath, cancellationToken);
-        var bom = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble);
-        await File.WriteAllTextAsync(conflict.FullPath, resolved, new UTF8Encoding(bom), cancellationToken);
+        await File.WriteAllTextAsync(conflict.FullPath, resolved, WpfStudio.Core.Text.TextEncoding.Detect(bytes), cancellationToken);
         return (await RunAsync(conflict.Root, ["add", "--", conflict.RelativePath], cancellationToken)).Display;
     }
 
@@ -505,7 +505,8 @@ public sealed class GitService
         }
         catch
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception kill) when (kill is InvalidOperationException or System.ComponentModel.Win32Exception) { /* Exited meanwhile; the original failure is what matters. */ }
             await process.WaitForExitAsync(CancellationToken.None);
             await Task.WhenAll(outputTask, errorTask);
             throw;
