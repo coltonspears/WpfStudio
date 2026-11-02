@@ -65,6 +65,22 @@ public sealed class SolutionExplorerViewModelTests
     }
 
     [Fact]
+    public async Task ContextCommandsSetTheStartupProjectAndOpenItsProjectFile()
+    {
+        var host = new Host { WorkspacePath = Path.Combine(Root, "Shop.sln") };
+        var projects = new ObservableCollection<WorkspaceProject> { Project("Shop", "Program.cs"), Project("Shop.Tests", "Tests.cs") };
+        var explorer = new SolutionExplorerViewModel(host, projects);
+        explorer.Rebuild(keepState: false);
+        explorer.SelectedNode = explorer.Nodes[0].Children[1];
+        explorer.SetStartupProjectCommand.Execute(null);
+        Assert.Equal("Shop.Tests", host.Startup?.Name);
+
+        explorer.SelectedNode = null;
+        await explorer.EditProjectCommand.ExecuteAsync(null);
+        Assert.Equal([projects[1].ProjectPath], host.Opened);
+    }
+
+    [Fact]
     public void RelatedFilesFollowConventionsAndRoles()
     {
         string view = Path.Combine(Root, "Views", "CustomerView.xaml"), code = view + ".cs", model = Path.Combine(Root, "ViewModels", "CustomerViewModel.cs");
@@ -95,10 +111,13 @@ public sealed class SolutionExplorerViewModelTests
         Assert.Equal(Path.Combine(Path.GetTempPath(), "Elsewhere").TrimEnd(Path.DirectorySeparatorChar), RelatedFileLocator.RelativeDirectory(Path.Combine(Path.GetTempPath(), "Elsewhere", "File.cs"), Root));
     }
 
-    private sealed class Host : IWorkbenchHost
+    private sealed class Host : ISolutionExplorerHost
     {
         public string? WorkspacePath { get; set; }
         public string Status { get; private set; } = "";
+        public string? StartupProjectPath { get; set; }
+        public WorkspaceProject? Startup { get; private set; }
+        public void SetStartupProject(WorkspaceProject project) { Startup = project; StartupProjectPath = project.ProjectPath; }
         public event Action? DocumentsChanged;
         public void ChangeDocuments() => DocumentsChanged?.Invoke();
         public IReadOnlyList<string> WorkspaceFiles => [];
@@ -111,7 +130,8 @@ public sealed class SolutionExplorerViewModelTests
         public Task GuardAsync(Func<Task> action) => action();
         public void ReportStatus(string status) => Status = status;
         public Task NavigateAsync(string path, int line, int column) => Task.CompletedTask;
-        public Task OpenDocumentAsync(string path) => Task.CompletedTask;
+        public List<string> Opened { get; } = [];
+        public Task OpenDocumentAsync(string path) { Opened.Add(path); return Task.CompletedTask; }
         public Task<bool> CloseDocumentAsync(string path) => Task.FromResult(true);
         public void ShowTool(string toolId) { }
     }

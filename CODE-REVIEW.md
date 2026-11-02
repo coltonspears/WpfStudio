@@ -328,3 +328,9 @@ Structural work (S1), step 7:
 
 - **Breakpoint editing** moved to `Features/Debugging/BreakpointEditingViewModel.cs`: toggling at the caret, conditions, hit counts, tracepoint messages, watches, the Show breakpoints shortcut, and the margin markers kept in sync with the debugger's breakpoint list (with the breakpoint subscriptions it observes released on dispose). It reaches the shell through `IBreakpointEditingHost` (active and open editors, dialogs, status, tool activation). Menus, the F9 key binding, the palette and editor actions go through `Breakpoints`.
 - `BreakpointEditingTests` drives the hit-count, tracepoint, disable and toggle paths through the shell's debugger and dialog fakes. `ShellViewModel` is now 2,700 lines across 16 partials.
+
+Structural work (C1 and S1), step 8:
+
+- **Feature callbacks became a typed host.** `StudioFeatures` no longer exposes the mutable `SaveBeforeMutation` and `WorkspaceChanged` function properties; it takes the shell once through `Attach(IWorkspaceMutationHost)`, whose two methods save open documents before a tool rewrites project files and re-check and reload after one did. A tool that runs before the shell attached now fails with a clear message instead of silently skipping the save.
+- **Explorer context commands** (reveal, copy path, edit project file, set startup project) moved into `SolutionExplorerViewModel` behind `ISolutionExplorerHost`, which adds the startup project to the workbench host.
+- `ShellViewModel` is now 2,704 lines across 16 partials.

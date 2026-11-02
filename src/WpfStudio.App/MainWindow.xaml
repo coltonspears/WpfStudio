@@ -651,13 +651,13 @@
                           <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
                           <MenuItem Header="Add to file group…" c:Ui.Icon="Pin" Command="{Binding FileGroups.AddSelectedCommand}" />
                           <Separator />
-                          <MenuItem Header="Set as startup project" c:Ui.Icon="Target" Command="{Binding SetStartupProjectCommand}" />
-                          <MenuItem Header="Edit project file" Command="{Binding EditProjectCommand}" />
+                          <MenuItem Header="Set as startup project" c:Ui.Icon="Target" Command="{Binding Explorer.SetStartupProjectCommand}" />
+                          <MenuItem Header="Edit project file" Command="{Binding Explorer.EditProjectCommand}" />
                           <MenuItem Header="Manage NuGet packages…" c:Ui.Icon="Package" Command="{Binding OpenSelectedProjectPackagesCommand}" />
                           <Separator />
                           <MenuItem Header="Git changes…" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" />
-                          <MenuItem Header="Open containing folder" c:Ui.Icon="FolderOpen" Command="{Binding RevealSelectedCommand}" />
-                          <MenuItem Header="Copy full path" c:Ui.Icon="Link" Command="{Binding CopySelectedPathCommand}" />
+                          <MenuItem Header="Open containing folder" c:Ui.Icon="FolderOpen" Command="{Binding Explorer.RevealSelectedCommand}" />
+                          <MenuItem Header="Copy full path" c:Ui.Icon="Link" Command="{Binding Explorer.CopySelectedPathCommand}" />
                         </ContextMenu>
                       </TreeView.ContextMenu>
                       <TreeView.ItemContainerStyle>

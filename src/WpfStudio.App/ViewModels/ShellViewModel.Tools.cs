@@ -17,16 +17,11 @@ public sealed partial class ShellViewModel
     {
         Features = features;
         if (features == null) return;
-        features.SaveBeforeMutation = async () =>
-        {
-            if (IsBusy || _loading || IsPreviewOpen || Debugger.IsActive) throw new InvalidOperationException("Finish the current build, debug session, or change preview before modifying the workspace.");
-            return await SaveAllDocumentsAsync();
-        };
-        features.WorkspaceChanged = async () => { await CheckExternalChangesAsync(fromAppOperation: true); await ReloadWorkspaceAsync(); };
+        features.Attach(this);
         features.Git.OpenFileRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
         // Commits, checkouts and merges change what each editor's change margin and blame compare with.
         features.Git.RepositoryChanged += () => { foreach (var document in Documents) _ = document.RefreshGitAsync(features.GitService, _lifetime.Token); };
-        features.Git.WorkspaceFilesChanged += () => _ = GuardAsync(() => features.WorkspaceChanged());
+        features.Git.WorkspaceFilesChanged += () => _ = GuardAsync(WorkspaceMutatedAsync);
         features.Assistant.SettingsRequested += () => _ = OpenSettingsCommand.ExecuteAsync(AssistantPage);
         features.Assistant.RefreshContextRequested += UpdateAssistantContext;
     }
@@ -85,10 +80,6 @@ public sealed partial class ShellViewModel
     });
     [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { if (Features != null) { _gitToolOpened = true; ToolRequested?.Invoke("Git"); await Features.Git.SetWorkspaceAsync(Workspace?.Path); } });
     [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { if (Features != null) { UpdateAssistantContext(); ToolRequested?.Invoke("ColtonGPT"); await Features.Assistant.InitializeAsync(); } });
-    [RelayCommand] private Task RevealSelectedAsync() => GuardAsync(() => { if (Explorer.SelectedNode is { Path.Length: > 0 }) DesktopNavigation.Reveal(Explorer.SelectedNode.Path); return Task.CompletedTask; });
-    [RelayCommand] private Task CopySelectedPathAsync() => GuardAsync(() => { if (Explorer.SelectedNode is { Path.Length: > 0 }) DesktopNavigation.Copy(Explorer.SelectedNode.Path); return Task.CompletedTask; });
-    [RelayCommand] private Task EditProjectAsync() => GuardAsync(async () => { var path = Explorer.SelectedNode?.ProjectPath ?? StartupProject?.ProjectPath; if (path != null) await OpenDocumentAsync(path); });
-    [RelayCommand] private void SetStartupProject() { if (Projects.FirstOrDefault(p => p.ProjectPath == Explorer.SelectedNode?.ProjectPath) is { } project) { StartupProject = project; Status = project.Name + " is the startup project"; } }
     [RelayCommand] private Task RefactorAsync(string? action) => GuardAsync(async () =>
     {
         if (ActiveDocument is not { IsReadOnly: false } document || document.State.Extension != ".cs" || action == null) { Status = "Open a C# source document to use this refactoring"; return; }

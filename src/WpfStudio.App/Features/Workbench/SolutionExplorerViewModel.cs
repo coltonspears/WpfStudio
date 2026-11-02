@@ -2,10 +2,18 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Workbench;
+
+/// <summary>What the explorer's context commands need beyond <see cref="IWorkbenchHost"/>.</summary>
+public interface ISolutionExplorerHost : IWorkbenchHost
+{
+    string? StartupProjectPath { get; }
+    void SetStartupProject(WorkspaceProject project);
+}
 
 /// <summary>
 /// The Solution Explorer tree: projects under their solution, a name filter that expands every match, and the
@@ -13,12 +21,12 @@ namespace WpfStudio.App.Features.Workbench;
 /// </summary>
 public sealed partial class SolutionExplorerViewModel : ObservableObject
 {
-    private readonly IWorkbenchHost _host;
+    private readonly ISolutionExplorerHost _host;
     private readonly ObservableCollection<WorkspaceProject> _projects;
     private (HashSet<string> Expanded, string? Selected)? _stateBeforeFilter;
 
     /// <param name="projects">The loaded projects, owned by the shell; the tree is rebuilt from them on request.</param>
-    public SolutionExplorerViewModel(IWorkbenchHost host, ObservableCollection<WorkspaceProject> projects)
+    public SolutionExplorerViewModel(ISolutionExplorerHost host, ObservableCollection<WorkspaceProject> projects)
     {
         _host = host; _projects = projects;
         Nodes.CollectionChanged += (_, _) => NotifyPlaceholders();
@@ -53,6 +61,16 @@ public sealed partial class SolutionExplorerViewModel : ObservableObject
     {
         NestRelatedFiles = !NestRelatedFiles;
         _host.ReportStatus(NestRelatedFiles ? "Related files nested in Solution Explorer" : "Related files listed separately in Solution Explorer");
+    }
+
+    // ------------------------------------------------------------------ Context menu
+    [RelayCommand] private Task RevealSelectedAsync() => _host.GuardAsync(() => { if (SelectedNode is { Path.Length: > 0 } node) DesktopNavigation.Reveal(node.Path); return Task.CompletedTask; });
+    [RelayCommand] private Task CopySelectedPathAsync() => _host.GuardAsync(() => { if (SelectedNode is { Path.Length: > 0 } node) DesktopNavigation.Copy(node.Path); return Task.CompletedTask; });
+    /// <summary>Opens the selected node's project file, or the startup project's when nothing is selected.</summary>
+    [RelayCommand] private Task EditProjectAsync() => _host.GuardAsync(async () => { var path = SelectedNode?.ProjectPath ?? _host.StartupProjectPath; if (path != null) await _host.OpenDocumentAsync(path); });
+    [RelayCommand] private void SetStartupProject()
+    {
+        if (_projects.FirstOrDefault(p => p.ProjectPath == SelectedNode?.ProjectPath) is { } project) _host.SetStartupProject(project);
     }
 
     /// <summary>Lists loose files from a folder, as shown while the project model is still loading or when it has no projects.</summary>

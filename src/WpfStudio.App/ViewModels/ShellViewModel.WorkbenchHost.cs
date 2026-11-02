@@ -5,12 +5,13 @@ using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Features.WpfExplorer;
 using WpfStudio.Core.Wpf;
 using WpfStudio.App.Features.XamlAnalysis;
+using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IWorkspaceMutationHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -101,6 +102,18 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     Task IBreakpointEditingHost.GuardAsync(Func<Task> action) => GuardAsync(action);
     void IBreakpointEditingHost.ReportStatus(string status) => Status = status;
     void IBreakpointEditingHost.ShowTool(string toolId) => ShowToolCommand.Execute(toolId);
+
+    // ------------------------------------------------------------------ ISolutionExplorerHost / IWorkspaceMutationHost
+    string? ISolutionExplorerHost.StartupProjectPath => StartupProject?.ProjectPath;
+    void ISolutionExplorerHost.SetStartupProject(WorkspaceProject project) { StartupProject = project; Status = project.Name + " is the startup project"; }
+    async Task<bool> IWorkspaceMutationHost.SaveBeforeMutationAsync()
+    {
+        if (IsBusy || _loading || IsPreviewOpen || Debugger.IsActive) throw new InvalidOperationException("Finish the current build, debug session, or change preview before modifying the workspace.");
+        return await SaveAllDocumentsAsync();
+    }
+    Task IWorkspaceMutationHost.WorkspaceChangedAsync() => WorkspaceMutatedAsync();
+    /// <summary>After a tool changed workspace files: re-check open files against disk, then reload the project model.</summary>
+    private async Task WorkspaceMutatedAsync() { await CheckExternalChangesAsync(fromAppOperation: true); await ReloadWorkspaceAsync(); }
 
     // ------------------------------------------------------------------ WPF Explorer
     /// <summary>The resource declared at, or referenced from, the active caret; null (with a status) when the index no longer matches the buffer.</summary>
