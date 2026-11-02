@@ -293,3 +293,9 @@ Fixed on this branch (hang and data-integrity pass):
 Structural work (S1), step 1:
 
 - **Task List and file groups** left `ShellViewModel`. `Features/Workbench/TaskListViewModel.cs` and `FileGroupsViewModel.cs` own their state, commands and `WorkspaceStateStore`; they reach the shell only through `IWorkbenchHost` (workspace path and files, open documents, active caret, dialogs, navigation, status), which `ShellViewModel.WorkbenchHost.cs` implements explicitly. The shell exposes them as `TaskList` and `FileGroups`; `MainWindow.xaml` binds through those properties. `WorkbenchToolTests` exercises both against a fake host with no shell at all.
+
+Structural work (S1), step 2:
+
+- **Problems pane** moved to `Features/Workbench/ProblemsViewModel.cs`: severity, scope and text filters, the visible rows and the error, warning and message counts, over the shell's `Diagnostics` list. It refreshes once per rebuild instead of recounting on every added diagnostic (the O(N²) item in the performance table). Navigation stays with the shell because it verifies XAML diagnostics against the project model first.
+- **External-changes review** moved to `Features/Documents/ExternalChangesViewModel.cs`, with the banner state, the disk watcher, the check loop and the load/keep commands, reaching the shell through `IExternalChangesHost` (open editors, close, status, output, "disk versions checked", "setting changed"). `ShellViewModel.CheckExternalChangesAsync` remains as a one-line forwarder for the window-activation behavior and the Git hooks.
+- `IWorkbenchHost` gained a `DocumentsChanged` event. `ShellViewModel` is down to 3,560 lines across 19 partials; `ProblemsViewModelTests` covers the pane against a fake host.

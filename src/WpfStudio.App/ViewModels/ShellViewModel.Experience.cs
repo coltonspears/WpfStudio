@@ -21,7 +21,6 @@ public sealed partial class ShellViewModel
 
     private void InitializeExperience()
     {
-        Diagnostics.CollectionChanged += (_, _) => { OnPropertyChanged(nameof(ErrorCount)); OnPropertyChanged(nameof(WarningCount)); };
         Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
         if (Features?.Assistant.Settings is INotifyPropertyChanged settings)
             settings.PropertyChanged += (_, e) => { if (e.PropertyName == "HasApiKey") OnPropertyChanged(nameof(IsColtonGptReady)); };
@@ -43,8 +42,6 @@ public sealed partial class ShellViewModel
     public string WorkspaceSummary => Workspace == null ? "" : $"{Workspace.Projects.Count} project{(Workspace.Projects.Count == 1 ? "" : "s")} · .NET SDK {Workspace.SdkVersion}";
     public string CommandCenterText => Workspace == null ? "Search files and commands" : WorkspaceName;
     public bool HasDocuments => Documents.Count > 0;
-    public int ErrorCount => Diagnostics.Count(d => d.Severity.Equals("Error", IgnoreCase));
-    public int WarningCount => Diagnostics.Count(d => d.Severity.Equals("Warning", IgnoreCase));
     public bool IsColtonGptReady => Features?.Assistant.Settings.HasApiKey == true;
     private void NotifyWorkspaceSummary()
     {

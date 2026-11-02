@@ -38,7 +38,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private bool _initialized;
     private bool _disposed;
     private bool _loading;
-    private Task? _externalCheck;
     private bool _contextReloadPending;
     private bool _updatingChoices;
     private int _launchChoicesGeneration;
@@ -55,7 +54,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
         Designer.SelectionSourceChanged += RevealDesignerSelection;
-        TaskList = new(this); FileGroups = new(this);
+        TaskList = new(this); FileGroups = new(this); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
         InitializeDesignerContext();
         InitializeChangeReview();
         LiveInspection = new(dispatcher);
@@ -67,7 +66,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         InitializeExperience();
         InitializeWorkbench();
         InitializeProjectXamlAnalysis();
-        InitializeExternalChanges();
         InitializeSettings();
         debugger.SourceRequested += (path, line) => _ = GuardAsync(() => NavigateAsync(path, line, 1, true));
         debugger.Breakpoints.CollectionChanged += (_, _) => ObserveBreakpoints();
@@ -110,7 +108,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial WorkspaceProject? StartupProject { get; set; }
     [ObservableProperty] public partial ExplorerNode? SelectedNode { get; set; }
     [ObservableProperty] public partial WpfItem? SelectedWpfItem { get; set; }
-    [ObservableProperty] public partial WorkspaceDiagnostic? SelectedDiagnostic { get; set; }
     [ObservableProperty] public partial NavigationResult? SelectedSearchResult { get; set; }
     [ObservableProperty] public partial string Status { get; set; } = "Ready";
     [ObservableProperty] public partial string Output { get; set; } = "";
@@ -173,7 +170,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ShowInlayHints = settings.ShowInlayHints;
         ShowInlineBlame = settings.ShowInlineBlame;
         ShowCodeLens = settings.ShowCodeLens;
-        AutoReloadUnchangedFiles = settings.AutoReloadUnchangedFiles;
+        ExternalChanges.AutoReloadUnchangedFiles = settings.AutoReloadUnchangedFiles;
         ShowQuickInfo = settings.ShowQuickInfo;
         NestRelatedFiles = settings.NestRelatedFiles;
         Editor.Load(settings.Editor);
@@ -522,67 +519,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (Documents.Any(d => d.State.IsDirty)) { Status = "Documents changed while saving. Save again before building or debugging."; return false; }
         return true;
     }
-    /// <summary>
-    /// Compares open files with disk. Files whose disk version changed are offered for review instead of being
-    /// replaced silently. <paramref name="fromAppOperation"/> marks changes WpfStudio made itself (a Git checkout,
-    /// pull or merge): files without unsaved edits then follow the disk at once.
-    /// </summary>
-    public Task CheckExternalChangesAsync(bool fromAppOperation = false)
-    {
-        // A check already running reads the files again before it finishes; callers wait for that pass.
-        if (_externalCheck is { IsCompleted: false } running) { _recheckFiles = true; _recheckFromApp |= fromAppOperation; return running; }
-        return _externalCheck = CheckExternalChangesCoreAsync(fromAppOperation);
-    }
-    private async Task CheckExternalChangesCoreAsync(bool fromAppOperation)
-    {
-        var reloaded = new List<string>();
-        try
-        {
-            do
-            {
-                fromAppOperation |= _recheckFromApp;
-                _recheckFiles = false; _recheckFromApp = false;
-                foreach (var doc in Documents.ToArray())
-                {
-                    if (doc.IsReadOnly) continue;
-                    var disk = await _store.ReadDiskAsync(doc.State);
-                    var pending = ExternalChanges.FirstOrDefault(change => ReferenceEquals(change.Document, doc));
-                    // The disk is back to what the editor last loaded or saved: nothing is left to decide.
-                    if (disk?.Hash == doc.State.DiskHash) { if (pending is not null || doc.State.HasExternalChange) ForgetExternalChange(doc); continue; }
-                    if (disk is { } same && same.Text == doc.State.Content)
-                    {
-                        // The disk now holds exactly the editor text, e.g. the same edit made elsewhere.
-                        doc.State.MarkSavedSnapshot(same.Text, same.Hash);
-                        if (pending is not null) ExternalChanges.Remove(pending);
-                        continue;
-                    }
-                    if (disk is not null && !doc.State.IsDirty && (fromAppOperation || AutoReloadUnchangedFiles))
-                    {
-                        await _store.ReloadAsync(doc.State);
-                        reloaded.Add(doc.State.Name);
-                        if (pending is not null) ExternalChanges.Remove(pending);
-                        continue;
-                    }
-                    if (pending is null) ExternalChanges.Add(pending = new ExternalChange(doc));
-                    pending.Update(disk?.Text, disk?.Hash);
-                    doc.State.HasExternalChange = true;
-                }
-            } while (_recheckFiles);
-        }
-        catch (Exception ex) { AppendOutput("Checking files changed outside WpfStudio: " + ex.Message); }
-        finally
-        {
-            RequestProjectXamlAnalysis();
-            if (reloaded.Count > 0)
-            {
-                Status = reloaded.Count == 1 ? $"Loaded {reloaded[0]} from disk; it changed outside WpfStudio" : $"Loaded {reloaded.Count} files from disk that changed outside WpfStudio";
-                AppendOutput("Loaded from disk after outside changes: " + string.Join(", ", reloaded));
-            }
-            // A commit or checkout in the terminal changes what change margins and blame compare with.
-            if (Features?.GitService is { } git) foreach (var document in Documents) _ = document.RefreshGitAsync(git, _lifetime.Token);
-        }
-    }
-    [RelayCommand] private Task ReloadDocumentAsync() => GuardAsync(async () => { if (ActiveDocument == null) return; if (ActiveDocument.State.IsDirty && !await _dialogs.ConfirmAsync("Reload document", "Discard editor changes and reload this file from disk?")) return; await _store.ReloadAsync(ActiveDocument.State); ForgetExternalChange(ActiveDocument); });
+    [RelayCommand] private Task ReloadDocumentAsync() => GuardAsync(async () => { if (ActiveDocument == null) return; if (ActiveDocument.State.IsDirty && !await _dialogs.ConfirmAsync("Reload document", "Discard editor changes and reload this file from disk?")) return; await _store.ReloadAsync(ActiveDocument.State); ExternalChanges.Forget(ActiveDocument); });
     [RelayCommand] private Task BuildAsync() => RunBuildAsync(BuildOperation.Build);
     [RelayCommand] private Task RestoreAsync() => RunBuildAsync(BuildOperation.Restore);
     [RelayCommand] private Task RebuildAsync() => RunBuildAsync(BuildOperation.Rebuild);
@@ -696,7 +633,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private void RefreshEditorDiagnostics()
     {
         Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(CurrentProjectXamlDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Distinct()) Diagnostics.Add(item);
-        RefreshVisibleProblems();
+        Problems.Refresh();
         RefreshWpfIssues();
     }
     private IEnumerable<WorkspaceDiagnostic> CurrentWpfIndexDiagnostics() => (_wpfIndex?.Diagnostics ?? []).Where(issue =>
@@ -986,7 +923,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) await _store.DeleteRecoveryAsync(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = NestRelatedFiles, Editor = Editor.ToSettings() });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = NestRelatedFiles, Editor = Editor.ToSettings() });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }
@@ -997,7 +934,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        DisposeProjectXamlAnalysis(); _documentWatcher?.Dispose(); TaskList.Dispose();
+        DisposeProjectXamlAnalysis(); ExternalChanges.Dispose(); TaskList.Dispose();
         foreach (var breakpoint in _observedBreakpoints) breakpoint.PropertyChanged -= BreakpointChanged;
         Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;

@@ -15,6 +15,8 @@ public interface IWorkbenchHost
     IReadOnlyList<string> WorkspaceFiles { get; }
     /// <summary>Paths of the open documents, in tab order.</summary>
     IReadOnlyList<string> OpenDocumentPaths { get; }
+    /// <summary>Raised when the set of open documents or the active document changes.</summary>
+    event Action? DocumentsChanged;
     /// <summary>The editor text of each open document, keyed by path (case-insensitive).</summary>
     IReadOnlyDictionary<string, string> OpenDocumentTexts();
     /// <summary>The active document's path and caret line; null when no tab is active.</summary>

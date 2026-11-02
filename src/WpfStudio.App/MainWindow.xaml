@@ -545,25 +545,25 @@
     <DockPanel Grid.Row="2">
     <Border DockPanel.Dock="Top" Margin="6,0,6,6" Padding="14,10,12,10" CornerRadius="6" BorderThickness="1"
             Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource WarningBrush}"
-            Visibility="{Binding HasExternalChanges, Converter={StaticResource BooleanToVisibility}}" AutomationProperties.Name="Files changed outside WpfStudio">
+            Visibility="{Binding ExternalChanges.HasChanges, Converter={StaticResource BooleanToVisibility}}" AutomationProperties.Name="Files changed outside WpfStudio">
       <StackPanel>
         <DockPanel>
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-            <Button Content="Load all disk versions" Command="{Binding LoadAllDiskVersionsCommand}" Margin="0,0,6,0"
+            <Button Content="Load all disk versions" Command="{Binding ExternalChanges.LoadAllDiskVersionsCommand}" Margin="0,0,6,0"
                     ToolTip="Every listed editor shows its file as it is on disk now. Unsaved edits in those files are discarded; deleted files' tabs close." />
-            <Button Content="Keep all my versions" Command="{Binding KeepAllEditorVersionsCommand}" Margin="0,0,6,0"
+            <Button Content="Keep all my versions" Command="{Binding ExternalChanges.KeepAllEditorVersionsCommand}" Margin="0,0,6,0"
                     ToolTip="Every listed editor keeps its text and is marked unsaved (•). Saving replaces the disk versions with yours." />
-            <Button Style="{StaticResource ToolbarButton}" Content="{Binding ExternalChangesToggleText}" Command="{Binding ToggleExternalChangesCommand}" />
+            <Button Style="{StaticResource ToolbarButton}" Content="{Binding ExternalChanges.ToggleText}" Command="{Binding ExternalChanges.ToggleCommand}" />
           </StackPanel>
           <c:Glyph Kind="Warning" Width="18" Height="18" Margin="0,1,10,0" VerticalAlignment="Top" Foreground="{DynamicResource WarningBrush}" />
           <StackPanel VerticalAlignment="Center">
-            <TextBlock Text="{Binding ExternalChangesTitle}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
-            <TextBlock Text="{Binding ExternalChangesHint}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
+            <TextBlock Text="{Binding ExternalChanges.Title}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+            <TextBlock Text="{Binding ExternalChanges.Hint}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
           </StackPanel>
         </DockPanel>
-        <StackPanel Visibility="{Binding IsExternalChangesExpanded, Converter={StaticResource BooleanToVisibility}}" Margin="28,8,0,0">
+        <StackPanel Visibility="{Binding ExternalChanges.IsExpanded, Converter={StaticResource BooleanToVisibility}}" Margin="28,8,0,0">
           <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto">
-            <ItemsControl ItemsSource="{Binding ExternalChanges}" Focusable="False">
+            <ItemsControl ItemsSource="{Binding ExternalChanges.Changes}" Focusable="False">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
                   <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,8,0,8">
@@ -571,9 +571,9 @@
                       <DockPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
                           <Button Style="{StaticResource AccentButton}" Content="{Binding LoadLabel}" ToolTip="{Binding LoadConsequence}" Margin="0,0,6,0"
-                                  Command="{Binding DataContext.LoadDiskVersionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                  Command="{Binding DataContext.ExternalChanges.LoadDiskVersionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
                           <Button Content="Keep my version" ToolTip="{Binding KeepConsequence}" Margin="0,0,6,0"
-                                  Command="{Binding DataContext.KeepEditorVersionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                                  Command="{Binding DataContext.ExternalChanges.KeepEditorVersionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
                           <ToggleButton Style="{StaticResource ToolbarToggle}" Content="Compare" IsChecked="{Binding IsComparing}" IsEnabled="{Binding CanCompare}"
                                         ToolTip="Show what loading the disk version would change in the editor" />
                         </StackPanel>
@@ -603,7 +603,7 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </ScrollViewer>
-          <CheckBox IsChecked="{Binding AutoReloadUnchangedFiles}" Margin="0,6,0,0"
+          <CheckBox IsChecked="{Binding ExternalChanges.AutoReloadUnchangedFiles}" Margin="0,6,0,0"
                     Content="Load files without unsaved edits automatically. Only files you have edited will be listed here."
                     ToolTip="When this is on, a file you have not edited in WpfStudio simply shows its new disk version, as after a Git checkout." />
         </StackPanel>
@@ -920,19 +920,19 @@
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                 <DockPanel Margin="10,3,8,3">
                   <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Check XAML" Command="{Binding RefreshProjectXamlAnalysisCommand}" ToolTip="Refresh XAML diagnostics across the loaded projects, including closed files." />
-                  <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding ProblemScopes}" SelectedItem="{Binding ProblemScope}" Width="110" Margin="6,0" ToolTip="Which files' problems to list" />
-                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Info" Content="{Binding MessageCount}" IsChecked="{Binding ShowMessageProblems}" ToolTip="Show messages" Height="26" />
-                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Warning" Content="{Binding WarningCount}" IsChecked="{Binding ShowWarningProblems}" ToolTip="Show warnings" Height="26" />
-                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Error" Content="{Binding ErrorCount}" IsChecked="{Binding ShowErrorProblems}" ToolTip="Show errors" Height="26" />
-                  <TextBox DockPanel.Dock="Left" Width="220" Text="{Binding ProblemFilter, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter problems" ToolTip="Match code, message, file or project. Separate terms with spaces; prefix a term with - to exclude it.">
+                  <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding Problems.Scopes}" SelectedItem="{Binding Problems.Scope}" Width="110" Margin="6,0" ToolTip="Which files' problems to list" />
+                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Info" Content="{Binding Problems.MessageCount}" IsChecked="{Binding Problems.ShowMessages}" ToolTip="Show messages" Height="26" />
+                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Warning" Content="{Binding Problems.WarningCount}" IsChecked="{Binding Problems.ShowWarnings}" ToolTip="Show warnings" Height="26" />
+                  <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Error" Content="{Binding Problems.ErrorCount}" IsChecked="{Binding Problems.ShowErrors}" ToolTip="Show errors" Height="26" />
+                  <TextBox DockPanel.Dock="Left" Width="220" Text="{Binding Problems.Filter, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter problems" ToolTip="Match code, message, file or project. Separate terms with spaces; prefix a term with - to exclude it.">
                     <TextBox.InputBindings>
-                      <KeyBinding Key="Escape" Command="{Binding ClearProblemFilterCommand}" />
+                      <KeyBinding Key="Escape" Command="{Binding Problems.ClearFilterCommand}" />
                     </TextBox.InputBindings>
                   </TextBox>
-                  <Button DockPanel.Dock="Left" Style="{StaticResource QuietButton}" Content="{Binding ProblemFilterSummary}" Command="{Binding ClearProblemFilterCommand}" ToolTip="Clear every Problems filter" Margin="6,0" Visibility="{Binding ProblemFilterSummary, Converter={StaticResource Presence}}" />
+                  <Button DockPanel.Dock="Left" Style="{StaticResource QuietButton}" Content="{Binding Problems.FilterSummary}" Command="{Binding Problems.ClearFilterCommand}" ToolTip="Clear every Problems filter" Margin="6,0" Visibility="{Binding Problems.FilterSummary, Converter={StaticResource Presence}}" />
                   <TextBlock Text="{Binding XamlAnalysisStatus}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding XamlAnalysisStatus}" />
                 </DockPanel>
-                <DataGrid Grid.Row="1" ItemsSource="{Binding VisibleDiagnostics}" SelectedItem="{Binding SelectedDiagnostic}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
+                <DataGrid Grid.Row="1" ItemsSource="{Binding Problems.Visible}" SelectedItem="{Binding Problems.Selected}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
                   <DataGrid.Columns>
                     <DataGridTemplateColumn Header="" Width="34">
                       <DataGridTemplateColumn.CellTemplate>
@@ -959,8 +959,8 @@
                       <Style.Triggers>
                         <MultiDataTrigger>
                           <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding VisibleDiagnostics.Count}" Value="0" />
-                            <Condition Binding="{Binding IsProblemFilterActive}" Value="True" />
+                            <Condition Binding="{Binding Problems.Visible.Count}" Value="0" />
+                            <Condition Binding="{Binding Problems.IsFilterActive}" Value="True" />
                           </MultiDataTrigger.Conditions>
                           <Setter Property="Visibility" Value="{Binding Diagnostics.Count, Converter={StaticResource Presence}}" />
                         </MultiDataTrigger>
@@ -1087,9 +1087,9 @@
             <Button Style="{StaticResource StatusButton}" Command="{Binding ShowToolCommand}" CommandParameter="Problems" ToolTip="Errors and warnings — open Problems">
               <StackPanel Orientation="Horizontal">
                 <c:Glyph Kind="Error" Width="13" Height="13" Margin="0,0,4,0" />
-                <TextBlock Text="{Binding ErrorCount}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Problems.ErrorCount}" VerticalAlignment="Center" />
                 <c:Glyph Kind="Warning" Width="13" Height="13" Margin="10,0,4,0" />
-                <TextBlock Text="{Binding WarningCount}" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Problems.WarningCount}" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
             <TextBlock Style="{StaticResource StatusText}" Text="{Binding ActiveDocument.LanguageStatus}" MaxWidth="260" TextTrimming="CharacterEllipsis" ToolTip="{Binding ActiveDocument.LanguageStatus}" />

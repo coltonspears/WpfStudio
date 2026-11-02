@@ -133,6 +133,8 @@ public sealed class WorkbenchToolTests
         public string? WorkspacePath => workspaceRoot is null ? null : Path.Combine(workspaceRoot, "App.sln");
         public IReadOnlyList<string> WorkspaceFiles => Files;
         public IReadOnlyList<string> OpenDocumentPaths => OpenPaths;
+        public event Action? DocumentsChanged;
+        public void ChangeDocuments() => DocumentsChanged?.Invoke();
         public IReadOnlyDictionary<string, string> OpenDocumentTexts() => Buffers;
         public (string Path, int Line)? ActiveLocation => Active;
         public string? SelectedExplorerFile => SelectedFile;

@@ -65,12 +65,12 @@ public sealed class WorkbenchTests
     public void ProblemTermsMatchCodeMessageFileAndProjectAndCanExclude()
     {
         var diagnostic = new WorkspaceDiagnostic("CS0103", "The name 'total' does not exist", "Error", @"C:\Shop\Order.cs", 4, 1, 0, 5, ProjectName: "Shop");
-        Assert.True(ShellViewModel.ProblemMatches(diagnostic, "cs0103"));
-        Assert.True(ShellViewModel.ProblemMatches(diagnostic, "total"));
-        Assert.True(ShellViewModel.ProblemMatches(diagnostic, "order.cs"));
-        Assert.True(ShellViewModel.ProblemMatches(diagnostic, "shop"));
-        Assert.False(ShellViewModel.ProblemMatches(diagnostic, "-total"));
-        Assert.True(ShellViewModel.ProblemMatches(diagnostic, "-CS8618"));
+        Assert.True(ProblemsViewModel.Matches(diagnostic, "cs0103"));
+        Assert.True(ProblemsViewModel.Matches(diagnostic, "total"));
+        Assert.True(ProblemsViewModel.Matches(diagnostic, "order.cs"));
+        Assert.True(ProblemsViewModel.Matches(diagnostic, "shop"));
+        Assert.False(ProblemsViewModel.Matches(diagnostic, "-total"));
+        Assert.True(ProblemsViewModel.Matches(diagnostic, "-CS8618"));
     }
 
     [Fact]
@@ -86,22 +86,22 @@ public sealed class WorkbenchTests
         firstEditor.Diagnostics.Add(new("CS0103", "Missing name", "Error", first, 1, 1, 0, 1));
         secondEditor.Diagnostics.Add(new("CS0168", "Unused variable", "Warning", second, 1, 1, 0, 1));
 
-        Assert.Equal(2, test.Shell.VisibleDiagnostics.Count);
-        test.Shell.ShowWarningProblems = false;
-        Assert.Equal("CS0103", Assert.Single(test.Shell.VisibleDiagnostics).Id);
-        Assert.Equal("1 of 2 shown", test.Shell.ProblemFilterSummary);
+        Assert.Equal(2, test.Shell.Problems.Visible.Count);
+        test.Shell.Problems.ShowWarnings = false;
+        Assert.Equal("CS0103", Assert.Single(test.Shell.Problems.Visible).Id);
+        Assert.Equal("1 of 2 shown", test.Shell.Problems.FilterSummary);
 
-        test.Shell.ShowWarningProblems = true;
-        test.Shell.ProblemScope = "Current file";
-        Assert.Equal("CS0168", Assert.Single(test.Shell.VisibleDiagnostics).Id);
+        test.Shell.Problems.ShowWarnings = true;
+        test.Shell.Problems.Scope = "Current file";
+        Assert.Equal("CS0168", Assert.Single(test.Shell.Problems.Visible).Id);
 
-        test.Shell.ProblemScope = "All files";
-        test.Shell.ProblemFilter = "missing";
-        Assert.Equal("CS0103", Assert.Single(test.Shell.VisibleDiagnostics).Id);
+        test.Shell.Problems.Scope = "All files";
+        test.Shell.Problems.Filter = "missing";
+        Assert.Equal("CS0103", Assert.Single(test.Shell.Problems.Visible).Id);
 
-        test.Shell.ClearProblemFilterCommand.Execute(null);
-        Assert.Equal(2, test.Shell.VisibleDiagnostics.Count);
-        Assert.False(test.Shell.IsProblemFilterActive);
+        test.Shell.Problems.ClearFilterCommand.Execute(null);
+        Assert.Equal(2, test.Shell.Problems.Visible.Count);
+        Assert.False(test.Shell.Problems.IsFilterActive);
     }
 
     [Fact]

@@ -332,7 +332,7 @@
           </Border>
           <TextBlock Text="CHANGES FROM OTHER PROGRAMS" Style="{StaticResource GroupLabel}" />
           <Border Style="{StaticResource Group}">
-            <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding AutoReloadUnchangedFiles}">
+            <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding ExternalChanges.AutoReloadUnchangedFiles}">
               <StackPanel>
                 <TextBlock Text="Load files without unsaved edits automatically" Style="{StaticResource RowName}" />
                 <TextBlock Text="When this is off, every open file changed on disk is listed above the editors until you choose to load the disk version or keep yours. When it is on, only files you have edited are listed." Style="{StaticResource RowNote}" />

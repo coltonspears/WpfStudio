@@ -17,7 +17,7 @@ public sealed partial class ShellViewModel
     private void InitializeWorkbench()
     {
         Explorer.CollectionChanged += (_, _) => NotifyExplorerPlaceholders();
-        Documents.CollectionChanged += (_, _) => { if (ProblemScope == OpenFilesScope) RefreshVisibleProblems(); };
+        Documents.CollectionChanged += (_, _) => NotifyOpenDocumentsChanged();
     }
 
     // ------------------------------------------------------------------ Close solution
@@ -70,56 +70,6 @@ public sealed partial class ShellViewModel
             closed++;
         }
         Status = closed == 1 ? "Closed 1 tab" : $"Closed {closed} tabs";
-    }
-
-    // ------------------------------------------------------------------ Problems filter
-    /// <summary>The rows Problems shows: <see cref="Diagnostics"/> narrowed by severity, scope and search text.</summary>
-    public ObservableCollection<WorkspaceDiagnostic> VisibleDiagnostics { get; } = [];
-    public IReadOnlyList<string> ProblemScopes { get; } = [AllFilesScope, OpenFilesScope, CurrentFileScope];
-    private const string AllFilesScope = "All files", OpenFilesScope = "Open files", CurrentFileScope = "Current file";
-    [ObservableProperty] public partial string ProblemFilter { get; set; } = "";
-    [ObservableProperty] public partial string ProblemScope { get; set; } = AllFilesScope;
-    [ObservableProperty] public partial bool ShowErrorProblems { get; set; } = true;
-    [ObservableProperty] public partial bool ShowWarningProblems { get; set; } = true;
-    [ObservableProperty] public partial bool ShowMessageProblems { get; set; } = true;
-    partial void OnProblemFilterChanged(string value) => RefreshVisibleProblems();
-    partial void OnProblemScopeChanged(string value) => RefreshVisibleProblems();
-    partial void OnShowErrorProblemsChanged(bool value) => RefreshVisibleProblems();
-    partial void OnShowWarningProblemsChanged(bool value) => RefreshVisibleProblems();
-    partial void OnShowMessageProblemsChanged(bool value) => RefreshVisibleProblems();
-    public int MessageCount => Diagnostics.Count - ErrorCount - WarningCount;
-    public bool IsProblemFilterActive => ProblemFilter.Trim().Length > 0 || ProblemScope != AllFilesScope || !ShowErrorProblems || !ShowWarningProblems || !ShowMessageProblems;
-    /// <summary>"12 of 40 shown" while a filter hides rows; empty otherwise.</summary>
-    public string ProblemFilterSummary => IsProblemFilterActive && Diagnostics.Count > 0 ? $"{VisibleDiagnostics.Count} of {Diagnostics.Count} shown" : "";
-    [RelayCommand] private void ClearProblemFilter() { ProblemFilter = ""; ProblemScope = AllFilesScope; ShowErrorProblems = ShowWarningProblems = ShowMessageProblems = true; }
-
-    private void RefreshVisibleProblems()
-    {
-        var selected = SelectedDiagnostic;
-        var terms = ProblemFilter.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var open = ProblemScope == OpenFilesScope ? Documents.Select(d => d.State.Path).ToHashSet(StringComparer.OrdinalIgnoreCase) : null;
-        var current = ProblemScope == CurrentFileScope ? ActiveDocument?.State.Path : null;
-        VisibleDiagnostics.Clear();
-        foreach (var diagnostic in Diagnostics)
-        {
-            if (!SeverityShown(diagnostic.Severity)) continue;
-            if (open != null && (diagnostic.Path == null || !open.Contains(diagnostic.Path))) continue;
-            if (ProblemScope == CurrentFileScope && (current == null || !string.Equals(diagnostic.Path, current, IgnoreCase))) continue;
-            if (!terms.All(term => ProblemMatches(diagnostic, term))) continue;
-            VisibleDiagnostics.Add(diagnostic);
-        }
-        if (selected != null && !VisibleDiagnostics.Contains(selected)) SelectedDiagnostic = null;
-        OnPropertyChanged(nameof(MessageCount)); OnPropertyChanged(nameof(IsProblemFilterActive)); OnPropertyChanged(nameof(ProblemFilterSummary));
-    }
-    private bool SeverityShown(string severity) =>
-        severity.Equals("Error", IgnoreCase) ? ShowErrorProblems : severity.Equals("Warning", IgnoreCase) ? ShowWarningProblems : ShowMessageProblems;
-    /// <summary>A term matches the code, message, file name or project; <c>-term</c> excludes rows that match it.</summary>
-    internal static bool ProblemMatches(WorkspaceDiagnostic diagnostic, string term)
-    {
-        if (term.Length > 1 && term[0] == '-') return !ProblemMatches(diagnostic, term[1..]);
-        return diagnostic.Id.Contains(term, IgnoreCase) || diagnostic.Message.Contains(term, IgnoreCase)
-            || (diagnostic.Path != null && Path.GetFileName(diagnostic.Path).Contains(term, IgnoreCase))
-            || (diagnostic.ProjectName?.Contains(term, IgnoreCase) ?? false);
     }
 
     // ------------------------------------------------------------------ Solution Explorer filter and file nesting
