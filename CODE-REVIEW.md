@@ -18,6 +18,57 @@ CommunityToolkit.Mvvm is used consistently for properties and commands; what is 
 
 ---
 
+## Status
+
+Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the item ids below. "Done" means the change is committed with tests; "Partly" means the item's main risk is addressed but the proposal is not fully carried out; everything else is pending. The fix log at the end records each commit's changes in detail.
+
+### Done
+
+| Item | What landed | Commit |
+|------|-------------|--------|
+| A1, A2, B1, B8, B9 | Global exception handlers; guarded commands and `async void` handlers; safe docking reset | b9e365d |
+| B2, A12 | `KnownSourceFileWatcher` guards every callback and reports through `failed` | b9e365d |
+| B3 | `StudioLogProvider` tolerates a locked or unwritable log file | b9e365d |
+| B6 | Settings, workspace-state and recovery stores treat `UnauthorizedAccessException` like `IOException` | b9e365d |
+| B4, A6 | Bounded RPCs under the `WorkspaceClient` lifecycle lock; dispose timeout | 73f5c94 |
+| B5, A4 | `DeleteRecoveryAsync`; `UndoAsync` | 73f5c94 |
+| B7 | `ConPtySession` retains the process handle | 73f5c94 |
+| B10, D8 | Profiling host exposes only `IMemoryProfilerRpc` | 73f5c94 |
+| B11 | Debugger state written through a unique temporary file | 73f5c94 |
+| B12, A10 | Reload, debug and inspection launches re-check `IsBusy` after their awaits | 73f5c94 |
+| B14, B15, B16 | SQL workbench: schema kept on save; column completion text; undecryptable password no longer hides profiles | 73f5c94 |
+| B17 | Scaffolder matches the toolkit package id case-insensitively | 73f5c94 |
+| B18, B19, B20 | Git: resolved files keep their encoding; `Win32Exception` no longer masks failures; stale refresh cannot wipe a newer result | 73f5c94 |
+| B23 | `WorkspaceClient` keeps the last 20 stderr lines | 73f5c94 |
+| B24, B25, A7 | Preview host survives a cancelled query; `PreviewProcessLease.Terminate` never throws | 73f5c94 |
+| C2 | `StudioFeatures` callbacks replaced by `IWorkspaceMutationHost` | ee4df56 |
+| S1 | `ShellViewModel` split in nine steps: Task List, file groups, Problems, external changes, command palette, change review, project XAML analysis, Solution Explorer, related-file locator, automatic saving, WPF Explorer, breakpoint editing, explorer commands, inspection source verifier, designer source tracker. 3,996 lines across 21 partials → 2,594 across 16 | 4019b98 … 2ddd448 |
+| Performance table, row 2 | `ErrorCount`/`WarningCount` recount once per rebuild (`ProblemsViewModel`) | 240f08b |
+
+### Partly done
+
+| Item | Done | Still pending |
+|------|------|---------------|
+| A3 | The profiler monitor loop reports and resets | A shared `Forget(Task, ILogger)` helper; the other listed fire-and-forget sites |
+| A5 | IO failures in the log provider no longer throw | Logging still does synchronous IO under a lock; a background writer |
+| A20 | The shell detaches its editor-preference handler; the breakpoint, designer-tracker and auto-save owners unsubscribe on dispose | The remaining long-lived subscriptions listed in A20 |
+| C1 | The shell reaches extracted tools through typed host interfaces (`IWorkbenchHost` and its siblings) | The shell's 18-parameter constructor and the remaining hand wiring of features in its constructor |
+| C7 | The shell's subscription to `EditorPreferences.Current` is removed at dispose | `EditorPreferences` is still a static singleton outside the container |
+| S2 | `ReviewAndApplyAsync` is the shared tail for the C# refactoring and code-action commands | The four verified pipelines (rename, XAML quick fix, designer edit, inspection source edit) keep separate staleness checks by design |
+
+### Pending
+
+- **Coupling (1.1):** C3, C4, C5, C6, C8–C16.
+- **Large classes (1.2):** S3–S18 (`EditorSurface`, `DesignerViewModel`, `MemoryProfilerViewModel`, `GitViewModel`/`GitService`, `DebuggerViewModel`, `DatabasePaneViewModel`, `WorkspaceEngine`, `PreviewEngine`, `NativePreviewSurface`, `DiffView`, `ScaffoldingService`, `AppPaths.cs`, `EditorPreferences`, `MainWindow.xaml`).
+- **DI registration (1.3):** D1–D7, D9.
+- **Async (1.4):** A8, A9, A11, A13–A19, A21 (analyzers) and the pending halves of A3, A5, A20.
+- **Code-behind and MVVM (1.5):** M1–M10.
+- **CommunityToolkit.Mvvm (1.6):** T1–T9.
+- **`field` keyword (1.7):** F1–F6.
+- **Bugs (Part 2):** B13, B21, B22, B26–B68, and the performance table apart from row 2.
+
+---
+
 ## Part 1: Proposed improvements
 
 ### 1.1 Coupling
@@ -257,10 +308,10 @@ Ordered by impact. "Confirmed" means the code path was read end to end and the f
 
 ## Suggested order of work
 
-1. **Safety net first** (half a day): global exception handlers (A1), guard the unguarded commands and `async void` (B1, B8), a `Forget()` helper for fire-and-forget (A3), catch `UnauthorizedAccessException` in the stores (B6), fix the log provider (B3). Add the threading analyzers (A21) so regressions fail the build.
-2. **Hang and data-integrity fixes** (one to two days): bounded RPCs and dispose timeout in `WorkspaceClient` (B4), `DeleteRecoveryAsync` (B5), preview cancellation path (B24, B25), typed RPC target in the profiling host (B10), ConPTY handle retention (B7), Git encoding and revision guard (B18, B20), SQL workbench profile/completion (B14, B15, B16), scaffolder casing (B17).
-3. **Structural work** (ongoing, feature by feature): split `ShellViewModel` along the lines in S1/S2, replace `Func` plumbing and value-returning events with host interfaces (C1–C3), typed workbench ids (C4), DI extension methods and options (D1–D7), one process-host abstraction (C12), `DataTemplate`-based pane creation (M1).
-4. **Toolkit and language cleanup** (mechanical, can ride along with any feature PR): T1–T5, T8 and F1–F5 are local edits with no behaviour change and can be done file by file as those files are touched. T6 (cancel commands instead of the hand-rolled `IsBusy`/`_operation` pairs) and T7 (messenger) are design changes and belong with the `ShellViewModel` split in step 3.
+1. **Safety net first** — done except A21 (half a day): global exception handlers (A1), guard the unguarded commands and `async void` (B1, B8), a `Forget()` helper for fire-and-forget (A3), catch `UnauthorizedAccessException` in the stores (B6), fix the log provider (B3). Add the threading analyzers (A21) so regressions fail the build.
+2. **Hang and data-integrity fixes** — done (one to two days): bounded RPCs and dispose timeout in `WorkspaceClient` (B4), `DeleteRecoveryAsync` (B5), preview cancellation path (B24, B25), typed RPC target in the profiling host (B10), ConPTY handle retention (B7), Git encoding and revision guard (B18, B20), SQL workbench profile/completion (B14, B15, B16), scaffolder casing (B17).
+3. **Structural work** — S1 and C2 done, the rest pending (ongoing, feature by feature): split `ShellViewModel` along the lines in S1/S2, replace `Func` plumbing and value-returning events with host interfaces (C1–C3), typed workbench ids (C4), DI extension methods and options (D1–D7), one process-host abstraction (C12), `DataTemplate`-based pane creation (M1).
+4. **Toolkit and language cleanup** — pending (mechanical, can ride along with any feature PR): T1–T5, T8 and F1–F5 are local edits with no behaviour change and can be done file by file as those files are touched. T6 (cancel commands instead of the hand-rolled `IsBusy`/`_operation` pairs) and T7 (messenger) are design changes and belong with the `ShellViewModel` split in step 3.
 
 ---
 
