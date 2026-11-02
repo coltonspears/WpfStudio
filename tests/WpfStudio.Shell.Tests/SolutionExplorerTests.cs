@@ -77,7 +77,7 @@ public sealed class SolutionExplorerTests
     public async Task ContextMenuBuildsNeedASolutionOrProjectNode()
     {
         await using var test = new ShellTestContext();
-        test.Shell.SelectedNode = new ExplorerNode("App.xaml", Path.Combine(test.Root, "App.xaml"), false);
+        test.Shell.Explorer.SelectedNode = new ExplorerNode("App.xaml", Path.Combine(test.Root, "App.xaml"), false);
 
         await test.Shell.BuildSelectedCommand.ExecuteAsync(null);
 

@@ -16,6 +16,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     public CommandPaletteViewModel Palette { get; }
     public ChangeReviewViewModel ChangeReview { get; }
     public ProjectXamlAnalysisCoordinator XamlAnalysis { get; }
+    public SolutionExplorerViewModel Explorer { get; }
     /// <summary>True while a change review is open; workspace operations wait for the decision.</summary>
     public bool IsPreviewOpen => ChangeReview.IsOpen;
     private Action? _openDocumentsChanged, _documentsChanged;
@@ -31,7 +32,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     event Action? IWorkbenchHost.DocumentsChanged { add => _documentsChanged += value; remove => _documentsChanged -= value; }
     IReadOnlyDictionary<string, string> IWorkbenchHost.OpenDocumentTexts() => Documents.ToDictionary(d => d.State.Path, d => d.State.Content, StringComparer.OrdinalIgnoreCase);
     (string Path, int Line)? IWorkbenchHost.ActiveLocation => ActiveDocument is { } active ? (active.State.Path, active.State.CaretLine) : null;
-    string? IWorkbenchHost.SelectedExplorerFile => SelectedNode is { Kind: ExplorerNodeKind.File, Path.Length: > 0 } node ? node.Path : null;
+    string? IWorkbenchHost.SelectedExplorerFile => Explorer.SelectedNode is { Kind: ExplorerNodeKind.File, Path.Length: > 0 } node ? node.Path : null;
     IUserDialogService IWorkbenchHost.Dialogs => _dialogs;
     CancellationToken IWorkbenchHost.Lifetime => _lifetime.Token;
     Task IWorkbenchHost.GuardAsync(Func<Task> action) => GuardAsync(action);

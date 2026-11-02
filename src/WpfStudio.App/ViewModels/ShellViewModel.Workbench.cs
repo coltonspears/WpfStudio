@@ -12,11 +12,8 @@ namespace WpfStudio.App.ViewModels;
 /// <summary>Closing the solution and groups of tabs, filtering Problems and Solution Explorer, and the Help pages.</summary>
 public sealed partial class ShellViewModel
 {
-    private (HashSet<string> Expanded, string? Selected)? _explorerStateBeforeFilter;
-
     private void InitializeWorkbench()
     {
-        Explorer.CollectionChanged += (_, _) => NotifyExplorerPlaceholders();
         Documents.CollectionChanged += (_, _) => NotifyOpenDocumentsChanged();
     }
 
@@ -25,7 +22,7 @@ public sealed partial class ShellViewModel
     /// <summary>Closes every tab and unloads the solution, returning to the start page. False when the user cancels a save prompt.</summary>
     public async Task<bool> CloseWorkspaceAsync()
     {
-        if (Workspace == null && Explorer.Count == 0) { Status = "No solution is open"; return true; }
+        if (Workspace == null && Explorer.Nodes.Count == 0) { Status = "No solution is open"; return true; }
         if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return false; }
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before closing the solution"; return false; }
         if (!await CloseAllDocumentsForWorkspaceAsync()) return false;
@@ -34,7 +31,6 @@ public sealed partial class ShellViewModel
         var name = Workspace == null ? "" : Path.GetFileName(Workspace.Path);
         _history.Clear();
         _allFiles = [];
-        _explorerStateBeforeFilter = null; ExplorerFilter = "";
         Explorer.Clear(); Projects.Clear(); SearchResults.Clear(); WpfItems.Clear();
         _updatingChoices = true;
         TargetFrameworks.Clear(); LaunchProfiles.Clear(); TargetFramework = null; LaunchProfile = null;
@@ -72,31 +68,6 @@ public sealed partial class ShellViewModel
         Status = closed == 1 ? "Closed 1 tab" : $"Closed {closed} tabs";
     }
 
-    // ------------------------------------------------------------------ Solution Explorer filter and file nesting
-    /// <summary>Shows only files whose name contains this text, with their folders expanded.</summary>
-    [ObservableProperty] public partial string ExplorerFilter { get; set; } = "";
-    /// <summary>Nests code-behind under its XAML (MainWindow.xaml.cs under MainWindow.xaml) and partial files under their main file.</summary>
-    [ObservableProperty] public partial bool NestRelatedFiles { get; set; } = true;
-    public bool IsExplorerFiltered => ExplorerFilter.Trim().Length > 0;
-    /// <summary>The "No workspace open" prompt; a filter with no matches shows its own message instead.</summary>
-    public bool ShowExplorerPlaceholder => Explorer.Count == 0 && !IsExplorerFiltered;
-    public bool ShowExplorerNoMatches => Explorer.Count == 0 && IsExplorerFiltered;
-    private void NotifyExplorerPlaceholders() { OnPropertyChanged(nameof(ShowExplorerPlaceholder)); OnPropertyChanged(nameof(ShowExplorerNoMatches)); }
-    partial void OnExplorerFilterChanged(string value)
-    {
-        var filtering = value.Trim().Length > 0;
-        if (filtering && _explorerStateBeforeFilter == null) _explorerStateBeforeFilter = ExplorerNode.CaptureState(Explorer);
-        OnPropertyChanged(nameof(IsExplorerFiltered)); NotifyExplorerPlaceholders();
-        if (Workspace == null) return;
-        if (filtering) { RebuildExplorer(keepState: false); return; }
-        var state = _explorerStateBeforeFilter; _explorerStateBeforeFilter = null;
-        RebuildExplorer(keepState: false);
-        if (state is { } previous) ExplorerNode.RestoreState(Explorer, previous);
-    }
-    partial void OnNestRelatedFilesChanged(bool value) { if (Workspace != null) RebuildExplorer(keepState: true); }
-    [RelayCommand] private void ClearExplorerFilter() => ExplorerFilter = "";
-    [RelayCommand] private void ToggleNestRelatedFiles() { NestRelatedFiles = !NestRelatedFiles; Status = NestRelatedFiles ? "Related files nested in Solution Explorer" : "Related files listed separately in Solution Explorer"; }
-
     // ------------------------------------------------------------------ Help > About / What's new
     [ObservableProperty] public partial bool IsAboutOpen { get; set; }
     [ObservableProperty] public partial bool IsWhatsNewPage { get; set; }
@@ -121,7 +92,7 @@ public sealed partial class ShellViewModel
         yield return Command("Window", "Close other tabs", CloseOtherDocumentsCommand, icon: "Close", detail: "Keep only the active tab");
         yield return Command("Window", "Close saved tabs", CloseSavedDocumentsCommand, icon: "Close", detail: "Keep tabs with unsaved edits");
         yield return Command("Window", "Close tabs to the right", CloseDocumentsToRightCommand, icon: "Close");
-        yield return Command("View", NestRelatedFiles ? "Stop nesting related files in Solution Explorer" : "Nest related files in Solution Explorer", ToggleNestRelatedFilesCommand, icon: "Tree", detail: "Code-behind under XAML, partial files under their main file");
+        yield return Command("View", Explorer.NestRelatedFiles ? "Stop nesting related files in Solution Explorer" : "Nest related files in Solution Explorer", Explorer.ToggleNestingCommand, icon: "Tree", detail: "Code-behind under XAML, partial files under their main file");
         yield return Command("View", "Task List", ShowToolCommand, "TaskList", icon: "Check", detail: "TODO, HACK and FIXME comments, and your own to-do items");
         yield return Command("View", "Refresh Task List", TaskList.RefreshCommand, icon: "Refresh");
         foreach (var entry in FileGroupCommands()) yield return entry;

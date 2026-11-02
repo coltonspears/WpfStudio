@@ -1,9 +1,9 @@
 using System.ComponentModel;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Controls;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
 using WpfStudio.Core;
 
@@ -75,97 +75,22 @@ public sealed partial class ShellViewModel
 
     // ------------------------------------------------------------------ Related files
     /// <summary>Conventional pairs, in the order <see cref="SwitchRelatedCommand"/> cycles through them.</summary>
-    private List<string> ConventionalRelated(string path)
-    {
-        var files = _allFiles.Concat(Documents.Select(d => d.State.Path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var candidates = new List<string>();
-        void AddName(string name)
-        {
-            candidates.Add(Path.Combine(Path.GetDirectoryName(path)!, name));
-            candidates.AddRange(files.Where(f => Path.GetFileName(f).Equals(name, IgnoreCase)));
-        }
-        if (path.EndsWith(".xaml.cs", IgnoreCase))
-        {
-            var view = Path.GetFileName(path)[..^8];
-            AddName(view + "Model.cs"); AddName(view + "ViewModel.cs"); AddName(view + ".xaml");
-        }
-        else if (path.EndsWith(".xaml", IgnoreCase))
-        {
-            var view = Path.GetFileNameWithoutExtension(path);
-            AddName(view + ".xaml.cs"); AddName(view + "Model.cs"); AddName(view + "ViewModel.cs");
-        }
-        else if (path.EndsWith("ViewModel.cs", IgnoreCase))
-        {
-            var stem = Path.GetFileName(path)[..^12];
-            AddName(stem + ".xaml"); AddName(stem + "View.xaml");
-        }
-        return candidates.Where(p => !p.Equals(path, IgnoreCase) && (File.Exists(p) || _store.Find(p) != null)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
+    private List<string> ConventionalRelated(string path) =>
+        RelatedFileLocator.Conventional(path, _allFiles.Concat(Documents.Select(d => d.State.Path)), candidate => File.Exists(candidate) || _store.Find(candidate) != null);
     /// <summary>Views and view models linked through a declared DataContext, found in the WPF index.</summary>
-    private List<string> DataContextRelated(string path)
-    {
-        var results = new List<string>();
-        if (_wpfIndex == null) return results;
-        if (path.EndsWith(".xaml", IgnoreCase))
-        {
-            var text = _store.Find(path)?.Content ?? (_wpfIndex.Texts.TryGetValue(path, out var indexed) ? indexed : null);
-            if (text != null && DataContextType(text) is { } type)
-                results.AddRange(_wpfIndex.Items.Where(i => i.Path.EndsWith(".cs", IgnoreCase) && (i.Name == type || i.Name.EndsWith("." + type, StringComparison.Ordinal))).Select(i => i.Path));
-        }
-        else if (path.EndsWith(".cs", IgnoreCase) && _wpfIndex.Texts.TryGetValue(path, out var source))
-        {
-            var types = Regex.Matches(source, @"\b(?:class|record)\s+(\w+)").Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
-            foreach (var (xamlPath, xaml) in _wpfIndex.Texts.Where(t => t.Key.EndsWith(".xaml", IgnoreCase)))
-                if (DataContextType(xaml) is { } type && types.Contains(type)) results.Add(xamlPath);
-        }
-        return results.Where(p => !p.Equals(path, IgnoreCase) && File.Exists(p)).Distinct(StringComparer.OrdinalIgnoreCase).Take(4).ToList();
-    }
-
-    private static string? DataContextType(string xaml)
-    {
-        var match = Regex.Match(xaml, @"d:DataContext\s*=\s*[""']\{d:DesignInstance\s+(?:Type\s*=\s*)?(?:\w+:)?(?<type>\w+)");
-        if (!match.Success) match = Regex.Match(xaml, @"<\w+\.DataContext\s*>\s*<(?:\w+:)?(?<type>\w+)\b");
-        return match.Success ? match.Groups["type"].Value : null;
-    }
-
-    private static string RoleFor(string source, string related)
-    {
-        if (related.EndsWith(".xaml.cs", IgnoreCase)) return "Code-behind";
-        if (related.EndsWith(".xaml", IgnoreCase)) return "View";
-        if (related.EndsWith(".cs", IgnoreCase)) return source.EndsWith(".xaml.cs", IgnoreCase) || source.EndsWith(".xaml", IgnoreCase) ? "View model" : "Related";
-        return "Related";
-    }
-
+    private List<string> DataContextRelated(string path) => RelatedFileLocator.DataContext(path, _wpfIndex, candidate => _store.Find(candidate)?.Content);
     private void RefreshRelated(EditorViewModel document)
     {
         var path = document.State.Path;
-        document.Location = LocationFor(path);
+        document.Location = RelatedFileLocator.LocationFor(path, WorkspaceRoot);
         var related = ConventionalRelated(path).Concat(DataContextRelated(path)).Distinct(StringComparer.OrdinalIgnoreCase).Take(4).ToList();
         if (document.RelatedFiles.Select(r => r.Path).SequenceEqual(related, StringComparer.OrdinalIgnoreCase)) return;
         document.RelatedFiles.Clear();
-        foreach (var file in related) document.RelatedFiles.Add(new RelatedFile(RoleFor(path, file), file));
+        foreach (var file in related) document.RelatedFiles.Add(new RelatedFile(RelatedFileLocator.RoleFor(path, file), file));
     }
     private void RefreshAllRelated() { foreach (var document in Documents) RefreshRelated(document); }
-
     private string WorkspaceRoot => Workspace == null ? "" : Path.GetDirectoryName(Path.GetFullPath(Workspace.Path)) ?? "";
-    private string RelativeDirectory(string path)
-    {
-        var directory = Path.GetDirectoryName(path) ?? "";
-        var root = WorkspaceRoot;
-        if (root.Length > 0 && (directory.Equals(root, IgnoreCase) || directory.StartsWith(root + Path.DirectorySeparatorChar, IgnoreCase)))
-        {
-            var relative = Path.GetRelativePath(root, directory);
-            return relative == "." ? Path.GetFileName(root) : Path.Combine(Path.GetFileName(root), relative);
-        }
-        return directory;
-    }
-    private string LocationFor(string path)
-    {
-        var parts = RelativeDirectory(path).Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length > 4) parts = ["…", .. parts[^3..]];
-        return string.Join("  ›  ", parts);
-    }
+    private string RelativeDirectory(string path) => RelatedFileLocator.RelativeDirectory(path, WorkspaceRoot);
 
     // ------------------------------------------------------------------ Command palette entries
     private PaletteEntry FileEntry(string path) => new(Path.GetFileName(path), RelativeDirectory(path), () => { RecordNavigationOrigin(); return OpenDocumentAsync(path); }, IconKind: FileIconKindConverter.KindFor(path));

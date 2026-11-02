@@ -62,7 +62,7 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (_, library, asset) = await CreateProjectsAsync(test, shared: true);
-        test.Shell.SelectedNode = new ExplorerNode("logo.png", asset, false, projectPath: library.ProjectPath);
+        test.Shell.Explorer.SelectedNode = new ExplorerNode("logo.png", asset, false, projectPath: library.ProjectPath);
         await test.Shell.ShowPackUriCommand.ExecuteAsync(null);
         Assert.Equal("pack://application:,,,/Company.Controls;component/Images/logo.png", test.Shell.Status);
     }
@@ -72,7 +72,7 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (startup, library, asset) = await CreateProjectsAsync(test, shared: true);
-        test.Shell.SelectedNode = new ExplorerNode("logo.png", asset, false, projectPath: library.ProjectPath);
+        test.Shell.Explorer.SelectedNode = new ExplorerNode("logo.png", asset, false, projectPath: library.ProjectPath);
         test.Shell.SelectedBuildAction = "Resource";
 
         Task operation = test.Shell.SetBuildActionCommand.ExecuteAsync(null);

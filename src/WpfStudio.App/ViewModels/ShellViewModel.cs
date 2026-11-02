@@ -59,6 +59,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         TaskList = new(this); FileGroups = new(this); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
         Palette = new(this); ChangeReview = new(this, dispatcher);
         XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token);
+        Explorer = new(this, Projects);
         ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) OnPropertyChanged(nameof(IsPreviewOpen)); };
         InitializeDesignerContext();
         LiveInspection = new(dispatcher);
@@ -85,7 +86,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public DatabasePaneViewModel Database { get; }
     public Features.Profiling.MemoryProfilerViewModel MemoryProfiler { get; }
     public ObservableCollection<EditorViewModel> Documents { get; } = [];
-    public ObservableCollection<ExplorerNode> Explorer { get; } = [];
     public ObservableCollection<WorkspaceProject> Projects { get; } = [];
     public ObservableCollection<string> RecentWorkspaces { get; } = [];
     public ObservableCollection<NavigationResult> SearchResults { get; } = [];
@@ -107,7 +107,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SaveCommand))] public partial EditorViewModel? ActiveDocument { get; set; }
     [ObservableProperty] public partial string? ActiveWorkbench { get; set; }
     [ObservableProperty] public partial WorkspaceProject? StartupProject { get; set; }
-    [ObservableProperty] public partial ExplorerNode? SelectedNode { get; set; }
     [ObservableProperty] public partial WpfItem? SelectedWpfItem { get; set; }
     [ObservableProperty] public partial NavigationResult? SelectedSearchResult { get; set; }
     [ObservableProperty] public partial string Status { get; set; } = "Ready";
@@ -164,7 +163,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ShowCodeLens = settings.ShowCodeLens;
         ExternalChanges.AutoReloadUnchangedFiles = settings.AutoReloadUnchangedFiles;
         ShowQuickInfo = settings.ShowQuickInfo;
-        NestRelatedFiles = settings.NestRelatedFiles;
+        Explorer.NestRelatedFiles = settings.NestRelatedFiles;
         Editor.Load(settings.Editor);
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
@@ -223,7 +222,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             Status = "Loading " + Path.GetFileName(path) + "…";
             _history.Clear();
-            _explorerStateBeforeFilter = null; ExplorerFilter = "";
+            Explorer.Clear();
             var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
             Terminal.WorkingDirectory = directory;
             TargetFramework = null;
@@ -232,15 +231,15 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var loading = _workspace.LoadAsync(new(path, Configuration, UseCache: true), token);
             try { _allFiles = await Task.Run(() => EnumerateSourceFiles(directory).ToArray(), token); }
             catch (IOException ex) { _allFiles = []; AppendOutput("File listing: " + ex.Message); }
-            Explorer.Clear(); foreach (var node in ExplorerNode.FromFiles(directory, _allFiles, nestRelated: NestRelatedFiles)) Explorer.Add(node);
+            Explorer.ShowFiles(directory, _allFiles);
             Status = "Loading language services for " + Path.GetFileName(path) + "…";
             Workspace = await loading;
             RefreshConfigurations();
             Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
             StartupProject = Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
             _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            RebuildExplorer(keepState: false);
-            if (Explorer.Count == 0 && !IsExplorerFiltered) foreach (var node in ExplorerNode.FromFiles(directory, _allFiles, nestRelated: NestRelatedFiles)) Explorer.Add(node);
+            Explorer.Rebuild(keepState: false);
+            if (Explorer.Nodes.Count == 0 && !Explorer.IsFiltered) Explorer.ShowFiles(directory, _allFiles);
             foreach (var issue in Workspace.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
             RecentWorkspaces.Remove(path); RecentWorkspaces.Insert(0, path); while (RecentWorkspaces.Count > 10) RecentWorkspaces.RemoveAt(10);
             await Debugger.SetWorkspaceAsync(path);
@@ -308,25 +307,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
         StartupProject = Projects.FirstOrDefault(p => p.ProjectPath == startupPath) ?? Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
         _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        RebuildExplorer(keepState: true);
-    }
-    /// <summary>
-    /// A solution appears as one node above its projects; an opened project file appears on its own. A reload, such as the one
-    /// after each build, keeps the nodes that were expanded and selected.
-    /// </summary>
-    private void RebuildExplorer(bool keepState)
-    {
-        var state = ExplorerNode.CaptureState(Explorer);
-        Explorer.Clear();
-        var filter = ExplorerFilter.Trim();
-        var projects = Projects.Select(project => filter.Length == 0 ? ExplorerNode.ForProject(project, NestRelatedFiles) : ExplorerNode.ForFilteredProject(project, filter, NestRelatedFiles))
-            .OfType<ExplorerNode>().ToArray();
-        if (Workspace is { } workspace && projects.Length > 0 && !Path.GetExtension(workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase))
-            Explorer.Add(ExplorerNode.ForSolution(workspace.Path, projects));
-        else foreach (var project in projects) Explorer.Add(project);
-        // A filtered tree shows every match; the unfiltered layout comes back when the filter is cleared.
-        if (filter.Length > 0) ExplorerNode.ExpandAll(Explorer);
-        else if (keepState) ExplorerNode.RestoreState(Explorer, state);
+        Explorer.Rebuild(keepState: true);
     }
     private static IEnumerable<string> EnumerateSourceFiles(string root)
     {
@@ -526,7 +507,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Builds the solution or project chosen in Solution Explorer instead of the whole workspace.</summary>
     private Task RunSelectedBuildAsync(BuildOperation operation)
     {
-        if (SelectedNode is { CanBuild: true } node) return RunBuildAsync(operation, node.Path);
+        if (Explorer.SelectedNode is { CanBuild: true } node) return RunBuildAsync(operation, node.Path);
         Status = "Select a solution or project in Solution Explorer";
         return Task.CompletedTask;
     }
@@ -800,9 +781,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task CreateWpfItemAsync() => GuardAsync(async () =>
     {
         if (StartupProject == null) return;
-        var target = Projects.FirstOrDefault(p => p.ProjectPath == SelectedNode?.ProjectPath) ?? StartupProject;
+        var target = Projects.FirstOrDefault(p => p.ProjectPath == Explorer.SelectedNode?.ProjectPath) ?? StartupProject;
         var root = Path.GetDirectoryName(target.ProjectPath)!;
-        var directory = SelectedNode is { IsFolder: true } && Directory.Exists(SelectedNode.Path) && (SelectedNode.Path.Equals(root, StringComparison.OrdinalIgnoreCase) || SelectedNode.Path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) ? SelectedNode.Path : root;
+        var directory = Explorer.SelectedNode is { IsFolder: true } && Directory.Exists(Explorer.SelectedNode.Path) && (Explorer.SelectedNode.Path.Equals(root, StringComparison.OrdinalIgnoreCase) || Explorer.SelectedNode.Path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) ? Explorer.SelectedNode.Path : root;
         var changes = await _scaffolding.CreateAsync(target.ProjectPath, directory, ScaffoldName, SelectedScaffoldKind, AddDataTemplate);
         IsScaffoldOpen = false;
         if (await PreviewAsync("Create WPF files", changes, AddDataTemplate ? "Merge the generated Templates.xaml dictionary into application resources to activate the view mapping." : "")) { await ApplyChangesAsync(changes); Status = "Created in editor buffers. Save All to write the files."; }
@@ -833,7 +814,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task ImportAssetAsync() => GuardAsync(async () =>
     {
         if (StartupProject == null) return;
-        var targetProject = Projects.FirstOrDefault(p => p.ProjectPath == SelectedNode?.ProjectPath) ?? StartupProject;
+        var targetProject = Projects.FirstOrDefault(p => p.ProjectPath == Explorer.SelectedNode?.ProjectPath) ?? StartupProject;
         var source = await _files.OpenFileAsync("Import resource asset", "Assets|*.png;*.jpg;*.jpeg;*.ico;*.svg;*.ttf;*.otf|All files|*.*"); if (source == null) return;
         var destination = Path.Combine(Path.GetDirectoryName(targetProject.ProjectPath)!, "Assets", Path.GetFileName(source));
         if (File.Exists(destination)) throw new IOException("An asset with that name already exists.");
@@ -847,7 +828,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     });
     [RelayCommand] private Task SetBuildActionAsync() => GuardAsync(async () =>
     {
-        var path = SelectedWpfItem?.Path ?? SelectedNode?.Path; if (path == null) return;
+        var path = SelectedWpfItem?.Path ?? Explorer.SelectedNode?.Path; if (path == null) return;
         var owner = ResolveAssetOwner(path);
         var project = await _store.OpenAsync(owner.ProjectPath);
         var change = ScaffoldingService.SetBuildAction(project.Path, project.Content, path, SelectedBuildAction);
@@ -856,13 +837,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private WorkspaceProject ResolveAssetOwner(string path)
     {
         var owners = Projects.Where(p => p.Files.Any(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase))).ToArray();
-        if (SelectedNode?.Path == path && owners.FirstOrDefault(p => p.ProjectPath == SelectedNode.ProjectPath) is { } selected) return selected;
+        if (Explorer.SelectedNode?.Path == path && owners.FirstOrDefault(p => p.ProjectPath == Explorer.SelectedNode.ProjectPath) is { } selected) return selected;
         if (owners.Length == 1) return owners[0];
         throw new InvalidOperationException(owners.Length == 0 ? "This file is not an evaluated project item. Refresh the workspace first." : "This linked asset belongs to multiple projects. Select it under the intended project in Solution Explorer.");
     }
     [RelayCommand] private Task ShowPackUriAsync() => GuardAsync(() =>
     {
-        var path = SelectedWpfItem?.Path ?? SelectedNode?.Path;
+        var path = SelectedWpfItem?.Path ?? Explorer.SelectedNode?.Path;
         if (path != null) { var owner = ResolveAssetOwner(path); var logicalPath = owner.Files.First(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).LogicalPath; var uri = ScaffoldingService.PackUri(owner.ProjectPath, path, owner.AssemblyName, logicalPath); AppendOutput(uri); ToolRequested?.Invoke("Output"); Status = uri; }
         return Task.CompletedTask;
     });
@@ -916,7 +897,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) await _store.DeleteRecoveryAsync(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = NestRelatedFiles, Editor = Editor.ToSettings() });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings() });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }

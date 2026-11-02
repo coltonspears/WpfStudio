@@ -622,7 +622,7 @@
                 <DockPanel Background="{DynamicResource SurfaceBrush}">
                   <DockPanel DockPanel.Dock="Top" Margin="12,0,6,4" Height="28">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                      <ToggleButton Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Tree" IsChecked="{Binding NestRelatedFiles}" ToolTip="Nest related files: code-behind under XAML, partial files under their main file" Height="26" />
+                      <ToggleButton Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Tree" IsChecked="{Binding Explorer.NestRelatedFiles}" ToolTip="Nest related files: code-behind under XAML, partial files under their main file" Height="26" />
                       <Button Style="{StaticResource IconButton}" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" ToolTip="New WPF item (Ctrl+Shift+N)" Width="26" Height="26" />
                       <Button Style="{StaticResource IconButton}" c:Ui.Icon="Refresh" Command="{Binding ReloadWorkspaceCommand}" ToolTip="Reload workspace" Width="26" Height="26" />
                       <Button Style="{StaticResource IconButton}" c:Ui.Icon="FolderOpen" Command="{Binding OpenWorkspaceCommand}" ToolTip="Open solution or project (Ctrl+Shift+O)" Width="26" Height="26" />
@@ -630,24 +630,24 @@
                     <TextBlock Text="{Binding WorkspaceSummary}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                   </DockPanel>
                   <DockPanel DockPanel.Dock="Top" Margin="10,0,8,6" Visibility="{Binding HasWorkspace, Converter={StaticResource BooleanToVisibility}}">
-                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding ClearExplorerFilterCommand}" ToolTip="Clear filter (Esc)" Width="24" Height="24" Visibility="{Binding IsExplorerFiltered, Converter={StaticResource BooleanToVisibility}}" />
-                    <TextBox Text="{Binding ExplorerFilter, UpdateSourceTrigger=PropertyChanged, Delay=200}" c:Ui.Placeholder="Filter files and dependencies" ToolTip="Show files whose name contains this text; include / to match folders">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding Explorer.ClearFilterCommand}" ToolTip="Clear filter (Esc)" Width="24" Height="24" Visibility="{Binding Explorer.IsFiltered, Converter={StaticResource BooleanToVisibility}}" />
+                    <TextBox Text="{Binding Explorer.Filter, UpdateSourceTrigger=PropertyChanged, Delay=200}" c:Ui.Placeholder="Filter files and dependencies" ToolTip="Show files whose name contains this text; include / to match folders">
                       <TextBox.InputBindings>
-                        <KeyBinding Key="Escape" Command="{Binding ClearExplorerFilterCommand}" />
+                        <KeyBinding Key="Escape" Command="{Binding Explorer.ClearFilterCommand}" />
                       </TextBox.InputBindings>
                     </TextBox>
                   </DockPanel>
                   <Grid>
-                    <TextBlock Text="No files match the filter" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" Margin="0,24,0,0" Visibility="{Binding ShowExplorerNoMatches, Converter={StaticResource BooleanToVisibility}}" />
-                    <TreeView x:Name="ExplorerTree" b:Interaction.SelectOnRightClick="True" ItemsSource="{Binding Explorer}" b:Interaction.ActivateCommand="{Binding OpenNodeCommand}" b:Interaction.SelectedNode="{Binding SelectedNode, Mode=TwoWay}">
+                    <TextBlock Text="No files match the filter" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" Margin="0,24,0,0" Visibility="{Binding Explorer.ShowNoMatches, Converter={StaticResource BooleanToVisibility}}" />
+                    <TreeView x:Name="ExplorerTree" b:Interaction.SelectOnRightClick="True" ItemsSource="{Binding Explorer.Nodes}" b:Interaction.ActivateCommand="{Binding OpenNodeCommand}" b:Interaction.SelectedNode="{Binding Explorer.SelectedNode, Mode=TwoWay}">
                       <TreeView.ContextMenu>
                         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                          <MenuItem Header="Build" c:Ui.Icon="Build" Command="{Binding BuildSelectedCommand}" Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
-                          <MenuItem Header="Rebuild" Command="{Binding RebuildSelectedCommand}" Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
-                          <MenuItem Header="Clean" c:Ui.Icon="Trash" Command="{Binding CleanSelectedCommand}" Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
-                          <MenuItem Header="Restore packages" c:Ui.Icon="Package" Command="{Binding RestoreSelectedCommand}" Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
-                          <Separator Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
-                          <MenuItem Header="Open" c:Ui.Icon="File" Command="{Binding OpenNodeCommand}" CommandParameter="{Binding SelectedNode}" />
+                          <MenuItem Header="Build" c:Ui.Icon="Build" Command="{Binding BuildSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <MenuItem Header="Rebuild" Command="{Binding RebuildSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <MenuItem Header="Clean" c:Ui.Icon="Trash" Command="{Binding CleanSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <MenuItem Header="Restore packages" c:Ui.Icon="Package" Command="{Binding RestoreSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <Separator Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+                          <MenuItem Header="Open" c:Ui.Icon="File" Command="{Binding OpenNodeCommand}" CommandParameter="{Binding Explorer.SelectedNode}" />
                           <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
                           <MenuItem Header="Add to file group…" c:Ui.Icon="Pin" Command="{Binding FileGroups.AddSelectedCommand}" />
                           <Separator />
@@ -667,7 +667,7 @@
                         </Style>
                       </TreeView.ItemContainerStyle>
                     </TreeView>
-                    <StackPanel VerticalAlignment="Center" Margin="22,0,22,40" Visibility="{Binding ShowExplorerPlaceholder, Converter={StaticResource BooleanToVisibility}}">
+                    <StackPanel VerticalAlignment="Center" Margin="22,0,22,40" Visibility="{Binding Explorer.ShowPlaceholder, Converter={StaticResource BooleanToVisibility}}">
                       <c:Glyph Kind="FolderOpen" Width="30" Height="30" Foreground="{DynamicResource SubtleBrush}" StrokeWeight="1.1" />
                       <TextBlock Text="No workspace open" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,4" />
                       <TextBlock Text="Open a solution or project to browse its files, WPF components and resources." Style="{StaticResource Caption}" TextAlignment="Center" />

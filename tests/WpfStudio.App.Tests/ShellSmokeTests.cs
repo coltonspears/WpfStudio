@@ -187,7 +187,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await answerPrompt.Task;
             var initialTree = new TaskCompletionSource<TimeSpan>();
             clock.Restart();
-            shell.Explorer.CollectionChanged += (_, _) => { if (shell.Explorer.Count > 0) initialTree.TrySetResult(clock.Elapsed); };
+            shell.Explorer.Nodes.CollectionChanged += (_, _) => { if (shell.Explorer.Nodes.Count > 0) initialTree.TrySetResult(clock.Elapsed); };
             await shell.LoadWorkspaceAsync(Path.Combine(root, "samples/CounterApp/CounterApp.csproj"));
             output.WriteLine($"Initial tree: {(await initialTree.Task).TotalMilliseconds:N0} ms; semantic workspace ready: {clock.Elapsed.TotalMilliseconds:N0} ms");
             Assert.True(initialTree.Task.Result < TimeSpan.FromSeconds(5));
@@ -202,7 +202,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var editor = Descendants<EditorSurface>(window).Single(e => ReferenceEquals(e.ViewModel, shell.ActiveDocument));
             Assert.True(editor.ActualWidth > 300);
             Assert.Contains("CounterViewModel", editor.Text);
-            Assert.Same(shell.Explorer, ((TreeView)window.FindName("ExplorerTree")).ItemsSource);
+            Assert.Same(shell.Explorer.Nodes, ((TreeView)window.FindName("ExplorerTree")).ItemsSource);
             Assert.Same(shell.ActiveDocument, manager.ActiveContent);
             var selected = shell.ActiveDocument!;
             var originalText = selected.State.Content;
@@ -254,10 +254,10 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.False(shell.Debugger.IsActive);
             shell.ShowToolCommand.Execute("Output"); await Idle();
             shell.ActiveDocument = selected;
-            foreach (var projectNode in shell.Explorer) projectNode.IsExpanded = true;
+            foreach (var projectNode in shell.Explorer.Nodes) projectNode.IsExpanded = true;
             await shell.BuildCommand.ExecuteAsync(null);
             await Idle();
-            foreach (var projectNode in shell.Explorer) projectNode.IsExpanded = true;
+            foreach (var projectNode in shell.Explorer.Nodes) projectNode.IsExpanded = true;
             await Idle();
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/studio.png"));
             shell.ToggleThemeCommand.Execute(null); await Idle();
@@ -292,7 +292,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             {
                 var firstTree = new TaskCompletionSource<TimeSpan>();
                 var loadClock = Stopwatch.StartNew();
-                shell.Explorer.CollectionChanged += (_, _) => { if (shell.Explorer.Count > 0) firstTree.TrySetResult(loadClock.Elapsed); };
+                shell.Explorer.Nodes.CollectionChanged += (_, _) => { if (shell.Explorer.Nodes.Count > 0) firstTree.TrySetResult(loadClock.Elapsed); };
                 double maximumDispatcherGapMs = 0;
                 var lastTick = Stopwatch.GetTimestamp();
                 var heartbeat = new DispatcherTimer(TimeSpan.FromMilliseconds(50), DispatcherPriority.Background, (_, _) =>
