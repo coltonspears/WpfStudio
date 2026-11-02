@@ -78,7 +78,7 @@ public sealed partial class ShellViewModel
     private List<string> ConventionalRelated(string path) =>
         RelatedFileLocator.Conventional(path, _allFiles.Concat(Documents.Select(d => d.State.Path)), candidate => File.Exists(candidate) || _store.Find(candidate) != null);
     /// <summary>Views and view models linked through a declared DataContext, found in the WPF index.</summary>
-    private List<string> DataContextRelated(string path) => RelatedFileLocator.DataContext(path, _wpfIndex, candidate => _store.Find(candidate)?.Content);
+    private List<string> DataContextRelated(string path) => RelatedFileLocator.DataContext(path, WpfExplorer.Index, candidate => _store.Find(candidate)?.Content);
     private void RefreshRelated(EditorViewModel document)
     {
         var path = document.State.Path;

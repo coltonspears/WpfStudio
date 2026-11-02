@@ -193,7 +193,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.True(initialTree.Task.Result < TimeSpan.FromSeconds(5));
             Assert.NotNull(shell.Workspace);
             Assert.NotEmpty(shell.Projects);
-            Assert.NotEmpty(shell.WpfItems);
+            Assert.NotEmpty(shell.WpfExplorer.Items);
             await shell.OpenDocumentAsync(Path.Combine(root, "samples/CounterApp/MainWindow.xaml"));
             await shell.OpenDocumentAsync(Path.Combine(root, "samples/CounterApp/CounterViewModel.cs"));
             await Idle();
@@ -356,15 +356,15 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
 
     private static async Task VerifyExpandedToolsAsync(string root, MainWindow window, DockingManager manager, ShellViewModel shell)
     {
-        shell.WpfCategory = "Keyed resources";
-        Assert.All(shell.WpfItems, item => Assert.NotNull(item.Key));
-        shell.SelectedWpfItem = shell.WpfItems.First();
+        shell.WpfExplorer.Category = "Keyed resources";
+        Assert.All(shell.WpfExplorer.Items, item => Assert.NotNull(item.Key));
+        shell.WpfExplorer.SelectedItem = shell.WpfExplorer.Items.First();
         await Idle();
-        Assert.True(shell.CanRenameWpfResource);
-        Assert.Contains("reference", shell.WpfUsageSummary);
+        Assert.True(shell.WpfExplorer.CanRenameResource);
+        Assert.Contains("reference", shell.WpfExplorer.UsageSummary);
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/wpf-resource-details.png"));
-        shell.WpfCategory = "All WPF items";
-        shell.SelectedWpfItem = null;
+        shell.WpfExplorer.Category = "All WPF items";
+        shell.WpfExplorer.SelectedItem = null;
         var editor = Descendants<EditorSurface>(window).First(e => e.IsVisible);
         editor.ContextMenu.PlacementTarget = editor;
         editor.ContextMenu.IsOpen = true; await Idle();
@@ -1137,7 +1137,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var issue = Assert.Single(shell.Diagnostics, diagnostic => diagnostic.Id == "XAMLBIND001" && diagnostic.Path == shared);
         Assert.Equal("Orders", issue.ProjectName);
         Assert.DoesNotContain(shell.Documents, document => document.State.Path == shared);
-        Assert.Contains(issue, shell.WpfIssues);
+        Assert.Contains(issue, shell.WpfExplorer.Issues);
         await shell.NavigateDiagnosticCommand.ExecuteAsync(issue);
         var editor = shell.ActiveDocument!;
         Assert.Equal("Orders", editor.XamlProject!.Name);

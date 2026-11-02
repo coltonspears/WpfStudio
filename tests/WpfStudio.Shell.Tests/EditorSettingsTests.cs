@@ -39,7 +39,7 @@ public sealed class EditorSettingsTests
         await test.Shell.OpenDocumentAsync(path);
         var editor = test.Shell.ActiveDocument!;
         editor.State.Content = "unwanted edit";
-        test.Dialogs.WhileAsking = () => test.Shell.RunAutoSaveAsync();
+        test.Dialogs.WhileAsking = () => test.Shell.AutoSave.RunNowAsync();
         test.Dialogs.SaveDecisions.Enqueue(SaveDecision.Discard);
         Assert.True(await test.Shell.CloseDocumentAsync(editor));
         Assert.Equal("original", await File.ReadAllTextAsync(path));
@@ -47,7 +47,7 @@ public sealed class EditorSettingsTests
         // Outside a close, the same timed save does write.
         await test.Shell.OpenDocumentAsync(path);
         test.Shell.ActiveDocument!.State.Content = "kept edit";
-        await test.Shell.RunAutoSaveAsync();
+        await test.Shell.AutoSave.RunNowAsync();
         Assert.Equal("kept edit", await File.ReadAllTextAsync(path));
     }
 

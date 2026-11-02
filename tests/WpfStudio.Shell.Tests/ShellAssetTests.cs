@@ -13,7 +13,7 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (startup, library, asset) = await CreateProjectsAsync(test);
-        test.Shell.SelectedWpfItem = new WpfItem("Asset", "logo.png", asset, 1);
+        test.Shell.WpfExplorer.SelectedItem = new WpfItem("Asset", "logo.png", asset, 1);
         test.Shell.SelectedBuildAction = "Content";
 
         Task operation = test.Shell.SetBuildActionCommand.ExecuteAsync(null);
@@ -33,7 +33,7 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (_, _, asset) = await CreateProjectsAsync(test);
-        test.Shell.SelectedWpfItem = new WpfItem("Asset", "logo.png", asset, 1);
+        test.Shell.WpfExplorer.SelectedItem = new WpfItem("Asset", "logo.png", asset, 1);
 
         await test.Shell.ShowPackUriCommand.ExecuteAsync(null);
 
@@ -46,7 +46,7 @@ public sealed class ShellAssetTests
     {
         await using var test = new ShellTestContext();
         var (startup, library, asset) = await CreateProjectsAsync(test, shared: true);
-        test.Shell.SelectedWpfItem = new WpfItem("Asset", "logo.png", asset, 1);
+        test.Shell.WpfExplorer.SelectedItem = new WpfItem("Asset", "logo.png", asset, 1);
 
         await test.Shell.SetBuildActionCommand.ExecuteAsync(null);
         Assert.False(test.Shell.IsPreviewOpen);

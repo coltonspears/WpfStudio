@@ -317,3 +317,9 @@ Structural work (S1), step 5:
 - **Solution Explorer** moved to `Features/Workbench/SolutionExplorerViewModel.cs`: the tree, the selected node, the name filter with its expand-all and state restore, and related-file nesting. The shell keeps the project list and the file listing and asks the explorer to show loose files or rebuild from projects; the views bind `Explorer.Nodes`, `Explorer.SelectedNode` and the filter members.
 - **Related files** became the pure `RelatedFileLocator` (conventional pairs, DataContext links from the WPF index, roles, and the tab-header breadcrumb); the shell's wrappers supply the candidate files and how to read text.
 - `SolutionExplorerViewModelTests` covers the tree, filter, nesting and locator without a shell. `ShellViewModel` is now 2,912 lines across 17 partials.
+
+Structural work (S1), step 6:
+
+- **Automatic saving** moved to `Features/Documents/AutoSaveCoordinator.cs`: the typing pause, suspension while documents close, the stop at shutdown and the save pass itself, behind `IAutoSaveHost` (open editors, review-open flag, status, output, and hooks for a saved XAML document, a completed pass and an external change). It subscribes to the editor preferences itself and unsubscribes on dispose; the shell's own preference subscription is now a named handler removed at dispose as well.
+- **WPF Explorer** moved to `Features/WpfExplorer/WpfExplorerViewModel.cs`: the index, items, category and text filters, selection, descriptions, resolved references, the issue list and the resource-at-offset lookup. The shell still computes the index and the XAML issue list and hands them over; `WpfExplorerPane.xaml` binds through `WpfExplorer`.
+- `WpfExplorerViewModelTests` covers the explorer over a hand-built index. `ShellViewModel` is now 2,771 lines across 16 partials.

@@ -21,7 +21,7 @@ public sealed class XamlDiagnosticsTests
         Assert.True(await test.Shell.CloseDocumentAsync(editor));
 
         Assert.DoesNotContain(test.Shell.Diagnostics, issue => issue.Id == "XAML001");
-        Assert.DoesNotContain(test.Shell.WpfIssues, issue => issue.Id == "XAML001");
+        Assert.DoesNotContain(test.Shell.WpfExplorer.Issues, issue => issue.Id == "XAML001");
     }
 
     [Fact]
@@ -36,9 +36,9 @@ public sealed class XamlDiagnosticsTests
         editor.Diagnostics.Add(issue);
 
         Assert.Contains(issue, test.Shell.Diagnostics);
-        Assert.Contains(issue, test.Shell.WpfIssues);
+        Assert.Contains(issue, test.Shell.WpfExplorer.Issues);
         Assert.True(await test.Shell.CloseDocumentAsync(editor));
         Assert.DoesNotContain(issue, test.Shell.Diagnostics);
-        Assert.DoesNotContain(issue, test.Shell.WpfIssues);
+        Assert.DoesNotContain(issue, test.Shell.WpfExplorer.Issues);
     }
 }

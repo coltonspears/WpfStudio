@@ -185,7 +185,7 @@ public sealed class ProjectXamlAnalysisLifecycleTests
 
         await WaitAsync(() => test.Shell.XamlAnalysis.Status.Contains("Reload the workspace", StringComparison.Ordinal));
         Assert.Empty(editor.Diagnostics);
-        Assert.Empty(test.Shell.WpfIssues);
+        Assert.Empty(test.Shell.WpfExplorer.Issues);
         Assert.Equal("<Grid><!-- unsaved --></Grid>", editor.State.Content);
         Assert.Equal(version, editor.State.Version);
         Assert.True(editor.XamlContextRevision > revision);

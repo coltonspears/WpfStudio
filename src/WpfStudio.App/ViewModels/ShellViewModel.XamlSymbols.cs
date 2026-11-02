@@ -121,7 +121,7 @@ public sealed partial class ShellViewModel
             Status = "Place the caret on a resolved binding member, named element, event handler or resource key" + SymbolWarnings(warnings ?? []);
             return;
         }
-        foreach (var usage in _wpfIndex!.Usages.Where(usage => usage.ResolvedPath == declaration.Path && usage.ResolvedDeclarationStart == declaration.ValueStart))
+        foreach (var usage in WpfExplorer.Index!.Usages.Where(usage => usage.ResolvedPath == declaration.Path && usage.ResolvedDeclarationStart == declaration.ValueStart))
             SearchResults.Add(new(usage.Path, usage.Line, 1, (usage.IsDynamic ? "DynamicResource " : "StaticResource ") + usage.Key));
         ToolRequested?.Invoke("Search");
         Status = $"{SearchResults.Count} resolved resource reference(s); runtime and code resource references are not indexed" + SymbolWarnings(warnings ?? []);
@@ -165,7 +165,7 @@ public sealed partial class ShellViewModel
             Status = "Place the caret on a resolved binding member, named element, event handler or resource key" + SymbolWarnings(warnings ?? []);
             return;
         }
-        SelectedWpfItem = _wpfIndex!.Items.FirstOrDefault(item => item.Path == declaration.Path && item.Line == declaration.Line && item.Key == declaration.Key);
+        WpfExplorer.SelectedItem = WpfExplorer.Index!.Items.FirstOrDefault(item => item.Path == declaration.Path && item.Line == declaration.Line && item.Key == declaration.Key);
         await RenameResourceCommand.ExecuteAsync(null);
     }
 

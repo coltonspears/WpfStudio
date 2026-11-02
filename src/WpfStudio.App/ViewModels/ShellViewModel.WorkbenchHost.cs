@@ -1,13 +1,15 @@
 using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.Workbench;
+using WpfStudio.App.Features.WpfExplorer;
+using WpfStudio.Core.Wpf;
 using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -17,6 +19,8 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     public ChangeReviewViewModel ChangeReview { get; }
     public ProjectXamlAnalysisCoordinator XamlAnalysis { get; }
     public SolutionExplorerViewModel Explorer { get; }
+    public WpfExplorerViewModel WpfExplorer { get; }
+    public AutoSaveCoordinator AutoSave { get; }
     /// <summary>True while a change review is open; workspace operations wait for the decision.</summary>
     public bool IsPreviewOpen => ChangeReview.IsOpen;
     private Action? _openDocumentsChanged, _documentsChanged;
@@ -70,14 +74,34 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     WorkspaceSnapshot? IProjectXamlAnalysisHost.Workspace => Workspace;
     bool IProjectXamlAnalysisHost.IsLoading => _loading;
     IReadOnlyList<EditorViewModel> IProjectXamlAnalysisHost.Documents => Documents;
-    IReadOnlyDictionary<string, string>? IProjectXamlAnalysisHost.IndexTexts => _wpfIndex?.Texts;
+    IReadOnlyDictionary<string, string>? IProjectXamlAnalysisHost.IndexTexts => WpfExplorer.Index?.Texts;
     void IProjectXamlAnalysisHost.DiagnosticsChanged() => RefreshEditorDiagnostics();
     void IProjectXamlAnalysisHost.XamlContextsChanged() => RefreshXamlContexts();
     void IProjectXamlAnalysisHost.InvalidateXamlResources() => _xamlResources.Invalidate();
     void IProjectXamlAnalysisHost.OpenXamlDocumentsChanged() => _xamlResources.SetOpenDocuments(Documents.Select(editor => editor.State));
-    void IProjectXamlAnalysisHost.ForgetIndexedState() { _buildDiagnostics.Clear(); _wpfIndex = null; _xaml.Index = null; }
+    void IProjectXamlAnalysisHost.ForgetIndexedState() { _buildDiagnostics.Clear(); WpfExplorer.SetIndex(null); _xaml.Index = null; }
     void IProjectXamlAnalysisHost.SemanticStateChanged() => Interlocked.Increment(ref _symbolSemanticRevision);
     void IProjectXamlAnalysisHost.AppendOutput(string line) => AppendOutput(line);
+
+    // ------------------------------------------------------------------ IAutoSaveHost
+    IReadOnlyList<EditorViewModel> IAutoSaveHost.Documents => Documents;
+    bool IAutoSaveHost.IsReviewOpen => IsPreviewOpen;
+    void IAutoSaveHost.ReportStatus(string status) => Status = status;
+    void IAutoSaveHost.AppendOutput(string line) => AppendOutput(line);
+    void IAutoSaveHost.DocumentAutoSaved(EditorViewModel document) { if (document.IsXaml) _xamlResources.Invalidate(); }
+    void IAutoSaveHost.AutoSaveCompleted() => XamlAnalysis.Request();
+    void IAutoSaveHost.ExternalChangeDetected() => _ = CheckExternalChangesAsync();
+
+    // ------------------------------------------------------------------ WPF Explorer
+    /// <summary>The resource declared at, or referenced from, the active caret; null (with a status) when the index no longer matches the buffer.</summary>
+    private ResourceDeclaration? ResourceAtCaret()
+    {
+        if (ActiveDocument is not { } document || WpfExplorer.Index is null) return null;
+        var state = document.State;
+        // Never use old index offsets after edits. Refresh first so refactor previews correspond to exactly the buffer being inspected.
+        if (!WpfExplorer.IsIndexCurrent(state.Path, state.Content)) { Status = "Refresh WPF Explorer after editing resource keys"; return null; }
+        return WpfExplorer.ResourceAt(state.Path, state.CaretOffset);
+    }
 
     /// <summary>Compares open files with disk; see <see cref="ExternalChangesViewModel.CheckAsync"/>.</summary>
     public Task CheckExternalChangesAsync(bool fromAppOperation = false) => ExternalChanges.CheckAsync(fromAppOperation);
