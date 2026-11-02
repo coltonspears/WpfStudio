@@ -1132,7 +1132,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         await File.WriteAllTextAsync(solution, "<Solution><Project Path=\"Customers/Customers.csproj\"/><Project Path=\"Orders/Orders.csproj\"/></Solution>");
         await shell.LoadWorkspaceAsync(solution);
         var analysisClock = Stopwatch.StartNew();
-        await shell.RefreshProjectXamlAnalysisCommand.ExecuteAsync(null);
+        await shell.XamlAnalysis.RefreshCommand.ExecuteAsync(null);
         long initialScanMs = analysisClock.ElapsedMilliseconds;
         var issue = Assert.Single(shell.Diagnostics, diagnostic => diagnostic.Id == "XAMLBIND001" && diagnostic.Path == shared);
         Assert.Equal("Orders", issue.ProjectName);
@@ -1142,8 +1142,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var editor = shell.ActiveDocument!;
         Assert.Equal("Orders", editor.XamlProject!.Name);
         await editor.RefreshAnalysisAsync();
-        await shell.RefreshProjectXamlAnalysisCommand.ExecuteAsync(null);
-        Assert.Contains("XAML checked:", shell.XamlAnalysisStatus);
+        await shell.XamlAnalysis.RefreshCommand.ExecuteAsync(null);
+        Assert.Contains("XAML checked:", shell.XamlAnalysis.Status);
         shell.ShowToolCommand.Execute("Problems");
         await Idle();
         var selector = Descendants<ComboBox>(window).Single(combo => System.Windows.Automation.AutomationProperties.GetName(combo) == "XAML project context" && ReferenceEquals(combo.DataContext, editor));
@@ -1158,8 +1158,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         analysisClock.Restart();
         await File.WriteAllTextAsync(modelPath, "namespace Fixture; public class Model { public string Name => \"Sample\"; }");
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(25));
-        while (shell.IsProjectXamlAnalysisRunning || shell.Diagnostics.Any(diagnostic => diagnostic.Id == "XAMLBIND001" && diagnostic.Path == shared)
-            || !shell.XamlAnalysisStatus.Contains("checked", StringComparison.OrdinalIgnoreCase))
+        while (shell.XamlAnalysis.IsRunning || shell.Diagnostics.Any(diagnostic => diagnostic.Id == "XAMLBIND001" && diagnostic.Path == shared)
+            || !shell.XamlAnalysis.Status.Contains("checked", StringComparison.OrdinalIgnoreCase))
             await Task.Delay(50, deadline.Token);
         await editor.RefreshAnalysisAsync();
         Assert.Empty(editor.Diagnostics);

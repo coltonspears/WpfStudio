@@ -96,7 +96,7 @@ public sealed class XamlNameProjectionShellTests
         var xaml = test.Shell.ActiveDocument!;
         await codeEditor.SyncAsync();
         await xaml.SyncAsync();
-        await test.Shell.RefreshProjectXamlAnalysisAsync();
+        await test.Shell.XamlAnalysis.RefreshAsync();
         await observer.RefreshAnalysisAsync();
         Assert.Contains(observer.Diagnostics, MissingField);
 

@@ -920,7 +920,7 @@
               <Grid Background="{DynamicResource SurfaceBrush}">
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                 <DockPanel Margin="10,3,8,3">
-                  <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Check XAML" Command="{Binding RefreshProjectXamlAnalysisCommand}" ToolTip="Refresh XAML diagnostics across the loaded projects, including closed files." />
+                  <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Check XAML" Command="{Binding XamlAnalysis.RefreshCommand}" ToolTip="Refresh XAML diagnostics across the loaded projects, including closed files." />
                   <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding Problems.Scopes}" SelectedItem="{Binding Problems.Scope}" Width="110" Margin="6,0" ToolTip="Which files' problems to list" />
                   <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Info" Content="{Binding Problems.MessageCount}" IsChecked="{Binding Problems.ShowMessages}" ToolTip="Show messages" Height="26" />
                   <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Warning" Content="{Binding Problems.WarningCount}" IsChecked="{Binding Problems.ShowWarnings}" ToolTip="Show warnings" Height="26" />
@@ -931,7 +931,7 @@
                     </TextBox.InputBindings>
                   </TextBox>
                   <Button DockPanel.Dock="Left" Style="{StaticResource QuietButton}" Content="{Binding Problems.FilterSummary}" Command="{Binding Problems.ClearFilterCommand}" ToolTip="Clear every Problems filter" Margin="6,0" Visibility="{Binding Problems.FilterSummary, Converter={StaticResource Presence}}" />
-                  <TextBlock Text="{Binding XamlAnalysisStatus}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding XamlAnalysisStatus}" />
+                  <TextBlock Text="{Binding XamlAnalysis.Status}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding XamlAnalysis.Status}" />
                 </DockPanel>
                 <DataGrid Grid.Row="1" ItemsSource="{Binding Problems.Visible}" SelectedItem="{Binding Problems.Selected}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
                   <DataGrid.Columns>

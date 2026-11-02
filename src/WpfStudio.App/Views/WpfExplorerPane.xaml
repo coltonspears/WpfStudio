@@ -40,8 +40,8 @@
     <DockPanel>
      <StackPanel DockPanel.Dock="Top" Margin="12,8,12,4">
       <TextBlock Text="Errors are definite problems. Informational items need runtime or library context and may be valid." Style="{StaticResource Caption}" />
-      <TextBlock Text="{Binding XamlAnalysisStatus}" Style="{StaticResource Caption}" Margin="0,4,0,0" TextWrapping="Wrap" />
-      <Button Content="Check project XAML" Style="{StaticResource QuietButton}" Command="{Binding RefreshProjectXamlAnalysisCommand}" HorizontalAlignment="Left" Margin="-4,4,0,0" />
+      <TextBlock Text="{Binding XamlAnalysis.Status}" Style="{StaticResource Caption}" Margin="0,4,0,0" TextWrapping="Wrap" />
+      <Button Content="Check project XAML" Style="{StaticResource QuietButton}" Command="{Binding XamlAnalysis.RefreshCommand}" HorizontalAlignment="Left" Margin="-4,4,0,0" />
      </StackPanel>
      <ListBox ItemsSource="{Binding WpfIssues}" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
       <ListBox.ItemTemplate><DataTemplate><DockPanel>

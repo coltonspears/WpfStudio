@@ -28,7 +28,7 @@ public sealed class ProjectXamlPartialCoverageTests
         await test.Shell.OpenDocumentAsync(views["Healthy"]);
         var editor = test.Shell.ActiveDocument!;
         int position = Markup.IndexOf("Name}", StringComparison.Ordinal);
-        await test.Shell.RefreshProjectXamlAnalysisAsync();
+        await test.Shell.XamlAnalysis.RefreshAsync();
         Assert.Contains((await editor.CompleteAsync(position)).Items, item => item.DisplayText == "Name");
 
         // Make A unavailable without changing project membership. Then a real
@@ -44,7 +44,7 @@ public sealed class ProjectXamlPartialCoverageTests
             while (editor.LanguageStatus != "Checking changed project source files…") await Task.Delay(10, deadline.Token);
         Assert.Empty((await editor.CompleteAsync(position)).Items);
 
-        await test.Shell.RefreshProjectXamlAnalysisAsync();
+        await test.Shell.XamlAnalysis.RefreshAsync();
 
         var completions = await editor.CompleteAsync(position);
         Assert.Contains(completions.Items, item => item.DisplayText == "Name");
@@ -52,8 +52,8 @@ public sealed class ProjectXamlPartialCoverageTests
         await editor.RefreshAnalysisAsync();
         Assert.Empty(editor.Diagnostics);
         Assert.DoesNotContain("Checking changed", editor.LanguageStatus);
-        Assert.Contains("1 unavailable", test.Shell.XamlAnalysisStatus);
-        Assert.Contains("partial coverage", test.Shell.XamlAnalysisStatus);
+        Assert.Contains("1 unavailable", test.Shell.XamlAnalysis.Status);
+        Assert.Contains("partial coverage", test.Shell.XamlAnalysis.Status);
         var batch = await test.Workspace.AnalyzeXamlProjectAsync(new(100, [new(editor.State.Path, editor.State.Content, editor.State.Version)]));
         Assert.True(batch.Accepted, batch.Status);
         Assert.Equal("Unavailable", Assert.Single(batch.Files, file => file.ProjectName == "Unavailable").State);

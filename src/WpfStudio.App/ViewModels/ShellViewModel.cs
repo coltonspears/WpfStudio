@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using WpfStudio.App.Features.Review;
+using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
@@ -34,6 +35,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _operation;
     private WpfIndexSnapshot? _wpfIndex;
+    private readonly List<WorkspaceDiagnostic> _buildDiagnostics = [];
     private string[] _allFiles = [];
     private bool _initialized;
     private bool _disposed;
@@ -56,6 +58,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.SelectionSourceChanged += RevealDesignerSelection;
         TaskList = new(this); FileGroups = new(this); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
         Palette = new(this); ChangeReview = new(this, dispatcher);
+        XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token);
         ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) OnPropertyChanged(nameof(IsPreviewOpen)); };
         InitializeDesignerContext();
         LiveInspection = new(dispatcher);
@@ -66,7 +69,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         InitializeFeatures(features);
         InitializeExperience();
         InitializeWorkbench();
-        InitializeProjectXamlAnalysis();
         InitializeSettings();
         debugger.SourceRequested += (path, line) => _ = GuardAsync(() => NavigateAsync(path, line, 1, true));
         debugger.Breakpoints.CollectionChanged += (_, _) => ObserveBreakpoints();
@@ -139,7 +141,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public string WindowTitle => Workspace == null ? "WpfStudio" : $"{Path.GetFileNameWithoutExtension(Workspace.Path)} — WpfStudio";
     public bool HasWorkspace => Workspace != null;
     public bool IsWelcomeVisible => Documents.Count == 0;
-    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features?.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); ResetProjectXamlAnalysis(value); }
+    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features?.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); XamlAnalysis.Reset(value); }
     partial void OnWpfFilterChanged(string value) => RefreshWpfItems();
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
     partial void OnConfigurationChanged(string value) { if (!string.IsNullOrWhiteSpace(value)) ScheduleContextReload(); }
@@ -249,7 +251,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Status = $"{Projects.Count} projects · SDK {Workspace.SdkVersion}" + (Workspace.Cached ? " · refreshing project model…" : "");
             await SaveSettingsAsync();
         }
-        finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; RequestProjectXamlAnalysis(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
+        finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; XamlAnalysis.Request(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
         if (Workspace is { Cached: true } cached && !_contextReloadPending) _ = RefreshSavedProjectModelAsync(cached.Path, Configuration);
     }
     /// <summary>
@@ -275,7 +277,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             if (discard.Contains(doc)) await _store.DeleteRecoveryAsync(doc.State.Path);
             if (Designer.SourcePath == doc.State.Path) await Designer.CloseAsync();
-            doc.Dispose(); Documents.Remove(doc); _store.Close(doc.State); UntrackDiagnosticDocument(doc.State);
+            doc.Dispose(); Documents.Remove(doc); _store.Close(doc.State); XamlAnalysis.UntrackDocument(doc.State);
         }
         ActiveDocument = null; OnPropertyChanged(nameof(IsWelcomeVisible));
         return true;
@@ -294,7 +296,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             foreach (var doc in Documents) await doc.SyncAsync();
             await RefreshWpfAsync();
             if (Status.EndsWith("refreshing project model…", StringComparison.Ordinal)) Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}";
-            RequestProjectXamlAnalysis();
+            XamlAnalysis.Request();
         }
         catch (OperationCanceledException) { }
         catch (Exception exception) { AppendOutput("Project model refresh: " + exception.Message); }
@@ -361,7 +363,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (requestedConfiguration != Configuration || requestedFramework != TargetFramework) _contextReloadPending = true;
           } while (_contextReloadPending && !_lifetime.IsCancellationRequested);
         }
-        finally { _loading = false; RequestProjectXamlAnalysis(); }
+        finally { _loading = false; XamlAnalysis.Request(); }
     });
     private async Task RefreshLaunchChoicesAsync()
     {
@@ -447,7 +449,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         vm.OpenRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
         RefreshRelated(vm);
         Documents.Add(vm); ActiveDocument = vm; RefreshBreakpointMarkers();
-        TrackDiagnosticDocument(state);
+        XamlAnalysis.TrackDocument(state);
         OnPropertyChanged(nameof(IsWelcomeVisible));
     }
     public async Task<bool> CloseDocumentAsync(EditorViewModel document, bool discardChanges = false)
@@ -463,7 +465,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
         if (Designer.SourcePath == document.State.Path) await Designer.CloseAsync();
         document.Dispose(); Documents.Remove(document); _store.Close(document.State);
-        UntrackDiagnosticDocument(document.State);
+        XamlAnalysis.UntrackDocument(document.State);
         // Queue the worker close before awaiting index refresh. A reopened
         // editor must synchronize after this old buffer has been retired.
         if (document.IsCSharp || document.IsXaml)
@@ -488,7 +490,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await _store.SaveAsync(doc.State);
             TaskList.UpdateComments(doc.State.Path, doc.State.Content);
             if (doc.IsXaml) _xamlResources.Invalidate();
-            RequestProjectXamlAnalysis();
+            XamlAnalysis.Request();
             Status = doc.State.IsDirty ? "The document changed while saving. Save again to include the latest edits." : "Saved " + doc.State.Name;
             return !doc.State.IsDirty;
         }
@@ -497,7 +499,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (!await _dialogs.ConfirmAsync("File changed outside WpfStudio", $"Overwrite the external changes to {doc.State.Name} with the editor content?")) return false;
             await _store.SaveAsync(doc.State, true);
             if (doc.IsXaml) _xamlResources.Invalidate();
-            RequestProjectXamlAnalysis();
+            XamlAnalysis.Request();
             if (doc.State.IsDirty) Status = "The document changed while saving. Save again to include the latest edits.";
             return !doc.State.IsDirty;
         }
@@ -622,19 +624,23 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
     private void RefreshEditorDiagnostics()
     {
-        Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(CurrentProjectXamlDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Distinct()) Diagnostics.Add(item);
+        Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Distinct()) Diagnostics.Add(item);
         Problems.Refresh();
         RefreshWpfIssues();
     }
+    private IEnumerable<WorkspaceDiagnostic> CurrentEditorDiagnostics(bool xamlOnly = false) => Documents
+        .Where(editor => (!xamlOnly || editor.IsXaml) && (XamlAnalysis.XamlContextsAvailable || !editor.IsXaml))
+        .Where(editor => !editor.IsXaml || !XamlAnalysis.CoversEditor(editor))
+        .SelectMany(editor => editor.Diagnostics);
     private IEnumerable<WorkspaceDiagnostic> CurrentWpfIndexDiagnostics() => (_wpfIndex?.Diagnostics ?? []).Where(issue =>
-        !IsIndexDiagnosticStale(issue) && (issue.Path is null || _store.Find(issue.Path) is not { } document ||
+        !XamlAnalysis.IsIndexDiagnosticStale(issue) && (issue.Path is null || _store.Find(issue.Path) is not { } document ||
          (_wpfIndex!.Texts.TryGetValue(issue.Path, out var indexed) && indexed == document.Content)) &&
         (issue.Id != "XAML001" || !Documents.Any(editor => editor.State.Path.Equals(issue.Path, StringComparison.OrdinalIgnoreCase) &&
             editor.Diagnostics.Any(diagnostic => diagnostic.Id == "XAMLSYNTAX001"))));
     private void RefreshWpfIssues()
     {
         WpfIssues.Clear();
-        foreach (var issue in CurrentWpfIndexDiagnostics().Concat(CurrentProjectXamlDiagnostics()).Concat(CurrentEditorDiagnostics(xamlOnly: true)).Distinct()) WpfIssues.Add(issue);
+        foreach (var issue in CurrentWpfIndexDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentEditorDiagnostics(xamlOnly: true)).Distinct()) WpfIssues.Add(issue);
         OnPropertyChanged(nameof(WpfIssueTitle));
     }
     [RelayCommand] private Task GoToDefinitionAsync() => GuardAsync(async () =>
@@ -731,9 +737,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task NavigateSearchAsync(NavigationResult? result) => result == null ? Task.CompletedTask : GuardAsync(() => NavigateSymbolResultAsync(result));
     [RelayCommand] private Task NavigateDiagnosticAsync(WorkspaceDiagnostic? diagnostic) => diagnostic?.Path == null ? Task.CompletedTask : GuardAsync(async () =>
     {
-        if (!await VerifyProjectDiagnosticAsync(diagnostic)) { Status = "The diagnostic source changed. Refresh project XAML analysis before navigating."; RequestProjectXamlAnalysis(); return; }
+        if (!await XamlAnalysis.VerifyDiagnosticAsync(diagnostic)) { Status = "The diagnostic source changed. Refresh project XAML analysis before navigating."; XamlAnalysis.Request(); return; }
         await OpenDocumentAsync(diagnostic.Path);
-        if (ActiveDocument is not { } editor || !IsOpenedProjectDiagnosticCurrent(diagnostic, editor.State))
+        if (ActiveDocument is not { } editor || !XamlAnalysis.IsOpenedDiagnosticCurrent(diagnostic, editor.State))
         { Status = "The diagnostic source changed while opening it. Refresh project XAML analysis before navigating."; return; }
         SelectXamlDiagnosticContext(editor, diagnostic);
         await NavigateAsync(diagnostic.Path, diagnostic.Line, diagnostic.Column);
@@ -753,14 +759,14 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (Workspace == null) return;
         var workspace = Workspace;
-        var revision = Volatile.Read(ref _wpfIndexRevision);
+        var revision = XamlAnalysis.IndexRevision;
         var buffers = _store.Documents.ToDictionary(d => d.Path, d => d.Content, StringComparer.OrdinalIgnoreCase);
         var index = await Task.Run(() => _indexer.IndexAsync(workspace, buffers, _lifetime.Token));
-        if (!ReferenceEquals(workspace, Workspace) || revision != Volatile.Read(ref _wpfIndexRevision)) return;
+        if (!ReferenceEquals(workspace, Workspace) || revision != XamlAnalysis.IndexRevision) return;
         _wpfIndex = index; _xaml.Index = _wpfIndex;
-        _invalidIndexPaths.Clear(); _indexTextHashes.Clear(); _indexDiagnosticsInvalid = false;
+        XamlAnalysis.MarkIndexRefreshed();
         RefreshWpfItems(); RefreshEditorDiagnostics(); RefreshAllRelated();
-        _ = _projectAnalysis?.Schedule();
+        XamlAnalysis.Schedule();
     });
     private void RefreshWpfItems()
     {
@@ -862,6 +868,14 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     });
     private Task<bool> PreviewAsync(string title, IReadOnlyList<FileChange> changes, string warnings) => ChangeReview.ShowAsync(title, changes, warnings);
     private async Task ApplyChangesAsync(IReadOnlyList<FileChange> changes) { await _edits.ApplyAsync(changes); foreach (var change in changes) AddDocument(_store.Find(change.Path)!); }
+    /// <summary>Prepares, reviews and applies a worker edit result: the shared tail of the edit commands that need no further verification.</summary>
+    private async Task<bool> ReviewAndApplyAsync(string title, WorkspaceEditResult result)
+    {
+        var changes = await _edits.PrepareAsync(result);
+        if (!await PreviewAsync(title, changes, string.Join(Environment.NewLine, result.Warnings))) return false;
+        await ApplyChangesAsync(changes);
+        return true;
+    }
     [RelayCommand] private void QuickOpen() => Palette.OpenFiles();
     [RelayCommand] private void CommandPalette() => Palette.OpenCommands();
     [RelayCommand] private void ToggleTheme() { ThemeName = ThemeName == "Dark" ? "Light" : "Dark"; ThemeChanged?.Invoke(ThemeName); }
@@ -913,7 +927,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        DisposeProjectXamlAnalysis(); ExternalChanges.Dispose(); TaskList.Dispose(); Palette.Dispose();
+        XamlAnalysis.Dispose(); ExternalChanges.Dispose(); TaskList.Dispose(); Palette.Dispose();
         foreach (var breakpoint in _observedBreakpoints) breakpoint.PropertyChanged -= BreakpointChanged;
         Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;

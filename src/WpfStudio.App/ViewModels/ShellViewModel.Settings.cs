@@ -142,7 +142,7 @@ public sealed partial class ShellViewModel
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { AppendOutput("Automatic save: " + exception.Message); }
         }
         if (saved == 0) return;
-        RequestProjectXamlAnalysis();
+        XamlAnalysis.Request();
         Status = saved == 1 ? "Saved automatically" : $"Saved {saved} files automatically";
     }
 

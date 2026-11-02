@@ -96,20 +96,14 @@ public sealed partial class ShellViewModel
         if (ActiveDocument is not { IsReadOnly: false } document || document.State.Extension != ".cs" || action == null) { Status = "Open a C# source document to use this refactoring"; return; }
         await document.SyncAsync(); var state = document.State;
         var result = await _workspace.RefactorAsync(new(state.Path, state.CaretOffset, state.Version, action));
-        var changes = await _edits.PrepareAsync(result);
-        if (await PreviewAsync("Review C# refactoring", changes, string.Join(Environment.NewLine, result.Warnings))) await ApplyChangesAsync(changes);
+        await ReviewAndApplyAsync("Review C# refactoring", result);
     });
     private async Task ApplyCSharpCodeActionAsync(EditorViewModel editor, WpfStudio.Contracts.CodeActionEntry action)
     {
         var state = editor.State;
         Status = action.Title + "…";
         var result = await _workspace.ApplyCodeActionAsync(new(state.Path, state.Version, action.Id), _lifetime.Token);
-        var changes = await _edits.PrepareAsync(result);
-        if (await PreviewAsync(action.Title, changes, string.Join(Environment.NewLine, result.Warnings)))
-        {
-            await ApplyChangesAsync(changes);
-            Status = "Applied: " + action.Title;
-        }
+        if (await ReviewAndApplyAsync(action.Title, result)) Status = "Applied: " + action.Title;
     }
     [RelayCommand] private void ShowBreakpoints() { Debugger.SelectedTab = 2; ToolRequested?.Invoke("Debugger"); }
     [RelayCommand] private Task BreakpointConditionAsync() => GuardAsync(async () =>

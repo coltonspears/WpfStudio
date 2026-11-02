@@ -1,12 +1,13 @@
 using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.Workbench;
+using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -14,6 +15,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     public ExternalChangesViewModel ExternalChanges { get; }
     public CommandPaletteViewModel Palette { get; }
     public ChangeReviewViewModel ChangeReview { get; }
+    public ProjectXamlAnalysisCoordinator XamlAnalysis { get; }
     /// <summary>True while a change review is open; workspace operations wait for the decision.</summary>
     public bool IsPreviewOpen => ChangeReview.IsOpen;
     private Action? _openDocumentsChanged, _documentsChanged;
@@ -57,11 +59,24 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     Task<bool> IExternalChangesHost.CloseDocumentAsync(EditorViewModel document, bool discardChanges) => CloseDocumentAsync(document, discardChanges);
     void IExternalChangesHost.DiskVersionsChecked()
     {
-        RequestProjectXamlAnalysis();
+        XamlAnalysis.Request();
         // A commit or checkout in the terminal changes what change margins and blame compare with.
         if (Features?.GitService is { } git) foreach (var document in Documents) _ = document.RefreshGitAsync(git, _lifetime.Token);
     }
     void IExternalChangesHost.SettingChanged() { if (_initialized) _ = SaveSettingsAsync(); }
+
+    // ------------------------------------------------------------------ IProjectXamlAnalysisHost
+    WorkspaceSnapshot? IProjectXamlAnalysisHost.Workspace => Workspace;
+    bool IProjectXamlAnalysisHost.IsLoading => _loading;
+    IReadOnlyList<EditorViewModel> IProjectXamlAnalysisHost.Documents => Documents;
+    IReadOnlyDictionary<string, string>? IProjectXamlAnalysisHost.IndexTexts => _wpfIndex?.Texts;
+    void IProjectXamlAnalysisHost.DiagnosticsChanged() => RefreshEditorDiagnostics();
+    void IProjectXamlAnalysisHost.XamlContextsChanged() => RefreshXamlContexts();
+    void IProjectXamlAnalysisHost.InvalidateXamlResources() => _xamlResources.Invalidate();
+    void IProjectXamlAnalysisHost.OpenXamlDocumentsChanged() => _xamlResources.SetOpenDocuments(Documents.Select(editor => editor.State));
+    void IProjectXamlAnalysisHost.ForgetIndexedState() { _buildDiagnostics.Clear(); _wpfIndex = null; _xaml.Index = null; }
+    void IProjectXamlAnalysisHost.SemanticStateChanged() => Interlocked.Increment(ref _symbolSemanticRevision);
+    void IProjectXamlAnalysisHost.AppendOutput(string line) => AppendOutput(line);
 
     /// <summary>Compares open files with disk; see <see cref="ExternalChangesViewModel.CheckAsync"/>.</summary>
     public Task CheckExternalChangesAsync(bool fromAppOperation = false) => ExternalChanges.CheckAsync(fromAppOperation);
