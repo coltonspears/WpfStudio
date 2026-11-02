@@ -266,28 +266,27 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             shell.ToggleThemeCommand.Execute(null); await Idle();
             await VerifyExpandedToolsAsync(root, window, manager, shell);
             shell.CommandPaletteCommand.Execute(null); await Idle();
-            Assert.True(shell.IsPaletteOpen); Assert.NotEmpty(shell.PaletteResults);
+            Assert.True(shell.Palette.IsOpen); Assert.NotEmpty(shell.Palette.Results);
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/command-palette.png"));
-            shell.PaletteQuery = ">build"; await Idle();
-            Assert.Equal("Build", shell.PaletteResults.First().Label);
-            shell.QuickOpenCommand.Execute(null); shell.PaletteQuery = "cvm"; await Idle();
-            Assert.False(shell.IsCommandPalette);
-            Assert.Equal("CounterViewModel.cs", shell.PaletteResults.First().Label);
+            shell.Palette.Query = ">build"; await Idle();
+            Assert.Equal("Build", shell.Palette.Results.First().Label);
+            shell.QuickOpenCommand.Execute(null); shell.Palette.Query = "cvm"; await Idle();
+            Assert.False(shell.Palette.IsCommandMode);
+            Assert.Equal("CounterViewModel.cs", shell.Palette.Results.First().Label);
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/quick-open.png"));
-            shell.ClosePaletteCommand.Execute(null);
+            shell.Palette.CloseCommand.Execute(null);
             shell.NewWpfItemCommand.Execute(null); await Idle(); Assert.True(shell.IsScaffoldOpen);
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/new-item.png"));
             shell.CancelScaffoldCommand.Execute(null);
-            shell.PreviewChanges.Add(new FileChange("CustomerView.xaml", "<Grid />", "<Grid><TextBlock Text=\"Hello\" /></Grid>", "Add customer view"));
-            shell.SelectedPreviewChange = shell.PreviewChanges[0]; shell.IsPreviewOpen = true;
+            _ = shell.ChangeReview.ShowAsync("Add customer view", [new FileChange("CustomerView.xaml", "<Grid />", "<Grid><TextBlock Text=\"Hello\" /></Grid>", "Add customer view")], "");
             await Idle();
             var reviewDiff = Descendants<WpfStudio.App.Controls.Diff.DiffView>(window).Single(view => view.Name == "ReviewDiff");
             Assert.True(reviewDiff.IsVisible);
-            Assert.Equal(shell.SelectedPreviewChange.After, reviewDiff.After);
+            Assert.Equal(shell.ChangeReview.SelectedChange.After, reviewDiff.After);
             Assert.True(reviewDiff.ShowsSplit);
             Assert.Contains(reviewDiff.Layout!.Right, line => line.Kind == WpfStudio.App.Controls.Diff.DiffLineKind.Added && line.Text.Contains("Hello"));
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/change-preview.png"));
-            shell.CancelPreviewCommand.Execute(null);
+            shell.ChangeReview.CancelCommand.Execute(null);
             var performanceFixture = Path.Combine(root, "artifacts/performance/fixture/Performance.slnx");
             if (File.Exists(performanceFixture))
             {
@@ -681,21 +680,21 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
 
         // Review/cancel then accept the same cross-language rename through the real commands.
         var cancelled = await StartRenameAsync("FullName");
-        Assert.Equal(3, shell.PreviewChanges.Count);
-        Assert.All(shell.PreviewChanges, change => Assert.NotEqual(change.Before, change.After));
-        Assert.Contains("Binding Name", shell.PreviewChanges.Single(change => change.Path == view).After); // Order.Name is unrelated.
-        Assert.Contains("Binding FullName", shell.PreviewChanges.Single(change => change.Path == view).After);
+        Assert.Equal(3, shell.ChangeReview.Changes.Count);
+        Assert.All(shell.ChangeReview.Changes, change => Assert.NotEqual(change.Before, change.After));
+        Assert.Contains("Binding Name", shell.ChangeReview.Changes.Single(change => change.Path == view).After); // Order.Name is unrelated.
+        Assert.Contains("Binding FullName", shell.ChangeReview.Changes.Single(change => change.Path == view).After);
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-symbol-rename-review.png"));
         shell.ToggleThemeCommand.Execute(null); await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-symbol-rename-review-light.png"));
         shell.ToggleThemeCommand.Execute(null);
-        shell.CancelPreviewCommand.Execute(null);
+        shell.ChangeReview.CancelCommand.Execute(null);
         await cancelled;
         Assert.Equal(unsavedView, editor.State.Content);
         Assert.Equal(unsavedModel, model.State.Content);
 
         var accepted = await StartRenameAsync("FullName");
-        shell.AcceptPreviewCommand.Execute(null);
+        shell.ChangeReview.AcceptCommand.Execute(null);
         await accepted;
         Assert.Contains("public string FullName", model.State.Content);
         Assert.Contains("Label => FullName", model.State.Content);
@@ -728,8 +727,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         await shell.FindReferencesCommand.ExecuteAsync(null);
         Assert.Contains(shell.SearchResults, hit => hit.Path == view);
         var eventRename = await StartRenameAsync("HandleSave");
-        Assert.Equal(2, shell.PreviewChanges.Count);
-        shell.AcceptPreviewCommand.Execute(null);
+        Assert.Equal(2, shell.ChangeReview.Changes.Count);
+        shell.ChangeReview.AcceptCommand.Execute(null);
         await eventRename;
         Assert.Contains("void HandleSave", code.State.Content);
         Assert.Contains("Click=\"HandleSave\"", editor.State.Content);
@@ -891,20 +890,20 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-name-references.png"));
 
         var cancelled = await StartRenameAsync();
-        Assert.Equal(2, shell.PreviewChanges.Count);
-        Assert.Contains(shell.PreviewChanges, change => change.Path == view && change.After.Contains("Name=\"EmailInput\"", StringComparison.Ordinal)
+        Assert.Equal(2, shell.ChangeReview.Changes.Count);
+        Assert.Contains(shell.ChangeReview.Changes, change => change.Path == view && change.After.Contains("Name=\"EmailInput\"", StringComparison.Ordinal)
             && change.After.Contains("ElementName=EmailInput", StringComparison.Ordinal));
-        Assert.Contains(shell.PreviewChanges, change => change.Path == codePath && change.After.Contains("EmailInput.Text", StringComparison.Ordinal));
-        shell.SelectedPreviewChange = shell.PreviewChanges.Single(change => change.Path == view);
+        Assert.Contains(shell.ChangeReview.Changes, change => change.Path == codePath && change.After.Contains("EmailInput.Text", StringComparison.Ordinal));
+        shell.ChangeReview.SelectedChange = shell.ChangeReview.Changes.Single(change => change.Path == view);
         await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-name-rename-review.png"));
-        shell.CancelPreviewCommand.Execute(null);
+        shell.ChangeReview.CancelCommand.Execute(null);
         await cancelled;
         Assert.Equal(markup, editor.State.Content);
         Assert.DoesNotContain(shell.Documents, document => document.State.Path == codePath);
 
         var accepted = await StartRenameAsync();
-        shell.AcceptPreviewCommand.Execute(null);
+        shell.ChangeReview.AcceptCommand.Execute(null);
         await accepted;
         var codeEditor = Assert.Single(shell.Documents, document => document.State.Path == codePath);
         Assert.Equal(markup.Replace("ContactEmail", "EmailInput", StringComparison.Ordinal), editor.State.Content);
@@ -1313,18 +1312,18 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var originalRuntimeValue = model.SelectedProperty.Value;
             var cancelledSourceWrite = model.WritePropertyToSourceCommand.ExecuteAsync(null);
             await WaitForSourceReviewAsync(cancelledSourceWrite);
-            Assert.Contains("binding", shell.PreviewWarnings, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("Text=\"Live &amp; reviewed\"", Assert.Single(shell.PreviewChanges).After);
+            Assert.Contains("binding", shell.ChangeReview.Warnings, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Text=\"Live &amp; reviewed\"", Assert.Single(shell.ChangeReview.Changes).After);
             Assert.Equal(originalXaml, sourceEditor.State.Content);
             Assert.Equal(originalRuntimeValue, model.SelectedProperty.Value);
-            shell.CancelPreviewCommand.Execute(null);
+            shell.ChangeReview.CancelCommand.Execute(null);
             await cancelledSourceWrite;
             Assert.Equal(originalXaml, sourceEditor.State.Content);
 
             var staleSourceWrite = model.WritePropertyToSourceCommand.ExecuteAsync(null);
             await WaitForSourceReviewAsync(staleSourceWrite);
             sourceEditor.State.Content = originalXaml + "\n<!-- changed during review -->";
-            shell.AcceptPreviewCommand.Execute(null);
+            shell.ChangeReview.AcceptCommand.Execute(null);
             await staleSourceWrite;
             Assert.EndsWith("<!-- changed during review -->", sourceEditor.State.Content);
             sourceEditor.State.Content = originalXaml;
@@ -1334,7 +1333,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             try
             {
                 await File.AppendAllTextAsync(sourceEditor.State.Path, "\n<!-- saved externally during review -->");
-                shell.AcceptPreviewCommand.Execute(null);
+                shell.ChangeReview.AcceptCommand.Execute(null);
                 await externalSourceWrite;
                 Assert.Equal(originalXaml, sourceEditor.State.Content);
                 Assert.Contains("file changed after", model.SourceEditStatus);
@@ -1346,7 +1345,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await WaitForSourceReviewAsync(sourceWrite);
             await Idle();
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/live-xaml-source-review.png"));
-            shell.AcceptPreviewCommand.Execute(null);
+            shell.ChangeReview.AcceptCommand.Execute(null);
             await sourceWrite;
             Assert.Contains("Text=\"Live &amp; reviewed\"", sourceEditor.State.Content);
             Assert.Equal(originalBytes, await File.ReadAllBytesAsync(sourceEditor.State.Path));
@@ -1359,16 +1358,16 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             model.EditAsNull = true;
             var nullWrite = model.WritePropertyToSourceCommand.ExecuteAsync(null);
             await WaitForSourceReviewAsync(nullWrite);
-            Assert.Contains("Text=\"{x:Null}\"", Assert.Single(shell.PreviewChanges).After);
-            shell.AcceptPreviewCommand.Execute(null);
+            Assert.Contains("Text=\"{x:Null}\"", Assert.Single(shell.ChangeReview.Changes).After);
+            shell.ChangeReview.AcceptCommand.Execute(null);
             await nullWrite;
             Assert.Contains("Text=\"{x:Null}\"", sourceEditor.State.Content);
             await shell.UndoWorkspaceEditCommand.ExecuteAsync(null);
             model.EditAsNull = false;
             var removeSource = model.RemovePropertyFromSourceCommand.ExecuteAsync(null);
             await WaitForSourceReviewAsync(removeSource);
-            Assert.DoesNotContain("Name=\"BadText\" Text=", Assert.Single(shell.PreviewChanges).After);
-            shell.AcceptPreviewCommand.Execute(null);
+            Assert.DoesNotContain("Name=\"BadText\" Text=", Assert.Single(shell.ChangeReview.Changes).After);
+            shell.ChangeReview.AcceptCommand.Execute(null);
             await removeSource;
             Assert.DoesNotContain("Name=\"BadText\" Text=", sourceEditor.State.Content);
             await shell.UndoWorkspaceEditCommand.ExecuteAsync(null);
@@ -1379,10 +1378,10 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             model.EditedValue = "Local style override";
             var styleWrite = model.WritePropertyToSourceCommand.ExecuteAsync(null);
             await WaitForSourceReviewAsync(styleWrite);
-            var styleAfter = Assert.Single(shell.PreviewChanges).After;
+            var styleAfter = Assert.Single(shell.ChangeReview.Changes).After;
             Assert.Contains("Name=\"StyleBindingText\" Text=\"Local style override\"", styleAfter);
             Assert.Contains("<Setter Property=\"Text\" Value=\"{Binding MissingStyleValue}\" />", styleAfter);
-            shell.AcceptPreviewCommand.Execute(null);
+            shell.ChangeReview.AcceptCommand.Execute(null);
             await styleWrite;
             Assert.Equal(styleAfter, sourceEditor.State.Content);
             await shell.UndoWorkspaceEditCommand.ExecuteAsync(null);
@@ -1391,10 +1390,10 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             model.EditedValue = "Replace composite binding";
             var compositeWrite = model.WritePropertyToSourceCommand.ExecuteAsync(null);
             await WaitForSourceReviewAsync(compositeWrite);
-            var compositeAfter = Assert.Single(shell.PreviewChanges).After;
+            var compositeAfter = Assert.Single(shell.ChangeReview.Changes).After;
             Assert.DoesNotContain("<MultiBinding", compositeAfter);
             Assert.Contains("Replace composite binding", compositeAfter);
-            shell.AcceptPreviewCommand.Execute(null);
+            shell.ChangeReview.AcceptCommand.Execute(null);
             await compositeWrite;
             Assert.Equal(compositeAfter, sourceEditor.State.Content);
             await shell.UndoWorkspaceEditCommand.ExecuteAsync(null);
@@ -1406,7 +1405,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var changedRuntimeWrite = model.WritePropertyToSourceCommand.ExecuteAsync(null);
             await WaitForSourceReviewAsync(changedRuntimeWrite);
             await SendFixtureCommandAsync("binding-replace");
-            shell.AcceptPreviewCommand.Execute(null);
+            shell.ChangeReview.AcceptCommand.Execute(null);
             await changedRuntimeWrite;
             Assert.Equal(originalXaml, sourceEditor.State.Content);
             Assert.DoesNotContain("XAML updated", model.SourceEditStatus);
@@ -1964,10 +1963,10 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         }
         finally { shell.PropertyChanged -= diffChanged; }
         Assert.Equal(source, document.State.Content);
-        Assert.Contains("Written &amp; saved", Assert.Single(shell.PreviewChanges).After);
+        Assert.Contains("Written &amp; saved", Assert.Single(shell.ChangeReview.Changes).After);
         await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-designer-source-diff.png"));
-        shell.AcceptPreviewCommand.Execute(null);
+        shell.ChangeReview.AcceptCommand.Execute(null);
         await writeSource;
         Assert.Contains("Text=\"Written &amp; saved in source buffer\"", document.State.Content);
         Assert.Equal(source, await File.ReadAllTextAsync(path));

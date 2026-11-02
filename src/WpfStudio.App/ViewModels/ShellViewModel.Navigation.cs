@@ -9,7 +9,6 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class ShellViewModel
 {
     private readonly NavigationHistory _history = new();
-    private CancellationTokenSource? _symbolSearch;
     private bool _replayingHistory;
 
     private NavigationLocation? CurrentLocation() =>
@@ -44,7 +43,7 @@ public sealed partial class ShellViewModel
         finally { _replayingHistory = false; }
     }
 
-    [RelayCommand] private void GoToSymbol() { IsCommandPalette = false; PaletteQuery = "#"; IsPaletteOpen = true; RefreshPalette(); }
+    [RelayCommand] private void GoToSymbol() => Palette.OpenSymbols();
 
     [RelayCommand] private Task GoToImplementationAsync() => GuardAsync(async () =>
     {
@@ -60,36 +59,4 @@ public sealed partial class ShellViewModel
         ToolRequested?.Invoke("Search");
         Status = $"{results.Count} implementation(s)";
     });
-
-    /// <summary>Palette '#' mode: search types and members across the solution as the query changes.</summary>
-    private void RefreshSymbolPalette(string query)
-    {
-        _symbolSearch?.Cancel(); _symbolSearch?.Dispose();
-        _symbolSearch = new();
-        PaletteResults.Clear(); SelectedPaletteEntry = null;
-        if (query.Length == 0) return;
-        _ = SearchPaletteSymbolsAsync(query, _symbolSearch.Token);
-    }
-    private async Task SearchPaletteSymbolsAsync(string query, CancellationToken token)
-    {
-        try
-        {
-            await Task.Delay(150, token); // Coalesce keystrokes into one worker query.
-            if (!_workspace.IsConnected) { Status = "Symbol search needs the language worker. Open a solution or restart the language service."; return; }
-            var results = await _workspace.SearchSymbolsAsync(new(query, 80), token);
-            if (token.IsCancellationRequested || !IsPaletteOpen) return;
-            PaletteResults.Clear();
-            foreach (var result in results) PaletteResults.Add(SymbolEntry(result));
-            SelectedPaletteEntry = PaletteResults.FirstOrDefault();
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { if (!token.IsCancellationRequested) Status = "Symbol search: " + ex.Message; }
-    }
-    private PaletteEntry SymbolEntry(SymbolSearchResult result)
-    {
-        var location = result.Location;
-        var where = $"{Path.GetFileName(location.Path)}:{location.Line}";
-        return new(result.Name, result.Container is { Length: > 0 } container ? container + " · " + where : where,
-            () => NavigateAsync(location.Path, location.Line, location.Column), result.Kind, Icon: "Braces");
-    }
 }

@@ -6,6 +6,7 @@
         xmlns:dc="clr-namespace:AvalonDock.Controls;assembly=AvalonDock"
         xmlns:vm="clr-namespace:WpfStudio.App.ViewModels"
         xmlns:workbench="clr-namespace:WpfStudio.App.Features.Workbench"
+        xmlns:review="clr-namespace:WpfStudio.App.Features.Review"
         xmlns:views="clr-namespace:WpfStudio.App.Views"
         xmlns:ai="clr-namespace:WpfStudio.App.Features.ColtonGpt"
         xmlns:controls="clr-namespace:WpfStudio.App.Controls"
@@ -1127,7 +1128,7 @@
     </Border>
 
     <!-- ============================================================ Command palette -->
-    <Grid Grid.RowSpan="4" Panel.ZIndex="20" Background="{DynamicResource OverlayBrush}" Visibility="{Binding IsPaletteOpen, Converter={StaticResource BooleanToVisibility}}">
+    <Grid Grid.RowSpan="4" Panel.ZIndex="20" Background="{DynamicResource OverlayBrush}" Visibility="{Binding Palette.IsOpen, Converter={StaticResource BooleanToVisibility}}">
       <Border Style="{StaticResource OverlayCard}" Width="660" MaxHeight="560" VerticalAlignment="Top" Margin="0,72,0,0" Padding="0">
         <DockPanel>
           <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,6,12,6">
@@ -1137,7 +1138,7 @@
                   <Style TargetType="c:Glyph">
                     <Setter Property="Kind" Value="Search" />
                     <Style.Triggers>
-                      <DataTrigger Binding="{Binding IsCommandPalette}" Value="True"><Setter Property="Kind" Value="Command" /></DataTrigger>
+                      <DataTrigger Binding="{Binding Palette.IsCommandMode}" Value="True"><Setter Property="Kind" Value="Command" /></DataTrigger>
                     </Style.Triggers>
                   </Style>
                 </c:Glyph.Style>
@@ -1148,19 +1149,19 @@
                     <Style TargetType="TextBlock">
                       <Setter Property="Text" Value="Files" />
                       <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsCommandPalette}" Value="True"><Setter Property="Text" Value="Commands" /></DataTrigger>
+                        <DataTrigger Binding="{Binding Palette.IsCommandMode}" Value="True"><Setter Property="Text" Value="Commands" /></DataTrigger>
                       </Style.Triggers>
                     </Style>
                   </TextBlock.Style>
                 </TextBlock>
               </Border>
-              <TextBox x:Name="PaletteBox" Text="{Binding PaletteQuery, UpdateSourceTrigger=PropertyChanged}" FontSize="15" BorderThickness="0" Background="Transparent" MinHeight="40" Padding="4,0"
-                       c:Ui.Placeholder="{Binding PalettePlaceholder}" b:Interaction.FocusCaretEnd="True" AutomationProperties.Name="Quick open and command palette">
+              <TextBox x:Name="PaletteBox" Text="{Binding Palette.Query, UpdateSourceTrigger=PropertyChanged}" FontSize="15" BorderThickness="0" Background="Transparent" MinHeight="40" Padding="4,0"
+                       c:Ui.Placeholder="{Binding Palette.Placeholder}" b:Interaction.FocusCaretEnd="True" AutomationProperties.Name="Quick open and command palette">
                 <TextBox.InputBindings>
-                  <KeyBinding Key="Enter" Command="{Binding ExecutePaletteCommand}" />
-                  <KeyBinding Key="Escape" Command="{Binding ClosePaletteCommand}" />
-                  <KeyBinding Key="Down" Command="{Binding PaletteNextCommand}" />
-                  <KeyBinding Key="Up" Command="{Binding PalettePreviousCommand}" />
+                  <KeyBinding Key="Enter" Command="{Binding Palette.ExecuteCommand}" />
+                  <KeyBinding Key="Escape" Command="{Binding Palette.CloseCommand}" />
+                  <KeyBinding Key="Down" Command="{Binding Palette.NextCommand}" />
+                  <KeyBinding Key="Up" Command="{Binding Palette.PreviousCommand}" />
                 </TextBox.InputBindings>
               </TextBox>
             </DockPanel>
@@ -1182,9 +1183,9 @@
             </DockPanel>
           </Border>
           <Grid>
-            <ListBox x:Name="PaletteList" ItemsSource="{Binding PaletteResults}" SelectedItem="{Binding SelectedPaletteEntry}" b:Interaction.ActivateCommand="{Binding ExecutePaletteCommand}" b:Interaction.ActivateOnClick="True" b:Interaction.FollowSelection="True" Padding="0,6" Focusable="False">
+            <ListBox x:Name="PaletteList" ItemsSource="{Binding Palette.Results}" SelectedItem="{Binding Palette.Selected}" b:Interaction.ActivateCommand="{Binding Palette.ExecuteCommand}" b:Interaction.ActivateOnClick="True" b:Interaction.FollowSelection="True" Padding="0,6" Focusable="False">
               <ListBox.InputBindings>
-                <KeyBinding Key="Escape" Command="{Binding ClosePaletteCommand}" />
+                <KeyBinding Key="Escape" Command="{Binding Palette.CloseCommand}" />
               </ListBox.InputBindings>
               <ListBox.ItemContainerStyle>
                 <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
@@ -1215,7 +1216,7 @@
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
-            <TextBlock Text="No matches" Foreground="{DynamicResource SubtleBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24" Visibility="{Binding PaletteResults.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}" />
+            <TextBlock Text="No matches" Foreground="{DynamicResource SubtleBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24" Visibility="{Binding Palette.Results.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}" />
           </Grid>
         </DockPanel>
       </Border>
@@ -1273,29 +1274,29 @@
          split or inline diff focused on the changed lines. -->
     <Grid Grid.RowSpan="4" Panel.ZIndex="40" Background="{DynamicResource OverlayBrush}" Visibility="{Binding IsPreviewOpen, Converter={StaticResource BooleanToVisibility}}">
       <Grid.InputBindings>
-        <KeyBinding Key="Escape" Command="{Binding CancelPreviewCommand}" />
-        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding AcceptPreviewCommand}" />
+        <KeyBinding Key="Escape" Command="{Binding ChangeReview.CancelCommand}" />
+        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding ChangeReview.AcceptCommand}" />
       </Grid.InputBindings>
       <Border Style="{StaticResource OverlayCard}" Margin="20,16" Padding="0" AutomationProperties.Name="Change review">
         <DockPanel>
           <Border DockPanel.Dock="Top" Padding="22,14,14,12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <StackPanel>
               <DockPanel>
-                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CancelPreviewCommand}" ToolTip="Cancel (Esc)" VerticalAlignment="Top" />
+                <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding ChangeReview.CancelCommand}" ToolTip="Cancel (Esc)" VerticalAlignment="Top" />
                 <Border DockPanel.Dock="Right" Style="{StaticResource Badge}" Margin="12,0,10,0" Padding="8,2">
-                  <TextBlock Text="{Binding PreviewSummary}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" FontSize="11" />
+                  <TextBlock Text="{Binding ChangeReview.Summary}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" FontSize="11" />
                 </Border>
                 <c:Glyph DockPanel.Dock="Left" Kind="Diff" Width="20" Height="20" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Center" />
                 <StackPanel VerticalAlignment="Center">
-                  <TextBlock Text="{Binding PreviewTitle}" FontSize="18" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding ChangeReview.Title}" FontSize="18" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" TextTrimming="CharacterEllipsis" />
                   <TextBlock Text="Nothing changes until you apply. Applying edits the open buffers as one undoable step; save normally to write files." Style="{StaticResource Caption}" Margin="0,2,0,0" />
                 </StackPanel>
               </DockPanel>
-              <Border Background="{DynamicResource WarningSoftBrush}" CornerRadius="6" Padding="10,7" Margin="0,10,0,0" Visibility="{Binding PreviewWarnings, Converter={StaticResource Presence}}">
+              <Border Background="{DynamicResource WarningSoftBrush}" CornerRadius="6" Padding="10,7" Margin="0,10,0,0" Visibility="{Binding ChangeReview.Warnings, Converter={StaticResource Presence}}">
                 <DockPanel>
                   <c:Glyph DockPanel.Dock="Left" Kind="Warning" Width="16" Height="16" Margin="0,0,8,0" Foreground="{DynamicResource WarningBrush}" VerticalAlignment="Top" />
                   <ScrollViewer MaxHeight="72" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <TextBlock Text="{Binding PreviewWarnings}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ChangeReview.Warnings}" TextWrapping="Wrap" />
                   </ScrollViewer>
                 </DockPanel>
               </Border>
@@ -1304,8 +1305,8 @@
           <Border DockPanel.Dock="Bottom" Padding="22,10,16,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
             <DockPanel>
               <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button Content="Cancel" Command="{Binding CancelPreviewCommand}" ToolTip="Esc" />
-                <Button Content="Apply changes" c:Ui.Icon="Check" Command="{Binding AcceptPreviewCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" ToolTip="Ctrl+Enter" />
+                <Button Content="Cancel" Command="{Binding ChangeReview.CancelCommand}" ToolTip="Esc" />
+                <Button Content="Apply changes" c:Ui.Icon="Check" Command="{Binding ChangeReview.AcceptCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" ToolTip="Ctrl+Enter" />
               </StackPanel>
               <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource SubtleBrush}" FontSize="11" TextTrimming="CharacterEllipsis"
                          Text="F8 / Shift+F8 moves between changes · click a collapsed region to expand it · Ctrl+Enter applies" />
@@ -1316,12 +1317,12 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Width="280" Visibility="{Binding PreviewHasManyFiles, Converter={StaticResource BooleanToVisibility}}">
+            <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Width="280" Visibility="{Binding ChangeReview.HasManyFiles, Converter={StaticResource BooleanToVisibility}}">
               <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="FILES" Style="{StaticResource SectionLabel}" Margin="14,10,0,4" />
-                <ListBox ItemsSource="{Binding PreviewFiles}" SelectedItem="{Binding SelectedPreviewFile}" AutomationProperties.Name="Changed files">
+                <ListBox ItemsSource="{Binding ChangeReview.Files}" SelectedItem="{Binding ChangeReview.SelectedFile}" AutomationProperties.Name="Changed files">
                   <ListBox.ItemTemplate>
-                    <DataTemplate DataType="{x:Type vm:ChangeReviewFile}">
+                    <DataTemplate DataType="{x:Type review:ChangeReviewFile}">
                       <DockPanel ToolTip="{Binding Change.Path}">
                         <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Change.Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,1,8,0" VerticalAlignment="Top" />
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="6,1,0,0">
@@ -1345,10 +1346,10 @@
               </DockPanel>
             </Border>
             <diff:DiffView Grid.Column="1" x:Name="ReviewDiff"
-                           Before="{Binding SelectedPreviewChange.Before}" After="{Binding SelectedPreviewChange.After}" FilePath="{Binding SelectedPreviewChange.Path}"
+                           Before="{Binding ChangeReview.SelectedChange.Before}" After="{Binding ChangeReview.SelectedChange.After}" FilePath="{Binding ChangeReview.SelectedChange.Path}"
                            OldLabel="Current" NewLabel="After applying" AutomationProperties.Name="Change diff">
               <diff:DiffView.Header>
-                <StackPanel Orientation="Horizontal" DataContext="{Binding SelectedPreviewFile}">
+                <StackPanel Orientation="Horizontal" DataContext="{Binding ChangeReview.SelectedFile}">
                   <c:StudioIcon Kind="{Binding Change.Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center" />
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
                   <TextBlock Text="{Binding Folder}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="8,1,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360" />

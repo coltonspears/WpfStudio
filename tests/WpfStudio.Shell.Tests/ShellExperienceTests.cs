@@ -1,3 +1,4 @@
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.ViewModels;
 
 namespace WpfStudio.Shell.Tests;
@@ -9,32 +10,32 @@ public sealed class ShellExperienceTests
     {
         await using var test = new ShellTestContext();
         test.Shell.CommandPaletteCommand.Execute(null);
-        Assert.True(test.Shell.IsPaletteOpen);
-        Assert.True(test.Shell.IsCommandPalette);
-        Assert.Contains(test.Shell.PaletteResults, entry => entry.Label == "Build" && entry.Shortcut == "Ctrl+Shift+B" && entry.Category == "Build");
-        Assert.Contains(test.Shell.PaletteResults, entry => entry.Label == "Switch view ⇄ view model" && entry.Shortcut == "F7");
+        Assert.True(test.Shell.Palette.IsOpen);
+        Assert.True(test.Shell.Palette.IsCommandMode);
+        Assert.Contains(test.Shell.Palette.Results, entry => entry.Label == "Build" && entry.Shortcut == "Ctrl+Shift+B" && entry.Category == "Build");
+        Assert.Contains(test.Shell.Palette.Results, entry => entry.Label == "Switch view ⇄ view model" && entry.Shortcut == "F7");
 
-        test.Shell.PaletteQuery = ">rbld";
-        Assert.Equal("Rebuild", test.Shell.PaletteResults.First().Label);
-        test.Shell.PaletteQuery = ">zzzz";
-        Assert.Empty(test.Shell.PaletteResults);
-        test.Shell.PaletteQuery = ">compare snapshots";
-        Assert.Contains(test.Shell.PaletteResults, entry => entry.Label == "Compare memory snapshots" && entry.Category == "Memory");
-        Assert.Contains(test.Shell.PaletteResults.Take(3), entry => entry.Label == "Compare memory snapshots");
+        test.Shell.Palette.Query = ">rbld";
+        Assert.Equal("Rebuild", test.Shell.Palette.Results.First().Label);
+        test.Shell.Palette.Query = ">zzzz";
+        Assert.Empty(test.Shell.Palette.Results);
+        test.Shell.Palette.Query = ">compare snapshots";
+        Assert.Contains(test.Shell.Palette.Results, entry => entry.Label == "Compare memory snapshots" && entry.Category == "Memory");
+        Assert.Contains(test.Shell.Palette.Results.Take(3), entry => entry.Label == "Compare memory snapshots");
 
-        test.Shell.PaletteQuery = "";
-        Assert.False(test.Shell.IsCommandPalette);
-        test.Shell.PaletteQuery = ">";
-        Assert.True(test.Shell.IsCommandPalette);
+        test.Shell.Palette.Query = "";
+        Assert.False(test.Shell.Palette.IsCommandMode);
+        test.Shell.Palette.Query = ">";
+        Assert.True(test.Shell.Palette.IsCommandMode);
     }
 
     [Fact]
     public void FuzzyScoringPrefersPrefixesWordStartsAndRuns()
     {
-        Assert.Null(ShellViewModel.FuzzyScore("Build", "xyz"));
-        Assert.NotNull(ShellViewModel.FuzzyScore("CounterViewModel.cs", "cvm"));
-        Assert.True(ShellViewModel.FuzzyScore("Build", "bu") > ShellViewModel.FuzzyScore("Rebuild", "bu"));
-        Assert.Equal(0, ShellViewModel.FuzzyScore("anything", ""));
+        Assert.Null(CommandPaletteViewModel.FuzzyScore("Build", "xyz"));
+        Assert.NotNull(CommandPaletteViewModel.FuzzyScore("CounterViewModel.cs", "cvm"));
+        Assert.True(CommandPaletteViewModel.FuzzyScore("Build", "bu") > CommandPaletteViewModel.FuzzyScore("Rebuild", "bu"));
+        Assert.Equal(0, CommandPaletteViewModel.FuzzyScore("anything", ""));
     }
 
     [Fact]

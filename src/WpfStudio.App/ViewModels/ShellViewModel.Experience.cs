@@ -69,9 +69,9 @@ public sealed partial class ShellViewModel
     {
         if (ActiveDocument is not { IsReadOnly: false } document || !WpfStudio.Core.Text.SnippetCatalog.For(document.State.Extension).Any())
         { Status = "Snippets are available in C# and XAML editors"; return; }
-        IsCommandPalette = true; PaletteQuery = "> Snippet: "; IsPaletteOpen = true; RefreshPalette();
+        Palette.OpenCommands("> Snippet: ");
     }
-    [RelayCommand] private void ShowShortcuts() { IsCommandPalette = true; PaletteQuery = ">"; IsPaletteOpen = true; RefreshPalette(); }
+    [RelayCommand] private void ShowShortcuts() => Palette.OpenCommands();
 
     // ------------------------------------------------------------------ Related files
     /// <summary>Conventional pairs, in the order <see cref="SwitchRelatedCommand"/> cycles through them.</summary>
@@ -167,66 +167,8 @@ public sealed partial class ShellViewModel
         return string.Join("  ›  ", parts);
     }
 
-    // ------------------------------------------------------------------ Command palette
-    public string PalettePlaceholder => IsCommandPalette ? "Type a command name" : "Go to file by name — # for a type or member, > to run a command";
-    partial void OnIsCommandPaletteChanged(bool value) => OnPropertyChanged(nameof(PalettePlaceholder));
-    [RelayCommand] private void PaletteNext() => MovePalette(1);
-    [RelayCommand] private void PalettePrevious() => MovePalette(-1);
-    private void MovePalette(int delta)
-    {
-        if (PaletteResults.Count == 0) return;
-        var index = SelectedPaletteEntry == null ? -1 : PaletteResults.IndexOf(SelectedPaletteEntry);
-        SelectedPaletteEntry = PaletteResults[Math.Clamp(index + delta, 0, PaletteResults.Count - 1)];
-    }
-
-    private void RefreshPalette()
-    {
-        PaletteResults.Clear();
-        var query = PaletteQuery.TrimStart();
-        var commandMode = query.StartsWith('>');
-        if (IsCommandPalette != commandMode) IsCommandPalette = commandMode;
-        if (commandMode) query = query[1..].Trim();
-        else if (query.StartsWith('#')) { RefreshSymbolPalette(query[1..].Trim()); return; }
-        _symbolSearch?.Cancel();
-        IEnumerable<PaletteEntry> results;
-        if (commandMode)
-        {
-            var commands = CommandEntries().ToList();
-            results = query.Length == 0 ? commands : commands
-                .Select(entry => (entry, score: Best(FuzzyScore(entry.Label, query), FuzzyScore(entry.Category + " " + entry.Label, query) - 6)))
-                .Where(x => x.score != null).OrderByDescending(x => x.score).Select(x => x.entry);
-        }
-        else
-        {
-            var files = Documents.Select(d => d.State.Path).Reverse().Concat(_allFiles).Distinct(StringComparer.OrdinalIgnoreCase);
-            results = query.Length == 0 ? files.Select(FileEntry) : files
-                .Select(path => (path, score: Best(FuzzyScore(Path.GetFileName(path), query), FuzzyScore(Path.GetRelativePath(WorkspaceRoot.Length > 0 ? WorkspaceRoot : Path.GetPathRoot(path) ?? "", path), query) - 20)))
-                .Where(x => x.score != null).OrderByDescending(x => x.score).ThenBy(x => x.path.Length).Select(x => FileEntry(x.path));
-        }
-        foreach (var entry in results.Take(80)) PaletteResults.Add(entry);
-        SelectedPaletteEntry = PaletteResults.FirstOrDefault();
-    }
-
-    private static int? Best(int? first, int? second) => first == null ? second : second == null ? first : Math.Max(first.Value, second.Value);
+    // ------------------------------------------------------------------ Command palette entries
     private PaletteEntry FileEntry(string path) => new(Path.GetFileName(path), RelativeDirectory(path), () => { RecordNavigationOrigin(); return OpenDocumentAsync(path); }, IconKind: FileIconKindConverter.KindFor(path));
-
-    /// <summary>Case-insensitive subsequence match favouring prefixes, word starts and runs; null when absent.</summary>
-    internal static int? FuzzyScore(string candidate, string query)
-    {
-        if (query.Length == 0) return 0;
-        int score = 0, matched = 0, previous = -2;
-        for (var i = 0; i < candidate.Length && matched < query.Length; i++)
-        {
-            if (char.ToLowerInvariant(candidate[i]) != char.ToLowerInvariant(query[matched])) continue;
-            var wordStart = i == 0 || !char.IsLetterOrDigit(candidate[i - 1]) || (char.IsUpper(candidate[i]) && char.IsLower(candidate[i - 1]));
-            score += 1 + (wordStart ? 8 : 0) + (i == previous + 1 ? 5 : 0);
-            previous = i; matched++;
-        }
-        if (matched < query.Length) return null;
-        if (candidate.StartsWith(query, IgnoreCase)) score += 30;
-        else if (candidate.Contains(query, IgnoreCase)) score += 14;
-        return score - candidate.Length / 10;
-    }
 
     private PaletteEntry Command(string category, string label, ICommand command, object? parameter = null, string shortcut = "", string icon = "", string detail = "")
         => new(label, detail, async () =>

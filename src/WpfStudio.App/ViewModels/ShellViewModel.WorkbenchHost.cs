@@ -1,16 +1,21 @@
 using WpfStudio.App.Features.Documents;
+using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : IWorkbenchHost, IExternalChangesHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
     public ProblemsViewModel Problems { get; }
     public ExternalChangesViewModel ExternalChanges { get; }
+    public CommandPaletteViewModel Palette { get; }
+    public ChangeReviewViewModel ChangeReview { get; }
+    /// <summary>True while a change review is open; workspace operations wait for the decision.</summary>
+    public bool IsPreviewOpen => ChangeReview.IsOpen;
     private Action? _openDocumentsChanged, _documentsChanged;
     /// <summary>Raised when a tab is opened or closed.</summary>
     private void NotifyOpenDocumentsChanged() { _openDocumentsChanged?.Invoke(); _documentsChanged?.Invoke(); }
@@ -34,6 +39,13 @@ public sealed partial class ShellViewModel : IWorkbenchHost, IExternalChangesHos
     Task<bool> IWorkbenchHost.CloseDocumentAsync(string path) =>
         Documents.FirstOrDefault(d => d.State.Path.Equals(path, StringComparison.OrdinalIgnoreCase)) is { } document ? CloseDocumentAsync(document) : Task.FromResult(true);
     void IWorkbenchHost.ShowTool(string toolId) => ShowToolCommand.Execute(toolId);
+
+    // ------------------------------------------------------------------ ICommandPaletteHost
+    IEnumerable<PaletteEntry> ICommandPaletteHost.CommandEntries() => CommandEntries();
+    PaletteEntry ICommandPaletteHost.FileEntry(string path) => FileEntry(path);
+    string ICommandPaletteHost.WorkspaceRoot => WorkspaceRoot;
+    bool ICommandPaletteHost.IsSymbolSearchAvailable => _workspace.IsConnected;
+    Task<IReadOnlyList<SymbolSearchResult>> ICommandPaletteHost.SearchSymbolsAsync(string query, CancellationToken token) => _workspace.SearchSymbolsAsync(new(query, 80), token);
 
     // ------------------------------------------------------------------ IExternalChangesHost
     IReadOnlyList<EditorViewModel> IExternalChangesHost.Documents => Documents;

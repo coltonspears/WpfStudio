@@ -18,8 +18,8 @@ public sealed class ShellAssetTests
 
         Task operation = test.Shell.SetBuildActionCommand.ExecuteAsync(null);
         await WaitForPreviewAsync(test);
-        Assert.Equal(library.ProjectPath, Assert.Single(test.Shell.PreviewChanges).Path);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        Assert.Equal(library.ProjectPath, Assert.Single(test.Shell.ChangeReview.Changes).Path);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Contains("<Content Include=\"Assets\\logo.png\"", test.Store.Find(library.ProjectPath)!.Content);
@@ -77,8 +77,8 @@ public sealed class ShellAssetTests
 
         Task operation = test.Shell.SetBuildActionCommand.ExecuteAsync(null);
         await WaitForPreviewAsync(test);
-        Assert.Equal(library.ProjectPath, Assert.Single(test.Shell.PreviewChanges).Path);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        Assert.Equal(library.ProjectPath, Assert.Single(test.Shell.ChangeReview.Changes).Path);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Contains("<Resource Include=\"..\\Shared\\logo.png\"", test.Store.Find(library.ProjectPath)!.Content);

@@ -3,6 +3,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using WpfStudio.App.Features.Review;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
@@ -32,7 +33,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly ILogger<ShellViewModel> _logger;
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _operation;
-    private TaskCompletionSource<bool>? _previewCompletion;
     private WpfIndexSnapshot? _wpfIndex;
     private string[] _allFiles = [];
     private bool _initialized;
@@ -55,8 +55,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
         Designer.SelectionSourceChanged += RevealDesignerSelection;
         TaskList = new(this); FileGroups = new(this); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
+        Palette = new(this); ChangeReview = new(this, dispatcher);
+        ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) OnPropertyChanged(nameof(IsPreviewOpen)); };
         InitializeDesignerContext();
-        InitializeChangeReview();
         LiveInspection = new(dispatcher);
         LiveInspection.LaunchRequested += debug => LaunchWithInspectionAsync(debug);
         LiveInspection.SourceRequested += NavigateInspectionSourceAsync;
@@ -88,8 +89,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public ObservableCollection<NavigationResult> SearchResults { get; } = [];
     public ObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
     public ObservableCollection<WpfItem> WpfItems { get; } = [];
-    public ObservableCollection<PaletteEntry> PaletteResults { get; } = [];
-    public ObservableCollection<FileChange> PreviewChanges { get; } = [];
     public IReadOnlyList<ScaffoldKind> ScaffoldKinds { get; } = [ScaffoldKind.ViewAndViewModel, ScaffoldKind.UserControl, ScaffoldKind.ViewModel, ScaffoldKind.ResourceDictionary, ScaffoldKind.Converter];
     public ObservableCollection<string> Configurations { get; } = ["Debug", "Release"];
     public string[] BuildActions { get; } = ["Resource", "Content", "None", "Page"];
@@ -117,14 +116,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial string? LaunchProfile { get; set; }
     [ObservableProperty] public partial string SearchQuery { get; set; } = "";
     [ObservableProperty] public partial string WpfFilter { get; set; } = "";
-    [ObservableProperty] public partial string PaletteQuery { get; set; } = "";
-    [ObservableProperty] public partial bool IsPaletteOpen { get; set; }
-    [ObservableProperty] public partial bool IsCommandPalette { get; set; }
-    [ObservableProperty] public partial PaletteEntry? SelectedPaletteEntry { get; set; }
-    [ObservableProperty] public partial bool IsPreviewOpen { get; set; }
-    [ObservableProperty] public partial FileChange? SelectedPreviewChange { get; set; }
-    [ObservableProperty] public partial string PreviewTitle { get; set; } = "Preview changes";
-    [ObservableProperty] public partial string PreviewWarnings { get; set; } = "";
     [ObservableProperty] public partial bool IsScaffoldOpen { get; set; }
     [ObservableProperty] public partial ScaffoldKind SelectedScaffoldKind { get; set; } = ScaffoldKind.ViewAndViewModel;
     [ObservableProperty] public partial string ScaffoldName { get; set; } = "CustomerView";
@@ -150,7 +141,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public bool IsWelcomeVisible => Documents.Count == 0;
     partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features?.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); ResetProjectXamlAnalysis(value); }
     partial void OnWpfFilterChanged(string value) => RefreshWpfItems();
-    partial void OnPaletteQueryChanged(string value) => RefreshPalette();
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
     partial void OnConfigurationChanged(string value) { if (!string.IsNullOrWhiteSpace(value)) ScheduleContextReload(); }
     partial void OnTargetFrameworkChanged(string? value) { if (value != null) ScheduleContextReload(); }
@@ -870,21 +860,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (path != null) { var owner = ResolveAssetOwner(path); var logicalPath = owner.Files.First(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).LogicalPath; var uri = ScaffoldingService.PackUri(owner.ProjectPath, path, owner.AssemblyName, logicalPath); AppendOutput(uri); ToolRequested?.Invoke("Output"); Status = uri; }
         return Task.CompletedTask;
     });
-    private async Task<bool> PreviewAsync(string title, IReadOnlyList<FileChange> changes, string warnings)
-    {
-        if (_previewCompletion is { Task.IsCompleted: false }) { Status = "Finish the current change preview first"; return false; }
-        if (changes.Count == 0) { Status = "No changes required"; return false; }
-        PreviewTitle = title; PreviewWarnings = warnings; PreviewChanges.Clear(); foreach (var change in changes) PreviewChanges.Add(change); SelectedPreviewChange = changes[0];
-        _previewCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously); IsPreviewOpen = true;
-        return await _previewCompletion.Task;
-    }
-    [RelayCommand] private void AcceptPreview() { IsPreviewOpen = false; _previewCompletion?.TrySetResult(true); }
-    [RelayCommand] private void CancelPreview() { IsPreviewOpen = false; _previewCompletion?.TrySetResult(false); }
+    private Task<bool> PreviewAsync(string title, IReadOnlyList<FileChange> changes, string warnings) => ChangeReview.ShowAsync(title, changes, warnings);
     private async Task ApplyChangesAsync(IReadOnlyList<FileChange> changes) { await _edits.ApplyAsync(changes); foreach (var change in changes) AddDocument(_store.Find(change.Path)!); }
-    [RelayCommand] private void QuickOpen() { IsCommandPalette = false; PaletteQuery = ""; IsPaletteOpen = true; RefreshPalette(); }
-    [RelayCommand] private void CommandPalette() { IsCommandPalette = true; PaletteQuery = ">"; IsPaletteOpen = true; RefreshPalette(); }
-    [RelayCommand] private void ClosePalette() => IsPaletteOpen = false;
-    [RelayCommand] private Task ExecutePaletteAsync() => GuardAsync(async () => { var entry = SelectedPaletteEntry; if (entry == null) return; IsPaletteOpen = false; await entry.Execute(); });
+    [RelayCommand] private void QuickOpen() => Palette.OpenFiles();
+    [RelayCommand] private void CommandPalette() => Palette.OpenCommands();
     [RelayCommand] private void ToggleTheme() { ThemeName = ThemeName == "Dark" ? "Light" : "Dark"; ThemeChanged?.Invoke(ThemeName); }
     [RelayCommand] private void ShowTool(string? name)
     {
@@ -934,7 +913,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        DisposeProjectXamlAnalysis(); ExternalChanges.Dispose(); TaskList.Dispose();
+        DisposeProjectXamlAnalysis(); ExternalChanges.Dispose(); TaskList.Dispose(); Palette.Dispose();
         foreach (var breakpoint in _observedBreakpoints) breakpoint.PropertyChanged -= BreakpointChanged;
         Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;

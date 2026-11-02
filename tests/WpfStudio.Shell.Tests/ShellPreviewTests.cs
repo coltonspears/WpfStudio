@@ -15,8 +15,8 @@ public sealed class ShellPreviewTests
         Task operation = test.Shell.InsertCommandCommand.ExecuteAsync(null);
         Assert.True(test.Shell.IsPreviewOpen);
         Assert.Equal(Original, test.Store.Find(path)!.Content);
-        Assert.Single(test.Shell.PreviewChanges);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        Assert.Single(test.Shell.ChangeReview.Changes);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Contains("RefreshAsync", test.Store.Find(path)!.Content);
         Assert.Equal(Original, await File.ReadAllTextAsync(path));
@@ -32,7 +32,7 @@ public sealed class ShellPreviewTests
         await test.Shell.OpenDocumentAsync(path);
         Task operation = test.Shell.InsertCommandCommand.ExecuteAsync(null);
         Assert.True(test.Shell.IsPreviewOpen);
-        test.Shell.CancelPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.CancelCommand.Execute(null);
         await operation.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(Original, test.Store.Find(path)!.Content);
         Assert.Equal(Original, await File.ReadAllTextAsync(path));
@@ -47,7 +47,7 @@ public sealed class ShellPreviewTests
         Task operation = test.Shell.InsertCommandCommand.ExecuteAsync(null);
         string updated = Original + "// typed after preview\n";
         test.Shell.ActiveDocument!.State.Content = updated;
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(updated, test.Store.Find(path)!.Content);
         Assert.Contains("changed after the preview", test.Shell.Status);
@@ -62,7 +62,7 @@ public sealed class ShellPreviewTests
         Task operation = test.Shell.InsertCommandCommand.ExecuteAsync(null);
         Assert.False(await test.Shell.TryCloseAsync());
         Assert.True(test.Shell.IsPreviewOpen);
-        test.Shell.CancelPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.CancelCommand.Execute(null);
         await operation.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False(test.Shell.IsPreviewOpen);
     }
@@ -78,7 +78,7 @@ public sealed class ShellPreviewTests
         await test.Shell.InsertPropertyCommand.ExecuteAsync(null).WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(test.Shell.IsPreviewOpen);
         Assert.False(first.IsCompleted);
-        test.Shell.CancelPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.CancelCommand.Execute(null);
         await first.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(Original, test.Store.Find(path)!.Content);
     }

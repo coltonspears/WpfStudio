@@ -301,7 +301,7 @@
       </Style.Triggers></Style></local:NativePreviewPane.Style>
       <local:NativePreviewPane.IsSuppressed>
        <MultiBinding Converter="{StaticResource NativePreviewSuppression}">
-        <Binding Path="MainWindow.DataContext.IsPaletteOpen" Source="{x:Static Application.Current}"/>
+        <Binding Path="MainWindow.DataContext.Palette.IsOpen" Source="{x:Static Application.Current}"/>
         <Binding Path="MainWindow.DataContext.IsScaffoldOpen" Source="{x:Static Application.Current}"/>
         <Binding Path="MainWindow.DataContext.IsPreviewOpen" Source="{x:Static Application.Current}"/>
         <Binding Path="MainWindow.DataContext.IsSettingsOpen" Source="{x:Static Application.Current}"/>

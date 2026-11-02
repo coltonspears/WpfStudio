@@ -40,8 +40,8 @@ public sealed class XamlNameProjectionShellTests
         test.Workspace.NameProjectionChanged += (_, _) => notifications++;
         Task operation = test.Shell.PreviewSymbolRenameAsync(editor, result);
         await ReadyAsync(test, operation);
-        if (accept) test.Shell.AcceptPreviewCommand.Execute(null);
-        else test.Shell.CancelPreviewCommand.Execute(null);
+        if (accept) test.Shell.ChangeReview.AcceptCommand.Execute(null);
+        else test.Shell.ChangeReview.CancelCommand.Execute(null);
         await operation;
 
         Assert.Equal(0, notifications);
@@ -104,7 +104,7 @@ public sealed class XamlNameProjectionShellTests
         Assert.NotNull(first.NameProjection);
         Task cancelled = test.Shell.PreviewSymbolRenameAsync(xaml, first);
         await ReadyAsync(test, cancelled);
-        test.Shell.CancelPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.CancelCommand.Execute(null);
         await cancelled;
         await FieldsAsync(codeEditor, "Input", "ContactEmail");
         Assert.Equal(Markup, xaml.State.Content);
@@ -151,7 +151,7 @@ public sealed class XamlNameProjectionShellTests
         test.Shell.ActiveDocument = xaml;
         Task operation = test.Shell.PreviewSymbolRenameAsync(xaml, result);
         await ReadyAsync(test, operation);
-        test.Shell.AcceptPreviewCommand.Execute(null);
+        test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await operation;
     }
     private static async Task FieldsAsync(EditorViewModel editor, string present, string absent)
