@@ -5,6 +5,7 @@
         xmlns:layout="clr-namespace:AvalonDock.Layout;assembly=AvalonDock"
         xmlns:dc="clr-namespace:AvalonDock.Controls;assembly=AvalonDock"
         xmlns:vm="clr-namespace:WpfStudio.App.ViewModels"
+        xmlns:workbench="clr-namespace:WpfStudio.App.Features.Workbench"
         xmlns:views="clr-namespace:WpfStudio.App.Views"
         xmlns:ai="clr-namespace:WpfStudio.App.Features.ColtonGpt"
         xmlns:controls="clr-namespace:WpfStudio.App.Controls"
@@ -424,8 +425,8 @@
             <MenuItem Header="Close saved tabs" Command="{Binding CloseSavedDocumentsCommand}" IsEnabled="{Binding HasDocuments}" ToolTip="Close every tab without unsaved edits" />
             <MenuItem Header="Close tabs to the right" Command="{Binding CloseDocumentsToRightCommand}" IsEnabled="{Binding HasDocuments}" />
             <Separator />
-            <MenuItem Header="Pin open tabs as a file group…" c:Ui.Icon="Pin" Command="{Binding AddOpenTabsToFileGroupCommand}" IsEnabled="{Binding HasDocuments}" />
-            <MenuItem Header="Add file to a file group…" Command="{Binding AddActiveToFileGroupCommand}" IsEnabled="{Binding HasDocuments}" />
+            <MenuItem Header="Pin open tabs as a file group…" c:Ui.Icon="Pin" Command="{Binding FileGroups.AddOpenTabsCommand}" IsEnabled="{Binding HasDocuments}" />
+            <MenuItem Header="Add file to a file group…" Command="{Binding FileGroups.AddActiveCommand}" IsEnabled="{Binding HasDocuments}" />
             <MenuItem Header="File groups" Command="{Binding ShowToolCommand}" CommandParameter="FileGroups" />
             <Separator />
             <MenuItem Header="Save current layout" c:Ui.Icon="Sidebar" Command="{Binding SaveLayoutCommand}" />
@@ -647,7 +648,7 @@
                           <Separator Visibility="{Binding SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
                           <MenuItem Header="Open" c:Ui.Icon="File" Command="{Binding OpenNodeCommand}" CommandParameter="{Binding SelectedNode}" />
                           <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
-                          <MenuItem Header="Add to file group…" c:Ui.Icon="Pin" Command="{Binding AddSelectedToFileGroupCommand}" />
+                          <MenuItem Header="Add to file group…" c:Ui.Icon="Pin" Command="{Binding FileGroups.AddSelectedCommand}" />
                           <Separator />
                           <MenuItem Header="Set as startup project" c:Ui.Icon="Target" Command="{Binding SetStartupProjectCommand}" />
                           <MenuItem Header="Edit project file" Command="{Binding EditProjectCommand}" />
@@ -679,43 +680,43 @@
                 <DockPanel Background="{DynamicResource SurfaceBrush}">
                   <DockPanel DockPanel.Dock="Top" Margin="12,0,6,4" Height="28">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                      <Button Style="{StaticResource IconButton}" c:Ui.Icon="Pin" Command="{Binding AddOpenTabsToFileGroupCommand}" ToolTip="Pin the open tabs as a group" Width="26" Height="26" />
-                      <Button Style="{StaticResource IconButton}" c:Ui.Icon="Plus" Command="{Binding AddActiveToFileGroupCommand}" ToolTip="Add the active file to a group" Width="26" Height="26" />
+                      <Button Style="{StaticResource IconButton}" c:Ui.Icon="Pin" Command="{Binding FileGroups.AddOpenTabsCommand}" ToolTip="Pin the open tabs as a group" Width="26" Height="26" />
+                      <Button Style="{StaticResource IconButton}" c:Ui.Icon="Plus" Command="{Binding FileGroups.AddActiveCommand}" ToolTip="Add the active file to a group" Width="26" Height="26" />
                     </StackPanel>
                     <TextBlock Text="Files you open together" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" />
                   </DockPanel>
                   <Grid>
-                    <TreeView ItemsSource="{Binding FileGroups}" b:Interaction.SelectOnRightClick="True">
+                    <TreeView ItemsSource="{Binding FileGroups.Groups}" b:Interaction.SelectOnRightClick="True">
                       <TreeView.Resources>
-                        <HierarchicalDataTemplate DataType="{x:Type vm:FileGroupViewModel}" ItemsSource="{Binding Files}">
+                        <HierarchicalDataTemplate DataType="{x:Type workbench:FileGroupViewModel}" ItemsSource="{Binding Files}">
                           <DockPanel Background="Transparent">
                             <DockPanel.InputBindings>
-                              <MouseBinding Gesture="LeftDoubleClick" Command="{Binding DataContext.OpenFileGroupCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
+                              <MouseBinding Gesture="LeftDoubleClick" Command="{Binding DataContext.FileGroups.OpenGroupCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
                             </DockPanel.InputBindings>
                             <DockPanel.ContextMenu>
                               <ContextMenu>
-                                <MenuItem Header="Open all" c:Ui.Icon="FolderOpen" Command="{Binding PlacementTarget.Tag.OpenFileGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
-                                <MenuItem Header="Switch to this group" ToolTip="Close other tabs, then open this group" Command="{Binding PlacementTarget.Tag.SwitchToFileGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <MenuItem Header="Open all" c:Ui.Icon="FolderOpen" Command="{Binding PlacementTarget.Tag.FileGroups.OpenGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <MenuItem Header="Switch to this group" ToolTip="Close other tabs, then open this group" Command="{Binding PlacementTarget.Tag.FileGroups.SwitchToGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                                 <Separator />
-                                <MenuItem Header="Rename…" Command="{Binding PlacementTarget.Tag.RenameFileGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
-                                <MenuItem Header="Delete group" c:Ui.Icon="Trash" Command="{Binding PlacementTarget.Tag.DeleteFileGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <MenuItem Header="Rename…" Command="{Binding PlacementTarget.Tag.FileGroups.RenameGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                <MenuItem Header="Delete group" c:Ui.Icon="Trash" Command="{Binding PlacementTarget.Tag.FileGroups.DeleteGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                               </ContextMenu>
                             </DockPanel.ContextMenu>
                             <DockPanel.Tag><Binding Path="DataContext" RelativeSource="{RelativeSource AncestorType=TreeView}" /></DockPanel.Tag>
                             <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="FolderOpen" Width="22" Height="22" ToolTip="Open all files in this group"
-                                    Command="{Binding DataContext.OpenFileGroupCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
+                                    Command="{Binding DataContext.FileGroups.OpenGroupCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
                             <c:Glyph DockPanel.Dock="Left" Kind="Pin" Width="14" Height="14" Margin="0,0,7,0" Foreground="{DynamicResource AccentBrush}" />
                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
                             <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center" />
                           </DockPanel>
                         </HierarchicalDataTemplate>
-                        <DataTemplate DataType="{x:Type vm:FileGroupEntry}">
+                        <DataTemplate DataType="{x:Type workbench:FileGroupEntry}">
                           <DockPanel Background="Transparent" ToolTip="{Binding Path}">
                             <DockPanel.InputBindings>
-                              <MouseBinding Gesture="LeftDoubleClick" Command="{Binding DataContext.OpenFileGroupEntryCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
+                              <MouseBinding Gesture="LeftDoubleClick" Command="{Binding DataContext.FileGroups.OpenEntryCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
                             </DockPanel.InputBindings>
                             <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="20" Height="20" ToolTip="Remove from group"
-                                    Command="{Binding DataContext.RemoveFileGroupEntryCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
+                                    Command="{Binding DataContext.FileGroups.RemoveEntryCommand, RelativeSource={RelativeSource AncestorType=TreeView}}" CommandParameter="{Binding}" />
                             <controls:StudioIcon DockPanel.Dock="Left" Kind="{Binding IconKind}" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center" />
                             <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
                           </DockPanel>
@@ -727,7 +728,7 @@
                         </Style>
                       </TreeView.ItemContainerStyle>
                     </TreeView>
-                    <StackPanel VerticalAlignment="Center" Margin="22,0,22,40" Visibility="{Binding FileGroups.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+                    <StackPanel VerticalAlignment="Center" Margin="22,0,22,40" Visibility="{Binding FileGroups.Groups.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}">
                       <c:Glyph Kind="Pin" Width="26" Height="26" Foreground="{DynamicResource SubtleBrush}" StrokeWeight="1.1" />
                       <TextBlock Text="No file groups" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,4" />
                       <TextBlock Text="Pin the files of a feature together, then open them all in one step. Use the pin button to group the open tabs, or right-click a file in Solution Explorer." Style="{StaticResource Caption}" TextAlignment="Center" TextWrapping="Wrap" />
@@ -975,11 +976,11 @@
                 <!-- TODO-style comments found in the workspace -->
                 <DockPanel>
                   <DockPanel DockPanel.Dock="Top" Margin="10,3,8,3">
-                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Refresh" Command="{Binding RefreshTaskListCommand}" ToolTip="Rescan the workspace for TODO, HACK, FIXME, UNDONE and BUG comments" Width="26" Height="26" />
-                    <TextBox DockPanel.Dock="Left" Width="220" Text="{Binding TaskFilter, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter comments" />
-                    <TextBlock Text="{Binding TaskListStatus}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Refresh" Command="{Binding TaskList.RefreshCommand}" ToolTip="Rescan the workspace for TODO, HACK, FIXME, UNDONE and BUG comments" Width="26" Height="26" />
+                    <TextBox DockPanel.Dock="Left" Width="220" Text="{Binding TaskList.Filter, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter comments" />
+                    <TextBlock Text="{Binding TaskList.Status}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" />
                   </DockPanel>
-                  <DataGrid ItemsSource="{Binding TaskCommentItems}" SelectedItem="{Binding SelectedTaskComment}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateTaskCommentCommand}">
+                  <DataGrid ItemsSource="{Binding TaskList.Comments}" SelectedItem="{Binding TaskList.SelectedComment}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding TaskList.NavigateCommentCommand}">
                     <DataGrid.Columns>
                       <DataGridTextColumn Header="Token" Binding="{Binding Token}" Width="70" />
                       <DataGridTextColumn Header="Description" Binding="{Binding Text}" Width="*" />
@@ -992,20 +993,20 @@
                 <!-- The user's own to-do items for this workspace -->
                 <DockPanel Grid.Column="2">
                   <DockPanel DockPanel.Dock="Top" Margin="10,3,8,3">
-                    <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Clear done" Command="{Binding ClearCompletedUserTasksCommand}" ToolTip="Remove checked tasks" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Clear done" Command="{Binding TaskList.ClearCompletedCommand}" ToolTip="Remove checked tasks" />
                     <TextBlock Text="MY TASKS" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="0" />
                   </DockPanel>
-                  <TextBox DockPanel.Dock="Top" Margin="10,0,8,6" Text="{Binding NewTaskText, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Add a task (start with @ to link the caret line)">
+                  <TextBox DockPanel.Dock="Top" Margin="10,0,8,6" Text="{Binding TaskList.NewTaskText, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Add a task (start with @ to link the caret line)">
                     <TextBox.InputBindings>
-                      <KeyBinding Key="Enter" Command="{Binding AddUserTaskCommand}" />
+                      <KeyBinding Key="Enter" Command="{Binding TaskList.AddCommand}" />
                     </TextBox.InputBindings>
                   </TextBox>
-                  <ListBox ItemsSource="{Binding UserTasks}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" b:Interaction.ActivateCommand="{Binding NavigateUserTaskCommand}">
+                  <ListBox ItemsSource="{Binding TaskList.UserTasks}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" b:Interaction.ActivateCommand="{Binding TaskList.NavigateUserTaskCommand}">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
                         <DockPanel>
                           <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="22" Height="22" ToolTip="Remove task"
-                                  Command="{Binding DataContext.RemoveUserTaskCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
+                                  Command="{Binding DataContext.TaskList.RemoveCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
                           <TextBlock DockPanel.Dock="Right" Text="{Binding Location}" Foreground="{DynamicResource AccentBrush}" Margin="6,0" VerticalAlignment="Center" Visibility="{Binding HasLocation, Converter={StaticResource BooleanToVisibility}}" />
                           <CheckBox IsChecked="{Binding IsDone}" VerticalAlignment="Center">
                             <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />

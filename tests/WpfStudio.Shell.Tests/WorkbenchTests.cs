@@ -1,3 +1,4 @@
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 
@@ -185,8 +186,8 @@ public sealed class WorkbenchTests
         await using var test = new ShellTestContext();
         string path = await test.CreateFileAsync("A.cs", "class A { }");
         await test.Shell.OpenDocumentAsync(path);
-        await test.Shell.AddOpenTabsToFileGroupCommand.ExecuteAsync(null);
-        Assert.Empty(test.Shell.FileGroups);
+        await test.Shell.FileGroups.AddOpenTabsCommand.ExecuteAsync(null);
+        Assert.Empty(test.Shell.FileGroups.Groups);
         Assert.Equal("Open a solution to pin file groups for it", test.Shell.Status);
     }
 }

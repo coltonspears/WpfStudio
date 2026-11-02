@@ -55,6 +55,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
         Designer.SelectionSourceChanged += RevealDesignerSelection;
+        TaskList = new(this); FileGroups = new(this);
         InitializeDesignerContext();
         InitializeChangeReview();
         LiveInspection = new(dispatcher);
@@ -256,8 +257,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await Debugger.SetWorkspaceAsync(path);
             if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(path);
             await RefreshWpfAsync();
-            await LoadUserTasksAsync(); await LoadFileGroupsAsync();
-            _ = GuardAsync(ScanTaskCommentsAsync);
+            await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync();
+            _ = TaskList.RefreshCommand.ExecuteAsync(null);
             Status = $"{Projects.Count} projects · SDK {Workspace.SdkVersion}" + (Workspace.Cached ? " · refreshing project model…" : "");
             await SaveSettingsAsync();
         }
@@ -498,7 +499,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             TidyBeforeSave(doc);
             await _store.SaveAsync(doc.State);
-            UpdateTaskComments(doc.State.Path, doc.State.Content);
+            TaskList.UpdateComments(doc.State.Path, doc.State.Content);
             if (doc.IsXaml) _xamlResources.Invalidate();
             RequestProjectXamlAnalysis();
             Status = doc.State.IsDirty ? "The document changed while saving. Save again to include the latest edits." : "Saved " + doc.State.Name;
@@ -996,7 +997,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        DisposeProjectXamlAnalysis(); _documentWatcher?.Dispose(); _taskScan?.Cancel(); _taskScan?.Dispose();
+        DisposeProjectXamlAnalysis(); _documentWatcher?.Dispose(); TaskList.Dispose();
         foreach (var breakpoint in _observedBreakpoints) breakpoint.PropertyChanged -= BreakpointChanged;
         Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;

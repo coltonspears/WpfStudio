@@ -289,3 +289,7 @@ Fixed on this branch (hang and data-integrity pass):
 - **B18** conflict resolution writes the file back in its detected encoding (`Core/Text/TextEncoding.cs`). **B19** `Win32Exception` from `Kill` no longer masks the original Git failure. **B20** a failed Git refresh no longer wipes a newer successful one.
 - **B14** saving the connected profile keeps the schema tree; **B15** column completion inserts `[Column]`; **B16** a profile whose password cannot be unlocked loads with an empty password instead of hiding every profile.
 - **B17** the scaffolder's fallback scan matches the toolkit package id case-insensitively.
+
+Structural work (S1), step 1:
+
+- **Task List and file groups** left `ShellViewModel`. `Features/Workbench/TaskListViewModel.cs` and `FileGroupsViewModel.cs` own their state, commands and `WorkspaceStateStore`; they reach the shell only through `IWorkbenchHost` (workspace path and files, open documents, active caret, dialogs, navigation, status), which `ShellViewModel.WorkbenchHost.cs` implements explicitly. The shell exposes them as `TaskList` and `FileGroups`; `MainWindow.xaml` binds through those properties. `WorkbenchToolTests` exercises both against a fake host with no shell at all.

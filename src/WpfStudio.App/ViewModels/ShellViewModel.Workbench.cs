@@ -42,7 +42,7 @@ public sealed partial class ShellViewModel
         StartupProject = null;
         Workspace = null;
         RefreshEditorDiagnostics();
-        await LoadUserTasksAsync(); await LoadFileGroupsAsync(); await ScanTaskCommentsAsync();
+        await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync(); await TaskList.RefreshCommand.ExecuteAsync(null);
         try { await _workspace.UnloadAsync(_lifetime.Token); } catch (Exception ex) { AppendOutput("Language worker shutdown: " + ex.Message); }
         await SaveSettingsAsync();
         Status = name.Length == 0 ? "Solution closed" : $"Closed {name}";
@@ -173,7 +173,7 @@ public sealed partial class ShellViewModel
         yield return Command("Window", "Close tabs to the right", CloseDocumentsToRightCommand, icon: "Close");
         yield return Command("View", NestRelatedFiles ? "Stop nesting related files in Solution Explorer" : "Nest related files in Solution Explorer", ToggleNestRelatedFilesCommand, icon: "Tree", detail: "Code-behind under XAML, partial files under their main file");
         yield return Command("View", "Task List", ShowToolCommand, "TaskList", icon: "Check", detail: "TODO, HACK and FIXME comments, and your own to-do items");
-        yield return Command("View", "Refresh Task List", RefreshTaskListCommand, icon: "Refresh");
+        yield return Command("View", "Refresh Task List", TaskList.RefreshCommand, icon: "Refresh");
         foreach (var entry in FileGroupCommands()) yield return entry;
         yield return Command("Help", "About WpfStudio", ShowAboutCommand, icon: "Info", detail: "Version, runtime and data folder");
         yield return Command("Help", "What's new", ShowWhatsNewCommand, icon: "Bulb", detail: "Recent features and fixes");
