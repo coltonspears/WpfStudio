@@ -1,0 +1,80 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.ShellStatusBar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls">
+  <UserControl.Resources>
+    <Style x:Key="StatusButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Padding" Value="7,0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="{Binding (TextElement.Foreground), RelativeSource={RelativeSource AncestorType=DockPanel}}" />
+    </Style>
+    <Style x:Key="StatusText" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Margin" Value="8,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </UserControl.Resources>
+  <Border>
+    <Border.Style>
+      <Style TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource WindowBrush}" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding Debugger.IsActive}" Value="True"><Setter Property="Background" Value="{DynamicResource DebugBrush}" /></DataTrigger>
+        </Style.Triggers>
+      </Style>
+    </Border.Style>
+    <Grid>
+      <DockPanel Margin="8,0">
+        <DockPanel.Style>
+          <Style TargetType="DockPanel">
+            <Setter Property="TextElement.Foreground" Value="{DynamicResource MutedBrush}" />
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Debugger.IsActive}" Value="True"><Setter Property="TextElement.Foreground" Value="White" /></DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </DockPanel.Style>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button Style="{StaticResource StatusButton}" Command="{Binding ShowToolCommand}" CommandParameter="Problems" ToolTip="Errors and warnings — open Problems">
+            <StackPanel Orientation="Horizontal">
+              <c:Glyph Kind="Error" Width="13" Height="13" Margin="0,0,4,0" />
+              <TextBlock Text="{Binding Problems.ErrorCount}" VerticalAlignment="Center" />
+              <c:Glyph Kind="Warning" Width="13" Height="13" Margin="10,0,4,0" />
+              <TextBlock Text="{Binding Problems.WarningCount}" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <TextBlock Style="{StaticResource StatusText}" Text="{Binding ActiveDocument.LanguageStatus}" MaxWidth="260" TextTrimming="CharacterEllipsis" ToolTip="{Binding ActiveDocument.LanguageStatus}" />
+          <TextBlock Style="{StaticResource StatusText}" Visibility="{Binding ActiveDocument, Converter={StaticResource Presence}}">
+            <Run Text="Ln " /><Run Text="{Binding ActiveDocument.State.CaretLine, Mode=OneWay}" /><Run Text=",  Col " /><Run Text="{Binding ActiveDocument.State.CaretColumn, Mode=OneWay}" />
+          </TextBlock>
+          <TextBlock Style="{StaticResource StatusText}" Text="{Binding ActiveDocument.EncodingLabel}" Visibility="{Binding ActiveDocument, Converter={StaticResource Presence}}" />
+          <TextBlock Style="{StaticResource StatusText}" Text="{Binding ActiveDocument.LanguageLabel}" Visibility="{Binding ActiveDocument, Converter={StaticResource Presence}}" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal">
+          <Button Style="{StaticResource StatusButton}" Command="{Binding ShowToolCommand}" CommandParameter="Explorer" ToolTip="Show Solution Explorer">
+            <StackPanel Orientation="Horizontal">
+              <c:Glyph Kind="Window" Width="13" Height="13" Margin="0,0,6,0" />
+              <TextBlock VerticalAlignment="Center">
+                <TextBlock.Style>
+                  <Style TargetType="TextBlock">
+                    <Setter Property="Text" Value="{Binding WorkspaceName}" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding HasWorkspace}" Value="False"><Setter Property="Text" Value="No workspace" /></DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </TextBlock.Style>
+              </TextBlock>
+            </StackPanel>
+          </Button>
+          <StackPanel Orientation="Horizontal" Margin="6,0,0,0" Visibility="{Binding Debugger.IsActive, Converter={StaticResource BooleanToVisibility}}">
+            <c:Glyph Kind="Bug" Width="13" Height="13" Margin="0,0,5,0" />
+            <TextBlock Text="Debugging" FontWeight="SemiBold" FontSize="11.5" VerticalAlignment="Center" />
+          </StackPanel>
+          <TextBlock Style="{StaticResource StatusText}" Text="{Binding Status}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Status}" />
+        </StackPanel>
+      </DockPanel>
+      <ProgressBar Style="{StaticResource ActivityBar}" VerticalAlignment="Top" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}" />
+    </Grid>
+  </Border>
+</UserControl>

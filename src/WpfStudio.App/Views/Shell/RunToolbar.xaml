@@ -1,0 +1,73 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.RunToolbar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls">
+  <UserControl.Resources>
+    <Style x:Key="ToolbarDivider" TargetType="Border">
+      <Setter Property="Width" Value="1" />
+      <Setter Property="Margin" Value="8,7" />
+      <Setter Property="Background" Value="{DynamicResource StrongBorderBrush}" />
+    </Style>
+  </UserControl.Resources>
+  <Border Background="{DynamicResource WindowBrush}" Padding="10,0,10,6">
+    <DockPanel>
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+        <Button Style="{StaticResource ToolbarButton}" c:Ui.Icon="NewFile" Content="New item" Command="{Binding NewWpfItemCommand}" ToolTip="New WPF item: view + view model, control, dictionary or converter (Ctrl+Shift+N)" />
+        <Button Style="{StaticResource ToolbarButton}" c:Ui.Icon="Swap" Content="View ⇄ VM" Command="{Binding SwitchRelatedCommand}" ToolTip="Jump between a view, its code-behind and its view model (F7)" />
+        <Border Style="{StaticResource ToolbarDivider}" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="WpfTools" ToolTip="WPF Explorer" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" ToolTip="Git changes" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Package" Command="{Binding OpenPackagesCommand}" ToolTip="NuGet packages" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Database" Command="{Binding ShowToolCommand}" CommandParameter="Database" ToolTip="SQL Server" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Terminal" Command="{Binding ShowToolCommand}" CommandParameter="Terminal" ToolTip="Terminal (Ctrl+`)" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Chat" Command="{Binding OpenAssistantCommand}" ToolTip="ColtonGPT" />
+      </StackPanel>
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrongBorderBrush}" BorderThickness="1" CornerRadius="7" Height="30" Padding="2,0">
+          <StackPanel Orientation="Horizontal">
+            <c:StudioIcon Kind="Project" Width="15" Height="15" Margin="7,0,0,0" VerticalAlignment="Center" />
+            <ComboBox Style="{StaticResource ToolbarCombo}" Width="176" ItemsSource="{Binding Projects}" SelectedItem="{Binding StartupProject}" DisplayMemberPath="Name" ToolTip="Startup project" c:Ui.Placeholder="No startup project" />
+            <Border Style="{StaticResource ToolbarDivider}" Margin="0,7" />
+            <ComboBox Style="{StaticResource ToolbarCombo}" Width="92" ItemsSource="{Binding Configurations}" SelectedItem="{Binding Configuration}" ToolTip="Build configuration" />
+            <Border Style="{StaticResource ToolbarDivider}" Margin="0,7" Visibility="{Binding TargetFrameworks.Count, Converter={StaticResource Presence}}" />
+            <ComboBox Style="{StaticResource ToolbarCombo}" Width="132" ItemsSource="{Binding TargetFrameworks}" SelectedItem="{Binding TargetFramework}" ToolTip="Target framework" Visibility="{Binding TargetFrameworks.Count, Converter={StaticResource Presence}}" />
+            <Border Style="{StaticResource ToolbarDivider}" Margin="0,7" Visibility="{Binding LaunchProfiles.Count, Converter={StaticResource Presence}}" />
+            <ComboBox Style="{StaticResource ToolbarCombo}" Width="132" ItemsSource="{Binding LaunchProfiles}" SelectedItem="{Binding LaunchProfile}" ToolTip="Launch profile" Visibility="{Binding LaunchProfiles.Count, Converter={StaticResource Presence}}" />
+          </StackPanel>
+        </Border>
+        <Button Command="{Binding DebugCommand}" Height="30" Margin="8,0,2,0" Padding="12,0,14,0" MinHeight="0">
+          <Button.Style>
+            <Style TargetType="Button" BasedOn="{StaticResource AccentButton}">
+              <Setter Property="c:Ui.Icon" Value="Play" />
+              <Setter Property="Content" Value="Start" />
+              <Setter Property="ToolTip" Value="Start debugging (F5)" />
+              <Setter Property="IsEnabled" Value="{Binding HasWorkspace}" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding Debugger.IsActive}" Value="True"><Setter Property="IsEnabled" Value="True" /></DataTrigger>
+                <DataTrigger Binding="{Binding Debugger.IsStopped}" Value="True">
+                  <Setter Property="c:Ui.Icon" Value="Continue" />
+                  <Setter Property="Content" Value="Continue" />
+                  <Setter Property="ToolTip" Value="Continue (F5)" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Button.Style>
+        </Button>
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="PlayOutline" Command="{Binding RunCommand}" IsEnabled="{Binding HasWorkspace}" ToolTip="Run without debugging (Ctrl+F5)" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Build" Command="{Binding BuildCommand}" IsEnabled="{Binding HasWorkspace}" ToolTip="Build (Ctrl+Shift+B)" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Flask" Command="{Binding TestCommand}" IsEnabled="{Binding HasWorkspace}" ToolTip="Run tests" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Stop" Command="{Binding CancelOperationCommand}" ToolTip="Cancel the running operation" Foreground="{DynamicResource DangerBrush}" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}" />
+        <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource StrongBorderBrush}" BorderThickness="1" CornerRadius="7" Height="30" Padding="2,0" Margin="8,0,0,0" Visibility="{Binding Debugger.IsActive, Converter={StaticResource BooleanToVisibility}}">
+          <StackPanel Orientation="Horizontal">
+            <Button Style="{StaticResource IconButton}" c:Ui.Icon="Pause" Command="{Binding Debugger.PauseCommand}" ToolTip="Pause" />
+            <Button Style="{StaticResource IconButton}" c:Ui.Icon="Stop" Command="{Binding Debugger.StopCommand}" ToolTip="Stop debugging (Shift+F5)" Foreground="{DynamicResource DangerBrush}" />
+            <Border Style="{StaticResource ToolbarDivider}" Margin="3,7" />
+            <Button Style="{StaticResource IconButton}" c:Ui.Icon="StepOver" Command="{Binding Debugger.StepOverCommand}" ToolTip="Step over (F10)" />
+            <Button Style="{StaticResource IconButton}" c:Ui.Icon="StepInto" Command="{Binding Debugger.StepIntoCommand}" ToolTip="Step into (F11)" />
+            <Button Style="{StaticResource IconButton}" c:Ui.Icon="StepOut" Command="{Binding Debugger.StepOutCommand}" ToolTip="Step out (Shift+F11)" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </DockPanel>
+  </Border>
+</UserControl>

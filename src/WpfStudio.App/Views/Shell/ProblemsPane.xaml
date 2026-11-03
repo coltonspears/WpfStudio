@@ -1,0 +1,59 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.ProblemsPane"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:b="clr-namespace:WpfStudio.App.Behaviors">
+  <Grid Background="{DynamicResource SurfaceBrush}">
+    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+    <DockPanel Margin="10,3,8,3">
+      <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Check XAML" Command="{Binding XamlAnalysis.RefreshCommand}" ToolTip="Refresh XAML diagnostics across the loaded projects, including closed files." />
+      <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding Problems.Scopes}" SelectedItem="{Binding Problems.Scope}" Width="110" Margin="6,0" ToolTip="Which files' problems to list" />
+      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Info" Content="{Binding Problems.MessageCount}" IsChecked="{Binding Problems.ShowMessages}" ToolTip="Show messages" Height="26" />
+      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Warning" Content="{Binding Problems.WarningCount}" IsChecked="{Binding Problems.ShowWarnings}" ToolTip="Show warnings" Height="26" />
+      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Error" Content="{Binding Problems.ErrorCount}" IsChecked="{Binding Problems.ShowErrors}" ToolTip="Show errors" Height="26" />
+      <TextBox DockPanel.Dock="Left" Width="220" Text="{Binding Problems.Filter, UpdateSourceTrigger=PropertyChanged, Delay=150}" c:Ui.Placeholder="Filter problems" ToolTip="Match code, message, file or project. Separate terms with spaces; prefix a term with - to exclude it.">
+        <TextBox.InputBindings>
+          <KeyBinding Key="Escape" Command="{Binding Problems.ClearFilterCommand}" />
+        </TextBox.InputBindings>
+      </TextBox>
+      <Button DockPanel.Dock="Left" Style="{StaticResource QuietButton}" Content="{Binding Problems.FilterSummary}" Command="{Binding Problems.ClearFilterCommand}" ToolTip="Clear every Problems filter" Margin="6,0" Visibility="{Binding Problems.FilterSummary, Converter={StaticResource Presence}}" />
+      <TextBlock Text="{Binding XamlAnalysis.Status}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding XamlAnalysis.Status}" />
+    </DockPanel>
+    <DataGrid Grid.Row="1" ItemsSource="{Binding Problems.Visible}" SelectedItem="{Binding Problems.Selected}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" b:Interaction.ActivateCommand="{Binding NavigateDiagnosticCommand}">
+      <DataGrid.Columns>
+        <DataGridTemplateColumn Header="" Width="34">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate>
+              <c:Glyph Kind="{Binding Severity, Converter={StaticResource SeverityGlyph}}" Foreground="{Binding Severity, Converter={StaticResource SeverityGlyph}, ConverterParameter=Brush}" Width="15" Height="15" ToolTip="{Binding Severity}" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+        <DataGridTextColumn Header="Code" Binding="{Binding Id}" Width="112" />
+        <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
+        <DataGridTextColumn Header="Project" Binding="{Binding ProjectName}" Width="130" />
+        <DataGridTextColumn Header="File" Binding="{Binding Path}" Width="240" />
+        <DataGridTextColumn Header="Line" Binding="{Binding Line}" Width="56" />
+      </DataGrid.Columns>
+    </DataGrid>
+    <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24,0,0" Visibility="{Binding Diagnostics.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}" IsHitTestVisible="False">
+      <c:Glyph Kind="Check" Width="22" Height="22" Foreground="{DynamicResource SuccessBrush}" />
+      <TextBlock Text="No reported problems" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0" HorizontalAlignment="Center" />
+    </StackPanel>
+    <TextBlock Grid.Row="1" Text="No problems match the filter" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24,0,0" IsHitTestVisible="False">
+      <TextBlock.Style>
+        <Style TargetType="TextBlock">
+          <Setter Property="Visibility" Value="Collapsed" />
+          <Style.Triggers>
+            <MultiDataTrigger>
+              <MultiDataTrigger.Conditions>
+                <Condition Binding="{Binding Problems.Visible.Count}" Value="0" />
+                <Condition Binding="{Binding Problems.IsFilterActive}" Value="True" />
+              </MultiDataTrigger.Conditions>
+              <Setter Property="Visibility" Value="{Binding Diagnostics.Count, Converter={StaticResource Presence}}" />
+            </MultiDataTrigger>
+          </Style.Triggers>
+        </Style>
+      </TextBlock.Style>
+    </TextBlock>
+  </Grid>
+</UserControl>

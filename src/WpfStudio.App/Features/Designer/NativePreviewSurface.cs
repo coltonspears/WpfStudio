@@ -16,9 +16,8 @@ namespace WpfStudio.App.Features.Designer;
 public sealed partial class NativePreviewSurface : HwndHost
 {
     private string _bridgeToken = Guid.NewGuid().ToString("N");
-    private IPreviewInteractionSession? _session, _leasedSession;
-    private IPreviewInteractionSession? _detachingSession;
-    private Task? _deactivation;
+    private IPreviewInteractionSession? _session;
+    private readonly PreviewLease _lease = new();
     private bool _active, _pending, _updating, _destroyed, _dpiCompatible, _releasing;
     private long _bridgeGeneration, _stateGeneration, _navigationSequence;
     private double _offsetX, _offsetY;
@@ -49,7 +48,7 @@ public sealed partial class NativePreviewSurface : HwndHost
     {
         if (ReferenceEquals(_session, session)) return;
         RevokeFocus();
-        ResetAttachment();
+        _lease.ResetAttachment();
         _stateGeneration++;
         if (_session is not null) _session.Changed -= SessionChanged;
         _session = session;
@@ -84,7 +83,7 @@ public sealed partial class NativePreviewSurface : HwndHost
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
         RevokeFocus();
-        ResetAttachment();
+        _lease.ResetAttachment();
         _destroyed = false;
         _bridgeGeneration++;
         _bridgeToken = Guid.NewGuid().ToString("N");
@@ -110,7 +109,7 @@ public sealed partial class NativePreviewSurface : HwndHost
     protected override void DestroyWindowCore(HandleRef hwnd)
     {
         RevokeFocus();
-        ResetAttachment();
+        _lease.ResetAttachment();
         _destroyed = true;
         _bridgeGeneration++;
         _pending = false;
@@ -130,20 +129,15 @@ public sealed partial class NativePreviewSurface : HwndHost
         if (_releasing) return false;
         _releasing = true;
         RevokeFocus();
-        ResetAttachment();
+        _lease.ResetAttachment();
         _stateGeneration++;
         _active = false; _pending = false;
         if (hide) Visibility = Visibility.Hidden;
-        // The session may already be reused by another bridge while this view's
-        // dispatcher continuation is still queued after a completed detach.
-        if (_deactivation?.IsCompletedSuccessfully == true && ReferenceEquals(_detachingSession, _leasedSession))
-            _leasedSession = null;
         // Abort bypasses ordinary RPC gates and confirms that no remote child can
         // remain attached. If that cannot be proven, do not destroy its parent.
         try
         {
-            _leasedSession?.Abort("The native preview container was removed. Refresh the preview after docking to interact again.");
-            _leasedSession = null;
+            _lease.Abort("The native preview container was removed. Refresh the preview after docking to interact again.");
             SetState(false, "");
             return true;
         }
@@ -175,7 +169,7 @@ public sealed partial class NativePreviewSurface : HwndHost
         if (message == 0x0082 && hwnd == _bridge)
         {
             RevokeFocus();
-            ResetAttachment();
+            _lease.ResetAttachment();
             _destroyed = true; _bridgeGeneration++; _pending = false; _bridge = 0;
             if (_session is not null) _session.Changed -= SessionChanged;
             SetState(false, "");
@@ -292,14 +286,12 @@ public sealed partial class NativePreviewSurface : HwndHost
                 // An attach that completed under an older activation generation
                 // still owns a physical lease, even though its reply was ignored.
                 // Release that lease before creating another attachment token.
-                if (_leasedSession is { } previous && (!WantsAttachment || !ReferenceEquals(previous, session) || _attaching || !IsAttached))
+                if (_lease.Session is { } previous && (!WantsAttachment || !ReferenceEquals(previous, session) || _lease.IsAttaching || !IsAttached))
                 {
                     operationSession = previous;
-                    _detachingSession = previous;
-                    _deactivation = previous.DeactivateAsync();
-                    await _deactivation;
-                    if (ReferenceEquals(_leasedSession, previous)) _leasedSession = null;
-                    ResetAttachment();
+                    await _lease.BeginDeactivation(previous);
+                    _lease.EndDeactivation(previous);
+                    _lease.ResetAttachment();
                     SetState(false, "");
                     if (_destroyed || generation != _bridgeGeneration) break;
                     if (stateGeneration != _stateGeneration || !ReferenceEquals(session, _session)) { _pending = true; continue; }
@@ -307,16 +299,15 @@ public sealed partial class NativePreviewSurface : HwndHost
                 if (!WantsAttachment || session is null || !ReferenceEquals(_session, session)) continue;
                 if (!ReadViewport(out int width, out int height, out double scale)) continue;
                 if (_focus is { } pendingFocus && !FocusIsCurrent(pendingFocus)) RevokeFocus(pendingFocus);
-                bool attached = ReferenceEquals(_leasedSession, session) && IsAttached && session.IsAttached;
+                bool attached = ReferenceEquals(_lease.Session, session) && IsAttached && session.IsAttached;
                 var focus = attached ? _focus : null;
                 var action = attached ? focus?.Action ?? PreviewSurfaceAction.Update : PreviewSurfaceAction.Attach;
-                if (!attached) BeginAttachment();
+                if (!attached) _lease.BeginAttachment();
                 var request = new PreviewSurfaceRequest(session.Surface, _bridgeToken, _bridge.ToInt64(),
                     Environment.ProcessId, width, height, PixelOffset(_offsetX, scale), PixelOffset(_offsetY, scale),
-                    0, action, focus?.Token, _navigationToken);
+                    0, action, focus?.Token, _lease.NavigationToken);
                 // Publish the lease before awaiting attach, including a not-yet-acknowledged child.
-                _deactivation = null; _detachingSession = null;
-                _leasedSession = session;
+                _lease.Publish(session);
                 operationSession = session;
                 var response = await session.UpdateAsync(request);
                 if (_destroyed || generation != _bridgeGeneration) break;
@@ -327,8 +318,8 @@ public sealed partial class NativePreviewSurface : HwndHost
                     if (response.Success)
                     {
                         ReceiveFocusObservation(response.Focus);
-                        var pendingObservation = _pendingFocusObservation;
-                        _pendingFocusObservation = null;
+                        var pendingObservation = _lease.PendingFocusObservation;
+                        _lease.PendingFocusObservation = null;
                         ReceiveFocusObservation(pendingObservation);
                     }
                     if (focus is not null)
@@ -339,7 +330,7 @@ public sealed partial class NativePreviewSurface : HwndHost
                             ((IKeyboardInputSink)this).KeyboardInputSite?.OnNoMoreTabStops(new TraversalRequest(
                                 action == PreviewSurfaceAction.FocusLast ? FocusNavigationDirection.Previous : FocusNavigationDirection.Next));
                     }
-                    if (!response.Success) { RevokeFocus(); ResetAttachment(); }
+                    if (!response.Success) { RevokeFocus(); _lease.ResetAttachment(); }
                     if (response.Success && _focus is not null) _pending = true;
                 }
                 else _pending = true;
@@ -350,14 +341,9 @@ public sealed partial class NativePreviewSurface : HwndHost
             string? cleanupFailure = null;
             // Clean up only the lease used by this failed operation. A late
             // exception from a removed bridge is not authority over a new one.
-            if (operationBridge == _bridgeGeneration && operationSession is not null && ReferenceEquals(operationSession, _leasedSession))
+            if (operationBridge == _bridgeGeneration && operationSession is not null && ReferenceEquals(operationSession, _lease.Session))
             {
-                try
-                {
-                    if (_deactivation?.IsCompletedSuccessfully != true || !ReferenceEquals(_detachingSession, operationSession))
-                        operationSession.Abort("Interactive preview communication failed.");
-                    _leasedSession = null;
-                }
+                try { _lease.Abort("Interactive preview communication failed."); }
                 catch (Exception cleanup) { cleanupFailure = cleanup.Message; }
             }
             bool current = !_destroyed && operationBridge == _bridgeGeneration && operationState == _stateGeneration
@@ -365,7 +351,7 @@ public sealed partial class NativePreviewSurface : HwndHost
             if (current || cleanupFailure is not null)
             {
                 RevokeFocus();
-                ResetAttachment();
+                _lease.ResetAttachment();
                 SetState(false, "Interactive preview stopped: " + exception.Message + (cleanupFailure is null ? "" : " " + cleanupFailure));
             }
             // A newly assigned session or bridge may have queued its attach while
@@ -390,7 +376,7 @@ public sealed partial class NativePreviewSurface : HwndHost
             if (!args.Available)
             {
                 RevokeFocus();
-                ResetAttachment();
+                _lease.ResetAttachment();
                 SetState(false, args.Status ?? "Interactive preview is unavailable.");
                 UpdateVisibility(); QueueUpdate();
                 return;
