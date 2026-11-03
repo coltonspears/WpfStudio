@@ -21,7 +21,9 @@ namespace WpfStudio.App;
 public partial class App : Application
 {
     private IHost? _host;
+#pragma warning disable VSTHRD100 // A WPF override; its body catches and reports startup failures.
     protected override async void OnStartup(StartupEventArgs e)
+#pragma warning restore VSTHRD100
     {
         base.OnStartup(e);
         var faults = new UnhandledFaultReporter(Dispatcher, AppPaths.DataDirectory, () => _host?.Services.GetService<ILogger<App>>(), (status, details) =>

@@ -83,7 +83,7 @@ public sealed partial class NativePreviewSurface
         finally
         {
             _inNativeNavigation = false;
-            if (_pending && !_destroyed) Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(QueueUpdate));
+            if (_pending && !_destroyed) _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(QueueUpdate));
         }
     }
 

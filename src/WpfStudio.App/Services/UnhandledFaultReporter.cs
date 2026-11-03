@@ -23,7 +23,7 @@ public sealed class UnhandledFaultReporter(Dispatcher dispatcher, string directo
         }
         catch { /* Nowhere left to report to. */ }
         if (exception is OutOfMemoryException or StackOverflowException or AccessViolationException) return false;
-        dispatcher.BeginInvoke(() =>
+        _ = dispatcher.BeginInvoke(() =>
         {
             // A failure to display this fault must not be reported as another fault, which would never end.
             try { show("Unexpected error: " + exception.Message, $"[{source}] {exception}"); }

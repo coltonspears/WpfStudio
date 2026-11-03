@@ -30,7 +30,7 @@ public partial class MemoryTypesView : UserControl
     private void ApplyGrouping()
     {
         if (_model is null) return;
-        if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(ApplyGrouping); return; } // Never block the thread that raised the change.
+        if (!Dispatcher.CheckAccess()) { _ = Dispatcher.BeginInvoke(ApplyGrouping); return; } // Never block the thread that raised the change.
         var view = CollectionViewSource.GetDefaultView(_model.Types);
         var grouped = _model.TypeGrouping != "No grouping";
         if (grouped == view.GroupDescriptions.Count > 0) return;

@@ -14,7 +14,9 @@ public static class ToolchainResolver
     public static async Task<string> RegisterAsync(string workspacePath, CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(workspacePath))!;
+#pragma warning disable VSTHRD011 // AsyncLazy guards against a factory that needs a blocked main thread; this worker has none.
         var resolution = Resolutions.GetOrAdd(directory, key => new(() => ResolveAsync(key)));
+#pragma warning restore VSTHRD011
         try { return await resolution.Value.WaitAsync(cancellationToken).ConfigureAwait(false); }
         catch when (resolution.Value.IsFaulted)
         {

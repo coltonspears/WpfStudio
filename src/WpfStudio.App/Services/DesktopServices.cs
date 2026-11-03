@@ -11,7 +11,7 @@ namespace WpfStudio.App.Services;
 
 public sealed class UiDispatcher(Dispatcher dispatcher) : IUiDispatcher
 {
-    public void Post(Action action) => dispatcher.BeginInvoke(action);
+    public void Post(Action action) => _ = dispatcher.BeginInvoke(action);
     public Task InvokeAsync(Action action, CancellationToken cancellationToken = default) => dispatcher.InvokeAsync(action, DispatcherPriority.Normal, cancellationToken).Task;
 }
 

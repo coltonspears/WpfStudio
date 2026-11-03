@@ -67,15 +67,18 @@ public sealed partial class EditorPreferences : ObservableObject
             {
                 _listingFamilies = true;
                 var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
-                Task.Run(ListFamilies).ContinueWith(listed => dispatcher.BeginInvoke(() =>
-                {
-                    // Checking Exception, not Status: it is what marks a failed listing as observed.
-                    _families = listed.Exception is null ? listed.Result : [EditorSettings.DefaultFontFamily];
-                    OnPropertyChanged(nameof(FontFamilies));
-                }), TaskScheduler.Default).Forget();
+                LoadFamiliesAsync(dispatcher).Forget();
             }
             return _families ?? [];
         }
+    }
+
+    private async Task LoadFamiliesAsync(System.Windows.Threading.Dispatcher dispatcher)
+    {
+        IReadOnlyList<string> families;
+        try { families = await Task.Run(ListFamilies).ConfigureAwait(false); }
+        catch (Exception) { families = [EditorSettings.DefaultFontFamily]; } // The settings page only needs something to offer.
+        _ = dispatcher.BeginInvoke(() => { _families = families; OnPropertyChanged(nameof(FontFamilies)); });
     }
 
     private static IReadOnlyList<string> ListFamilies()

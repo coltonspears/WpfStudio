@@ -31,7 +31,7 @@ public partial class MemoryProfilerPane : UserControl
         };
     }
 
-    private void FocusGoTo() => Dispatcher.BeginInvoke(() => { GoToBox.Focus(); GoToBox.SelectAll(); }, System.Windows.Threading.DispatcherPriority.Input);
+    private void FocusGoTo() => _ = Dispatcher.BeginInvoke(() => { GoToBox.Focus(); GoToBox.SelectAll(); }, System.Windows.Threading.DispatcherPriority.Input);
 
     private void ProcessesOpened(object? sender, EventArgs e)
     {
@@ -56,7 +56,7 @@ public partial class MemoryProfilerPane : UserControl
     }
 
     // On the UI thread this runs at once, as before; a change raised elsewhere queues instead of blocking that thread.
-    private void OnUiThread(Action action) { if (Dispatcher.CheckAccess()) action(); else Dispatcher.BeginInvoke(action); }
+    private void OnUiThread(Action action) { if (Dispatcher.CheckAccess()) action(); else _ = Dispatcher.BeginInvoke(action); }
 
     private void Apply()
     {

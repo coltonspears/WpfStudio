@@ -103,7 +103,7 @@ public sealed partial class NativePreviewSurface : HwndHost
             throw new Win32Exception(error, "Could not identify the preview container.");
         }
         if (!_dpiCompatible) SetState(false, DpiStatus);
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(QueueUpdate));
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(QueueUpdate));
         return new HandleRef(this, _bridge);
     }
 
@@ -181,7 +181,7 @@ public sealed partial class NativePreviewSurface : HwndHost
             SetState(false, "");
         }
         // DPI may change without a DIP-size change when moving a floating pane.
-        if (message is 0x02E0 or 0x02E3) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        if (message is 0x02E0 or 0x02E3) _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {
             if (_destroyed || hwnd != _bridge) return;
             ReadViewport(); QueueUpdate();
@@ -205,7 +205,7 @@ public sealed partial class NativePreviewSurface : HwndHost
         _focusTimer.Start();
         // Complete WPF's current navigation before delivering a possible
         // no-tab-stop continuation, including synchronously completed sessions.
-        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(QueueUpdate));
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(QueueUpdate));
         return true;
     }
 
@@ -271,7 +271,7 @@ public sealed partial class NativePreviewSurface : HwndHost
         _pending = true;
         if (_inNativeNavigation) return;
         // UpdateAsync reports its own failures; this covers its cleanup failing while it does.
-        if (!_updating) UpdateAsync().Forget(fault => Dispatcher.BeginInvoke(() => SetState(false, "Interactive preview stopped: " + fault.Message)));
+        if (!_updating) UpdateAsync().Forget(fault => _ = Dispatcher.BeginInvoke(() => SetState(false, "Interactive preview stopped: " + fault.Message)));
     }
 
     private async Task UpdateAsync()
@@ -384,7 +384,7 @@ public sealed partial class NativePreviewSurface : HwndHost
     {
         if (Dispatcher.HasShutdownStarted) return;
         long generation = _stateGeneration;
-        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
         {
             if (_destroyed || !ReferenceEquals(sender, _session)) return;
             if (!args.Available)

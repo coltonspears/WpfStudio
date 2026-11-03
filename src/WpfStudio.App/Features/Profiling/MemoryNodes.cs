@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using WpfStudio.Contracts;
 using WpfStudio.Contracts.Profiling;
 
 namespace WpfStudio.App.Features.Profiling;
@@ -44,9 +45,11 @@ public sealed partial class ObjectNodeViewModel : ObservableObject
     [ObservableProperty] public partial bool IsExpanded { get; set; }
     [ObservableProperty] public partial bool IsLoading { get; set; }
 
-    async partial void OnIsExpandedChanged(bool value)
+    partial void OnIsExpandedChanged(bool value) { if (value) LoadChildrenAsync().Forget(); }
+
+    private async Task LoadChildrenAsync()
     {
-        if (!value || _loaded || _load is null) return;
+        if (_loaded || _load is null) return;
         _loaded = true; IsLoading = true;
         try { await _load(this); }
         catch { Children.Clear(); _loaded = false; }
@@ -103,10 +106,7 @@ public sealed partial class DominatorNodeViewModel : ObservableObject
     [ObservableProperty] public partial bool IsExpanded { get; set; }
     [ObservableProperty] public partial bool IsSelected { get; set; }
 
-    async partial void OnIsExpandedChanged(bool value)
-    {
-        if (value) await EnsureLoadedAsync();
-    }
+    partial void OnIsExpandedChanged(bool value) { if (value) EnsureLoadedAsync().Forget(); }
 
     public async Task EnsureLoadedAsync()
     {

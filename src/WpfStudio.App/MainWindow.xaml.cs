@@ -22,5 +22,5 @@ public partial class MainWindow : Window
         };
     }
 
-    private void FocusSearch() => Dispatcher.BeginInvoke(() => { SearchBox.Focus(); Keyboard.Focus(SearchBox); SearchBox.SelectAll(); });
+    private void FocusSearch() => _ = Dispatcher.BeginInvoke(() => { SearchBox.Focus(); Keyboard.Focus(SearchBox); SearchBox.SelectAll(); });
 }

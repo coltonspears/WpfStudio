@@ -20,7 +20,7 @@ public sealed class TerminalSurface : ContentControl
     public TerminalSurface() { Loaded += (_, _) => Attach(); Unloaded += (_, _) => Content = null; }
     private static void Changed(DependencyObject value, DependencyPropertyChangedEventArgs args) { var surface = (TerminalSurface)value; if (surface.IsLoaded) surface.Attach(); }
     // AttachAsync reports a renderer that cannot start; this covers it failing while it does.
-    private void Attach() => AttachAsync().Forget(fault => Dispatcher.BeginInvoke(() => Content = new TextBlock { Text = "Terminal renderer stopped: " + fault.Message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) }));
+    private void Attach() => AttachAsync().Forget(fault => _ = Dispatcher.BeginInvoke(() => Content = new TextBlock { Text = "Terminal renderer stopped: " + fault.Message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) }));
     private async Task AttachAsync()
     {
         if (Session is not { } session) return;
@@ -30,7 +30,7 @@ public sealed class TerminalSurface : ContentControl
             {
                 renderer = new Renderer(session, Dispatcher);
                 Renderers.Add(session, renderer);
-                session.Closed += () => Dispatcher.BeginInvoke(() => { if (Renderers.Remove(session, out var removed)) removed.Dispose(); });
+                session.Closed += () => _ = Dispatcher.BeginInvoke(() => { if (Renderers.Remove(session, out var removed)) removed.Dispose(); });
             }
             if (renderer.Owner is { } previous && previous != this) previous.Content = null;
             renderer.Owner = this;

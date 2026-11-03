@@ -250,7 +250,9 @@ public sealed partial class EditorSurface : TextEditor
         }
         else if (e.Key == Key.Escape) { _completion?.Close(); CancelHover(); }
     }
+#pragma warning disable VSTHRD100 // A WPF event handler; the awaits below are guarded.
     private async void OnMouseHover(object? sender, MouseEventArgs e)
+#pragma warning restore VSTHRD100
     {
         CancelHover();
         if (IsOverAdornment(e.OriginalSource) || IsOverAdornment(Mouse.DirectlyOver)) return; // Folded blocks and lens rows have their own tips.

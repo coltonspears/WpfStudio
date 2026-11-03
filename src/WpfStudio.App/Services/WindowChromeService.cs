@@ -123,7 +123,7 @@ public sealed class TitleBarController
             case WmWindowPosChanged:
             case WmDpiChanged:
                 // Moving a maximized window to another monitor changes its overhang without a state change.
-                if (_window.WindowState == WindowState.Maximized) _window.Dispatcher.BeginInvoke(UpdateBounds);
+                if (_window.WindowState == WindowState.Maximized) _ = _window.Dispatcher.BeginInvoke(UpdateBounds);
                 break;
             case WmNcHitTest:
                 if (_maximize.IsVisible && _maximize.IsEnabled && OverMaximize(lParam))
