@@ -343,7 +343,7 @@
  <DataTemplate x:Key="StudioDocumentHeaderTemplate">
   <StackPanel Orientation="Horizontal">
    <Grid Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center">
-    <c:StudioIcon Kind="{Binding Title, Converter={StaticResource DockFileIcon}}" Width="16" Height="16" Visibility="{Binding Title, Converter={StaticResource DockFileVisibility}}"/>
+    <c:StudioIcon Kind="{Binding ContentId, Converter={StaticResource DockFileIcon}}" Width="16" Height="16" Visibility="{Binding ContentId, Converter={StaticResource DockFileVisibility}}"/>
     <c:Glyph Kind="{Binding ContentId, Converter={StaticResource DockContentGlyph}}" Width="15" Height="15"/>
    </Grid>
    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
