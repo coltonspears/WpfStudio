@@ -20,25 +20,9 @@ namespace WpfStudio.Workspace;
 /// <summary>Lives exclusively in WorkspaceHost. User project assemblies are never loaded into the editor process.</summary>
 public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 {
-    private Microsoft.CodeAnalysis.Workspace? _workspace;
-    private Solution? _solution;
-    private readonly object _gate = new();
-    private readonly Dictionary<string, long> _versions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string> _syncedTexts = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, (Document Document, long Version, CompletionItem Item)> _completions = new();
-    private long _completionRequest;
-    private int _workspaceLoadsInProgress;
-    private bool _workspaceLoadAttempted;
-    private bool _workspaceInventoryReady;
-
     public async Task<WorkspaceSnapshot> LoadAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
     {
-        lock (_gate)
-        {
-            _workspaceLoadAttempted = true;
-            _workspaceInventoryReady = false;
-            _workspaceLoadsInProgress++;
-        }
+        lock (_gate) _lifetime.BeginLoad();
         try
         {
             var acquired = request.UseCache ? await AcquireCachedAsync(request, cancellationToken).ConfigureAwait(false) : null;
@@ -46,22 +30,20 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             var snapshot = await PublishAsync(request, acquired, cancellationToken).ConfigureAwait(false);
             // Discovering Roslyn's code fix providers takes a few seconds; do it before the first Ctrl+.
             Task.Run(CodeActionCatalog.Warm, CancellationToken.None).Forget(fault => Console.Error.WriteLine("Code action catalog: " + fault.Message));
-            lock (_gate) _workspaceInventoryReady = _solution is not null;
+            lock (_gate) _lifetime.InventoryPublished(CurrentSolution is not null);
             return snapshot;
         }
         finally
         {
             lock (_gate)
             {
-                _workspaceLoadsInProgress--;
+                _lifetime.EndLoad();
                 // Ownership is populated after the Roslyn solution is loaded. Publish
                 // that completed inventory together with a new semantic generation.
-                _semanticRevision++;
+                SemanticRevision++;
             }
         }
     }
-
-    private Acquired? _prepared;
 
     /// <summary>
     /// Loads the workspace with MSBuild and runs its source generators while the current (usually cached) solution
@@ -81,24 +63,24 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 await project.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false);
         }
         catch { acquired.Workspace?.Dispose(); throw; }
-        Interlocked.Exchange(ref _prepared, acquired)?.Workspace?.Dispose();
+        _lifetime.ExchangePrepared(acquired)?.Workspace?.Dispose();
         return true;
     }
 
     /// <summary>Replaces the current solution with the prepared one. Open buffers are not carried over; the client replays them.</summary>
     public async Task<WorkspaceSnapshot> CommitRefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
     {
-        var acquired = Interlocked.Exchange(ref _prepared, null) ?? throw new InvalidOperationException("No refreshed project model is ready.");
-        lock (_gate) { _workspaceInventoryReady = false; _workspaceLoadsInProgress++; }
+        var acquired = _lifetime.ExchangePrepared(null) ?? throw new InvalidOperationException("No refreshed project model is ready.");
+        lock (_gate) _lifetime.BeginRefresh();
         try
         {
             var snapshot = await PublishAsync(request, acquired, cancellationToken).ConfigureAwait(false);
-            lock (_gate) _workspaceInventoryReady = _solution is not null;
+            lock (_gate) _lifetime.InventoryPublished(CurrentSolution is not null);
             return snapshot;
         }
         finally
         {
-            lock (_gate) { _workspaceLoadsInProgress--; _semanticRevision++; }
+            lock (_gate) { _lifetime.EndLoad(); SemanticRevision++; }
             SemanticStateChanged?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -183,13 +165,12 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         Microsoft.CodeAnalysis.Workspace? previous;
         lock (_gate)
         {
-            _solution = null;
-            ResetPageProjection();
-            _semanticRevision++;
+            CurrentSolution = null;
+            _pages.Reset();
+            SemanticRevision++;
             ResetProjectAnalysis();
             // With its solution unpublished above, no new request can start on the workspace closed below.
-            previous = _workspace;
-            _workspace = acquired.Workspace;
+            previous = _lifetime.ReplaceWorkspace(acquired.Workspace);
         }
         var path = Path.GetFullPath(request.Path);
         var issues = acquired.Issues;
@@ -200,9 +181,9 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         if (!ReferenceEquals(previous, acquired.Workspace)) previous?.Dispose();
         lock (_gate)
         {
-            if (acquired.Solution is { } loaded) { SetAuthoredSolution(loaded); _semanticRevision++; }
-            else _solution = null;
-            _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _codeActions.Clear(); _xamlProjects.Clear();
+            if (acquired.Solution is { } loaded) { SetAuthoredSolution(loaded); SemanticRevision++; }
+            else CurrentSolution = null;
+            _documents.Clear(); _completions.Clear(); _codeActions.Clear(); _ownership.Owners.Clear();
         }
         var configurations = new HashSet<string>(ProjectDiscovery.GetDeclaredConfigurations(path), StringComparer.OrdinalIgnoreCase);
         var loadedProjects = acquired.Solution?.Projects.ToArray() ?? [];
@@ -215,13 +196,13 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             lock (_gate)
                 foreach (var context in loadedProjects.Where(p => string.Equals(p.FilePath, projectPath, StringComparison.OrdinalIgnoreCase)))
                 {
-                    if (evaluated is null) _xamlInventoryUnavailable.Add(context.Id);
+                    if (evaluated is null) _ownership.Unavailable.Add(context.Id);
                     else
                     {
-                        _xamlInventory[context.Id] = evaluated.Files.Where(file => !file.IsGenerated && !IsGenerated(file.Path)
+                        _ownership.Files[context.Id] = evaluated.Files.Where(file => !file.IsGenerated && !IsGenerated(file.Path)
                             && file.Path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)).Select(file => Path.GetFullPath(file.Path))
                             .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
-                        _xamlResourceInventory[context.Id] = new(evaluated.XamlResources.Where(file => !IsGenerated(file.Path)).ToArray(),
+                        _ownership.Resources[context.Id] = new(evaluated.XamlResources.Where(file => !IsGenerated(file.Path)).ToArray(),
                             evaluated.OutputType is "Exe" or "WinExe");
                     }
                 }
@@ -269,7 +250,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             foreach (var file in model.Files.Where(f => f.Path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)))
             {
                 var filePath = Path.GetFullPath(file.Path);
-                if (!_xamlProjects.TryGetValue(filePath, out var owners)) _xamlProjects[filePath] = owners = [];
+                if (!_ownership.Owners.TryGetValue(filePath, out var owners)) _ownership.Owners[filePath] = owners = [];
                 owners.Add(project.Id);
             }
         }
@@ -313,11 +294,11 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         if (IsGenerated(path)) return new(false, request.Version, []);
         lock (_gate)
         {
-            if (_versions.TryGetValue(path, out var current) && request.Version < current) return new DocumentUpdateResult(false, current, []);
-            var solution = _authoredSolution ?? RequireSolution();
+            if (_documents.OpenVersion(path) is { } current && request.Version < current) return new DocumentUpdateResult(false, current, []);
+            var solution = _pages.Authored ?? RequireSolution();
             var ids = solution.GetDocumentIdsWithFilePath(path);
             if (ids.IsEmpty) return new DocumentUpdateResult(false, request.Version, []);
-            if (_versions.TryGetValue(path, out current) && current == request.Version && _syncedTexts.TryGetValue(path, out var existingText))
+            if (_documents.OpenVersion(path) == request.Version && _documents.Text(path) is { } existingText)
             {
                 if (!string.Equals(existingText, request.Text, StringComparison.Ordinal)) throw new InvalidOperationException("A document version cannot identify different text. Increment its version before updating.");
             }
@@ -325,13 +306,9 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             {
                 foreach (var id in ids) solution = solution.WithDocumentText(id, SourceText.From(request.Text), PreservationMode.PreserveIdentity);
                 SetAuthoredSolution(solution);
-                _semanticRevision++;
-                _xamlBatchCache.Clear();
-                _diskUnavailable.Remove(path);
-                _diskPending.Remove(path);
-                _versions[path] = request.Version;
-                _syncedTexts[path] = request.Text;
-                _completions.Clear(); // Changes in any file can change the semantic context of a completion.
+                SemanticsChanged();
+                _disk.Settled(path);
+                _documents.Set(path, request.Version, request.Text);
                 _codeActions.Clear();
             }
             document = solution.GetDocument(ids[0])!;
@@ -339,15 +316,15 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         lock (_gate)
         {
-            if (_pageProjectionPending || _versions.GetValueOrDefault(path) != request.Version
-                || _solution?.GetDocument(document.Id) is not { } currentDocument)
-                return new(false, _versions.GetValueOrDefault(path), []);
+            if (_pages.Pending || _documents.Version(path) != request.Version
+                || CurrentSolution?.GetDocument(document.Id) is not { } currentDocument)
+                return new(false, _documents.Version(path), []);
             document = currentDocument;
         }
         if (!request.Analyze) return new DocumentUpdateResult(true, request.Version, []);
         var diagnostics = await GetDiagnosticsAsync(document, cancellationToken).ConfigureAwait(false);
         lock (_gate)
-            return _versions.TryGetValue(path, out var latest) && latest == request.Version && !_pageProjectionPending && ReferenceEquals(document.Project.Solution, _solution) ? new DocumentUpdateResult(true, request.Version, diagnostics) : new DocumentUpdateResult(false, _versions.GetValueOrDefault(path), []);
+            return _documents.OpenVersion(path) == request.Version && !_pages.Pending && ReferenceEquals(document.Project.Solution, CurrentSolution) ? new DocumentUpdateResult(true, request.Version, diagnostics) : new DocumentUpdateResult(false, _documents.Version(path), []);
     }
 
     public async Task CloseDocumentAsync(string path, CancellationToken cancellationToken)
@@ -360,31 +337,30 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         string? synchronizedText;
         lock (_gate)
         {
-            version = _versions.TryGetValue(path, out var current) ? current : null;
-            synchronizedText = _syncedTexts.GetValueOrDefault(path);
+            version = _documents.OpenVersion(path);
+            synchronizedText = _documents.Text(path);
         }
         var read = await ReadBoundedTextAsync(path, DiskDocumentCharacters, cancellationToken).ConfigureAwait(false);
         lock (_gate)
         {
             // A new edit/reopen can arrive while disk I/O is pending. It owns the buffer.
-            if ((_versions.TryGetValue(path, out var current) ? (long?)current : null) != version
-                || _syncedTexts.GetValueOrDefault(path) != synchronizedText) return;
-            if (_authoredSolution is { } solution)
+            if (_documents.OpenVersion(path) != version || _documents.Text(path) != synchronizedText) return;
+            if (_pages.Authored is { } solution)
             {
                 if (read.Text is not null || read.State == "Missing")
                     foreach (var id in solution.GetDocumentIdsWithFilePath(path))
                         solution = solution.WithDocumentText(id, SourceText.From(read.Text ?? ""), PreservationMode.PreserveIdentity);
-                if (_diskDocuments.ContainsKey(path))
+                if (_disk.Documents.ContainsKey(path))
                 {
-                    if (read.Text is null) _diskUnavailable[path] = read.Status ?? "The model source file is unavailable.";
-                    else _diskUnavailable.Remove(path);
-                    _diskPending.Remove(path);
+                    if (read.Text is null) _disk.Unavailable[path] = read.Status ?? "The model source file is unavailable.";
+                    else _disk.Unavailable.Remove(path);
+                    _disk.Pending.Remove(path);
                 }
                 SetAuthoredSolution(solution);
-                _semanticRevision++;
-                _xamlBatchCache.Clear();
+                SemanticRevision++;
+                _batchCache.Clear();
             }
-            _versions.Remove(path); _syncedTexts.Remove(path); _reportedDiagnostics.Remove(path);
+            _documents.Remove(path); _projectDiagnostics.Reported.Remove(path);
             _completions.Clear(); _codeActions.Clear();
         }
         await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
@@ -398,8 +374,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         lock (_gate)
         {
             document = GetDocument(request.Path, request.Version);
-            generation = ++_completionRequest;
-            _completions.Clear(); // Keep only the active popup, bounded to 1,500 entries and one solution snapshot.
+            generation = _completions.Begin(); // Keep only the active popup, bounded to 1,500 entries and one solution snapshot.
         }
         var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
         ValidatePosition(request.Position, text.Length);
@@ -411,14 +386,10 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var items = new List<CompletionEntry>();
         lock (_gate)
         {
-            if (generation != _completionRequest || _pageProjectionPending || !ReferenceEquals(document.Project.Solution, _solution))
+            if (!_completions.IsLatest(generation) || _pages.Pending || !ReferenceEquals(document.Project.Solution, CurrentSolution))
                 return new CompletionResult(request.Version, request.Position, 0, []);
             foreach (var item in list.ItemsList.Where(i => prefix.Length == 0 || i.FilterText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Take(1500))
-            {
-                var id = Guid.NewGuid().ToString("N");
-                _completions[id] = (document, request.Version, item);
-                items.Add(new CompletionEntry(id, item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix, item.DisplayText, null, item.Tags));
-            }
+                items.Add(new CompletionEntry(_completions.Add(document, request.Version, item), item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix, item.DisplayText, null, item.Tags));
         }
         return new CompletionResult(request.Version, list.Span.Start, list.Span.Length, items);
     }
@@ -427,11 +398,11 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
     {
         await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         _ = GetDocument(request.Path, request.Version);
-        if (!_completions.TryGetValue(request.ItemId, out var entry) || entry.Version != request.Version || !string.Equals(entry.Document.FilePath, Path.GetFullPath(request.Path), StringComparison.OrdinalIgnoreCase)) return null;
+        if (!_completions.TryGet(request.ItemId, out var entry) || entry.Version != request.Version || !string.Equals(entry.Document.FilePath, Path.GetFullPath(request.Path), StringComparison.OrdinalIgnoreCase)) return null;
         var service = CompletionService.GetService(entry.Document)!;
         var change = await service.GetChangeAsync(entry.Document, entry.Item, cancellationToken: cancellationToken).ConfigureAwait(false);
         lock (_gate)
-            return !_pageProjectionPending && ReferenceEquals(entry.Document.Project.Solution, _solution) && _completions.ContainsKey(request.ItemId) ? ToEdit(change.TextChange) : null;
+            return !_pages.Pending && ReferenceEquals(entry.Document.Project.Solution, CurrentSolution) && _completions.Contains(request.ItemId) ? ToEdit(change.TextChange) : null;
     }
 
     public async Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken)
@@ -508,15 +479,15 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             throw new InvalidOperationException("Language queries for generated compiler output are unavailable. Open the authored XAML or C# source instead.");
         lock (_gate)
         {
-            if (_pageProjectionPending) throw new InvalidOperationException("Current XAML fields are being synchronized; retry with the current buffers.");
-            if (_versions.GetValueOrDefault(path) != version) throw new InvalidOperationException("Document version is stale; synchronize the buffer and retry.");
+            if (_pages.Pending) throw new InvalidOperationException("Current XAML fields are being synchronized; retry with the current buffers.");
+            if (_documents.Version(path) != version) throw new InvalidOperationException("Document version is stale; synchronize the buffer and retry.");
             var solution = RequireSolution();
             var id = solution.GetDocumentIdsWithFilePath(path).FirstOrDefault() ?? throw new FileNotFoundException("This file is not part of the loaded C# workspace.", path);
             return solution.GetDocument(id)!;
         }
     }
 
-    private Solution RequireSolution() => _solution ?? throw new InvalidOperationException("Language services are unavailable. Check workspace loading diagnostics.");
+    private Solution RequireSolution() => CurrentSolution ?? throw new InvalidOperationException("Language services are unavailable. Check workspace loading diagnostics.");
 
     private async Task<IReadOnlyList<WorkspaceDiagnostic>> GetDiagnosticsAsync(Document document, CancellationToken cancellationToken)
     {
@@ -597,15 +568,14 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         Microsoft.CodeAnalysis.Workspace? workspace;
         lock (_gate)
         {
-            _solution = null;
-            _semanticRevision++;
+            CurrentSolution = null;
+            SemanticRevision++;
             ResetProjectAnalysis();
-            ResetPageProjection();
-            workspace = _workspace;
-            _workspace = null;
+            _pages.Reset();
+            workspace = _lifetime.ReplaceWorkspace(null);
         }
         workspace?.Dispose();
-        Interlocked.Exchange(ref _prepared, null)?.Workspace?.Dispose();
+        _lifetime.ExchangePrepared(null)?.Workspace?.Dispose();
     }
 }
 

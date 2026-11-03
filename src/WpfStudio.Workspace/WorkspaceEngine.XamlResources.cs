@@ -11,7 +11,6 @@ public sealed partial class WorkspaceEngine
 {
     private const int ResourceSnapshotFiles = 512;
     private const int ResourceSnapshotCharacters = 8_000_000;
-    private readonly Dictionary<ProjectId, ResourceInventory> _xamlResourceInventory = [];
     private sealed record ResourceInventory(IReadOnlyList<ProjectDiscovery.EvaluatedXamlResource> Items, bool IsExecutable);
     private sealed record ResourceText(DiskText Read, long? Version, string? Hash);
     private sealed record ResourceProject(Project Project, string Assembly, IReadOnlyList<ProjectDiscovery.EvaluatedXamlResource> Items,
@@ -109,9 +108,9 @@ public sealed partial class WorkspaceEngine
         HashSet<ProjectId> unavailable;
         lock (_gate)
         {
-            if (!ReferenceEquals(solution, _solution)) throw new InvalidOperationException("Project types changed while capturing XAML resources.");
-            inventories = _xamlResourceInventory.Where(item => wanted.Contains(item.Key)).ToDictionary(item => item.Key, item => item.Value);
-            xaml = _xamlInventory.Where(item => wanted.Contains(item.Key)).ToDictionary(item => item.Key, item => item.Value);
+            if (!ReferenceEquals(solution, CurrentSolution)) throw new InvalidOperationException("Project types changed while capturing XAML resources.");
+            inventories = _ownership.Resources.Where(item => wanted.Contains(item.Key)).ToDictionary(item => item.Key, item => item.Value);
+            xaml = _ownership.Files.Where(item => wanted.Contains(item.Key)).ToDictionary(item => item.Key, item => item.Value);
             unavailable = UnavailableModelProjects(solution);
         }
         var projects = new Dictionary<ProjectId, ResourceProject>();
@@ -229,7 +228,7 @@ public sealed partial class WorkspaceEngine
         }
         token.ThrowIfCancellationRequested();
         lock (_gate)
-            if (!ReferenceEquals(solution, _solution)) throw new InvalidOperationException("Project types changed while reading XAML resources.");
+            if (!ReferenceEquals(solution, CurrentSolution)) throw new InvalidOperationException("Project types changed while reading XAML resources.");
         return new(new ReadOnlyDictionary<string, ResourceText>(texts), new ReadOnlyDictionary<ProjectId, ResourceProject>(projects),
             new ReadOnlyDictionary<ProjectId, XamlResourceIndex>(indexes), complete,
             complete ? null : captureStatus ?? "Some evaluated XAML resource inputs are unavailable or exceed the snapshot limits.");

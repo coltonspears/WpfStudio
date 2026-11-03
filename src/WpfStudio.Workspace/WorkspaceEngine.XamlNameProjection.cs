@@ -35,14 +35,14 @@ public sealed partial class WorkspaceEngine
         XamlPageProjectionInput[] inputs;
         lock (_gate)
         {
-            authored = _authoredSolution ?? RequireSolution();
+            authored = _pages.Authored ?? RequireSolution();
             original = RequireSolution();
-            epoch = _pageProjectionEpoch;
+            epoch = _pages.Epoch;
             string pagePath = Path.GetFullPath(plan.XamlPath);
             var inventory = PageProjectionInventory();
             if (!inventory.Any(item => item.Path.Equals(pagePath, StringComparison.OrdinalIgnoreCase)))
                 return new(false, "The reviewed page is no longer an evaluated WPF Page.");
-            foreach (string unowned in updates.Keys.Where(path => !_xamlProjects.ContainsKey(path)
+            foreach (string unowned in updates.Keys.Where(path => !_ownership.Owners.ContainsKey(path)
                 && authored.GetDocumentIdsWithFilePath(path).IsEmpty).ToArray())
             {
                 if (plan.ExpectedDocuments.Any(expected => Path.GetFullPath(expected.Path).Equals(unowned, StringComparison.OrdinalIgnoreCase)))
@@ -52,13 +52,13 @@ public sealed partial class WorkspaceEngine
             foreach (var (path, update) in updates)
             {
                 if (IsGenerated(path)) return new(false, "Generated output cannot be supplied as an authored buffer.");
-                if (_versions.TryGetValue(path, out long version) && (version > update.Version
-                    || version == update.Version && _syncedTexts.GetValueOrDefault(path) != update.Text))
+                if (_documents.OpenVersion(path) is { } version && (version > update.Version
+                    || version == update.Version && _documents.Text(path) != update.Text))
                     return new(false, "A rename buffer version is stale or identifies different text.");
             }
             inputs = inventory.Select(item => new XamlPageProjectionInput(item.Project, item.Path,
-                updates.GetValueOrDefault(item.Path)?.Text ?? _syncedTexts.GetValueOrDefault(item.Path)
-                    ?? _pageProjectionTexts.GetValueOrDefault(item.Path) ?? "")).ToArray();
+                updates.GetValueOrDefault(item.Path)?.Text ?? _documents.Text(item.Path)
+                    ?? _pages.Texts.GetValueOrDefault(item.Path) ?? "")).ToArray();
         }
         var candidate = authored;
         foreach (var (path, update) in updates)
@@ -70,27 +70,21 @@ public sealed partial class WorkspaceEngine
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            if (!ReferenceEquals(authored, _authoredSolution) || !ReferenceEquals(original, _solution) || epoch != _pageProjectionEpoch)
+            if (!ReferenceEquals(authored, _pages.Authored) || !ReferenceEquals(original, CurrentSolution) || epoch != _pages.Epoch)
                 return new(false, "Sources changed while synchronizing the reviewed rename. Retry with current buffers.");
             foreach (var (path, update) in updates)
             {
-                _versions[path] = update.Version;
-                _syncedTexts[path] = update.Text;
-                _diskUnavailable.Remove(path);
-                _diskPending.Remove(path);
-                _pageProjectionReadStatuses.Remove(path);
+                _documents.Set(path, update.Version, update.Text);
+                _disk.Settled(path);
+                _pages.ReadStatuses.Remove(path);
             }
-            _authoredSolution = candidate;
-            _solution = result.Solution;
-            _pageProjection = result;
-            _pageProjectionPending = false;
-            _pageProjectionEpoch++;
-            _semanticRevision++;
-            _nameProjectionStatuses.Clear();
+            _pages.Authored = candidate;
+            CurrentSolution = result.Solution;
+            _pages.Invalidate(); // A build still running started from older sources.
+            _pages.Published(result);
             foreach (var page in result.Pages)
-                if (page.Status is not null) _nameProjectionStatuses[page.Input.Path] = page.Status;
-            _completions.Clear();
-            _xamlBatchCache.Clear();
+                if (page.Status is not null) _pages.NameStatuses[page.Input.Path] = page.Status;
+            SemanticsChanged();
         }
         // No historical plan is needed: restart and undo replay authored buffers.
         return new(true, BaselineRefreshed: true);
@@ -103,13 +97,13 @@ public sealed partial class WorkspaceEngine
         XamlGeneratedNameBridgeResult? result = null;
         lock (_gate)
         {
-            var page = _pageProjection?.Pages.SingleOrDefault(item => item.Input.ProjectId == project.Id
+            var page = _pages.Result?.Pages.SingleOrDefault(item => item.Input.ProjectId == project.Id
                 && string.Equals(item.Input.Path, Path.GetFullPath(source.Path), StringComparison.OrdinalIgnoreCase));
             if (page is null || field is not null && (field.DeclaringSyntaxReferences is not [var syntax]
                 || project.Solution.GetDocument(syntax.SyntaxTree)?.Id != page.ProjectionDocumentId))
                 return Task.FromResult(result);
             XamlGeneratedNameBridgeResult Missing(string status) => new(XamlGeneratedNameBridgeState.Unavailable, Status: status);
-            if (!ReferenceEquals(project.Solution, _solution) || _pageProjectionPending || page.Input.Text != source.Text)
+            if (!ReferenceEquals(project.Solution, CurrentSolution) || _pages.Pending || page.Input.Text != source.Text)
                 result = Missing("Current XAML fields are not synchronized with this buffer snapshot.");
             else
             {
@@ -139,7 +133,7 @@ public sealed partial class WorkspaceEngine
             .Select(location => origin.Solution.GetDocument(location.SourceTree!)?.Project).FirstOrDefault(item => item is not null);
         if (project is null || await project.GetCompilationAsync(token).ConfigureAwait(false) is not { } compilation) return null;
         XamlPageProjectionPage[] pages;
-        lock (_gate) pages = _pageProjection?.Pages.Where(page => page.Input.ProjectId == project.Id).ToArray() ?? [];
+        lock (_gate) pages = _pages.Result?.Pages.Where(page => page.Input.ProjectId == project.Id).ToArray() ?? [];
         foreach (var page in pages)
         {
             var result = await TryResolveProjectedNameAsync(project, compilation, new(page.Input.Path, page.Input.Text), null, field, token).ConfigureAwait(false);
