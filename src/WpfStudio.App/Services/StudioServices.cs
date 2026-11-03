@@ -61,17 +61,9 @@ public static class StudioServices
 
     public static IServiceCollection AddDebugging(this IServiceCollection services)
     {
-        services.AddSingleton<DebuggerInstaller>(_ => new());
-        services.AddSingleton(sp => new DebugSession { AdapterPath = sp.GetRequiredService<DebuggerInstaller>().Locate() ?? Path.Combine(AppContext.BaseDirectory, "debugger", "netcoredbg.exe") });
-        services.AddSingleton(sp =>
-        {
-            var installer = sp.GetRequiredService<DebuggerInstaller>();
-            return new DebuggerViewModel(sp.GetRequiredService<DebugSession>(), sp.GetRequiredService<IUiDispatcher>())
-            {
-                AdapterInstaller = installer.InstallAsync,
-                AdapterDescription = "netcoredbg " + DebuggerInstaller.Version
-            };
-        });
+        services.AddSingleton<IDebugAdapterProvider>(_ => new DebuggerInstaller());
+        services.AddSingleton<DebugSession>();
+        services.AddSingleton<DebuggerViewModel>();
         return services;
     }
 

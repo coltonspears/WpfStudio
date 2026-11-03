@@ -30,7 +30,7 @@ internal sealed class ShellTestContext : IAsyncDisposable
         Store = new DocumentStore(Path.Combine(Root, "state"));
         var settings = new SettingsStore(Path.Combine(Root, "state"));
         var database = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Root, "sql.json")), Dialogs, Dialogs);
-        _debugger = new DebuggerViewModel(new DebugSession(), Dispatcher);
+        _debugger = new DebuggerViewModel(new DebugSession(), Dispatcher, new WpfStudio.Core.Debugging.DebuggerInstaller(dataDirectory: Root));
         _terminal = new TerminalViewModel(Dispatcher);
         Shell = new ShellViewModel(Store, settings, Workspace, new BuildService(), new WpfIndexService(), new ScaffoldingService(), new WorkspaceEditTransaction(Store), Xaml, Dialogs, Dialogs, Dispatcher, _debugger, _terminal, database, NullLogger<ShellViewModel>.Instance,
             designer: previewClient == null ? null : new WpfStudio.App.Features.Designer.DesignerViewModel(previewClient, Dispatcher));

@@ -60,7 +60,7 @@ public sealed class DebuggerWatchTests
                 {
                     var session = new DebugSession();
                     await using var adapter = await ScriptedAdapter.AttachAsync(session);
-                    await using var model = new DebuggerViewModel(session, new TestDispatcher(dispatcher));
+                    await using var model = new DebuggerViewModel(session, new TestDispatcher(dispatcher), new NoDebugAdapter());
                     await test(model, adapter);
                     result.TrySetResult();
                 }

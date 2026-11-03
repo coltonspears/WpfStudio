@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.Core.Debugging;
 
@@ -8,7 +9,7 @@ namespace WpfStudio.Core.Debugging;
 /// portable copy without <c>debugger/</c> can debug without rebuilding. The archive is verified against the same
 /// checksum as <c>tools/Get-Debugger.ps1</c> before anything is extracted.
 /// </summary>
-public sealed class DebuggerInstaller(HttpMessageHandler? handler = null, string? dataDirectory = null)
+public sealed class DebuggerInstaller(HttpMessageHandler? handler = null, string? dataDirectory = null) : IDebugAdapterProvider
 {
     public const string Version = "3.2.0-1092";
     public const string ArchiveUrl = "https://github.com/Samsung/netcoredbg/releases/download/" + Version + "/netcoredbg-win64.zip";
@@ -18,6 +19,7 @@ public sealed class DebuggerInstaller(HttpMessageHandler? handler = null, string
     /// <summary>The release archive is about 5 MB; anything far larger is not the pinned file.</summary>
     public const long MaximumArchiveBytes = 64L * 1024 * 1024;
 
+    public string Description => "netcoredbg " + Version;
     public string Url { get; init; } = ArchiveUrl;
     public string ExpectedSha256 { get; init; } = ArchiveSha256;
     public string InstallDirectory => Path.Combine(dataDirectory ?? AppPaths.DataDirectory, "debugger", Version);
