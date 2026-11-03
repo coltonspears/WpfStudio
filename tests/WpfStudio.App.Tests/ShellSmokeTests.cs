@@ -64,26 +64,20 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var data = Path.Combine(Path.GetTempPath(), "WpfStudio-ui-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(data);
         var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton<IUiDispatcher>(new UiDispatcher(Dispatcher.CurrentDispatcher));
+        services.AddWpfStudio(new UiDispatcher(Dispatcher.CurrentDispatcher));
+        // Later registrations win: no real dialogs or profile, and hosts built by this configuration rather than located next to the test.
         var dialogs = new TestDialogs();
         services.AddSingleton<IFileDialogService>(dialogs); services.AddSingleton<IUserDialogService>(dialogs);
         services.AddSingleton(new DocumentStore(data)); services.AddSingleton(new SettingsStore(data));
         var configuration = typeof(ShellSmokeTests).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
         services.AddSingleton(new WorkspaceClient(Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_WORKSPACE_HOST") ?? Path.Combine(root, $"src/WpfStudio.WorkspaceHost/bin/{configuration}/net10.0/WpfStudio.WorkspaceHost.dll")));
-        services.AddSingleton<WorkspaceEditTransaction>(); services.AddSingleton<BuildService>();
-        services.AddSingleton<WpfIndexService>(); services.AddSingleton<ScaffoldingService>(); services.AddSingleton<XamlCompletionService>();
-        services.AddSingleton<DebugSession>(); services.AddSingleton<DebuggerViewModel>(); services.AddSingleton<TerminalViewModel>();
         services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(data, "connections.json")));
         services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(data, "query-recovery.json")));
-        services.AddDatabaseFeature(); services.AddStudioFeatures();
         services.AddSingleton<WpfStudio.Contracts.Profiling.IMemoryProfiler>(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(
             Path.Combine(root, $"src/WpfStudio.App/bin/{configuration}/net10.0-windows/ProfilingHost/WpfStudio.ProfilingHost.dll")));
         services.AddSingleton<WpfStudio.Runtime.Design.IPreviewClient>(_ => new WpfStudio.Runtime.Design.PreviewClient(
             Environment.GetEnvironmentVariable("WPFSTUDIO_PREVIEW_HOST_UNDER_TEST")));
-        services.AddSingleton<WpfStudio.App.Features.Designer.DesignerViewModel>();
         services.AddSingleton(new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(data, "assistant")));
-        services.AddSingleton<ShellViewModel>();
         await using var provider = services.BuildServiceProvider();
         var shell = provider.GetRequiredService<ShellViewModel>();
         var bindingErrors = new BindingErrors();
