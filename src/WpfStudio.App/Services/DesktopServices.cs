@@ -49,7 +49,7 @@ public sealed class ClipboardService : IClipboardService
 /// where callers must be. The tasks exist for the shared contract. Callers such as the close-and-save flow check state
 /// right after the answer, so deferring through the dispatcher would let other queued work run between the two.
 /// </summary>
-public sealed class DesktopDialogs(Func<Window?>? owner = null) : IFileDialogService, IUserDialogService
+public sealed class DesktopDialogs(Func<Window?>? owner = null, IThemeService? theme = null) : IFileDialogService, IUserDialogService
 {
     private readonly Func<Window?> _owner = owner ?? ShownMainWindow;
     // Before the window is shown, or after it closed, WPF rejects it as an owner.
@@ -87,7 +87,7 @@ public sealed class DesktopDialogs(Func<Window?>? owner = null) : IFileDialogSer
         stack.Children.Add(input); stack.Children.Add(buttons);
         var window = new Window { Title = title, Content = stack, SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = _owner(), Background = Application.Current?.TryFindResource("SurfaceBrush") as Brush ?? SystemColors.WindowBrush, Foreground = Application.Current?.TryFindResource("TextBrush") as Brush ?? SystemColors.WindowTextBrush };
         ok.Click += (_, _) => window.DialogResult = true;
-        WindowChromeService.Track(window);
+        theme?.Track(window);
         window.ContentRendered += (_, _) => { input.Focus(); input.SelectAll(); };
         return Task.FromResult(window.ShowDialog() == true ? input.Text : null);
     }

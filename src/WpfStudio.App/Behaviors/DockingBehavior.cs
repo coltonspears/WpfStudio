@@ -58,7 +58,7 @@ public static class DockingBehavior
             shell.LayoutSaveRequested += Save;
             shell.LayoutRestoreRequested += Restore;
             shell.LayoutResetRequested += Reset;
-            shell.ThemeChanged += ApplyTheme;
+            shell.Theme.Applied += ApplyTheme;
             if (manager.IsLoaded) Capture();
         }
         private void Loaded(object sender, RoutedEventArgs args) => Capture();
@@ -84,14 +84,12 @@ public static class DockingBehavior
                 if (content.ContentId == Workbenches.Welcome) welcomeContent = content.Content;
             }
             using var stream = new MemoryStream(); new XmlLayoutSerializer(manager).Serialize(stream); defaultLayout = stream.ToArray();
-            ApplyTheme(shell.ThemeName);
+            ApplyTheme(shell.Theme.Palette);
             SynchronizeDocuments();
         }
-        private void ApplyTheme(string name)
+        private void ApplyTheme(Palette palette)
         {
-            ThemeService.Apply(name);
-            var light = name.Equals("Light", StringComparison.OrdinalIgnoreCase);
-            if (manager.Theme is not Controls.StudioDockTheme current || current.IsLight != light) manager.Theme = new Controls.StudioDockTheme(light);
+            if (manager.Theme is not Controls.StudioDockTheme current || current.Palette != palette) manager.Theme = new Controls.StudioDockTheme(palette);
         }
         private void PropertyChanged(object? sender, PropertyChangedEventArgs args)
         {
@@ -256,7 +254,7 @@ public static class DockingBehavior
         {
             manager.Loaded -= Loaded; manager.DocumentClosing -= DocumentClosing; manager.ActiveContentChanged -= ActiveChanged;
             shell.PropertyChanged -= PropertyChanged; shell.Documents.CollectionChanged -= DocumentsChanged;
-            shell.ToolRequested -= ShowTool; shell.WorkbenchCloseRequested -= CloseWorkbench; shell.LayoutSaveRequested -= Save; shell.LayoutRestoreRequested -= Restore; shell.LayoutResetRequested -= Reset; shell.ThemeChanged -= ApplyTheme;
+            shell.ToolRequested -= ShowTool; shell.WorkbenchCloseRequested -= CloseWorkbench; shell.LayoutSaveRequested -= Save; shell.LayoutRestoreRequested -= Restore; shell.LayoutResetRequested -= Reset; shell.Theme.Applied -= ApplyTheme;
         }
     }
 }

@@ -29,12 +29,12 @@ public sealed partial class ShellViewModel
     // ------------------------------------------------------------------ Theme
     public bool IsLightTheme => ThemeName.Equals("Light", IgnoreCase);
     public bool IsDarkTheme => !IsLightTheme;
-    partial void OnThemeNameChanged(string value) { OnPropertyChanged(nameof(IsLightTheme)); OnPropertyChanged(nameof(IsDarkTheme)); }
+    partial void OnThemeNameChanged(string value) { OnPropertyChanged(nameof(IsLightTheme)); OnPropertyChanged(nameof(IsDarkTheme)); Theme.Apply(value); }
     [RelayCommand]
     private void SetTheme(string? name)
     {
         if (name is not ("Dark" or "Light") || name.Equals(ThemeName, IgnoreCase)) return;
-        ThemeName = name; ThemeChanged?.Invoke(ThemeName);
+        ThemeName = name;
     }
 
     // ------------------------------------------------------------------ Workspace summary

@@ -17,37 +17,26 @@ public static class WindowChromeService
     private const int DwmUseImmersiveDarkMode = 20, DwmUseImmersiveDarkModeBefore20H1 = 19, DwmCornerPreference = 33, DwmBorderColor = 34, DwmCaptionColor = 35, DwmTextColor = 36;
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    /// <summary>Applies frame colours to a window that has a handle; later windows call <see cref="Track"/>.</summary>
-    public static void ApplyFrame(Window window, bool light)
+    /// <summary>Applies frame colours to a window that has a handle; later windows call <see cref="IThemeService.Track"/>.</summary>
+    public static void ApplyFrame(Window window, Palette palette)
     {
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return;
         try
         {
-            int dark = light ? 0 : 1;
+            int dark = palette.IsLight ? 0 : 1;
             // Windows 10 builds before 19041 reject the documented id and know this attribute by the older one.
             if (DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int)) != 0) DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkModeBefore20H1, ref dark, sizeof(int));
             int round = 2; DwmSetWindowAttribute(hwnd, DwmCornerPreference, ref round, sizeof(int));
-            int border = ColorRef(light ? "#CBCED6" : "#2E3037"); DwmSetWindowAttribute(hwnd, DwmBorderColor, ref border, sizeof(int));
-            int caption = ColorRef(light ? "#EDEEF1" : "#131417"); DwmSetWindowAttribute(hwnd, DwmCaptionColor, ref caption, sizeof(int));
-            int text = ColorRef(light ? "#1C1D21" : "#E4E5E9"); DwmSetWindowAttribute(hwnd, DwmTextColor, ref text, sizeof(int));
+            int border = ColorRef(palette.WindowFrame); DwmSetWindowAttribute(hwnd, DwmBorderColor, ref border, sizeof(int));
+            int caption = ColorRef(palette.Window); DwmSetWindowAttribute(hwnd, DwmCaptionColor, ref caption, sizeof(int));
+            int text = ColorRef(palette.Text); DwmSetWindowAttribute(hwnd, DwmTextColor, ref text, sizeof(int));
         }
         catch (DllNotFoundException) { }
         catch (EntryPointNotFoundException) { }
     }
 
-    /// <summary>Applies the current theme once the window has a handle.</summary>
-    public static void Track(Window window)
-    {
-        if (new WindowInteropHelper(window).Handle != IntPtr.Zero) ApplyFrame(window, ThemeService.IsLight);
-        else window.SourceInitialized += (_, _) => ApplyFrame(window, ThemeService.IsLight);
-    }
-
-    private static int ColorRef(string hex)
-    {
-        var color = (Color)ColorConverter.ConvertFromString(hex);
-        return color.R | (color.G << 8) | (color.B << 16);
-    }
+    private static int ColorRef(Color color) => color.R | (color.G << 8) | (color.B << 16);
 }
 
 /// <summary>Caption buttons and maximized-bounds handling for a WindowChrome-based window.</summary>
@@ -73,12 +62,8 @@ public sealed class TitleBarController
         window.CommandBindings.Add(new CommandBinding(SystemCommands.MaximizeWindowCommand, (_, _) => ToggleMaximize()));
         window.CommandBindings.Add(new CommandBinding(SystemCommands.RestoreWindowCommand, (_, _) => ToggleMaximize()));
         window.StateChanged += (_, _) => UpdateBounds();
-        window.SourceInitialized += (_, _) =>
-        {
-            WindowChromeService.ApplyFrame(window, ThemeService.IsLight);
-            // Added after WindowChrome's own hook, so this hook sees hit tests first.
-            (PresentationSource.FromVisual(window) as HwndSource)?.AddHook(Hook);
-        };
+        // Added after WindowChrome's own hook, so this hook sees hit tests first.
+        window.SourceInitialized += (_, _) => (PresentationSource.FromVisual(window) as HwndSource)?.AddHook(Hook);
         UpdateBounds();
     }
 

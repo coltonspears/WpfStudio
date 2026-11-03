@@ -24,6 +24,7 @@ internal sealed class ShellTestContext : IAsyncDisposable
     public ShellViewModel Shell { get; }
     private readonly DebuggerViewModel _debugger;
     internal FakeDesktop Desktop { get; } = new();
+    internal FakeTheme Theme { get; } = new();
     private readonly TerminalViewModel _terminal;
     public ShellTestContext(WpfStudio.Runtime.Design.IPreviewClient? previewClient = null)
     {
@@ -33,7 +34,7 @@ internal sealed class ShellTestContext : IAsyncDisposable
         var database = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Root, "sql.json")), Dialogs, Dialogs);
         _debugger = new DebuggerViewModel(new DebugSession(), Dispatcher);
         _terminal = new TerminalViewModel(Dispatcher);
-        Shell = new ShellViewModel(Store, settings, Workspace, new BuildService(), new WpfIndexService(), new ScaffoldingService(), new WorkspaceEditTransaction(Store), Xaml, Dialogs, Dialogs, Desktop, Desktop, Dispatcher, _debugger, _terminal, database, NullLogger<ShellViewModel>.Instance,
+        Shell = new ShellViewModel(Store, settings, Workspace, new BuildService(), new WpfIndexService(), new ScaffoldingService(), new WorkspaceEditTransaction(Store), Xaml, Dialogs, Dialogs, Desktop, Desktop, Theme, Dispatcher, _debugger, _terminal, database, NullLogger<ShellViewModel>.Instance,
             designer: previewClient == null ? null : new WpfStudio.App.Features.Designer.DesignerViewModel(previewClient, Dispatcher));
     }
     public async Task<string> CreateFileAsync(string name, string content)

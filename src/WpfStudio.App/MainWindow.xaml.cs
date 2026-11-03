@@ -18,7 +18,7 @@ public partial class MainWindow : Window
         {
             if (_shell != null) _shell.SearchFocusRequested -= FocusSearch;
             _shell = DataContext as ShellViewModel;
-            if (_shell != null) _shell.SearchFocusRequested += FocusSearch;
+            if (_shell != null) { _shell.SearchFocusRequested += FocusSearch; _shell.Theme.Track(this); }
         };
     }
 

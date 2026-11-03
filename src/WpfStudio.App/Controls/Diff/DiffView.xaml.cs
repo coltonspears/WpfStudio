@@ -106,9 +106,8 @@ public partial class DiffView : UserControl
         _inline.TextArea.TextView.VisualLinesChanged += (_, _) => UpdateRulerViewport();
         _splitRuler.Navigate += fraction => ScrollToFraction(_right, fraction);
         _inlineRuler.Navigate += fraction => ScrollToFraction(_inline, fraction);
-        // WPF can raise Loaded twice without Unloaded between, as when a tab is re-hosted.
-        Loaded += (_, _) => { ThemeService.Applied -= ThemeApplied; ThemeService.Applied += ThemeApplied; ApplyHighlighting(); };
-        Unloaded += (_, _) => ThemeService.Applied -= ThemeApplied;
+        Loaded += (_, _) => ApplyHighlighting();
+        SetResourceReference(ThemePaletteProperty, Palette.ResourceKey);
         UpdateLabels();
         ModeChanged();
         ShowMessage(EmptyText);
@@ -411,7 +410,11 @@ public partial class DiffView : UserControl
         foreach (var editor in new[] { _left, _right, _inline }) editor.SyntaxHighlighting = definition;
     }
 
-    private void ThemeApplied(bool light)
+    // Follows the application resource, so a closed view holds no subscription on any service.
+    private static readonly DependencyProperty ThemePaletteProperty = DependencyProperty.Register("ThemePalette", typeof(Palette), typeof(DiffView),
+        new PropertyMetadata(null, (view, _) => ((DiffView)view).ThemeApplied()));
+
+    private void ThemeApplied()
     {
         foreach (var editor in new[] { _left, _right, _inline })
         {

@@ -21,15 +21,16 @@ internal static class DiffPalette
         brush.Freeze();
         return brush;
     }
+    private static bool IsLight(FrameworkElement owner) => owner.TryFindResource(Palette.ResourceKey) is Palette { IsLight: true };
     public static (Brush Line, Brush Word, Color Solid) Removed(FrameworkElement owner)
     {
         var color = Color(owner, "DangerBrush", Colors.IndianRed);
-        return ThemeService.IsLight ? (Tint(color, 36), Tint(color, 84), color) : (Tint(color, 30), Tint(color, 78), color);
+        return IsLight(owner) ? (Tint(color, 36), Tint(color, 84), color) : (Tint(color, 30), Tint(color, 78), color);
     }
     public static (Brush Line, Brush Word, Color Solid) Added(FrameworkElement owner)
     {
         var color = Color(owner, "SuccessBrush", Colors.SeaGreen);
-        return ThemeService.IsLight ? (Tint(color, 36), Tint(color, 84), color) : (Tint(color, 28), Tint(color, 74), color);
+        return IsLight(owner) ? (Tint(color, 36), Tint(color, 84), color) : (Tint(color, 28), Tint(color, 74), color);
     }
     public static Brush Filler(FrameworkElement owner)
     {

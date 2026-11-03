@@ -50,10 +50,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IDesktopService desktop, IClipboardService clipboard, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null, Features.Profiling.MemoryProfilerViewModel? memoryProfiler = null)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IDesktopService desktop, IClipboardService clipboard, IThemeService theme, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null, Features.Profiling.MemoryProfilerViewModel? memoryProfiler = null)
     {
-        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _desktop = desktop; _clipboard = clipboard; _dispatcher = dispatcher; _logger = logger;
+        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _desktop = desktop; _clipboard = clipboard; Theme = theme; _dispatcher = dispatcher; _logger = logger;
         Debugger = debugger; Terminal = terminal; Database = database;
+        // System colours and syntax highlighting are not set until a theme is applied.
+        theme.Apply(ThemeName);
         MemoryProfiler = memoryProfiler ?? new(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(), files, clipboard);
         Designer = designer ?? new(new WpfStudio.Runtime.Design.PreviewClient(), dispatcher);
         Designer.SourceRequested += source => _ = GuardAsync(() => NavigateAsync(source.Path, source.Line, source.Column));
@@ -86,6 +88,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         };
         workspace.WorkerExited += (_, reason) => dispatcher.Post(() => { Status = "Language worker stopped. Use Restart language service to reconnect."; AppendOutput(reason); });
     }
+    public IThemeService Theme { get; }
     public DebuggerViewModel Debugger { get; }
     public TerminalViewModel Terminal { get; }
     public DatabasePaneViewModel Database { get; }
@@ -105,7 +108,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public event Action? LayoutResetRequested;
     public event Action? LayoutSaveRequested;
     public event Action? LayoutRestoreRequested;
-    public event Action<string>? ThemeChanged;
 
     [ObservableProperty] public partial WorkspaceSnapshot? Workspace { get; set; }
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SaveCommand))] public partial EditorViewModel? ActiveDocument { get; set; }
@@ -160,7 +162,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var assistant = Features?.Assistant.InitializeAsync() ?? Task.CompletedTask;
         var settings = await _settings.LoadAsync();
         await assistant;
-        ThemeName = settings.Theme; ThemeChanged?.Invoke(ThemeName);
+        ThemeName = settings.Theme;
         ShowInlayHints = settings.ShowInlayHints;
         ShowInlineBlame = settings.ShowInlineBlame;
         ShowCodeLens = settings.ShowCodeLens;
@@ -844,7 +846,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
     [RelayCommand] private void QuickOpen() => Palette.OpenFiles();
     [RelayCommand] private void CommandPalette() => Palette.OpenCommands();
-    [RelayCommand] private void ToggleTheme() { ThemeName = ThemeName == "Dark" ? "Light" : "Dark"; ThemeChanged?.Invoke(ThemeName); }
+    [RelayCommand] private void ToggleTheme() => ThemeName = ThemeName == "Dark" ? "Light" : "Dark";
     [RelayCommand] private void ShowTool(string? name)
     {
         if (name == Workbenches.Packages) _ = OpenPackagesCommand.ExecuteAsync(null);

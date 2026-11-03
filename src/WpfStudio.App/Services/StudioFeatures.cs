@@ -51,6 +51,7 @@ public static class StudioFeatureRegistration
 {
     public static IServiceCollection AddStudioFeatures(this IServiceCollection services)
     {
+        services.AddSingleton<IThemeService, ThemeService>();
         services.AddSingleton<IDesktopService, DesktopService>();
         services.AddSingleton<IClipboardService>(ClipboardService.Shared);
         services.AddSingleton<WpfStudio.Contracts.Profiling.IMemoryProfiler, WpfStudio.Runtime.Profiling.MemoryProfilerClient>();

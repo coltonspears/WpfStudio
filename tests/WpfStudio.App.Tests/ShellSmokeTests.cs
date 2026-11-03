@@ -287,10 +287,10 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await Idle();
             var reviewDiff = Descendants<WpfStudio.App.Controls.Diff.DiffView>(window).Single(view => view.Name == "ReviewDiff");
             Assert.True(reviewDiff.IsVisible);
-            // WPF can raise Loaded again without Unloaded between; the static theme event must still hold one subscription.
-            reviewDiff.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
-            var themeHandlers = (Delegate)typeof(ThemeService).GetField(nameof(ThemeService.Applied), BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
-            Assert.Single(themeHandlers.GetInvocationList(), handler => ReferenceEquals(handler.Target, reviewDiff));
+            // The diff view follows the palette as a resource; applying a theme reaches it and leaves it no subscription to drop.
+            Assert.Same(shell.Theme.Palette, reviewDiff.TryFindResource(Palette.ResourceKey));
+            shell.Theme.Apply("Light"); Assert.Same(Palette.Light, reviewDiff.TryFindResource(Palette.ResourceKey));
+            shell.Theme.Apply(shell.ThemeName); await Idle();
             Assert.Equal(shell.ChangeReview.SelectedChange.After, reviewDiff.After);
             Assert.True(reviewDiff.ShowsSplit);
             Assert.Contains(reviewDiff.Layout!.Right, line => line.Kind == WpfStudio.App.Controls.Diff.DiffLineKind.Added && line.Text.Contains("Hello"));
@@ -337,7 +337,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
                 await File.WriteAllTextAsync(Path.Combine(root, "artifacts/performance/ui-measurements.json"), json);
                 output.WriteLine(json);
             }
-            await VerifyColtonGptViewsAsync(root, shell.ThemeName);
+            await VerifyColtonGptViewsAsync(root, shell.Theme, shell.ThemeName);
             await VerifyMemoryProfilerAsync(root, window, manager, shell);
             await VerifyProjectXamlAnalysisAsync(root, data, window, shell);
             await VerifyXamlEventsAsync(root, data, window, shell);
@@ -2033,7 +2033,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         pane.Hide();
     }
 
-    private static async Task VerifyColtonGptViewsAsync(string root, string restoreTheme)
+    private static async Task VerifyColtonGptViewsAsync(string root, IThemeService themes, string restoreTheme)
     {
         using var http = new System.Net.Http.HttpClient();
         using var client = new WpfStudio.App.Features.ColtonGpt.OpenRouterClient(http);
@@ -2066,7 +2066,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.False(assistant.SendCommand.CanExecute(null));
             foreach (var theme in new[] { "Dark", "Light" })
             {
-                ThemeService.Apply(theme); await Idle();
+                themes.Apply(theme); await Idle();
                 Assert.True(pane.ActualWidth >= 280);
                 Assert.True(settingsView.ActualWidth >= 320);
                 foreach (var text in Descendants<TextBox>(content))
@@ -2077,7 +2077,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
                 Screenshot(content, Path.Combine(root, "artifacts/screenshots/coltongpt-" + theme.ToLowerInvariant() + ".png"));
             }
         }
-        finally { window.Close(); ThemeService.Apply(restoreTheme); }
+        finally { window.Close(); themes.Apply(restoreTheme); }
     }
 
     private static async Task VerifyBindingExplanationAsync(FrameworkElement pane,
