@@ -260,7 +260,7 @@ internal sealed partial class RunningInspector(BindingTraceBuffer traces, Wpf.Di
 
     private static string PropertyName(DependencyObject target, DependencyProperty property)
     {
-        var wrapper = target.GetType().GetProperty(property.Name, BindingFlags.Public | BindingFlags.Instance);
+        var wrapper = Wpf.PropertyEditing.PropertyWrappers.Find(target.GetType(), property.Name);
         return wrapper?.PropertyType == property.PropertyType ? property.Name : property.OwnerType.Name + "." + property.Name;
     }
 

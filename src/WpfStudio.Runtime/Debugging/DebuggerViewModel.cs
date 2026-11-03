@@ -82,6 +82,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private string? statePath;
     private int threadId;
     private int stopVersion;
+    private int watchRefresh;
     private readonly List<string> watchExpressions = [];
     public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher)
     {
@@ -147,7 +148,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     {
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(workspacePath).ToUpperInvariant())))[..20];
         statePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "debugging", hash + ".json");
-        Breakpoints.Clear(); watchExpressions.Clear(); Watches.Clear();
+        Breakpoints.Clear(); watchExpressions.Clear(); ResetWatchRows();
         if (!File.Exists(statePath)) return;
         try
         {
@@ -223,9 +224,9 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         var expression = WatchExpression.Trim(); if (!watchExpressions.Contains(expression)) watchExpressions.Add(expression);
         WatchExpression = ""; await SaveStateAsync();
         if (SelectedFrame is not null && IsStopped) await RefreshWatchesAsync(SelectedFrame.Id);
-        else { Watches.Clear(); foreach (var value in watchExpressions) Watches.Add(new DebugVariableViewModel(value, "Run to evaluate", null, 0)); }
+        else { ResetWatchRows(); foreach (var value in watchExpressions) Watches.Add(new DebugVariableViewModel(value, "Run to evaluate", null, 0)); }
     });
-    [RelayCommand] private Task ClearWatchesAsync() => GuardAsync(async () => { watchExpressions.Clear(); Watches.Clear(); await SaveStateAsync(); });
+    [RelayCommand] private Task ClearWatchesAsync() => GuardAsync(async () => { watchExpressions.Clear(); ResetWatchRows(); await SaveStateAsync(); });
     [RelayCommand] private void ClearOutput() { lock (outputGate) pendingOutput.Clear(); Output = ""; }
 
     private async Task ApplyFileBreakpointsAsync(string path)
@@ -389,18 +390,21 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private async Task RefreshWatchesAsync(int frameId)
     {
         var version = stopVersion;
-        Watches.Clear();
+        var refresh = ResetWatchRows();
+        bool Current() => refresh == watchRefresh && version == stopVersion && IsStopped && SelectedFrame?.Id == frameId;
         foreach (var expression in watchExpressions.ToArray())
         {
             try
             {
                 var value = await session.RequestAsync("evaluate", new { expression, frameId, context = "watch" });
-                if (version != stopVersion || !IsStopped || SelectedFrame?.Id != frameId) return;
+                if (!Current()) return;
                 Watches.Add(new DebugVariableViewModel(expression, Text(value, "result"), Text(value, "type"), Int(value, "variablesReference"), LoadVariablesAsync));
             }
-            catch (Exception ex) { Watches.Add(new DebugVariableViewModel(expression, ex.Message, null, 0)); }
+            catch (Exception ex) { if (!Current()) return; Watches.Add(new DebugVariableViewModel(expression, ex.Message, null, 0)); }
         }
     }
+    /// <summary>Empties the rows and supersedes any refresh still awaiting the adapter, whose answers would land on top of the newer rows.</summary>
+    private int ResetWatchRows() { Watches.Clear(); return ++watchRefresh; }
     private async Task SaveStateAsync()
     {
         if (statePath is null) return;

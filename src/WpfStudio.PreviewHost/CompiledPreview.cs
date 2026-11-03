@@ -29,10 +29,26 @@ internal static class CompiledPreview
         // Activating the built class invokes its own constructor/InitializeComponent
         // and connection handlers. The editor buffer is deliberately not parsed.
         var view = useFactory ? scenario!.CreateView(type) : (FrameworkElement)Activator.CreateInstance(type!)!;
-        string hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(assembly.Location)));
+        string hash = AssemblySha256(assembly.Location);
         string? resourcePath = string.IsNullOrWhiteSpace(request.ApplicationResourcePath) ? null : request.ApplicationResourcePath;
         return (view, new PreviewBuildProvenance(Path.GetFullPath(request.AssemblyPath!), assembly.GetName().Name ?? "",
             hash, assembly.ManifestModule.ModuleVersionId.ToString("D"), view.GetType().FullName!, resourcePath));
+    }
+
+    private static readonly Dictionary<string, (long Length, DateTime Written, string Hash)> AssemblyHashes = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Hashes the file only when its length or last-write time changed, so a render does not reread an unchanged build.</summary>
+    internal static string AssemblySha256(string path)
+    {
+        // Stamp before hashing: a rebuild during the read leaves an older stamp, so the next render hashes again.
+        var file = new FileInfo(path);
+        (long length, DateTime written) = (file.Length, file.LastWriteTimeUtc);
+        lock (AssemblyHashes)
+            if (AssemblyHashes.TryGetValue(path, out var known) && known.Length == length && known.Written == written) return known.Hash;
+        using var stream = File.OpenRead(path);
+        string hash = Convert.ToHexString(SHA256.HashData(stream));
+        lock (AssemblyHashes) AssemblyHashes[path] = (length, written, hash);
+        return hash;
     }
 
     internal static bool PrepareApplication(PreviewRequest request, Assembly assembly, bool optionalResources = false)

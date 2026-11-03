@@ -6,6 +6,7 @@ using System.Windows;
 using System.Xml;
 using System.Xml.Linq;
 using WpfStudio.Contracts;
+using WpfStudio.Wpf.PropertyEditing;
 
 namespace WpfStudio.PreviewHost;
 
@@ -167,7 +168,7 @@ internal sealed partial class PreviewDocument
         if (PreviewSource.GetId(target) is not { } sourceId || !_sourceTypes.TryGetValue(sourceId, out var type)) return false;
         if (!attached)
         {
-            var wrapper = type.GetProperty(property.Name, BindingFlags.Public | BindingFlags.Instance);
+            var wrapper = PropertyWrappers.Find(type, property.Name);
             return wrapper?.SetMethod?.IsPublic == true && wrapper.PropertyType == property.PropertyType;
         }
         return property.OwnerType.GetMethods(BindingFlags.Public | BindingFlags.Static).Any(m =>

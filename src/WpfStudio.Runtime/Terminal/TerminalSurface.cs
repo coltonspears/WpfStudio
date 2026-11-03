@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using CommunityToolkit.Mvvm.Input;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using WpfStudio.Contracts;
@@ -12,7 +13,7 @@ namespace WpfStudio.Runtime.Terminal;
 /// Reusable presentation adapter: owns browser events, resize and render acknowledgements.
 /// A renderer lives as long as its session, so WPF reparenting and tab virtualization retain scrollback.
 /// </summary>
-public sealed class TerminalSurface : ContentControl
+public sealed partial class TerminalSurface : ContentControl
 {
     private static readonly Dictionary<ConPtySession, Renderer> Renderers = [];
     public static readonly DependencyProperty SessionProperty = DependencyProperty.Register(nameof(Session), typeof(ConPtySession), typeof(TerminalSurface), new PropertyMetadata(null, Changed));
@@ -24,13 +25,13 @@ public sealed class TerminalSurface : ContentControl
     private async Task AttachAsync()
     {
         if (Session is not { } session) return;
+        Renderer? renderer = null;
         try
         {
-            if (!Renderers.TryGetValue(session, out var renderer))
+            if (!Renderers.TryGetValue(session, out renderer))
             {
                 renderer = new Renderer(session, Dispatcher);
                 Renderers.Add(session, renderer);
-                session.Closed += () => _ = Dispatcher.BeginInvoke(() => { if (Renderers.Remove(session, out var removed)) removed.Dispose(); });
             }
             if (renderer.Owner is { } previous && previous != this) previous.Content = null;
             renderer.Owner = this;
@@ -40,12 +41,25 @@ public sealed class TerminalSurface : ContentControl
         }
         catch (Exception ex)
         {
-            if (Renderers.Remove(session, out var failedRenderer)) failedRenderer.Dispose();
-            await session.DisposeAsync();
-            if (ReferenceEquals(Session, session))
-                Content = new TextBlock { Text = "Terminal renderer could not start. Ensure the Microsoft Edge WebView2 Runtime is installed.\n" + ex.Message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) };
+            // The renderer is only a view of the session. The shell keeps running and its output waits in the session's bounded channel for the next renderer.
+            if (renderer is not null)
+            {
+                if (Renderers.TryGetValue(session, out var current) && ReferenceEquals(current, renderer)) Renderers.Remove(session);
+                renderer.Dispose();
+            }
+            if (ReferenceEquals(Session, session)) Content = RendererFailure(ex.Message);
         }
     }
+    [RelayCommand] private Task RetryRendererAsync() => AttachAsync();
+    private StackPanel RendererFailure(string reason) => new()
+    {
+        Margin = new Thickness(16),
+        Children =
+        {
+            new TextBlock { Text = "Terminal renderer could not start. Your shell session is still running. Ensure the Microsoft Edge WebView2 Runtime is installed, then retry.\n" + reason, TextWrapping = TextWrapping.Wrap },
+            new Button { Content = "Retry renderer", Command = RetryRendererCommand, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0) }
+        }
+    };
 
     private sealed class Renderer : IDisposable
     {
@@ -60,7 +74,8 @@ public sealed class TerminalSurface : ContentControl
         private int disposed;
         public TerminalSurface? Owner { get; set; }
         public WebView2 Browser { get; } = new();
-        public Renderer(ConPtySession session, System.Windows.Threading.Dispatcher dispatcher) { this.session = session; this.dispatcher = dispatcher; }
+        public Renderer(ConPtySession session, System.Windows.Threading.Dispatcher dispatcher) { this.session = session; this.dispatcher = dispatcher; session.Closed += OnSessionClosed; }
+        private void OnSessionClosed() => dispatcher.BeginInvoke(() => { if (Renderers.Remove(session, out var removed)) removed.Dispose(); });
         public Task InitializeAsync() => initialization ??= InitializeCoreAsync();
         private async Task InitializeCoreAsync()
         {
@@ -117,8 +132,10 @@ public sealed class TerminalSurface : ContentControl
         }
         private void ProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs args)
         {
-            if (args.ProcessFailedKind is CoreWebView2ProcessFailedKind.BrowserProcessExited or CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.FrameRenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)
-                FailAsync("Terminal renderer stopped (" + args.ProcessFailedKind + ").").Forget();
+            if (args.ProcessFailedKind is not (CoreWebView2ProcessFailedKind.BrowserProcessExited or CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.FrameRenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)) return;
+            var message = "Terminal renderer stopped (" + args.ProcessFailedKind + ").";
+            // Before the page reports ready this is an initialisation failure, which the attaching surface recovers from.
+            if (!ready.TrySetException(new InvalidOperationException(message))) FailAsync(message).Forget();
         }
         private async Task FailAsync(string message)
         {
@@ -139,6 +156,7 @@ public sealed class TerminalSurface : ContentControl
         public void Dispose()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+            session.Closed -= OnSessionClosed;
             lifetime.Cancel(); acknowledgement?.TrySetCanceled();
             ready.TrySetCanceled();
             if (Owner is not null) Owner.Content = null;
