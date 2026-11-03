@@ -1,0 +1,158 @@
+# Analyzer policy for src/ and tests/. Directory.Build.props includes this file for those projects only.
+#
+# It is deliberately not named .globalconfig: the compiler discovers that name for every project below it, which would
+# reach samples/, tests/*/Fixtures and tools/. Those stand in for user projects and are not held to this policy.
+#
+# TreatWarningsAsErrors turns every "warning" here into a build failure. A rule stays on only if it finds real defects
+# or prevents a mistake this code has actually made, at a false-positive rate people will tolerate. Hit counts below are
+# unique sites measured before the cleanup, as src + tests. Style and naming rules are off on purpose: the dense house
+# style is not up for debate here. For a legitimate exception use the narrowest suppression, with a reason.
+#
+# Measured and not adopted as packages:
+#   IDisposableAnalyzers (358 hits, 14 rules): ownership transfer, shared CancellationTokenSource and SemaphoreSlim fields,
+#     and using scopes in tests. Reading the product hits found no real leak.
+#   Meziantou.Analyzer (11,161 hits, 57 rules): duplicates CA rules or enforces style. The rest (MA0130, MA0169, MA0054,
+#     MA0040) were deliberate here: type.GetType() probes for custom Type metadata, and tokens stop being forwarded on purpose.
+#   Roslynator.Analyzers (1,208 hits, 33 rules): almost all style. RCS1075 repeats CA1031, whose guards are deliberate.
+
+is_global = true
+
+# ---- .NET analyzers: AnalysisMode=Recommended turns on about 145 rules, and 25 of them fire here. ----
+
+# Kept because they found real defects.
+# CA1310 (1 + 25): culture-sensitive StartsWith/EndsWith, which behave differently on some machines.
+dotnet_diagnostic.CA1310.severity = warning
+# CA2016 (2 + 0): a token not forwarded. Pass CancellationToken.None when a fault path must still run.
+dotnet_diagnostic.CA2016.severity = warning
+# CA1806 (6 + 4): an ignored result. An HRESULT that is best effort takes an explicit discard.
+dotnet_diagnostic.CA1806.severity = warning
+# CA1851 (2 + 0): enumerating lazy LINQ twice repeats the work. Not in Recommended.
+dotnet_diagnostic.CA1851.severity = warning
+# CA1869 (5 + 13): a JsonSerializerOptions per call rebuilds its metadata cache each time.
+dotnet_diagnostic.CA1869.severity = warning
+
+# Kept because they prevent a mistake and cost almost nothing.
+# CA2008 (0): ContinueWith or StartNew on TaskScheduler.Current can land on the UI thread. Not in Recommended.
+dotnet_diagnostic.CA2008.severity = warning
+# CA2201 (0 + 1): throwing reserved exception types.
+dotnet_diagnostic.CA2201.severity = warning
+# CA2211 (0 + 3): visible mutable static fields.
+dotnet_diagnostic.CA2211.severity = warning
+
+# Off because applying them would harm this code. Do not mass-apply these.
+# CA2007 (785 + 2077): ConfigureAwait(false) in a view model moves the continuation off the UI thread, the crash PR #14 fixed.
+dotnet_diagnostic.CA2007.severity = none
+# CA1822 (53 + 5): XAML, bindings, [RelayCommand], source generators and reflection-based tests depend on the current shape.
+dotnet_diagnostic.CA1822.severity = none
+# CA1515 (290 + 38): the same shape dependency, and tests reach these types across assemblies.
+dotnet_diagnostic.CA1515.severity = none
+# CA1031 (160 + 27): the guards catch everything on purpose so that one failure cannot take down the IDE.
+dotnet_diagnostic.CA1031.severity = none
+
+# Off because they were noisy. Every product hit was read and none was a real leak.
+# CA2000 (14 + 164): ownership transfer into DependencyProperties, JsonRpc and fields.
+dotnet_diagnostic.CA2000.severity = none
+# CA1001 (14 + 0) and CA2213 (15 + 2): SemaphoreSlim and CancellationTokenSource without a timer hold nothing to release, and live requests may still use them.
+dotnet_diagnostic.CA1001.severity = none
+dotnet_diagnostic.CA2213.severity = none
+# CA1063 (2 + 0), CA1816 (2 + 0) and CA2216 (1 + 0): the finalizer pattern, and nothing here declares a finalizer it relies on.
+dotnet_diagnostic.CA1063.severity = none
+dotnet_diagnostic.CA1816.severity = none
+dotnet_diagnostic.CA2216.severity = none
+# CA2025 (7 + 9): a Task counts as IDisposable, and the rest are cancelled and awaited in a finally.
+dotnet_diagnostic.CA2025.severity = none
+# CA1508 (4 + 0): all four were false positives from its data flow.
+dotnet_diagnostic.CA1508.severity = none
+# CA1812 (5 + 13): types created through new() constraints, DI and serialization.
+dotnet_diagnostic.CA1812.severity = none
+# CA1849 (48 + 76): mostly Cancel versus CancelAsync, the reason VSTHRD103 is off, then MemoryStream and console writes.
+dotnet_diagnostic.CA1849.severity = none
+# CA1305 (32 + 10): display text uses the user's culture on purpose, and Convert.ToInt32 reads numbers already typed by reflection.
+dotnet_diagnostic.CA1305.severity = none
+# CA1307 (100 + 758): the flagged overloads are already ordinal. CA1310 covers the ones that are not.
+dotnet_diagnostic.CA1307.severity = none
+# CA1308 (32 + 5): lower-casing here builds keys and display text, not security decisions.
+dotnet_diagnostic.CA1308.severity = none
+# CA1062 (393 + 33): nullable reference types already cover this inside one product.
+dotnet_diagnostic.CA1062.severity = none
+# CA2100 (2 + 0): one query is constant and the other is what the user typed into a query editor. Both are the feature.
+dotnet_diagnostic.CA2100.severity = none
+# CA5350 (1 + 3): SHA-1 here matches the checksum the XAML compiler emits. It is not security.
+dotnet_diagnostic.CA5350.severity = none
+# CA5392 (53 + 52): every P/Invoke targets a system DLL.
+dotnet_diagnostic.CA5392.severity = none
+
+# Off because they are API design for shipped libraries, not defects in an application.
+# CA1068 (27 + 0), CA1725 (20 + 4), CA1051 (3 + 5).
+dotnet_diagnostic.CA1068.severity = none
+dotnet_diagnostic.CA1725.severity = none
+dotnet_diagnostic.CA1051.severity = none
+
+# Off because they are micro-optimizations on paths that are not hot.
+# CA1848 (6 + 6), CA1859 (31 + 10), CA1861 (16 + 34), CA1826 (13 + 1), CA1864 (0 + 1), CA1870 (1 + 0), CA1838 (1 + 0), CA1512 (2 + 0).
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1859.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA1826.severity = none
+dotnet_diagnostic.CA1864.severity = none
+dotnet_diagnostic.CA1870.severity = none
+dotnet_diagnostic.CA1838.severity = none
+dotnet_diagnostic.CA1512.severity = none
+
+# Off because they are naming. CA1711 (0 + 2), CA1716 (1 + 0), CA1720 (7 + 0).
+dotnet_diagnostic.CA1711.severity = none
+dotnet_diagnostic.CA1716.severity = none
+dotnet_diagnostic.CA1720.severity = none
+
+# ---- Threading analyzers, loaded for src/ only. Test harnesses own their STA loop, so VSTHRD110 fires on dispatcher.BeginInvoke(async ...) (22 tests) without finding anything; xUnit1031 covers blocking. ----
+
+# async void, sync-over-async and unobserved fire-and-forget. VSTHRD110 treats _ = task as observed, so that form still relies on review; TaskObservation.Forget is the primitive.
+dotnet_diagnostic.VSTHRD100.severity = warning
+dotnet_diagnostic.VSTHRD002.severity = warning
+dotnet_diagnostic.VSTHRD110.severity = warning
+# VSTHRD001 and VSTHRD003 only apply with JoinableTaskFactory, which this code does not use.
+dotnet_diagnostic.VSTHRD001.severity = none
+dotnet_diagnostic.VSTHRD003.severity = none
+# VSTHRD103 is mostly Cancel versus CancelAsync.
+dotnet_diagnostic.VSTHRD103.severity = none
+# VSTHRD200 is a naming preference.
+dotnet_diagnostic.VSTHRD200.severity = none
+
+# ---- Banned APIs, loaded for src/ only. BannedSymbols.txt holds the list and the reason for each entry. ----
+
+dotnet_diagnostic.RS0030.severity = warning
+
+# ---- WpfAnalyzers: dependency property and routed event correctness. Rules without an entry keep their defaults and do not fire today. ----
+
+# WPF0012, WPF0013 and WPF0022 (12 + 5): an accessor that claims non-null for a property whose default is null.
+dotnet_diagnostic.WPF0012.severity = warning
+dotnet_diagnostic.WPF0013.severity = warning
+dotnet_diagnostic.WPF0022.severity = warning
+# WPF0041 (138 + 22): assignments to privately built elements with no binding to lose. A scan found none on a bound property, and SetCurrentValue changes value precedence.
+dotnet_diagnostic.WPF0041.severity = none
+# Naming and documentation. WPF0002 (0 + 4), WPF0005 (27 + 3), WPF0023 (15 + 0), WPF0033 (31 + 2), WPF0060 (75 + 13), WPF0061 (62 + 4), WPF0070 (19 + 0), WPF0071 (17 + 0), WPF0073 (3 + 0), WPF0091 (2 + 0).
+dotnet_diagnostic.WPF0002.severity = none
+dotnet_diagnostic.WPF0005.severity = none
+dotnet_diagnostic.WPF0023.severity = none
+dotnet_diagnostic.WPF0033.severity = none
+dotnet_diagnostic.WPF0060.severity = none
+dotnet_diagnostic.WPF0061.severity = none
+dotnet_diagnostic.WPF0070.severity = none
+dotnet_diagnostic.WPF0071.severity = none
+dotnet_diagnostic.WPF0073.severity = none
+dotnet_diagnostic.WPF0091.severity = none
+
+# ---- IDE rules: EnforceCodeStyleInBuild with AnalysisModeStyle=Default, so only these reach the build. ----
+
+# IDE0005 (38 + 57): unused usings. Needs GenerateDocumentationFile, which Directory.Build.props keeps out of the output.
+dotnet_diagnostic.IDE0005.severity = warning
+# IDE0051 and IDE0052 (2 + 0): unused private members. One was a Task field hiding an unobserved fire-and-forget.
+dotnet_diagnostic.IDE0051.severity = warning
+dotnet_diagnostic.IDE0052.severity = warning
+# IDE0059 (3 + 0): assignments nothing reads.
+dotnet_diagnostic.IDE0059.severity = warning
+# CS1591 and CS1573 (50 + 4) would demand complete XML comments. The other doc comment checks stay on: stale crefs and malformed XML are real.
+dotnet_diagnostic.CS1591.severity = none
+dotnet_diagnostic.CS1573.severity = none
+
+# xunit.analyzers (with xunit) and the CommunityToolkit.Mvvm analyzers keep their package defaults.

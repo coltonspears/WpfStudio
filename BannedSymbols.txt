@@ -1,0 +1,39 @@
+// Decisions from CODE-REVIEW.md that must not regress. Applies to src/ only (RS0030, see Directory.Build.props): tests own their
+// dispatcher loops and launch their own fixtures. Each owning class carries one [SuppressMessage] with its reason.
+// Task.Result and Task.Wait are not listed because VSTHRD002 already fails the build on them.
+
+// C8: view models reach the clipboard and the shell through a service.
+T:System.Windows.Clipboard;Use IClipboardService, or ClipboardService.Shared in XAML-created views: another application can hold the clipboard open at any moment (C8).
+M:System.Diagnostics.Process.Start(System.String);Pass a ProcessStartInfo to run a tool. To open a URL or reveal a file, use IDesktopService (C8).
+M:System.Diagnostics.Process.Start(System.String,System.String);Pass a ProcessStartInfo to run a tool. To open a URL or reveal a file, use IDesktopService (C8).
+M:System.Diagnostics.Process.Start(System.String,System.Collections.Generic.IEnumerable{System.String});Pass a ProcessStartInfo to run a tool. To open a URL or reveal a file, use IDesktopService (C8).
+P:System.Diagnostics.ProcessStartInfo.UseShellExecute;False is already the default, so delete the assignment. Shell navigation belongs to IDesktopService (C8).
+
+// A8, C11: dialogs and the main window stay behind the dialog services, so view models remain testable and owner handling lives in one place.
+T:System.Windows.MessageBox;Use IUserDialogService (A8).
+T:Microsoft.Win32.OpenFileDialog;Use IFileDialogService (A8).
+T:Microsoft.Win32.SaveFileDialog;Use IFileDialogService (A8).
+T:Microsoft.Win32.OpenFolderDialog;Use IFileDialogService (A8).
+P:System.Windows.Application.MainWindow;Take an owner-window accessor, as DesktopDialogs does, instead of reaching across the application (A8, C11).
+
+// A9: a synchronous Dispatcher.Invoke from a PropertyChanged handler or worker blocks until the UI thread is free, and can deadlock.
+M:System.Windows.Threading.Dispatcher.Invoke(System.Action);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke(System.Action,System.Windows.Threading.DispatcherPriority);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke(System.Action,System.Windows.Threading.DispatcherPriority,System.Threading.CancellationToken);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke(System.Action,System.Windows.Threading.DispatcherPriority,System.Threading.CancellationToken,System.TimeSpan);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke``1(System.Func{``0});Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke``1(System.Func{``0},System.Windows.Threading.DispatcherPriority);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke``1(System.Func{``0},System.Windows.Threading.DispatcherPriority,System.Threading.CancellationToken);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke``1(System.Func{``0},System.Windows.Threading.DispatcherPriority,System.Threading.CancellationToken,System.TimeSpan);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke(System.Delegate,System.Object[]);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke(System.Delegate,System.TimeSpan,System.Object[]);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke(System.Delegate,System.Windows.Threading.DispatcherPriority,System.Object[]);Use InvokeAsync or IUiDispatcher (A9).
+M:System.Windows.Threading.Dispatcher.Invoke(System.Delegate,System.TimeSpan,System.Windows.Threading.DispatcherPriority,System.Object[]);Use InvokeAsync or IUiDispatcher (A9).
+
+// A4: a synchronous wait on a gate froze the UI thread behind a recovery write.
+M:System.Threading.SemaphoreSlim.Wait;Await WaitAsync: the holder may need this thread (A4).
+M:System.Threading.SemaphoreSlim.Wait(System.Threading.CancellationToken);Await WaitAsync: the holder may need this thread (A4).
+M:System.Threading.SemaphoreSlim.Wait(System.Int32);Await WaitAsync: the holder may need this thread (A4).
+M:System.Threading.SemaphoreSlim.Wait(System.Int32,System.Threading.CancellationToken);Await WaitAsync: the holder may need this thread (A4).
+M:System.Threading.SemaphoreSlim.Wait(System.TimeSpan);Await WaitAsync: the holder may need this thread (A4).
+M:System.Threading.SemaphoreSlim.Wait(System.TimeSpan,System.Threading.CancellationToken);Await WaitAsync: the holder may need this thread (A4).
