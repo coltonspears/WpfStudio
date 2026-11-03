@@ -75,7 +75,7 @@ public sealed partial class TerminalSurface : ContentControl
         public TerminalSurface? Owner { get; set; }
         public WebView2 Browser { get; } = new();
         public Renderer(ConPtySession session, System.Windows.Threading.Dispatcher dispatcher) { this.session = session; this.dispatcher = dispatcher; session.Closed += OnSessionClosed; }
-        private void OnSessionClosed() => dispatcher.BeginInvoke(() => { if (Renderers.Remove(session, out var removed)) removed.Dispose(); });
+        private void OnSessionClosed() => _ = dispatcher.BeginInvoke(() => { if (Renderers.Remove(session, out var removed)) removed.Dispose(); });
         public Task InitializeAsync() => initialization ??= InitializeCoreAsync();
         private async Task InitializeCoreAsync()
         {
