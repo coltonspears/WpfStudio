@@ -154,7 +154,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (!IsCSharp || IsReadOnly || !(ShowCodeLens || ShowInlineBlame) || _disposed || !_workspace.IsConnected) return;
         _codeLens = new();
         var token = _codeLens.Token;
-        _ = Task.Run(async () =>
+        Task.Run(async () =>
         {
             // Counting scans every XAML file, so wait for a pause in typing.
             await Task.Delay(CodeLensVersion < 0 ? 300 : 1500, token);
@@ -165,7 +165,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 CodeLenses = result.Entries; CodeLensVersion = version;
                 CodeLensChanged?.Invoke();
             }, token);
-        }, token).ContinueWith(_ => { }, TaskScheduler.Default); // Optional: a failure leaves the previous lenses.
+        }, token).Forget(); // Optional: a failure leaves the previous lenses.
     }
     /// <summary>Asks the editor to collapse (true) or expand (false) every folding.</summary>
     public event Action<bool>? FoldingRequested;

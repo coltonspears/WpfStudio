@@ -2,6 +2,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Microsoft.Extensions.Logging;
 using WpfStudio.App.Services;
+using WpfStudio.Contracts;
 using WpfStudio.Core;
 
 namespace WpfStudio.Shell.Tests;
@@ -90,6 +91,109 @@ public sealed class CrashGuardTests
             using (DenyRead(path)) Assert.Empty(await store.LoadAsync(@"C:\work\App.sln"));
         }
         finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task ForgottenTaskFaultNeverReachesTheFinalizer()
+    {
+        var marker = "forgotten-" + Guid.NewGuid().ToString("N");
+        var unobserved = 0;
+        void Unobserved(object? sender, UnobservedTaskExceptionEventArgs args) { if (args.Exception.ToString().Contains(marker)) Interlocked.Increment(ref unobserved); }
+        TaskScheduler.UnobservedTaskException += Unobserved;
+        try
+        {
+            await StartAndForgetAsync(marker);
+            for (var pass = 0; pass < 3; pass++) { GC.Collect(); GC.WaitForPendingFinalizers(); }
+            Assert.Equal(0, Volatile.Read(ref unobserved));
+        }
+        finally { TaskScheduler.UnobservedTaskException -= Unobserved; }
+    }
+    // Not inlined, so the JIT keeps no reference to the faulted task in the caller's frame.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task StartAndForgetAsync(string marker)
+    {
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task.Run(() => { try { throw new InvalidOperationException(marker); } finally { finished.SetResult(); } }).Forget();
+        await finished.Task;
+        await Task.Delay(50);
+    }
+
+    [Fact]
+    public async Task ForgetReportsTheFaultButNotCancellation()
+    {
+        var reported = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task.FromException(new InvalidOperationException("failed")).Forget(reported.SetResult);
+        Assert.Equal("failed", (await reported.Task.WaitAsync(TimeSpan.FromSeconds(5))).Message);
+
+        Exception? cancelled = null;
+        Task.FromCanceled(new CancellationToken(true)).Forget(exception => cancelled = exception);
+        Assert.Null(cancelled);
+
+        Task.FromException(new InvalidOperationException("failed")).Forget(_ => throw new NotSupportedException()); // A failing reporter stays contained.
+    }
+
+    [Fact]
+    public async Task FaultReporterShowsOnTheUiThreadWhenCalledFromAnotherThread()
+    {
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-FaultGuard-").FullName;
+        var ui = await StartDispatcherAsync();
+        try
+        {
+            var shown = new TaskCompletionSource<(bool OnUiThread, string Status, string Details)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var reporter = new UnhandledFaultReporter(ui, directory, () => null, (status, details) => shown.SetResult((ui.CheckAccess(), status, details)));
+
+            // The finalizer thread is simply a thread that does not own the dispatcher.
+            Assert.True(await Task.Run(() => reporter.Report(new InvalidOperationException("lens request failed"), "background task")));
+
+            var (onUiThread, status, details) = await shown.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(onUiThread);
+            Assert.Equal("Unexpected error: lens request failed", status);
+            Assert.StartsWith("[background task]", details);
+            Assert.Contains("lens request failed", File.ReadAllText(Path.Combine(directory, "unhandled-error.log")));
+        }
+        finally { ui.InvokeShutdown(); Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task FaultReporterContainsAFailureToShowTheFault()
+    {
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-FaultGuard-").FullName;
+        var ui = await StartDispatcherAsync();
+        try
+        {
+            var dispatcherFault = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            ui.UnhandledException += (_, args) => { args.Handled = true; dispatcherFault.TrySetResult(); };
+            var reporter = new UnhandledFaultReporter(ui, directory, () => null, (_, _) => throw new InvalidOperationException("window is gone"));
+            Assert.True(reporter.Report(new InvalidOperationException("first"), "process"));
+            await ui.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Assert.False(dispatcherFault.Task.IsCompleted);
+        }
+        finally { ui.InvokeShutdown(); Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void FaultReporterLetsRuntimeFatalFaultsTerminate()
+    {
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-FaultGuard-").FullName;
+        try
+        {
+            var reporter = new UnhandledFaultReporter(System.Windows.Threading.Dispatcher.CurrentDispatcher, directory, () => null, (_, _) => { });
+            Assert.False(reporter.Report(new OutOfMemoryException(), "process"));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    private static async Task<System.Windows.Threading.Dispatcher> StartDispatcherAsync()
+    {
+        var started = new TaskCompletionSource<System.Windows.Threading.Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            started.SetResult(System.Windows.Threading.Dispatcher.CurrentDispatcher);
+            System.Windows.Threading.Dispatcher.Run();
+        }) { IsBackground = true, Name = "Fault reporter UI" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return await started.Task;
     }
 
     /// <summary>Denies the current user read access to <paramref name="path"/> until disposed, so the file can be deleted afterwards.</summary>

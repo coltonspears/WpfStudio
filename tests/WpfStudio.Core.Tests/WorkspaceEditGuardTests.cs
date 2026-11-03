@@ -50,6 +50,61 @@ public sealed class WorkspaceEditGuardTests
     }
 
     [Fact]
+    public async Task UndoWritesBoundDocumentsOnTheCallersThreadWhileRecoveryIsBusy()
+    {
+        string directory = CreateDirectory();
+        string created = Path.Combine(directory, "Created.cs"), existingPath = Path.Combine(directory, "Existing.cs");
+        await File.WriteAllTextAsync(existingPath, "before");
+        var store = new DocumentStore(directory);
+        var existing = await store.OpenAsync(existingPath);
+        var transaction = new WorkspaceEditTransaction(store);
+        // The created file comes first, so undo awaits the recovery gate before it restores the existing document.
+        await transaction.ApplyAsync([new(created, "", "class Created { }", "create"), new(existingPath, "before", "after", "edit")]);
+
+        var writer = -1;
+        existing.ContentChanged += (_, _) => writer = Environment.CurrentManagedThreadId;
+        var recoveryGate = (SemaphoreSlim)typeof(DocumentStore).GetField("_recoveryGate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(store)!;
+        await recoveryGate.WaitAsync(); // A recovery write is in progress.
+        using var ui = new SingleThreadContext();
+        var undo = ui.RunAsync(() => transaction.UndoAsync());
+        await Task.Delay(100);
+        recoveryGate.Release();
+
+        Assert.Equal([created], await undo.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("before", existing.Content);
+        Assert.Equal(ui.ThreadId, writer);
+    }
+
+    /// <summary>Runs continuations on one dedicated thread, as the WPF dispatcher does.</summary>
+    private sealed class SingleThreadContext : SynchronizationContext, IDisposable
+    {
+        private readonly System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = [];
+        private readonly Thread _thread;
+        public SingleThreadContext()
+        {
+            _thread = new Thread(() =>
+            {
+                SetSynchronizationContext(this);
+                foreach (var (callback, state) in _queue.GetConsumingEnumerable()) callback(state);
+            }) { IsBackground = true };
+            _thread.Start();
+        }
+        public int ThreadId => _thread.ManagedThreadId;
+        public override void Post(SendOrPostCallback d, object? state) => _queue.Add((d, state));
+        public Task<T> RunAsync<T>(Func<Task<T>> action)
+        {
+            var result = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Post(async _ =>
+            {
+                try { result.SetResult(await action()); }
+                catch (Exception ex) { result.SetException(ex); }
+            }, null);
+            return result.Task;
+        }
+        public void Dispose() { _queue.CompleteAdding(); _thread.Join(TimeSpan.FromSeconds(5)); _queue.Dispose(); }
+    }
+
+    [Fact]
     public async Task AcceptedContextGuardKeepsNormalApplyAndUndoBehavior()
     {
         string directory = CreateDirectory();
