@@ -9,7 +9,7 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class ShellViewModel
 {
     private readonly NavigationHistory _history = new();
-    private bool _replayingHistory;
+    private int _historyReplays; // A count: Back and Forward are separate commands, so two replays can overlap across their awaits.
 
     private NavigationLocation? CurrentLocation() =>
         ActiveDocument is { } document ? new(document.State.Path, document.State.CaretOffset, document.State.CaretLine) : null;
@@ -17,7 +17,7 @@ public sealed partial class ShellViewModel
     /// <summary>Remembers the caret before a jump so Back can return to it.</summary>
     private void RecordNavigationOrigin()
     {
-        if (!_replayingHistory && CurrentLocation() is { } origin) _history.Record(origin);
+        if (_historyReplays == 0 && CurrentLocation() is { } origin) _history.Record(origin);
     }
 
     [RelayCommand] private Task NavigateBackAsync() => GuardAsync(async () =>
@@ -33,14 +33,14 @@ public sealed partial class ShellViewModel
     private async Task ReplayLocationAsync(NavigationLocation target)
     {
         if (!File.Exists(target.Path) && _store.Find(target.Path) is null) { Status = "That location's file no longer exists"; return; }
-        _replayingHistory = true;
+        _historyReplays++;
         try
         {
             await OpenDocumentAsync(target.Path);
             if (ActiveDocument is { } document && document.State.Path.Equals(target.Path, StringComparison.OrdinalIgnoreCase))
                 document.Navigate(Math.Min(target.Offset, document.State.Content.Length));
         }
-        finally { _replayingHistory = false; }
+        finally { _historyReplays--; }
     }
 
     [RelayCommand] private void GoToSymbol() => Palette.OpenSymbols();

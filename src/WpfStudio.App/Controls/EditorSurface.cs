@@ -150,7 +150,7 @@ public sealed partial class EditorSurface : TextEditor
         CancelHover();
         _changePopup.IsOpen = false; _historyPopup.IsOpen = false;
         CancelPendingCompletion();
-        _completion?.Close(); _completionRequest?.Cancel();
+        _completion?.Close(); CancelCompletionRequest();
         if (_attached != null)
         {
             _attached.State.PropertyChanged -= StateChanged; _attached.PropertyChanged -= ModelChanged;
@@ -182,7 +182,7 @@ public sealed partial class EditorSurface : TextEditor
         if (args.PropertyName is nameof(EditorViewModel.ShowInlineBlame) or nameof(EditorViewModel.ShowCodeLens)) ApplyCodeLens();
         if (args.PropertyName == nameof(EditorViewModel.XamlContextRevision))
         {
-            _completionRequest?.Cancel(); _completion?.Close(); CancelHover();
+            CancelCompletionRequest(); _completion?.Close(); CancelHover();
         }
     }
     private void DiagnosticsChanged(object? sender, NotifyCollectionChangedEventArgs args)
@@ -300,10 +300,11 @@ public sealed partial class EditorSurface : TextEditor
         else if (e.Text == ")") _signature.IsOpen = false;
         if (_completion == null && e.Text.Length == 1 && (e.Text[0] is '.' or '<' or '{' || char.IsLetter(e.Text[0]))) _ = ShowCompletionAsync();
     }
+    private void CancelCompletionRequest() { _completionRequest?.Cancel(); _completionRequest?.Dispose(); _completionRequest = null; }
     private async Task ShowCompletionAsync()
     {
         if (ViewModel == null || IsReadOnly || _pendingCompletion != null) return;
-        _completionRequest?.Cancel(); _completionRequest?.Dispose(); _completionRequest = new();
+        CancelCompletionRequest(); _completionRequest = new();
         var token = _completionRequest.Token; var vm = ViewModel; var version = vm.State.Version; var caret = CaretOffset;
         long contextRevision = vm.XamlContextRevision;
         try

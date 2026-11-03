@@ -122,31 +122,35 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         var version = ++_workspaceVersion;
         _switchingWorkspace = true;
         NotifyCommands();
-        _operation?.Cancel();
-        await _activeTask;
-        await CancelLoadsAsync();
-        if (version != _workspaceVersion) return;
-        _workspacePath = workspacePath;
-        RepositoryRoot = null;
-        Branch = "Loading repository…";
-        Tracking = "";
-        Quietly(() =>
+        try
         {
-            Staged.Clear();
-            Unstaged.Clear();
-            History.Clear();
-            VisibleHistory.Clear();
-            Branches.Clear();
-            SelectedBranch = null;
-            SelectedStaged = null;
-            SelectedUnstaged = null;
-            SelectedCommit = null;
-        });
-        HasMoreHistory = false;
-        ClearCommit();
-        CurrentDiff = null;
-        NotifyLists();
-        _switchingWorkspace = false;
+            _operation?.Cancel();
+            await _activeTask;
+            await CancelLoadsAsync();
+            if (version != _workspaceVersion) return;
+            _workspacePath = workspacePath;
+            RepositoryRoot = null;
+            Branch = "Loading repository…";
+            Tracking = "";
+            Quietly(() =>
+            {
+                Staged.Clear();
+                Unstaged.Clear();
+                History.Clear();
+                VisibleHistory.Clear();
+                Branches.Clear();
+                SelectedBranch = null;
+                SelectedStaged = null;
+                SelectedUnstaged = null;
+                SelectedCommit = null;
+            });
+            HasMoreHistory = false;
+            ClearCommit();
+            CurrentDiff = null;
+            NotifyLists();
+        }
+        // Only the newest switch may lift the guard; an older one returning early leaves it to that switch. A failure must not leave Git disabled.
+        finally { if (version == _workspaceVersion) { _switchingWorkspace = false; NotifyCommands(); } }
         await RunAsync("Refresh", token => RefreshCoreAsync(token), cancellationToken);
     }
 
@@ -302,6 +306,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         finally
         {
             if (ReferenceEquals(_diffLoad, load)) { _diffLoad = null; IsDiffLoading = false; }
+            load.Dispose(); // This load owns its source; the field no longer offers it to anyone who would cancel it.
         }
     }
 
@@ -355,6 +360,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         finally
         {
             if (ReferenceEquals(_commitLoad, load)) { _commitLoad = null; IsCommitLoading = false; }
+            load.Dispose();
         }
     }
 
@@ -387,6 +393,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         finally
         {
             if (ReferenceEquals(_commitFileLoad, load)) _commitFileLoad = null;
+            load.Dispose();
         }
     }
 

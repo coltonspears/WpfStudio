@@ -45,6 +45,43 @@ public sealed class ProjectXamlAnalysisLifecycleTests
     }
 
     [Fact]
+    public async Task AnImmediateScanDoesNotRunUnderTheSchedulerLock()
+    {
+        var unblocked = false;
+        ProjectXamlAnalysisScheduler? scheduler = null;
+        using (scheduler = new((generation, _) =>
+        {
+            // The synchronous part of the scan: another thread must still be able to take the scheduler's lock.
+            var probe = Task.Run(() => scheduler!.IsCurrent(generation));
+            unblocked = SpinWait.SpinUntil(() => probe.IsCompleted, TimeSpan.FromSeconds(2));
+            return Task.CompletedTask;
+        }, (_, error) => throw new Xunit.Sdk.XunitException(error.ToString()), TimeSpan.Zero))
+        {
+            await scheduler.Schedule(immediate: true).WaitAsync(TimeSpan.FromSeconds(10));
+            await scheduler.Completion.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+        Assert.True(unblocked);
+    }
+
+    [Fact]
+    public async Task DisposingDuringAScanLetsItFinishCleanly()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failures = new List<Exception>();
+        var scheduler = new ProjectXamlAnalysisScheduler(async (_, _) => { entered.SetResult(); await release.Task; }, (_, error) => failures.Add(error), TimeSpan.Zero);
+        var run = scheduler.Schedule(immediate: true);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        scheduler.Dispose();
+        release.SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Empty(failures);
+        Assert.False(run.IsFaulted);
+        scheduler.Dispose();
+        await scheduler.Schedule(immediate: true).WaitAsync(TimeSpan.FromSeconds(3)); // Disposed: nothing runs and nothing throws.
+    }
+
+    [Fact]
     public async Task InvalidatedFailureIsNotReportedIntoNewContext()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

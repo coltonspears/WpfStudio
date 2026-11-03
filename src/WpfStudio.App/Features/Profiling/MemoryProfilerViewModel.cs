@@ -257,7 +257,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
-        _disposed = true; _revision++; StopMonitor(); _lifetime.Cancel(); CancelSelection();
+        _disposed = true; _revision++; StopMonitor(); _lifetime.Cancel(); CancelSelection(); ResetGroups();
         if (_sampler is IDisposable owned && sampler is null) owned.Dispose();
         if (_session is not null) await _session.DisposeAsync();
         _session = null; _lifetime.Dispose();

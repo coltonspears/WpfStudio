@@ -503,7 +503,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (_resources is not null) _resources.Changed -= SemanticStateChanged;
         ClearQuickFixes();
         DisposeGit();
-        _codeLens?.Cancel();
+        _codeLens?.Cancel(); _codeLens?.Dispose(); _codeLens = null;
         _analysis?.Cancel();
         _analysis?.Dispose();
     }
