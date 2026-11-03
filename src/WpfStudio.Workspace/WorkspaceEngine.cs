@@ -534,7 +534,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             diagnostics = diagnostics.AddRange(await analysis.GetAnalyzerSyntaxDiagnosticsAsync(semantic.SyntaxTree, cancellationToken).ConfigureAwait(false));
             diagnostics = diagnostics.AddRange(await analysis.GetAnalyzerSemanticDiagnosticsAsync(semantic, null, cancellationToken).ConfigureAwait(false));
         }
-        return CompleteDiagnostics(document, compilation, diagnostics);
+        return CompleteDiagnostics(document, compilation, await semantic.SyntaxTree.GetTextAsync(cancellationToken).ConfigureAwait(false), diagnostics);
     }
 
     private static WorkspaceDiagnostic ToDiagnostic(Diagnostic diagnostic)

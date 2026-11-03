@@ -40,6 +40,8 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public event EventHandler? NameProjectionChanged;
     /// <summary>An accepted C# model change affects other editors. The canonical changed path lets its own editor retain the analysis that synchronized it.</summary>
     public event EventHandler<string>? CSharpModelChanged;
+    /// <summary>A whole-project compilation contradicted an analysis reply. Nothing semantic changed, so same-version observations stay valid; subscribers must marshal to their UI dispatcher.</summary>
+    public event EventHandler? ProjectDiagnosticsChanged;
     public int? WorkerProcessId
     {
         get { try { return _process is { HasExited: false } process ? process.Id : null; } catch (InvalidOperationException) { return null; } }
@@ -418,6 +420,11 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
                     SemanticStateChanged?.Invoke(this, EventArgs.Empty);
                     NotifyNameProjectionChanged();
                 }
+            };
+            _proxy.ProjectDiagnosticsChanged += (_, _) =>
+            {
+                if (ReferenceEquals(_rpc, rpc) && ReferenceEquals(_process, process) && !_disposed)
+                    ProjectDiagnosticsChanged?.Invoke(this, EventArgs.Empty);
             };
             _rpc.StartListening();
         }

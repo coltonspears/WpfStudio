@@ -126,17 +126,24 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
         await using var engine = new WorkspaceClient();
         await engine.LoadAsync(new LoadWorkspaceRequest(Project));
         Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
-        var pushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var pushes = 0;
-        engine.SemanticStateChanged += (_, _) => { Interlocked.Increment(ref pushes); pushed.TrySetResult(); };
+        using var pushes = new SemaphoreSlim(0);
+        var pushed = 0;
+        engine.ProjectDiagnosticsChanged += (_, _) => { Interlocked.Increment(ref pushed); pushes.Release(); };
+        var invalidations = 0;
+        engine.SemanticStateChanged += (_, _) => Interlocked.Increment(ref invalidations);
+        engine.NameProjectionChanged += (_, _) => Interlocked.Increment(ref invalidations);
+        async Task<IReadOnlyList<WorkspaceDiagnostic>> SettledAsync(string current, long version)
+        {
+            Assert.True(await pushes.WaitAsync(TimeSpan.FromMinutes(3)));
+            return (await engine.UpdateDocumentAsync(new(Source, current, version))).Diagnostics;
+        }
 
         // Only this file was bound, so what needs every method body or has no file is not known yet.
         var first = (await engine.UpdateDocumentAsync(new(Source, text, 1))).Diagnostics;
         Assert.Contains(first, diagnostic => diagnostic.Id == "CS0029" && diagnostic.Severity == "Error");
         Assert.DoesNotContain(first, diagnostic => diagnostic.Id is "CS0169" or "CS0414" or "CS5001");
 
-        await pushed.Task.WaitAsync(TimeSpan.FromMinutes(3));
-        var settled = (await engine.UpdateDocumentAsync(new(Source, text, 1))).Diagnostics;
+        var settled = await SettledAsync(text, 1);
         Assert.Contains(settled, diagnostic => diagnostic.Id == "CS0029");
         var unused = Assert.Single(settled, diagnostic => diagnostic.Id == "CS0169");
         Assert.Equal(Source, unused.Path, ignoreCase: true);
@@ -147,15 +154,40 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
         // Other files' diagnostics stay out, as they always have.
         Assert.DoesNotContain(settled, diagnostic => diagnostic.Message.Contains("elsewhere") || (diagnostic.Path?.EndsWith("Other.cs", StringComparison.OrdinalIgnoreCase) ?? false));
         Assert.Equal(settled.Count, settled.Distinct().Count());
-
-        // The complete reply must not start another pass, or every open editor would keep analysing.
+        // The push is not a semantic change, and the complete reply must not start another pass.
         await Task.Delay(TimeSpan.FromSeconds(2));
-        Assert.Equal(1, Volatile.Read(ref pushes));
+        Assert.Equal(0, Volatile.Read(ref invalidations));
+        Assert.Equal(1, Volatile.Read(ref pushed));
         Assert.Equal(settled, (await engine.UpdateDocumentAsync(new(Source, text, 1))).Diagnostics);
 
-        // After an edit nothing stale remains: source positions wait for the new compilation, a project-wide error stays.
+        // An edit elsewhere in the file moves them at once, and a pass that agrees has nothing to push.
+        var moved = text.Replace("    private int _unused;", "    // A note.\n    private int _unused;", StringComparison.Ordinal);
+        var carried = (await engine.UpdateDocumentAsync(new(Source, moved, 2))).Diagnostics;
+        var carriedUnused = Assert.Single(carried, diagnostic => diagnostic.Id == "CS0169");
+        Assert.Equal(5, carriedUnused.Line);
+        Assert.Equal(17, carriedUnused.Column);
+        Assert.Equal(moved.IndexOf("_unused", StringComparison.Ordinal), carriedUnused.Start);
+        Assert.Contains(carried, diagnostic => diagnostic.Id == "CS0414" && diagnostic.Start == moved.IndexOf("_assigned", StringComparison.Ordinal));
+        Assert.Contains(carried, diagnostic => diagnostic.Id == "CS5001");
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, Volatile.Read(ref pushed));
+        Assert.True(carried.ToHashSet().SetEquals((await engine.UpdateDocumentAsync(new(Source, moved, 2))).Diagnostics));
+
+        // An edit touching one drops it until the pass has the new wording.
+        var renamed = moved.Replace("_unused;", "_unusedNow;", StringComparison.Ordinal);
+        var touched = (await engine.UpdateDocumentAsync(new(Source, renamed, 3))).Diagnostics;
+        Assert.DoesNotContain(touched, diagnostic => diagnostic.Id == "CS0169");
+        Assert.Contains(touched, diagnostic => diagnostic.Id == "CS0414");
+        Assert.Contains("_unusedNow", Assert.Single(await SettledAsync(renamed, 3), diagnostic => diagnostic.Id == "CS0169").Message);
+
+        // An edit that makes one wrong keeps it only until the pass disagrees.
+        var used = renamed.Replace("    public int Bad()", "    public int Use() => _unusedNow;\n    public int Bad()", StringComparison.Ordinal);
+        Assert.Contains((await engine.UpdateDocumentAsync(new(Source, used, 4))).Diagnostics, diagnostic => diagnostic.Id == "CS0169");
+        Assert.DoesNotContain(await SettledAsync(used, 4), diagnostic => diagnostic.Id == "CS0169");
+
+        // Rewriting the class leaves nothing stale; a diagnostic with no position stays.
         var fixedText = "namespace Shop;\npublic class Report\n{\n    public int Good() => 1;\n}\n";
-        var edited = (await engine.UpdateDocumentAsync(new(Source, fixedText, 2))).Diagnostics;
+        var edited = (await engine.UpdateDocumentAsync(new(Source, fixedText, 5))).Diagnostics;
         Assert.DoesNotContain(edited, diagnostic => diagnostic.Id is "CS0029" or "CS0169" or "CS0414");
         Assert.Contains(edited, diagnostic => diagnostic.Id == "CS5001");
     }
