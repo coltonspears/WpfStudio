@@ -1,5 +1,4 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
 using WpfStudio.Contracts;
 using WpfStudio.Workspace.Xaml;
 

@@ -1,8 +1,6 @@
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
-using WpfStudio.Core.Documents;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;

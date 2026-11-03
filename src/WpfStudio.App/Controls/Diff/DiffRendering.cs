@@ -50,7 +50,7 @@ internal sealed class DiffBackgroundRenderer(FrameworkElement owner, Func<IReadO
 
     public void Draw(TextView textView, DrawingContext drawing)
     {
-        if (!textView.VisualLinesValid || textView.Document is not { } document) return;
+        if (!textView.VisualLinesValid || textView.Document is null) return;
         var display = lines();
         var removed = DiffPalette.Removed(owner);
         var added = DiffPalette.Added(owner);

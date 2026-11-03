@@ -1,6 +1,5 @@
 using System.IO;
 using WpfStudio.Contracts;
-using WpfStudio.Workspace.Xaml;
 
 using WpfStudio.App.Features.XamlAnalysis;
 

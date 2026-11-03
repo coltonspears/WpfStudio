@@ -1,4 +1,3 @@
-using System.Windows.Input;
 using System.Windows.Threading;
 using WpfStudio.App.Controls;
 using WpfStudio.App.Services;

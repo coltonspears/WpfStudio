@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text.RegularExpressions;
@@ -33,7 +32,7 @@ internal static partial class XamlNamespaceIndex
         var declared = new HashSet<string>(StringComparer.Ordinal);
         var used = new HashSet<string>(StringComparer.Ordinal);
         var ignorable = new HashSet<string>(StringComparer.Ordinal);
-        using var reader = XmlReader.Create(new StringReader(xaml), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 2_000_000 });
+        using var reader = XmlReader.Create(new System.IO.StringReader(xaml), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 2_000_000 });
         while (reader.Read())
         {
             if (reader.NodeType != XmlNodeType.Element) continue;
@@ -71,7 +70,7 @@ internal static partial class XamlNamespaceIndex
     {
         try
         {
-            using var stream = File.OpenRead(path);
+            using var stream = System.IO.File.OpenRead(path);
             using var pe = new PEReader(stream);
             if (!pe.HasMetadata) return null;
             var metadata = pe.GetMetadataReader();
@@ -105,7 +104,7 @@ internal static partial class XamlNamespaceIndex
             string name = metadata.GetString(metadata.GetAssemblyDefinition().Name);
             return new(path, name, namespaces.Distinct(StringComparer.Ordinal).ToArray(), compatible);
         }
-        catch (Exception exception) when (exception is BadImageFormatException or IOException or UnauthorizedAccessException) { return null; }
+        catch (Exception exception) when (exception is BadImageFormatException or System.IO.IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>

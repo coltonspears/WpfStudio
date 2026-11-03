@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using WpfStudio.Contracts;
 using WpfStudio.Inspection.Protocol;
 using WpfStudio.Runtime.Design;
 

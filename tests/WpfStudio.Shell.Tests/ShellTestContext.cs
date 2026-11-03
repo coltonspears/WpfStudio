@@ -4,7 +4,6 @@ using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
 using WpfStudio.Core.Documents;
-using WpfStudio.Core.Wpf;
 using WpfStudio.Workspace;
 
 namespace WpfStudio.Shell.Tests;

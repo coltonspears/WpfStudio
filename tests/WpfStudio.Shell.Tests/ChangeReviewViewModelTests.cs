@@ -1,5 +1,4 @@
 using WpfStudio.App.Features.Review;
-using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 

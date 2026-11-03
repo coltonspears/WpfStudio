@@ -4,7 +4,6 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
-using WpfStudio.Inspection.Protocol;
 using WpfStudio.Wpf.Diagnostics;
 
 namespace WpfStudio.Preview.Tests;

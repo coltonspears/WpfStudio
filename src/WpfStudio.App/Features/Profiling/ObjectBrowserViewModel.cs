@@ -48,7 +48,7 @@ public sealed partial class ObjectBrowserViewModel(IObjectBrowserHost host, ICli
     public string GenerationBadge => Details is { } d ? MemorySize.GenerationShort(d.Object.Generation) : "";
     public bool IsPinnedObject => Details?.Object.IsPinned == true;
     public double RetainedShare => Details is { } d && host.Summary is { ManagedBytes: > 0 } s ? (double)d.Object.RetainedBytes / s.ManagedBytes : 0;
-    public string RetainedShareText => Details is { } d && host.Summary is { ManagedBytes: > 0 } s
+    public string RetainedShareText => Details is { } d && host.Summary is { ManagedBytes: > 0 }
         ? $"{RetainedShare.ToString(RetainedShare >= 0.001 ? "P1" : "P2", CultureInfo.CurrentCulture)} of the heap · keeps {d.Object.RetainedCount:N0} object{(d.Object.RetainedCount == 1 ? "" : "s")} alive" : "";
     public string ReferenceCoverage => Details is { } d ? $"{d.IncomingCount:N0} incoming · {d.OutgoingCount:N0} outgoing. Lists show up to 200 slots; root examples show up to 8 paths." : "";
     public string WhyAliveSummary => Details is not { } d ? "" : !d.Object.IsReachable

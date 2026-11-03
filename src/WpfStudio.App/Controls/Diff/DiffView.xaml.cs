@@ -8,7 +8,6 @@ using System.Windows.Threading;
 using CommunityToolkit.Mvvm.Input;
 using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.Document;
-using ICSharpCode.AvalonEdit.Rendering;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Text;

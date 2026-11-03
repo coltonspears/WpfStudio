@@ -1,5 +1,4 @@
 using WpfStudio.Contracts.Profiling;
-using WpfStudio.Profiling;
 
 namespace WpfStudio.Profiling.Tests;
 

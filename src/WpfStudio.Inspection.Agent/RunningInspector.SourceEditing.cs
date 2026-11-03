@@ -16,7 +16,7 @@ internal sealed partial class RunningInspector
     private InspectionProperty DescribeSourceProperty(DependencyObject target, DependencyProperty property, InspectionProperty display,
         PropertyEditInfo fullInfo, Dictionary<string, SourceObservation> observations)
     {
-        string? reason = null;
+        string? reason;
         InspectionSourcePropertyIdentity? identity = null;
         int remaining = 65;
         if (_editingDisposed) reason = "The inspection session has ended.";

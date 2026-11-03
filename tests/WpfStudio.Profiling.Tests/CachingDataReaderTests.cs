@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Runtime;
-using WpfStudio.Profiling;
 
 namespace WpfStudio.Profiling.Tests;
 

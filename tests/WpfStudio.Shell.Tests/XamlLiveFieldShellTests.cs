@@ -1,7 +1,6 @@
 using System.Reflection;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
-using WpfStudio.Core.Documents;
 using WpfStudio.Workspace;
 
 namespace WpfStudio.Shell.Tests;

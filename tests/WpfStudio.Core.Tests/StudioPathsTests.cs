@@ -1,5 +1,3 @@
-using WpfStudio.Core;
-
 namespace WpfStudio.Core.Tests;
 
 public sealed class StudioPathsTests

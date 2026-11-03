@@ -1,14 +1,10 @@
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
-using System.Windows;
-using System.Windows.Input;
 using AvalonDock;
 using AvalonDock.Layout;
-using WpfStudio.App;
 using WpfStudio.App.Features.Profiling;
 using WpfStudio.App.Features.Profiling.Visuals;
-using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 
 namespace WpfStudio.App.Tests;
