@@ -2,13 +2,14 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.Contracts;
 using WpfStudio.Contracts.Profiling;
 
 namespace WpfStudio.App.Features.Profiling;
 
 /// <summary>The object browser: navigation history, an expandable field tree read from captured memory, why the
 /// object is alive, what it keeps alive, and reference-removal estimates.</summary>
-public sealed partial class MemoryProfilerViewModel
+public sealed partial class ObjectBrowserViewModel(IObjectBrowserHost host, IClipboardService clipboard) : ObservableObject
 {
     private CancellationTokenSource? _inspection;
     private long _inspectionRevision;
@@ -40,18 +41,18 @@ public sealed partial class MemoryProfilerViewModel
     public string ObjectTitle => Details is { } d ? MemoryLabels.ShortType(d.Object.Type) : "";
     public string ObjectNamespace => Details is { } d ? MemoryLabels.Namespace(d.Object.Type) + " · " + d.Object.Module : "";
     public string ObjectState => Details is { } d
-        ? (d.Object.IsReachable ? "Rooted" : Summary?.IsComplete == true ? "No captured root" : "Reachability unknown") +
+        ? (d.Object.IsReachable ? "Rooted" : host.Summary?.IsComplete == true ? "No captured root" : "Reachability unknown") +
             (d.Object.IsPinned ? " · pinned" : "") + " · " + d.Object.Generation : "";
-    public string ReachabilityBadge => Details is { } d ? d.Object.IsReachable ? "Alive" : Summary?.IsComplete == true ? "Collectible" : "Unknown" : "";
+    public string ReachabilityBadge => Details is { } d ? d.Object.IsReachable ? "Alive" : host.Summary?.IsComplete == true ? "Collectible" : "Unknown" : "";
     public string ReachabilityTone => Details is { } d ? d.Object.IsReachable ? "Accent" : "Success" : "Neutral";
     public string GenerationBadge => Details is { } d ? MemorySize.GenerationShort(d.Object.Generation) : "";
     public bool IsPinnedObject => Details?.Object.IsPinned == true;
-    public double RetainedShare => Details is { } d && Summary is { ManagedBytes: > 0 } s ? (double)d.Object.RetainedBytes / s.ManagedBytes : 0;
-    public string RetainedShareText => Details is { } d && Summary is { ManagedBytes: > 0 } s
+    public double RetainedShare => Details is { } d && host.Summary is { ManagedBytes: > 0 } s ? (double)d.Object.RetainedBytes / s.ManagedBytes : 0;
+    public string RetainedShareText => Details is { } d && host.Summary is { ManagedBytes: > 0 } s
         ? $"{RetainedShare.ToString(RetainedShare >= 0.001 ? "P1" : "P2", CultureInfo.CurrentCulture)} of the heap · keeps {d.Object.RetainedCount:N0} object{(d.Object.RetainedCount == 1 ? "" : "s")} alive" : "";
     public string ReferenceCoverage => Details is { } d ? $"{d.IncomingCount:N0} incoming · {d.OutgoingCount:N0} outgoing. Lists show up to 200 slots; root examples show up to 8 paths." : "";
     public string WhyAliveSummary => Details is not { } d ? "" : !d.Object.IsReachable
-        ? (Summary?.IsComplete == true ? "Nothing roots this object. It is garbage that the next collection can free." : "No root path was captured; the capture is incomplete.")
+        ? (host.Summary?.IsComplete == true ? "Nothing roots this object. It is garbage that the next collection can free." : "No root path was captured; the capture is incomplete.")
         : RootPaths.Count == 0 ? "Rooted, but no example path was found within the traversal budget."
         : RootPaths.All(p => !p.IsLongLived) ? $"Only short-lived roots ({string.Join(", ", RootPaths.Select(p => p.KindText).Distinct())}) hold this object. It may be released soon."
         : $"Held by {string.Join(" and ", RootPaths.Where(p => p.IsLongLived).Select(p => (p.IsStatic ? "static " : "") + p.Title).Distinct().Take(3))}." +
@@ -85,26 +86,29 @@ public sealed partial class MemoryProfilerViewModel
     partial void OnSelectedIncomingReferenceChanged(MemoryReferenceInfo? value) { if (value is not null) SelectedReference = value; }
     partial void OnSelectedOutgoingReferenceChanged(MemoryReferenceInfo? value) { if (value is not null) SelectedReference = value; }
 
-    private bool CanEstimate() => CanUseCapture() && Details is not null && !IsInspecting && !IsEstimating;
+    private bool CanEstimate() => host.CanUseCapture && Details is not null && !IsInspecting && !IsEstimating;
     private bool CanEstimateReference() => CanEstimate() && SelectedReference is { IsPermanent: false };
 
-    [RelayCommand] private Task InspectObjectAsync(int objectId, CancellationToken token) => NavigateAsync(objectId, Navigation.New, token);
-    [RelayCommand] private async Task BackAsync() { if (_back.Count > 0) await NavigateAsync(_back[^1], Navigation.Back, _lifetime.Token); }
-    [RelayCommand] private async Task ForwardAsync() { if (_forward.Count > 0) await NavigateAsync(_forward[^1], Navigation.Forward, _lifetime.Token); }
-    [RelayCommand] private Task NavigateTrailAsync(TrailItem? item) => item is null || item.IsCurrent ? Task.CompletedTask : NavigateAsync(item.Id, Navigation.New, _lifetime.Token);
-    [RelayCommand] private Task OpenReferenceOwnerAsync(MemoryReferenceInfo? reference) => reference?.FromId is int id ? InspectObjectAsync(id, _lifetime.Token) : Task.CompletedTask;
-    [RelayCommand] private Task OpenReferenceTargetAsync(MemoryReferenceInfo? reference) => reference is null ? Task.CompletedTask : InspectObjectAsync(reference.ToId, _lifetime.Token);
-    [RelayCommand] private Task OpenFieldObjectAsync(MemoryFieldInfo? field) => field?.ObjectId is int id ? InspectObjectAsync(id, _lifetime.Token) : Task.CompletedTask;
-    [RelayCommand] private Task OpenNodeAsync(ObjectNodeViewModel? node) => node?.ObjectId is int id ? InspectObjectAsync(id, _lifetime.Token) : Task.CompletedTask;
-    [RelayCommand] private Task OpenPathStepAsync(PathStep? step) => step is null ? Task.CompletedTask : InspectObjectAsync(step.TargetId, _lifetime.Token);
-    [RelayCommand] private Task OpenRetainedTypeAsync(RetainedTypeRow? row) { if (row?.Type.TypeKey is string key) OpenType(key); return Task.CompletedTask; }
+    [RelayCommand] internal Task InspectObjectAsync(int objectId, CancellationToken token) => NavigateAsync(objectId, Navigation.New, token);
+    [RelayCommand] private async Task BackAsync() { if (_back.Count > 0) await NavigateAsync(_back[^1], Navigation.Back, host.Lifetime); }
+    [RelayCommand] private async Task ForwardAsync() { if (_forward.Count > 0) await NavigateAsync(_forward[^1], Navigation.Forward, host.Lifetime); }
+    [RelayCommand] private Task NavigateTrailAsync(TrailItem? item) => item is null || item.IsCurrent ? Task.CompletedTask : NavigateAsync(item.Id, Navigation.New, host.Lifetime);
+    [RelayCommand] private Task OpenReferenceOwnerAsync(MemoryReferenceInfo? reference) => reference?.FromId is int id ? InspectObjectAsync(id, host.Lifetime) : Task.CompletedTask;
+    [RelayCommand] private Task OpenReferenceTargetAsync(MemoryReferenceInfo? reference) => reference is null ? Task.CompletedTask : InspectObjectAsync(reference.ToId, host.Lifetime);
+    [RelayCommand] private Task OpenFieldObjectAsync(MemoryFieldInfo? field) => field?.ObjectId is int id ? InspectObjectAsync(id, host.Lifetime) : Task.CompletedTask;
+    [RelayCommand] private Task OpenNodeAsync(ObjectNodeViewModel? node) => node?.ObjectId is int id ? InspectObjectAsync(id, host.Lifetime) : Task.CompletedTask;
+    [RelayCommand] private Task OpenPathStepAsync(PathStep? step) => step is null ? Task.CompletedTask : InspectObjectAsync(step.TargetId, host.Lifetime);
+    [RelayCommand] private Task OpenRetainedTypeAsync(RetainedTypeRow? row) { if (row?.Type.TypeKey is string key) host.OpenType(key); return Task.CompletedTask; }
     [RelayCommand] private void SelectPathStep(PathStep? step) { if (step is not null && step.Reference.ToId == Details?.Object.Id) SelectedReference = step.Reference; }
 
     private enum Navigation { New, Back, Forward, Replace }
 
+    /// <summary>Starts a new capture's browser on an object, without adding to the history.</summary>
+    internal Task OpenFirstAsync(int objectId, CancellationToken token) => NavigateAsync(objectId, Navigation.Replace, token);
+
     private async Task NavigateAsync(int objectId, Navigation navigation, CancellationToken token)
     {
-        if (_session is not { } session || _disposed || IsBusy) return;
+        if (host.Session is not { } session || host.IsDisposed || host.IsBusy) return;
         var current = Details?.Object.Id ?? _pendingObject;
         if (current is int previous && previous != objectId)
         {
@@ -119,30 +123,30 @@ public sealed partial class MemoryProfilerViewModel
         else if (navigation == Navigation.Back && _back.Count > 0) _back.RemoveAt(_back.Count - 1);
         else if (navigation == Navigation.Forward && _forward.Count > 0) _forward.RemoveAt(_forward.Count - 1);
         UpdateTrail(objectId);
-        CancelInspection(); CancelGraph();
-        _inspection = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
-        var operationToken = _inspection.Token; var revision = _revision; var selection = ++_inspectionRevision;
+        CancelInspection(); host.ClearGraph();
+        _inspection = CancellationTokenSource.CreateLinkedTokenSource(token, host.Lifetime);
+        var operationToken = _inspection.Token; var revision = host.Revision; var selection = ++_inspectionRevision;
         _pendingObject = objectId;
-        IsInspecting = true; Details = null; Graph = null; SelectedReference = null; SelectedIncomingReference = null; SelectedOutgoingReference = null; ResetEstimate(); ResetBrowserContent();
+        IsInspecting = true; Details = null; SelectedReference = null; SelectedIncomingReference = null; SelectedOutgoingReference = null; ResetEstimate(); ResetContent();
         try
         {
-            bool Current() => !_disposed && revision == _revision && selection == _inspectionRevision;
+            bool Current() => !host.IsDisposed && revision == host.Revision && selection == _inspectionRevision;
             // Each part applies and reports on its own, so one that fails neither hides the others nor goes unobserved.
             var details = ApplyPartAsync(session.InspectAsync(objectId, operationToken), Current, value => Details = value);
-            var graph = ApplyPartAsync(session.GetGraphAsync(new(objectId, HiddenRootKinds: HiddenRootKinds), operationToken), Current, value => { Graph = value; _graphObject = objectId; });
+            var graph = ApplyPartAsync(session.GetGraphAsync(new(objectId, HiddenRootKinds: host.HiddenRootKinds), operationToken), Current, value => host.ShowGraph(objectId, value));
             var children = ApplyPartAsync(session.GetChildrenAsync(new(objectId), operationToken), Current, ApplyRootChildren);
             var retained = ApplyPartAsync(session.GetRetainedAsync(objectId, operationToken), Current, value => RetainedComposition = value);
             var detailsFailure = await details;
             var graphFailure = await graph;
             if (Current() && !operationToken.IsCancellationRequested)
-                Status = detailsFailure is not null ? "Object inspection failed: " + detailsFailure.Message
+                host.ReportStatus(detailsFailure is not null ? "Object inspection failed: " + detailsFailure.Message
                     : graphFailure is not null ? "Object inspected, but its graph could not be loaded: " + graphFailure.Message
-                    : "Object inspected from captured memory. Fields are read without invoking application getters.";
+                    : "Object inspected from captured memory. Fields are read without invoking application getters.");
             if (await children is { } childrenFailure && Current()) ObjectPreview = "Fields are unavailable: " + childrenFailure.Message;
             await retained;
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { if (!_disposed && revision == _revision && selection == _inspectionRevision) Status = "Object inspection failed: " + ex.Message; }
+        catch (Exception ex) { if (!host.IsDisposed && revision == host.Revision && selection == _inspectionRevision) host.ReportStatus("Object inspection failed: " + ex.Message); }
         finally
         {
             if (selection == _inspectionRevision) { IsInspecting = false; _pendingObject = null; NotifyEstimates(); }
@@ -167,17 +171,23 @@ public sealed partial class MemoryProfilerViewModel
     {
         if (Details is { } d) _labels[d.Object.Id] = MemoryLabels.ShortType(d.Object.Type);
         if (!_labels.ContainsKey(current))
-            _labels[current] = Objects.FirstOrDefault(o => o.Id == current) is { } known ? MemoryLabels.ShortType(known.Type)
-                : Graph?.Nodes.FirstOrDefault(n => n.Object.Id == current)?.Object is { } node ? MemoryLabels.ShortType(node.Type) : "Object";
+            _labels[current] = host.KnownTypeOf(current) is { } known ? MemoryLabels.ShortType(known) : "Object";
         var ids = _back.TakeLast(4).Append(current).Concat(_forward.AsEnumerable().Reverse().Take(2)).ToArray();
         Trail.Clear();
         foreach (var id in ids) Trail.Add(new(id, _labels.GetValueOrDefault(id, "Object"), id == current));
         OnPropertyChanged(nameof(CanGoBack)); OnPropertyChanged(nameof(CanGoForward));
     }
 
-    private void ResetHistory() { _back.Clear(); _forward.Clear(); _labels.Clear(); Trail.Clear(); _pendingObject = null; OnPropertyChanged(nameof(CanGoBack)); OnPropertyChanged(nameof(CanGoForward)); }
-    private void ResetBrowser() { ResetBrowserContent(); }
-    private void ResetBrowserContent() { FieldNodes.Clear(); RetainedComposition = null; ObjectPreview = ""; ObjectShape = ""; }
+    internal void ResetHistory() { _back.Clear(); _forward.Clear(); _labels.Clear(); Trail.Clear(); _pendingObject = null; OnPropertyChanged(nameof(CanGoBack)); OnPropertyChanged(nameof(CanGoForward)); }
+    private void ResetContent() { FieldNodes.Clear(); RetainedComposition = null; ObjectPreview = ""; ObjectShape = ""; }
+
+    /// <summary>Drops the current object without choosing another.</summary>
+    internal void ClearObject()
+    {
+        CancelInspection();
+        Details = null; SelectedReference = null; SelectedIncomingReference = null; SelectedOutgoingReference = null;
+        ResetEstimate(); ResetContent(); NotifyEstimates();
+    }
 
     private void ApplyRootChildren(MemoryObjectChildren children)
     {
@@ -197,27 +207,27 @@ public sealed partial class MemoryProfilerViewModel
 
     private async Task LoadNodeChildrenAsync(ObjectNodeViewModel node)
     {
-        if (_session is not { } session || node.ObjectId is not int id) return;
+        if (host.Session is not { } session || node.ObjectId is not int id) return;
         var selection = _inspectionRevision;
         try
         {
-            var children = await session.GetChildrenAsync(new(id, Raw: node.IsRaw), _inspection?.Token ?? _lifetime.Token);
+            var children = await session.GetChildrenAsync(new(id, Raw: node.IsRaw), _inspection?.Token ?? host.Lifetime);
             if (selection != _inspectionRevision) return;
             node.ReplaceChildren(NodesFor(children, node.Depth + 1, node));
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { if (selection == _inspectionRevision) Status = "Could not load object members: " + ex.Message; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { if (selection == _inspectionRevision) host.ReportStatus("Could not load object members: " + ex.Message); }
     }
 
     [RelayCommand]
     private async Task LoadMoreAsync(ObjectNodeViewModel? more)
     {
-        if (more is not { IsMore: true, ObjectId: int id } || _session is not { } session) return;
+        if (more is not { IsMore: true, ObjectId: int id } || host.Session is not { } session) return;
         var selection = _inspectionRevision;
         var raw = more.MoreParent?.IsRaw == true;
         try
         {
-            var children = await session.GetChildrenAsync(new(id, more.NextSkip, Raw: raw), _inspection?.Token ?? _lifetime.Token);
+            var children = await session.GetChildrenAsync(new(id, more.NextSkip, Raw: raw), _inspection?.Token ?? host.Lifetime);
             if (selection != _inspectionRevision) return;
             var target = more.MoreParent?.Children ?? FieldNodes;
             var index = target.IndexOf(more);
@@ -226,38 +236,37 @@ public sealed partial class MemoryProfilerViewModel
             foreach (var node in NodesFor(children, more.Depth, more.MoreParent)) target.Insert(index++, node);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { if (selection == _inspectionRevision) Status = "Could not load more members: " + ex.Message; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { if (selection == _inspectionRevision) host.ReportStatus("Could not load more members: " + ex.Message); }
     }
 
     [RelayCommand(CanExecute = nameof(CanEstimate), IncludeCancelCommand = true)] private Task EstimateObjectAsync(CancellationToken token) => EstimateAsync(null, token);
     [RelayCommand(CanExecute = nameof(CanEstimateReference), IncludeCancelCommand = true)] private Task EstimateReferenceAsync(CancellationToken token) => EstimateAsync(SelectedReference?.Id, token);
     private async Task EstimateAsync(int? referenceId, CancellationToken token)
     {
-        if (_session is not { } session || Details is not { } detail) return;
-        var revision = _revision; var selection = _inspectionRevision;
-        using var operation = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token, _inspection?.Token ?? _lifetime.Token);
-        IsEstimating = true; InspectorTab = KeepsAliveTab;
+        if (host.Session is not { } session || Details is not { } detail) return;
+        var revision = host.Revision; var selection = _inspectionRevision;
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(token, host.Lifetime, _inspection?.Token ?? host.Lifetime);
+        IsEstimating = true; InspectorTab = MemoryProfilerViewModel.KeepsAliveTab;
         try
         {
             var estimate = await session.EstimateReleaseAsync(new(detail.Object.Id, referenceId), operation.Token);
-            if (_disposed || revision != _revision || selection != _inspectionRevision) return;
+            if (host.IsDisposed || revision != host.Revision || selection != _inspectionRevision) return;
             ReleaseEstimate = estimate; ReleasedObjects = estimate.ObjectSample;
             ReleaseDescription = (referenceId is null ? "All owners removed: " : $"Reference slot {referenceId} removed: ") + estimate.Explanation;
-            Status = estimate.SelectedObjectRemainsReachable ? "The object remains rooted. A surviving root path is shown in the estimate." : $"{estimate.ReclaimableObjects:N0} objects become eligible in the modeled graph.";
+            host.ReportStatus(estimate.SelectedObjectRemainsReachable ? "The object remains rooted. A surviving root path is shown in the estimate." : $"{estimate.ReclaimableObjects:N0} objects become eligible in the modeled graph.");
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { if (!_disposed && revision == _revision && selection == _inspectionRevision) Status = "Reference-removal estimate failed: " + ex.Message; }
+        catch (Exception ex) { if (!host.IsDisposed && revision == host.Revision && selection == _inspectionRevision) host.ReportStatus("Reference-removal estimate failed: " + ex.Message); }
         finally { IsEstimating = false; }
     }
     private void ResetEstimate() { ReleaseEstimate = null; ReleasedObjects = []; ReleaseDescription = "Choose a reference slot, or estimate removing all owners of the selected object. This does not change the running app."; }
-    private void NotifyEstimates() { EstimateObjectCommand.NotifyCanExecuteChanged(); EstimateReferenceCommand.NotifyCanExecuteChanged(); }
-    private void CancelInspection() { _inspectionRevision++; _inspection?.Cancel(); _inspection?.Dispose(); _inspection = null; IsInspecting = false; }
+    internal void NotifyEstimates() { EstimateObjectCommand.NotifyCanExecuteChanged(); EstimateReferenceCommand.NotifyCanExecuteChanged(); }
+    internal void CancelInspection() { _inspectionRevision++; _inspection?.Cancel(); _inspection?.Dispose(); _inspection = null; IsInspecting = false; }
 
     [RelayCommand]
     private void CopyAddress()
     {
         if (Details is not { } d) return;
-        if (clipboard.TrySetText(d.Object.Address)) Status = $"Copied {d.Object.Address}.";
+        if (clipboard.TrySetText(d.Object.Address)) host.ReportStatus($"Copied {d.Object.Address}.");
     }
-
 }

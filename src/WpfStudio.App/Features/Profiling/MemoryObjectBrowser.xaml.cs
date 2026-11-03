@@ -26,7 +26,7 @@ public partial class MemoryObjectBrowser : UserControl
         };
     }
 
-    private MemoryProfilerViewModel? Model => DataContext as MemoryProfilerViewModel;
+    private ObjectBrowserViewModel? Model => (DataContext as MemoryProfilerViewModel)?.Browser;
 
     private void FieldDoubleClick(object sender, MouseButtonEventArgs e)
     {

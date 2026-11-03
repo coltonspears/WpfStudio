@@ -8,10 +8,10 @@ namespace WpfStudio.App.Features.Profiling;
 public sealed partial class MemoryProfilerViewModel
 {
     /// <summary>Opens an object in the browser and shows why it is alive.</summary>
-    [RelayCommand] private void ShowWhyAlive(int objectId) { ShowObject(objectId); InspectorTab = RootsTab; }
+    [RelayCommand] private void ShowWhyAlive(int objectId) { ShowObject(objectId); Browser.InspectorTab = RootsTab; }
 
     /// <summary>Opens an object in the browser and shows what it keeps alive.</summary>
-    [RelayCommand] private void ShowKeepsAlive(int objectId) { ShowObject(objectId); InspectorTab = KeepsAliveTab; }
+    [RelayCommand] private void ShowKeepsAlive(int objectId) { ShowObject(objectId); Browser.InspectorTab = KeepsAliveTab; }
 
     [RelayCommand] private void ShowInGraph(int objectId) { ShowObject(objectId); SelectedView = GraphView; }
 

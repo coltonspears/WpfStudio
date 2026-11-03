@@ -4,24 +4,20 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Profiling.Visuals;
 using WpfStudio.Contracts.Profiling;
-using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
 
 /// <summary>Snapshot history and comparison: every capture is kept as a summary, the newest one is compared with the
 /// previous capture of the same process (or a baseline you pick), and types that grow in every snapshot are flagged.
-/// A live process-memory timeline shows when each snapshot was taken.</summary>
+/// <see cref="Timeline"/> shows when each snapshot was taken against the live process memory.</summary>
 public sealed partial class MemoryProfilerViewModel
 {
     public const int SnapshotsView = 4;
-    private const int MaxSnapshots = 30, MaxSamples = 3600;
-    private readonly List<ProcessMemorySample> _samples = [];
-    private CancellationTokenSource? _monitor;
+    private const int MaxSnapshots = 30;
     private int _snapshotNumber;
     private bool _baselinePinned;
     private string? _pendingSourceKey, _pendingSourceName;
     public ObservableCollection<SnapshotCard> Snapshots { get; } = [];
-    public IReadOnlyList<string> TimelineWindows { get; } = ["1 min", "5 min", "15 min", "1 hour"];
     public IReadOnlyList<string> ComparisonFilters { get; } = ["Changed", "Growing", "New", "All"];
     [ObservableProperty] public partial SnapshotCard? CurrentSnapshot { get; set; }
     [ObservableProperty] public partial SnapshotCard? BaselineSnapshot { get; set; }
@@ -34,20 +30,11 @@ public sealed partial class MemoryProfilerViewModel
     [ObservableProperty] public partial string ComparisonHeadline { get; set; } = "";
     [ObservableProperty] public partial string ComparisonCountText { get; set; } = "";
     [ObservableProperty] public partial IReadOnlyList<LeakStep> LeakSteps { get; set; } = [];
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasLiveSamples), nameof(TimelineTitle))] public partial IReadOnlyList<ProcessMemorySample> LiveSamples { get; set; } = [];
     [ObservableProperty] public partial IReadOnlyList<TimelineMarker> TimelineMarkers { get; set; } = [];
-    [ObservableProperty] public partial string LiveMemoryText { get; set; } = "";
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(TimelineSeconds))] public partial string TimelineWindow { get; set; } = "5 min";
-    /// <summary>Set by the pane while it is visible; sampling stops when nobody is looking.</summary>
-    [ObservableProperty] public partial bool IsMonitorActive { get; set; }
-    [ObservableProperty] public partial bool MonitorMemory { get; set; } = true;
-    public double TimelineSeconds => TimelineWindow switch { "1 min" => 60, "15 min" => 900, "1 hour" => 3600, _ => 300 };
     public bool HasComparison => BaselineSnapshot is not null && CurrentSnapshot is not null && !ReferenceEquals(BaselineSnapshot, CurrentSnapshot);
     public bool HasSnapshotHistory => Snapshots.Count > 1;
     public bool IsLiveSource => SelectedProcess is not null;
-    public bool HasLiveSamples => LiveSamples.Count > 0;
     public string SnapshotsTabText => Snapshots.Count > 1 ? $"Snapshots ({Snapshots.Count})" : "Snapshots";
-    public string TimelineTitle => HasLiveSamples ? $"Process memory · {SelectedProcess?.Name} (PID {SelectedProcess?.Id})" : "Managed heap across snapshots";
     /// <summary>Same-source snapshots up to the current one, oldest first; the series behind trends and steady growth.</summary>
     private IReadOnlyList<SnapshotCard> Series
     {
@@ -63,13 +50,7 @@ public sealed partial class MemoryProfilerViewModel
     private RefreshThrottle ComparisonSearchThrottle => field ??= new(RefreshComparison);
     partial void OnComparisonSearchChanged(string value) => ComparisonSearchThrottle.Request();
     partial void OnComparisonOnlyMyCodeChanged(bool value) => RefreshComparison();
-    partial void OnIsMonitorActiveChanged(bool value) => UpdateMonitor();
-    partial void OnMonitorMemoryChanged(bool value) => UpdateMonitor();
-    partial void OnSelectedProcessChanged(ProfileProcess? value)
-    {
-        _samples.Clear(); LiveSamples = []; LiveMemoryText = "";
-        RefreshTimelineMarkers(); UpdateMonitor();
-    }
+    partial void OnSelectedProcessChanged(ProfileProcess? value) => Timeline.Watch(value);
 
     private static string ProcessKey(ProfileProcess process) => $"pid:{process.Id}:{process.StartTimeUtcTicks}";
 
@@ -133,8 +114,6 @@ public sealed partial class MemoryProfilerViewModel
     }
 
     [RelayCommand]
-    private void SetTimelineWindow(string? window) { if (window is not null && TimelineWindows.Contains(window)) TimelineWindow = window; }
-    [RelayCommand]
     private void SetComparisonFilter(string? filter) { if (filter is not null && ComparisonFilters.Contains(filter)) ComparisonFilter = filter; }
 
     private void RefreshSnapshotCards()
@@ -154,7 +133,7 @@ public sealed partial class MemoryProfilerViewModel
     private void RefreshTimelineMarkers()
     {
         // Live mode shows snapshots of the watched process; otherwise the current source's series.
-        var key = SelectedProcess is { } process && _samples.Count > 0 ? ProcessKey(process) : CurrentSnapshot?.SourceKey;
+        var key = SelectedProcess is { } process && Timeline.HasLiveSamples ? ProcessKey(process) : CurrentSnapshot?.SourceKey;
         TimelineMarkers = key is null ? [] : Snapshots.Where(s => s.SourceKey == key).Select(s => new TimelineMarker(s.Summary.CapturedAt, s.Title + (s.IsBaseline ? " baseline" : ""),
             s.Summary.ManagedBytes, $"Managed heap {s.SizeText} · {s.ObjectsText}" + (s.FindingCount > 0 ? $" · {s.FindingCount} findings" : ""), s.IsCurrent, s.IsBaseline, s)).ToArray();
     }
@@ -269,49 +248,6 @@ public sealed partial class MemoryProfilerViewModel
             "Open the type and read its retention paths: the owner that keeps accumulating instances (a static list, an event, a cache) is usually the bug. Group the instances by retention to see which path grows.",
             steady.Count, bytes, items);
     }
-
-    // ------------------------------------------------------------------ live process memory
-
-    private void UpdateMonitor()
-    {
-        var run = IsMonitorActive && MonitorMemory && SelectedProcess is not null && !_disposed;
-        if (!run) { _monitor?.Cancel(); _monitor?.Dispose(); _monitor = null; return; }
-        if (_monitor is not null) return;
-        _monitor = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        MonitorAsync(_monitor.Token).Forget(ReportFault);
-    }
-
-    private async Task MonitorAsync(CancellationToken token)
-    {
-        try
-        {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-            do SampleMemory(); while (await timer.WaitForNextTickAsync(token));
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { if (!_disposed) LiveMemoryText = "Memory sampling stopped: " + ex.Message; }
-        finally
-        {
-            // A loop that ended for any reason must not leave its source registered, or monitoring could never restart.
-            if (_monitor is { } monitor && monitor.Token == token) { monitor.Dispose(); _monitor = null; }
-        }
-    }
-
-    /// <summary>Takes one process-memory sample for the timeline. Public so tests can drive the timeline without a timer.</summary>
-    public void SampleMemory()
-    {
-        if (_disposed || SelectedProcess is not { } process) return;
-        var sample = _sampler.Sample(process.Id, process.StartTimeUtcTicks);
-        if (sample is null) { LiveMemoryText = "Process has exited"; return; }
-        var first = _samples.Count == 0;
-        _samples.Add(sample);
-        if (_samples.Count > MaxSamples) _samples.RemoveRange(0, _samples.Count - MaxSamples);
-        LiveSamples = _samples.ToArray();
-        LiveMemoryText = $"Private {MemorySize.Format(sample.PrivateBytes)} · working set {MemorySize.Format(sample.WorkingSetBytes)}";
-        if (first) RefreshTimelineMarkers();
-    }
-
-    private void StopMonitor() { _monitor?.Cancel(); _monitor?.Dispose(); _monitor = null; }
 }
 
 /// <summary>One captured snapshot in the history strip.</summary>

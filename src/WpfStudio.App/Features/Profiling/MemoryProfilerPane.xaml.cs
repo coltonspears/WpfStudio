@@ -17,7 +17,7 @@ public partial class MemoryProfilerPane : UserControl
         DataContextChanged += (_, e) => Attach(e.NewValue as MemoryProfilerViewModel);
         Loaded += (_, _) => { Attach(DataContext as MemoryProfilerViewModel); UpdateBrowserColumn(); };
         // Live memory sampling runs only while the profiler is on screen.
-        IsVisibleChanged += (_, _) => { if (_model is not null) _model.IsMonitorActive = IsVisible; };
+        IsVisibleChanged += (_, _) => { if (_model is not null) _model.Timeline.IsMonitorActive = IsVisible; };
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == System.Windows.Input.Key.G && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control && _model?.HasCapture == true)
@@ -34,9 +34,9 @@ public partial class MemoryProfilerPane : UserControl
     private void Attach(MemoryProfilerViewModel? model)
     {
         if (ReferenceEquals(model, _model)) return;
-        if (_model is not null) { _model.PropertyChanged -= ModelChanged; _model.IsMonitorActive = false; }
+        if (_model is not null) { _model.PropertyChanged -= ModelChanged; _model.Timeline.IsMonitorActive = false; }
         _model = model;
-        if (_model is not null) { _model.PropertyChanged += ModelChanged; _model.IsMonitorActive = IsVisible; }
+        if (_model is not null) { _model.PropertyChanged += ModelChanged; _model.Timeline.IsMonitorActive = IsVisible; }
         UpdateBrowserColumn();
     }
 
