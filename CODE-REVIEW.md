@@ -49,6 +49,7 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 | B13, B21, B22, B26–B43, B46–B48, B50, B52, B53, B56–B68 | Bug pass; see the fix log | 4bd49c9 … 3d21bb6 |
 | Performance table, all rows | Same pass | fb2831a, 835ae7c, 9c9bd99, b281b7c |
 | T1–T5, T8, T9, F1–F5 | Toolkit and `field` pass; see the fix log | 70ce80f … 61ad744 |
+| D1–D6, D9, C7, S16, S17 | DI pass; see the fix log | this step |
 
 ### Partly done
 
@@ -56,15 +57,15 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 |------|------|---------------|
 | A15 | Tokens and deadlines passed through; a cancelled preview render stops between its steps | `PreviewEngine` holds `_requests` for the whole render, because renders yield to the dispatcher and must not interleave. Kept by design |
 | A16 | Installer, package fallback, SQL text and binary values, script saves and the profiler's dispose are asynchronous | SQL XML values stay synchronous because the bounded formatter is. Kept by design |
-| C1 | The shell reaches extracted tools through typed host interfaces (`IWorkbenchHost` and its siblings) | The shell's 18-parameter constructor and the remaining hand wiring of features in its constructor |
-| C7 | The shell's subscription to `EditorPreferences.Current` is removed at dispose | `EditorPreferences` is still a static singleton outside the container |
+| C1 | Dependencies are required, so a missing registration fails at startup; Git and the assistant go through `IStudioToolsHost` | The constructor grew from 18 to 22 parameters rather than shrinking, and notifications from `Designer`, `Debugger`, `WorkerExited` and per-editor events are still hand-wired |
+| D7 | The formatter, sampler and stores are registered; watchers come through factories | `NavigationHistory`, the issue tracker and the analysis scheduler stay as owned `new`, because they hold only their owner's state. Kept by design |
 | S2 | `ReviewAndApplyAsync` is the shared tail for the C# refactoring and code-action commands | The four verified pipelines (rename, XAML quick fix, designer edit, inspection source edit) keep separate staleness checks by design |
 
 ### Pending
 
 - **Coupling (1.1):** C3, C4, C5, C6, C8–C16.
-- **Large classes (1.2):** S3–S18 (`EditorSurface`, `DesignerViewModel`, `MemoryProfilerViewModel`, `GitViewModel`/`GitService`, `DebuggerViewModel`, `DatabasePaneViewModel`, `WorkspaceEngine`, `PreviewEngine`, `NativePreviewSurface`, `DiffView`, `ScaffoldingService`, `AppPaths.cs`, `EditorPreferences`, `MainWindow.xaml`).
-- **DI registration (1.3):** D1–D7, D9.
+- **Large classes (1.2):** S3–S15, S18 (`EditorSurface`, `DesignerViewModel`, `MemoryProfilerViewModel`, `GitViewModel`/`GitService`, `DebuggerViewModel`, `DatabasePaneViewModel`, `WorkspaceEngine`, `PreviewEngine`, `NativePreviewSurface`, `DiffView`, `ScaffoldingService`, `MainWindow.xaml`).
+- **DI registration (1.3):** none. D7 is partly done by design (above).
 - **Async (1.4):** none. A15 and A16 are partly done by design (above).
 - **Code-behind and MVVM (1.5):** M1–M10.
 - **CommunityToolkit.Mvvm (1.6):** T6, T7.
@@ -428,3 +429,8 @@ Toolkit and `field` pass:
 - **T1, T2** derived notifications and command refreshes are declared with `[NotifyPropertyChangedFor]` and `[NotifyCanExecuteChangedFor]`. Three stay in hooks because they are conditional: `EmptyCanvasText`, `ScenarioDescription`, `SelectBindingIssueCommand`. **T3** `Summary`, `Details` and `DocumentState` declare their dependents; `DocumentState` now has observable `DiskHash` and `SavedText`. `NotifyLists`, `NotifyCommands` and `NotifyCanvasState` remain because they have non-property triggers.
 - **T4, F4** `ShowInlineBlame` is generated, and its initial value still runs no hook. **T5** the last four hand-built commands are generated. **T8** `nameof` replaces the `"HasApiKey"` string. **T9** `notify` expands to a partial property, `notifylegacy` keeps `SetProperty`, and `propfield` is a plain property using `field`. The scaffold fallback applies below C# 14, not 13 as this review first said, because its template has an initializer.
 - **F1, F2, F5** lazy caches use `field`. **F3** `FontFamilies` uses `field`; `LoadFontFamiliesCommand` was not added, to keep the change small.
+
+DI pass:
+
+- **D1, D9** `Services/StudioServices.cs` has a static `AddWpfStudio(IUiDispatcher)` built from per-area extensions, and the smoke test builds the same container with overrides. **D2** `IDebugAdapterProvider` removes the post-construction factories. **D3** `IOptions<StudioPaths>` carries the data directory; store directories are required and `WPFSTUDIO_DATA_DIRECTORY` still works. The debugger state, WebView2 profile, workspace cache and symbol cache still use `%LocalAppData%`, because their projects do not reference Core, so a portable install does not redirect those. **D4** the database pane's dependencies are required. **D5** `OpenRouterClient` comes from `AddHttpClient` and no longer disposes its client. **D6** `Core.IO.AtomicFile` is the temp-then-move helper with a unique temp name, also used for SQL script saves; layout, debugger state and solution cache keep their own.
+- **C7, S17** `EditorPreferences` is a singleton with no static `Current`, and `FontCatalog` lists fonts. `EditorSurface` reads `EditorViewModel.Preferences`, because inherited or ancestor bindings would not reach floating dock windows. **S16** `AppPaths.cs` is one file per type.
