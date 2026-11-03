@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -23,12 +24,46 @@ public sealed class DatabaseViewTests
             pane.Arrange(new Rect(0, 0, 1000, 800));
             pane.UpdateLayout();
             TextEditor editor = Descendants(pane).OfType<TextEditor>().Single();
-            Assert.Equal(model.SelectedDocument!.SqlText, editor.Text);
+            Assert.Equal(model.Queries.SelectedDocument!.SqlText, editor.Text);
             editor.AppendText("SELECT 123;");
-            Assert.EndsWith("SELECT 123;", model.SelectedDocument.SqlText);
+            Assert.EndsWith("SELECT 123;", model.Queries.SelectedDocument.SqlText);
             editor.Select(editor.Text.Length - 11, 11);
-            Assert.Equal("SELECT 123;", model.SelectedDocument.SelectedText.Trim());
-            Assert.True(model.SelectedDocument.SelectionStartLine > 1);
+            Assert.Equal("SELECT 123;", model.Queries.SelectedDocument.SelectedText.Trim());
+            Assert.True(model.Queries.SelectedDocument.SelectionStartLine > 1);
+        });
+    }
+
+    [Fact]
+    public async Task EveryPaneBindingResolvesAgainstThePartsOfTheViewModel()
+    {
+        await OnStaThread(() =>
+        {
+            PresentationTraceSources.Refresh();
+            var trace = PresentationTraceSources.DataBindingSource;
+            var failures = new List<string>();
+            var listener = new BindingFailureListener(failures);
+            var level = trace.Switch.Level;
+            trace.Switch.Level = SourceLevels.Warning;
+            trace.Listeners.Add(listener);
+            try
+            {
+                var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Path.GetTempPath(), "WpfStudio-DatabaseView-" + Guid.NewGuid().ToString("N"), "profiles.json")), new NullDialogs(), new NoAnswers(), new NoRecovery());
+                var pane = new DatabasePane { DataContext = model };
+                pane.Measure(new Size(1000, 800));
+                pane.Arrange(new Rect(0, 0, 1000, 800));
+                pane.UpdateLayout();
+                // The connection form and the object tree start in collapsed expanders.
+                foreach (var expander in Descendants(pane).OfType<Expander>().ToArray()) expander.IsExpanded = true;
+                pane.UpdateLayout();
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+                Assert.NotNull(Descendants(pane).OfType<PasswordBox>().SingleOrDefault());
+            }
+            finally
+            {
+                trace.Listeners.Remove(listener);
+                trace.Switch.Level = level;
+            }
+            Assert.Empty(failures);
         });
     }
 
@@ -61,15 +96,15 @@ public sealed class DatabaseViewTests
         {
             var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Path.GetTempPath(), "WpfStudio-DatabaseView-" + Guid.NewGuid().ToString("N"), "profiles.json")), new NullDialogs(), new NoAnswers(), new NoRecovery());
             var password = new PasswordBox();
-            BindingOperations.SetBinding(password, DatabaseViewBehaviors.PasswordProperty, new Binding(nameof(model.Password)) { Source = model, Mode = BindingMode.TwoWay });
+            BindingOperations.SetBinding(password, DatabaseViewBehaviors.PasswordProperty, new Binding(nameof(model.Connections.Password)) { Source = model.Connections, Mode = BindingMode.TwoWay });
             password.Password = "first edit";
-            Assert.Equal("first edit", model.Password);
+            Assert.Equal("first edit", model.Connections.Password);
             var tree = new TreeView();
             DatabaseViewBehaviors.SetTrackSelection(tree, true);
-            BindingOperations.SetBinding(tree, DatabaseViewBehaviors.SelectedNodeProperty, new Binding(nameof(model.SelectedSchema)) { Source = model, Mode = BindingMode.TwoWay });
+            BindingOperations.SetBinding(tree, DatabaseViewBehaviors.SelectedNodeProperty, new Binding(nameof(model.Explorer.SelectedSchema)) { Source = model.Explorer, Mode = BindingMode.TwoWay });
             var node = new SchemaNodeViewModel(new("master", Models.SchemaNodeKind.Database, "master"), (_, _) => Task.FromResult<IReadOnlyList<Models.SchemaItem>>([]));
             tree.RaiseEvent(new RoutedPropertyChangedEventArgs<object>(null!, node, TreeView.SelectedItemChangedEvent));
-            Assert.Same(node, model.SelectedSchema);
+            Assert.Same(node, model.Explorer.SelectedSchema);
         });
     }
 
@@ -83,8 +118,8 @@ public sealed class DatabaseViewTests
             Assert.True(buffer.TryAdd(names.Select((_, index) => "cell" + index).ToArray()));
             var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Path.GetTempPath(), "WpfStudio-DatabaseView-" + Guid.NewGuid().ToString("N"), "profiles.json")), new NullDialogs(), new NoAnswers(), new NoRecovery());
             var result = buffer.Build("Result 1");
-            model.SelectedDocument!.Results.Add(result);
-            model.SelectedDocument.SelectedResult = result;
+            model.Queries.SelectedDocument!.Results.Add(result);
+            model.Queries.SelectedDocument.SelectedResult = result;
             var pane = new DatabasePane { DataContext = model };
             pane.Measure(new Size(1000, 800));
             pane.Arrange(new Rect(0, 0, 1000, 800));
@@ -110,8 +145,8 @@ public sealed class DatabaseViewTests
             Assert.False(grid.Columns[Array.IndexOf(names, "a]b")].CanUserSort);
 
             var other = new ResultSetBuffer(["Only"]).Build("Result 2");
-            model.SelectedDocument.Results.Add(other);
-            model.SelectedDocument.SelectedResult = other;
+            model.Queries.SelectedDocument.Results.Add(other);
+            model.Queries.SelectedDocument.SelectedResult = other;
             pane.UpdateLayout();
             Assert.Equal("Only", Assert.Single(Descendants(pane).OfType<DataGrid>().Single().Columns).Header);
         });
@@ -126,6 +161,17 @@ public sealed class DatabaseViewTests
             foreach (DependencyObject nested in Descendants(child)) yield return nested;
         }
     }
+    /// <summary>Other test classes bind on their own threads at the same time, so only this pane's view models count.</summary>
+    private sealed class BindingFailureListener(List<string> failures) : TraceListener
+    {
+        public override void Write(string? message) { }
+        public override void WriteLine(string? message)
+        {
+            if (message is not null && message.Contains("BindingExpression path error", StringComparison.Ordinal) && message.Contains("ViewModel'", StringComparison.Ordinal))
+                lock (failures) failures.Add(message);
+        }
+    }
+
     private static Task OnStaThread(Action action)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

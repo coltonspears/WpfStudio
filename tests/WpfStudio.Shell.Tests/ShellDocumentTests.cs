@@ -206,7 +206,7 @@ public sealed class ShellDocumentTests
     public async Task ModifiedSqlCanCancelWholeApplicationShutdown()
     {
         await using var test = new ShellTestContext();
-        var query = test.Shell.Database.SelectedDocument!;
+        var query = test.Shell.Database.Queries.SelectedDocument!;
         query.SqlText += "\nSELECT 42;";
         test.Dialogs.SaveDecisions.Enqueue(SaveDecision.Cancel);
         Assert.False(await test.Shell.TryCloseAsync());
@@ -218,7 +218,7 @@ public sealed class ShellDocumentTests
     public async Task SqlSaveDuringShutdownWritesThePendingQuery()
     {
         await using var test = new ShellTestContext();
-        var query = test.Shell.Database.SelectedDocument!;
+        var query = test.Shell.Database.Queries.SelectedDocument!;
         query.SqlText = "SELECT 42;";
         string path = Path.Combine(test.Root, "SavedQuery.sql");
         test.Dialogs.SaveDecisions.Enqueue(SaveDecision.Save);

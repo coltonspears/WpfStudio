@@ -12,27 +12,27 @@ public sealed class WorkbenchRegressionTests
     public async Task SavingTheConnectedProfileKeepsTheSchemaTree()
     {
         var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs(), new NoAnswers(), new NoRecovery());
-        await model.ConnectCommand.ExecuteAsync(null);
-        Assert.True(model.IsConnected);
-        Assert.Single(model.Schema);
+        await model.Explorer.ConnectCommand.ExecuteAsync(null);
+        Assert.True(model.Explorer.IsConnected);
+        Assert.Single(model.Explorer.Schema);
 
-        model.ProfileName = "Renamed";
-        await model.SaveProfileCommand.ExecuteAsync(null);
+        model.Connections.ProfileName = "Renamed";
+        await model.Connections.SaveProfileCommand.ExecuteAsync(null);
 
         Assert.Contains("saved", model.Status, StringComparison.OrdinalIgnoreCase);
-        Assert.True(model.IsConnected);
-        Assert.Single(model.Schema);
-        Assert.Equal("Renamed", model.SelectedProfile?.Name);
+        Assert.True(model.Explorer.IsConnected);
+        Assert.Single(model.Explorer.Schema);
+        Assert.Equal("Renamed", model.Connections.SelectedProfile?.Name);
     }
 
     [Fact]
     public async Task SelectingAProfileForAnotherServerClearsTheSchemaTree()
     {
         var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs(), new NoAnswers(), new NoRecovery());
-        await model.ConnectCommand.ExecuteAsync(null);
-        model.SelectedProfile = new ConnectionProfile { Name = "Other", Server = "other-host" };
-        Assert.False(model.IsConnected);
-        Assert.Empty(model.Schema);
+        await model.Explorer.ConnectCommand.ExecuteAsync(null);
+        model.Connections.SelectedProfile = new ConnectionProfile { Name = "Other", Server = "other-host" };
+        Assert.False(model.Explorer.IsConnected);
+        Assert.Empty(model.Explorer.Schema);
     }
 
     [Fact]
@@ -83,16 +83,16 @@ public sealed class WorkbenchRegressionTests
             await using var model = new DatabasePaneViewModel(new OneDatabase(), store, new NoDialogs(), new NoAnswers(), new NoRecovery());
             await model.InitializeCommand.ExecuteAsync(null);
             Assert.Equal(["first"], store.Unlocked);
-            Assert.Equal("first-secret", model.Password);
-            Assert.All(model.Profiles, profile => Assert.Equal("", profile.Password));
+            Assert.Equal("first-secret", model.Connections.Password);
+            Assert.All(model.Connections.Profiles, profile => Assert.Equal("", profile.Password));
 
-            model.SelectedProfile = model.Profiles[1];
+            model.Connections.SelectedProfile = model.Connections.Profiles[1];
             Assert.Equal(["first", "second"], store.Unlocked);
-            Assert.Equal("second-secret", model.Password);
+            Assert.Equal("second-secret", model.Connections.Password);
 
             // Saving the selected profile re-encrypts what was typed and keeps the other profile's password.
-            model.Password = "changed";
-            await model.SaveProfileCommand.ExecuteAsync(null);
+            model.Connections.Password = "changed";
+            await model.Connections.SaveProfileCommand.ExecuteAsync(null);
             var reloaded = new ConnectionProfileStore(path);
             var profiles = await reloaded.LoadAsync();
             Assert.Equal("first-secret", reloaded.UnlockPassword(profiles.Single(profile => profile.Name == "first")));

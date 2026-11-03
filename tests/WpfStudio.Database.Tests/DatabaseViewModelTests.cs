@@ -11,15 +11,15 @@ public sealed class DatabaseViewModelTests
     {
         var service = new BlockingDatabase();
         var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
-        Task execute = model.ExecuteCommand.ExecuteAsync(null);
-        Task connect = model.ConnectCommand.ExecuteAsync(null);
+        Task execute = model.Queries.ExecuteCommand.ExecuteAsync(null);
+        Task connect = model.Explorer.ConnectCommand.ExecuteAsync(null);
         bool schemaCancelled = false;
         var node = new SchemaNodeViewModel(new SchemaItem("master", SchemaNodeKind.Database, "master"), async (_, token) =>
         {
             try { await Task.Delay(Timeout.Infinite, token); return []; }
             finally { schemaCancelled = token.IsCancellationRequested; }
         });
-        model.Schema.Add(node);
+        model.Explorer.Schema.Add(node);
         Task schema = node.LoadCommand.ExecuteAsync(null);
         await service.QueryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await service.ConnectStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -31,7 +31,7 @@ public sealed class DatabaseViewModelTests
         Assert.True(schema.IsCompleted);
         Assert.Equal(2, service.CancelledOperations);
         Assert.True(schemaCancelled);
-        Assert.False(model.SelectedDocument!.IsBusy);
+        Assert.False(model.Queries.SelectedDocument!.IsBusy);
     }
 
     [Fact]
@@ -42,11 +42,11 @@ public sealed class DatabaseViewModelTests
         {
             var dialogs = new SaveDialogs(path);
             var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), dialogs, dialogs, new NoRecovery());
-            var document = model.SelectedDocument!;
+            var document = model.Queries.SelectedDocument!;
             document.SqlText = "SELECT 1;";
             dialogs.BeforeSavePath = () => document.SqlText = "SELECT 2;";
-            await model.CloseQueryCommand.ExecuteAsync(null);
-            Assert.Contains(document, model.Documents);
+            await model.Queries.CloseQueryCommand.ExecuteAsync(null);
+            Assert.Contains(document, model.Queries.Documents);
             Assert.True(document.IsDirty);
             Assert.Equal("SELECT 2;", document.SqlText);
             Assert.Equal("SELECT 1;", await File.ReadAllTextAsync(path));
@@ -66,8 +66,8 @@ public sealed class DatabaseViewModelTests
             var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), dialogs, dialogs, new NoRecovery());
             var document = new QueryDocumentViewModel("script.sql", "SELECT 'original';") { FilePath = path };
             document.SqlText = "SELECT 'editor';";
-            model.Documents.Add(document); model.SelectedDocument = document;
-            await model.SaveScriptCommand.ExecuteAsync(null);
+            model.Queries.Documents.Add(document); model.Queries.SelectedDocument = document;
+            await model.Queries.SaveScriptCommand.ExecuteAsync(null);
             Assert.Equal("SELECT 'external';", await File.ReadAllTextAsync(path));
             Assert.Equal("SELECT 'editor';", document.SqlText);
             Assert.True(document.IsDirty);
@@ -80,10 +80,10 @@ public sealed class DatabaseViewModelTests
     public async Task ClosingModifiedQueryWithoutDialogCannotDiscardWork()
     {
         var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
-        QueryDocumentViewModel document = model.SelectedDocument!;
+        QueryDocumentViewModel document = model.Queries.SelectedDocument!;
         document.SqlText += "\nSELECT 42";
-        await model.CloseQueryCommand.ExecuteAsync(null);
-        Assert.Same(document, model.SelectedDocument);
+        await model.Queries.CloseQueryCommand.ExecuteAsync(null);
+        Assert.Same(document, model.Queries.SelectedDocument);
         Assert.True(document.IsDirty);
         Assert.EndsWith(" *", document.DisplayTitle);
     }
@@ -96,7 +96,7 @@ public sealed class DatabaseViewModelTests
         await model.InitializeCommand.ExecuteAsync(null);
         Assert.Equal(0, service.Executions);
         Assert.Equal(0, service.Connections);
-        Assert.Single(model.Documents);
+        Assert.Single(model.Queries.Documents);
     }
 
     [Fact]
@@ -104,13 +104,13 @@ public sealed class DatabaseViewModelTests
     {
         var service = new FakeDatabase();
         var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
-        model.SelectedDocument!.SqlText = "SELECT 1;\nSELECT 2;";
-        model.SelectedDocument.SelectedText = "SELECT 2;";
-        model.SelectedDocument.SelectionStartLine = 2;
-        await model.ExecuteCommand.ExecuteAsync(null);
+        model.Queries.SelectedDocument!.SqlText = "SELECT 1;\nSELECT 2;";
+        model.Queries.SelectedDocument.SelectedText = "SELECT 2;";
+        model.Queries.SelectedDocument.SelectionStartLine = 2;
+        await model.Queries.ExecuteCommand.ExecuteAsync(null);
         Assert.Equal("SELECT 2;", service.Sql);
         Assert.Equal(2, service.StartLine);
-        Assert.False(model.SelectedDocument.IsBusy);
+        Assert.False(model.Queries.SelectedDocument.IsBusy);
     }
 
     [Fact]
@@ -118,10 +118,10 @@ public sealed class DatabaseViewModelTests
     {
         var service = new FakeDatabase { Fail = true };
         var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
-        await model.ExecuteCommand.ExecuteAsync(null);
-        Assert.Equal("Failed", model.SelectedDocument!.Status);
-        Assert.Contains("test failure", model.SelectedDocument.Messages);
-        Assert.False(model.SelectedDocument.IsBusy);
+        await model.Queries.ExecuteCommand.ExecuteAsync(null);
+        Assert.Equal("Failed", model.Queries.SelectedDocument!.Status);
+        Assert.Contains("test failure", model.Queries.SelectedDocument.Messages);
+        Assert.False(model.Queries.SelectedDocument.IsBusy);
     }
 
     private sealed class FakeDatabase : IDatabaseService
