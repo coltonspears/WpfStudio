@@ -2,7 +2,6 @@ using System.ComponentModel;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
-using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.App.Features.Designer;
 
@@ -49,7 +48,7 @@ public sealed class DesignerSourceTracker : IAsyncDisposable
         _editor = null; _identity = null;
     }
 
-    private void SourceRequested(SourceLocation source) => _ = _host.GuardAsync(() => _host.NavigateAsync(source.Path, source.Line, source.Column));
+    private void SourceRequested(SourceLocation source) => _host.GuardAsync(() => _host.NavigateAsync(source.Path, source.Line, source.Column)).Forget();
 
     private void DesignerSourceChanged(object? sender, PropertyChangedEventArgs args)
     {

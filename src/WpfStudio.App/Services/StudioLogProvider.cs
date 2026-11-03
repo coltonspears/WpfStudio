@@ -2,7 +2,6 @@ using System.IO;
 using System.Text;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
-using WpfStudio.Core;
 
 namespace WpfStudio.App.Services;
 

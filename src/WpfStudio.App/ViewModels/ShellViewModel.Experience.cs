@@ -4,7 +4,6 @@ using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Controls;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
-using WpfStudio.Core;
 
 namespace WpfStudio.App.ViewModels;
 

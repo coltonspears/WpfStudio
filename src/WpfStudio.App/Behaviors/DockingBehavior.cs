@@ -12,7 +12,6 @@ using AvalonDock.Serializer.Xml;
 using AvalonDock.Themes;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
-using WpfStudio.Core;
 
 namespace WpfStudio.App.Behaviors;
 

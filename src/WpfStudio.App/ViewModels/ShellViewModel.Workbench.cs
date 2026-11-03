@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts;
-using WpfStudio.Core;
 
 namespace WpfStudio.App.ViewModels;
 
