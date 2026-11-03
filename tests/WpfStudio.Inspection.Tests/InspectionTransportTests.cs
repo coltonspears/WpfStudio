@@ -123,6 +123,51 @@ public sealed class InspectionTransportTests
     }
 
     [Fact]
+    public async Task FirstResponseSlowerThanTheRequestBudgetKeepsTheConnection()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await using var session = new InspectionSession();
+        using var pipe = await ConnectAsync(session, timeout.Token);
+        await AuthenticateAsync(session, pipe, timeout.Token);
+        var pending = session.SnapshotAsync(cancellationToken: timeout.Token);
+        var request = (await InspectionWire.ReadAsync(pipe, timeout.Token))!;
+        await Task.Delay(TimeSpan.FromSeconds(3.5), timeout.Token);
+        Assert.True(session.IsConnected);
+        await InspectionWire.WriteAsync(pipe, InspectionMessage.Create("tree", request.Id, new InspectionTree(1, [], [])), timeout.Token);
+        Assert.Equal(1, (await pending).Revision);
+        Assert.True(session.IsConnected);
+    }
+
+    [Fact]
+    public async Task OnceTheAgentHasAnsweredTheRequestBudgetApplies()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var session = new InspectionSession(requestTimeout: TimeSpan.FromMilliseconds(100), firstResponseTimeout: TimeSpan.FromSeconds(8));
+        using var pipe = await ConnectAsync(session, timeout.Token);
+        await AuthenticateAsync(session, pipe, timeout.Token);
+        var pending = session.SnapshotAsync(cancellationToken: timeout.Token);
+        var request = (await InspectionWire.ReadAsync(pipe, timeout.Token))!;
+        await Task.Delay(400, timeout.Token);
+        await InspectionWire.WriteAsync(pipe, InspectionMessage.Create("tree", request.Id, new InspectionTree(1, [], [])), timeout.Token);
+        Assert.Equal(1, (await pending).Revision);
+        await Assert.ThrowsAsync<TimeoutException>(() => session.SnapshotAsync(cancellationToken: timeout.Token));
+        Assert.False(session.IsConnected);
+    }
+
+    [Fact]
+    public async Task UnansweredFirstRequestStillClosesWhenItsLongerBudgetEnds()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var session = new InspectionSession(requestTimeout: TimeSpan.FromMilliseconds(50), firstResponseTimeout: TimeSpan.FromMilliseconds(500));
+        using var pipe = await ConnectAsync(session, timeout.Token);
+        await AuthenticateAsync(session, pipe, timeout.Token);
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAsync<TimeoutException>(() => session.SnapshotAsync(cancellationToken: timeout.Token));
+        Assert.True(elapsed.ElapsedMilliseconds >= 400, $"Closed after {elapsed.ElapsedMilliseconds} ms.");
+        Assert.False(session.IsConnected);
+    }
+
+    [Fact]
     public async Task UnexpectedResponseKindClosesConnectionInsteadOfDeserializingWrongPayload()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
