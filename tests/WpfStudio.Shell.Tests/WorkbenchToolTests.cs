@@ -31,6 +31,33 @@ public sealed class WorkbenchToolTests
     }
 
     [Fact]
+    public async Task ARefreshDuringAScanReplacesItWithoutReportingAFailure()
+    {
+        var root = NewDirectory();
+        try
+        {
+            var host = new FakeHost(root);
+            for (var index = 0; index < 5000; index++)
+            {
+                var path = Path.Combine(root, $"File{index}.cs");
+                host.Files.Add(path);
+                host.Buffers[path] = "// TODO one";
+            }
+            var tasks = new TaskListViewModel(host, new WorkspaceStateStore<UserTaskItem>("tasks", root));
+
+            var superseded = tasks.RefreshCommand.ExecuteAsync(null);
+            var latest = tasks.RefreshCommand.ExecuteAsync(null);
+            await latest;
+            await superseded;
+
+            Assert.Equal(5000, tasks.Comments.Count);
+            Assert.Contains("5000 comments", tasks.Status);
+            Assert.Equal("", host.Status);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task UserTasksLinkToTheCaretWithAnAtPrefixAndPersistPerWorkspace()
     {
         var root = NewDirectory();

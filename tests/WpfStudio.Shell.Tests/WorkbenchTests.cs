@@ -161,6 +161,17 @@ public sealed class WorkbenchTests
     }
 
     [Fact]
+    public async Task ClosingWithoutASolutionStillClosesFilesOpenedOnTheirOwn()
+    {
+        await using var test = new ShellTestContext();
+        await test.Shell.OpenDocumentAsync(await test.CreateFileAsync("Loose.cs", "class Loose { }"));
+        Assert.True(await test.Shell.CloseWorkspaceAsync());
+        Assert.Empty(test.Shell.Documents);
+        Assert.True(test.Shell.IsWelcomeVisible);
+        Assert.Equal("Closed all tabs", test.Shell.Status);
+    }
+
+    [Fact]
     public void ReleaseNotesListTheNewestEntryFirst()
     {
         Assert.NotEmpty(ReleaseNoteCatalog.All);
