@@ -18,6 +18,39 @@ public sealed class XamlCompletionTests
         })
     };
     [Fact]
+    public void NamespaceValuesComeFromCSharpFilesAndAreReadWhenTheIndexIsBuilt()
+    {
+        var index = new WpfIndexSnapshot([], [], [], [], new Dictionary<string, string>
+        {
+            ["Model.cs"] = "namespace Demo.Models; class Model { }",
+            ["Other.CS"] = "// namespace Commented\nnamespace Demo.Views { }\nnamespace Demo.Views { }",
+            ["View.xaml"] = "<!-- namespace FromXaml -->"
+        });
+        Assert.Equal(["Commented", "Demo.Views", "Demo.Views"], index.Namespaces["other.cs"]);
+        const string source = "<Window xmlns:vm=\"clr-namespace:";
+        var result = new XamlCompletionService { Index = index }.Complete("Window.xaml", source, source.Length, 1);
+        Assert.Equal(["clr-namespace:Commented", "clr-namespace:Demo.Models", "clr-namespace:Demo.Views"], result.Items.Select(item => item.DisplayText));
+    }
+    [Fact]
+    public void MappedPrefixesOfferTypesDeclaredInThatNamespaceOrBelowIt()
+    {
+        var service = new XamlCompletionService
+        {
+            Index = new WpfIndexSnapshot(
+                [new("ViewModel", "Direct", "Direct.cs", 1), new("ViewModel", "Nested", "Nested.cs", 1), new("ViewModel", "Elsewhere", "Elsewhere.cs", 1), new("Window", "Demo.Qualified", "Qualified.xaml", 1)],
+                [], [], [], new Dictionary<string, string>
+                {
+                    ["Direct.cs"] = "namespace Demo;",
+                    ["Nested.cs"] = "namespace Demo.Inner;",
+                    ["Elsewhere.cs"] = "namespace Demonstration;",
+                    ["Qualified.xaml"] = "<Window />"
+                })
+        };
+        const string source = "<Window xmlns:vm=\"clr-namespace:Demo\"><vm:";
+        var result = service.Complete("Window.xaml", source, source.Length, 1);
+        Assert.Equal(["vm:Direct", "vm:Nested", "vm:Qualified"], result.Items.Select(item => item.DisplayText));
+    }
+    [Fact]
     public void OfflineDesignDataContextDoesNotInferMembersFromCSharpText()
     {
         const string source = "<Window xmlns:vm=\"clr-namespace:Demo\" d:DataContext=\"{d:DesignInstance Type=vm:CustomerViewModel}\"><TextBlock Text=\"{Binding ";

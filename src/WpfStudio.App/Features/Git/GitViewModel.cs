@@ -521,6 +521,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         var selected = SelectedChange;
         var selectedWasStaged = SelectedChangeIsStaged;
         var selectedCommit = SelectedCommit;
+        // Editor blame can select a commit outside the loaded list. It stays selected, unlike one that left the list.
+        var keepUnlistedCommit = !rootChanged && selectedCommit is not null && !VisibleHistory.Any(x => x.Id == selectedCommit.Id);
         Quietly(() =>
         {
             Replace(Staged, snapshot.Changes.Where(x => x.IsStaged));
@@ -539,7 +541,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             }
             SelectedUnstaged = match is not null && !matchIsStaged ? match : null;
             SelectedStaged = match is not null && matchIsStaged ? match : null;
-            SelectedCommit = selectedCommit is null ? null : VisibleHistory.FirstOrDefault(x => x.Id == selectedCommit.Id);
+            SelectedCommit = selectedCommit is null ? null : VisibleHistory.FirstOrDefault(x => x.Id == selectedCommit.Id) ?? (keepUnlistedCommit ? selectedCommit : null);
         });
         HasMoreHistory = snapshot.History.Count > historyLimit;
         ApplyCollaboration(snapshot);

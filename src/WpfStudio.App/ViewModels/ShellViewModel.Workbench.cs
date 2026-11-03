@@ -22,7 +22,8 @@ public sealed partial class ShellViewModel
     /// <summary>Closes every tab and unloads the solution, returning to the start page. False when the user cancels a save prompt.</summary>
     public async Task<bool> CloseWorkspaceAsync()
     {
-        if (Workspace == null && Explorer.Nodes.Count == 0) { Status = "No solution is open"; return true; }
+        var onlyLooseFiles = Workspace == null && Explorer.Nodes.Count == 0;
+        if (onlyLooseFiles && Documents.Count == 0) { Status = "No solution is open"; return true; }
         if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return false; }
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before closing the solution"; return false; }
         if (!await CloseAllDocumentsForWorkspaceAsync()) return false;
@@ -41,7 +42,7 @@ public sealed partial class ShellViewModel
         await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync(); await TaskList.RefreshCommand.ExecuteAsync(null);
         try { await _workspace.UnloadAsync(_lifetime.Token); } catch (Exception ex) { AppendOutput("Language worker shutdown: " + ex.Message); }
         await SaveSettingsAsync();
-        Status = name.Length == 0 ? "Solution closed" : $"Closed {name}";
+        Status = onlyLooseFiles ? "Closed all tabs" : name.Length == 0 ? "Solution closed" : $"Closed {name}";
         return true;
     }
 

@@ -271,31 +271,24 @@ public sealed partial class EditorSurface
                 // Start at the text, below any lens row above the line.
                 var top = visual.GetTextLineVisualYPosition(visual.TextLines[0], VisualYPosition.TextTop) - view.VerticalOffset;
                 var height = visual.VisualTop + visual.Height - view.VerticalOffset - top;
-                foreach (var change in vm.LineChanges)
+                foreach (var change in LineChanges.At(vm.LineChanges, number, lineCount))
                 {
                     if (change.Kind == LineChangeKind.Deleted)
                     {
-                        var at = Math.Min(change.StartLine, lineCount);
-                        if (at != number) continue;
                         var y = change.StartLine > lineCount ? top + height : top;
                         var marker = new StreamGeometry();
                         using (var g = marker.Open()) { g.BeginFigure(new Point(0, y - 4), true, true); g.LineTo(new Point(6, y), true, false); g.LineTo(new Point(0, y + 4), true, false); }
                         marker.Freeze();
                         context.DrawGeometry(deleted, null, marker);
                     }
-                    else if (number >= change.StartLine && number < change.StartLine + change.LineCount)
-                        context.DrawRectangle(change.Kind == LineChangeKind.Added ? added : modified, null, new Rect(1, top, 3, height));
+                    else context.DrawRectangle(change.Kind == LineChangeKind.Added ? added : modified, null, new Rect(1, top, 3, height));
                 }
             }
         }
         private LineChange? ChangeAt(MouseEventArgs e, out int line)
         {
             line = TextView?.GetVisualLineFromVisualTop(e.GetPosition(TextView).Y + TextView.VerticalOffset)?.FirstDocumentLine.LineNumber ?? -1;
-            var number = line;
-            var lineCount = owner.Document.LineCount;
-            return owner.ViewModel?.LineChanges.FirstOrDefault(change => change.Kind == LineChangeKind.Deleted
-                ? Math.Min(change.StartLine, lineCount) == number
-                : number >= change.StartLine && number < change.StartLine + change.LineCount);
+            return owner.ViewModel is { } vm ? LineChanges.At(vm.LineChanges, line, owner.Document.LineCount).FirstOrDefault() : null;
         }
         protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
         {
@@ -304,8 +297,9 @@ public sealed partial class EditorSurface
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            Cursor = ChangeAt(e, out _) is null ? null : Cursors.Hand;
-            ToolTip = ChangeAt(e, out _) is { } change ? change.Kind switch
+            var hovered = ChangeAt(e, out _);
+            Cursor = hovered is null ? null : Cursors.Hand;
+            ToolTip = hovered is { } change ? change.Kind switch
             {
                 LineChangeKind.Added => "Added since the last commit. Click to remove.",
                 LineChangeKind.Deleted => "Lines deleted here since the last commit. Click to see or restore them.",

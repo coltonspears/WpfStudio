@@ -21,7 +21,7 @@ public sealed class ChangeReviewFile
         IsDeleted = change.After.Length == 0 && change.Before.Length > 0;
         Name = Path.GetFileName(change.Path);
         var directory = Path.GetDirectoryName(change.Path) ?? "";
-        Folder = root is not null && directory.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+        Folder = root is not null && ChangeReviewViewModel.IsWithin(directory, root)
             ? directory[root.Length..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) : directory;
         if (Folder.Length == 0) Folder = root is null ? "" : Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar));
     }
@@ -112,14 +112,16 @@ public sealed partial class ChangeReviewViewModel : ObservableObject
         var folders = Changes.Select(change => Path.GetDirectoryName(Path.GetFullPath(change.Path)) ?? "").ToArray();
         if (folders.Length == 0) return null;
         if (_host.WorkspacePath is { } workspace && Path.GetDirectoryName(Path.GetFullPath(workspace)) is { } workspaceFolder
-            && folders.All(folder => folder.StartsWith(workspaceFolder, StringComparison.OrdinalIgnoreCase))) return workspaceFolder;
+            && folders.All(folder => IsWithin(folder, workspaceFolder))) return workspaceFolder;
         var common = folders[0];
         foreach (var folder in folders.Skip(1))
-            while (common.Length > 0 && !(folder.Equals(common, StringComparison.OrdinalIgnoreCase)
-                || folder.StartsWith(common.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
+            while (common.Length > 0 && !IsWithin(folder, common))
                 common = Path.GetDirectoryName(common) ?? "";
         return common.Length == 0 ? null : common;
     }
+
+    internal static bool IsWithin(string folder, string root) => folder.Equals(root, StringComparison.OrdinalIgnoreCase)
+        || folder.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
     partial void OnSelectedFileChanged(ChangeReviewFile? value)
     {

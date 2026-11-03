@@ -61,7 +61,7 @@ public sealed partial class TextDiff
     public bool IsExact { get; }
     public bool IsIdentical => _blocks.Length == 0;
 
-    public static TextDiff Compute(string? before, string? after, int maxEditDistance = 3000)
+    public static TextDiff Compute(string? before, string? after, int maxEditDistance = 3000, CancellationToken cancellationToken = default)
     {
         var oldLines = SplitLines(before);
         var newLines = SplitLines(after);
@@ -69,7 +69,7 @@ public sealed partial class TextDiff
         int Id(string line) { if (!ids.TryGetValue(line, out var id)) ids[line] = id = ids.Count; return id; }
         var a = oldLines.Select(Id).ToArray();
         var b = newLines.Select(Id).ToArray();
-        var ops = Myers.Diff(a, b, maxEditDistance, out bool exact);
+        var ops = Myers.Diff(a, b, maxEditDistance, out bool exact, cancellationToken);
         var rows = new List<DiffRow>(Math.Max(a.Length, b.Length) + 8);
         var deleted = new List<int>();
         var inserted = new List<int>();
@@ -78,6 +78,7 @@ public sealed partial class TextDiff
             int paired = Math.Min(deleted.Count, inserted.Count);
             for (int i = 0; i < paired; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var (oldText, newText) = (oldLines[deleted[i]], newLines[inserted[i]]);
                 var (oldSpans, newSpans) = WordSpans(oldText, newText);
                 rows.Add(new(DiffRowKind.Modified, deleted[i] + 1, inserted[i] + 1, oldText, newText, oldSpans, newSpans));
@@ -182,7 +183,7 @@ internal static class Myers
     public enum OpKind : byte { Equal, Delete, Insert }
     public readonly record struct Op(OpKind Kind, int OldIndex, int NewIndex);
 
-    public static List<Op> Diff(int[] a, int[] b, int maxEditDistance, out bool exact)
+    public static List<Op> Diff(int[] a, int[] b, int maxEditDistance, out bool exact, CancellationToken cancellationToken = default)
     {
         exact = true;
         var ops = new List<Op>(a.Length + b.Length);
@@ -192,7 +193,7 @@ internal static class Myers
         while (suffix < a.Length - prefix && suffix < b.Length - prefix && a[a.Length - 1 - suffix] == b[b.Length - 1 - suffix]) suffix++;
         for (int i = 0; i < prefix; i++) ops.Add(new(OpKind.Equal, i, i));
         int n = a.Length - prefix - suffix, m = b.Length - prefix - suffix;
-        var middle = Middle(a, b, prefix, n, m, maxEditDistance);
+        var middle = Middle(a, b, prefix, n, m, maxEditDistance, cancellationToken);
         if (middle is null)
         {
             // The texts are too different for the search budget: show the middle as one replacement.
@@ -205,7 +206,7 @@ internal static class Myers
         return ops;
     }
 
-    private static List<Op>? Middle(int[] a, int[] b, int offset, int n, int m, int maxEditDistance)
+    private static List<Op>? Middle(int[] a, int[] b, int offset, int n, int m, int maxEditDistance, CancellationToken cancellationToken)
     {
         var result = new List<Op>();
         if (n == 0 && m == 0) return result;
@@ -219,6 +220,7 @@ internal static class Myers
         int found = -1;
         for (int d = 0; d <= limit && found < 0; d++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Snapshot k in [-d, d] of the previous iteration; that is all backtracking reads.
             var snapshot = new int[2 * d + 1];
             Array.Copy(v, center - d, snapshot, 0, snapshot.Length);

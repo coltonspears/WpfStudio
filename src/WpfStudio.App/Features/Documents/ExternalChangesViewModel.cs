@@ -126,8 +126,9 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
                         continue;
                     }
                     if (pending is null) Changes.Add(pending = new ExternalChange(doc));
-                    pending.Update(disk?.Text, disk?.Hash);
+                    var summarized = pending.UpdateAsync(disk?.Text, disk?.Hash);
                     doc.State.HasExternalChange = true;
+                    await summarized;
                 }
             } while (_recheckFiles);
         }
@@ -178,6 +179,8 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
 public sealed partial class ExternalChange : ObservableObject
 {
     private readonly EditorViewModel _document;
+    private string? _summarizedEditorText;
+    private int _summaryVersion;
     public ExternalChange(EditorViewModel document)
     {
         _document = document;
@@ -210,23 +213,36 @@ public sealed partial class ExternalChange : ObservableObject
         ? "Keep my version: the tab stays open as unsaved (•). Saving creates the file again."
         : "Keep my version: the editor text stays as it is and the tab is marked unsaved (•). Saving replaces the disk version with yours.";
 
-    internal void Update(string? diskText, string? diskHash)
+    internal Task UpdateAsync(string? diskText, string? diskHash)
     {
+        var unchanged = diskHash == DiskHash && EditorText == _summarizedEditorText;
         DiskText = diskText; DiskHash = diskHash;
-        if (diskText is null) Summary = "deleted";
-        else
+        if (IsDeleted) IsComparing = false;
+        Refresh();
+        // Every watcher tick lands here for every changed file, so an unchanged pair is not compared again.
+        return unchanged ? Task.CompletedTask : SummarizeAsync(EditorText, diskText);
+    }
+
+    private async Task SummarizeAsync(string editorText, string? diskText)
+    {
+        _summarizedEditorText = editorText;
+        var version = ++_summaryVersion;
+        if (diskText is null) { Summary = "deleted"; return; }
+        // A line diff of a large file takes long enough to be felt on the UI thread.
+        var summary = await Task.Run(() => Summarize(editorText, diskText));
+        if (version == _summaryVersion) Summary = summary;
+    }
+
+    private static string Summarize(string editorText, string diskText)
         {
             int added = 0, removed = 0;
-            foreach (var change in LineChanges.Compute(EditorText, diskText))
+        foreach (var change in LineChanges.Compute(editorText, diskText))
             {
                 var original = change.OriginalText.Length == 0 && change.Kind == LineChangeKind.Added ? 0 : change.OriginalText.Split('\n').Length;
                 if (change.Kind != LineChangeKind.Deleted) added += change.LineCount;
                 if (change.Kind != LineChangeKind.Added) removed += original;
             }
-            Summary = added + removed == 0 ? "changed on disk" : $"+{added} −{removed} lines on disk";
-        }
-        if (IsDeleted) IsComparing = false;
-        Refresh();
+        return added + removed == 0 ? "changed on disk" : $"+{added} −{removed} lines on disk";
     }
 
     private void StateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)

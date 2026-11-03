@@ -45,4 +45,26 @@ public static class LineChanges
         }
         return changes;
     }
+
+    /// <summary>
+    /// The changes shown at a line of a text with <paramref name="lineCount"/> lines, in <see cref="Compute"/>'s line order.
+    /// A deletion past the end of the text shows on the last line. Found by binary search, since a margin asks for every visible line.
+    /// </summary>
+    public static IEnumerable<LineChange> At(IReadOnlyList<LineChange> changes, int line, int lineCount)
+    {
+        int low = 0, high = changes.Count;
+        while (low < high)
+        {
+            var middle = (low + high) / 2;
+            if (changes[middle].StartLine + Math.Max(changes[middle].LineCount, 1) <= line) low = middle + 1;
+            else high = middle;
+        }
+        for (var index = low; index < changes.Count; index++)
+        {
+            var change = changes[index];
+            var first = change.Kind == LineChangeKind.Deleted ? Math.Min(change.StartLine, lineCount) : change.StartLine;
+            if (first > line) yield break;
+            if (change.Kind == LineChangeKind.Deleted ? first == line : line < change.StartLine + change.LineCount) yield return change;
+        }
+    }
 }

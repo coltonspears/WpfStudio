@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using WpfStudio.App.Features.Git;
+using WpfStudio.Core.Git;
 
 namespace WpfStudio.Shell.Tests;
 
@@ -322,6 +323,74 @@ public sealed class GitIntegrationTests
         Assert.Equal("file.cs", model.SelectedStaged?.Path);
         Assert.Equal("Staged", model.CurrentDiff?.NewLabel);
         Assert.Equal("Initial commit", model.CommitDetails?.Subject);
+    }
+
+    [Fact]
+    public async Task CommitOpenedFromBlameOutsideTheLoadedHistorySurvivesARefresh()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        var initial = (await fixture.RunAsync("rev-parse", "HEAD")).Trim();
+        for (var index = 1; index <= GitViewModel.HistoryPageSize + 2; index++)
+            await fixture.RunAsync("commit", "--allow-empty", "--quiet", "-m", $"Empty commit {index}");
+        using var model = new GitViewModel(fixture.Service);
+        await model.SetWorkspaceAsync(fixture.Root);
+        Assert.DoesNotContain(model.History, commit => commit.Id == initial);
+
+        model.ShowCommit(new BlameLine(initial, "WpfStudio test", "wpfstudio-test@example.invalid", DateTimeOffset.UnixEpoch, "Initial commit"));
+        await model.WhenLoadedAsync();
+        Assert.Equal("Initial commit", model.CommitDetails?.Subject);
+
+        await model.RefreshCommand.ExecuteAsync(null);
+        await model.WhenLoadedAsync();
+        Assert.Equal(initial, model.SelectedCommit?.Id);
+        Assert.Equal("Initial commit", model.CommitDetails?.Subject);
+        Assert.Equal("file.cs", Assert.Single(model.CommitFiles).Path);
+
+        // A commit that was listed and is no longer on the branch still goes.
+        model.SelectedCommit = model.VisibleHistory[0];
+        await model.WhenLoadedAsync();
+        await fixture.RunAsync("switch", "--quiet", "-c", "older", initial);
+        await model.RefreshCommand.ExecuteAsync(null);
+        await model.WhenLoadedAsync();
+        Assert.Null(model.SelectedCommit);
+        Assert.Null(model.CommitDetails);
+    }
+
+    [Fact]
+    public async Task SignInRetryKeepsWhatTheFailedActionAskedFor()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        var remote = fixture.File("../remote.git");
+        await fixture.RunAsync("init", "--bare", remote);
+        await fixture.RunAsync("remote", "add", "origin", remote);
+        await fixture.RunAsync("push", "--set-upstream", "origin", "main");
+        // This URL fails as a rejected sign-in would; the retry goes to the real remote.
+        const string rejecting = "ssh://git@example.invalid/remote.git";
+        await fixture.RunAsync("config", "core.sshCommand", "echo 'Permission denied (publickey)' >&2; exit 255 #");
+        await fixture.RunAsync("remote", "set-url", "origin", rejecting);
+        var saves = 0;
+        using var model = new GitViewModel(fixture.Service, _ => { saves++; return Task.FromResult(true); });
+        var reloads = 0;
+        model.WorkspaceFilesChanged += () => reloads++;
+        await model.SetWorkspaceAsync(fixture.Root);
+
+        await model.FetchCommand.ExecuteAsync(null);
+        Assert.True(model.CanSignIn, model.Error);
+        await fixture.RunAsync("remote", "set-url", "origin", remote);
+        await model.SignInAndRetryCommand.ExecuteAsync(null);
+        Assert.Equal("", model.Error);
+        Assert.Equal((0, 0), (saves, reloads));
+
+        await fixture.RunAsync("remote", "set-url", "origin", rejecting);
+        await model.PullCommand.ExecuteAsync(null);
+        Assert.True(model.CanSignIn, model.Error);
+        Assert.Equal((1, 0), (saves, reloads));
+        await fixture.RunAsync("remote", "set-url", "origin", remote);
+        await model.SignInAndRetryCommand.ExecuteAsync(null);
+        Assert.Equal("", model.Error);
+        Assert.Equal((2, 1), (saves, reloads));
     }
 
     [Fact]

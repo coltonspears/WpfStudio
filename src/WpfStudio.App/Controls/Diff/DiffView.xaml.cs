@@ -10,8 +10,8 @@ using ICSharpCode.AvalonEdit;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using WpfStudio.App.Services;
-using WpfStudio.Core.Text;
 using WpfStudio.Contracts;
+using WpfStudio.Core.Text;
 
 namespace WpfStudio.App.Controls.Diff;
 
@@ -67,6 +67,7 @@ public partial class DiffView : UserControl
     private DiffLayout? _layout;
     private int _current = -1;
     private int _computeVersion;
+    private CancellationTokenSource? _compute;
     private bool _syncing;
     private bool _recomputeQueued;
     private bool _updatingMode;
@@ -175,6 +176,7 @@ public partial class DiffView : UserControl
     private void Recompute()
     {
         var version = ++_computeVersion;
+        _compute?.Cancel(); _compute?.Dispose(); _compute = null;
         _expanded.Clear();
         _current = -1;
         if (!string.IsNullOrEmpty(Message)) { Clear(); ShowMessage(Message!, "Info"); return; }
@@ -182,12 +184,20 @@ public partial class DiffView : UserControl
         string before = Before ?? "", after = After ?? "";
         if (before.Length + after.Length < 400_000) { Apply(TextDiff.Compute(before, after)); return; }
         ShowMessage("Comparing…");
-        Task.Run(() => TextDiff.Compute(before, after)).ContinueWith(task =>
+        _compute = new CancellationTokenSource();
+        CompareInBackgroundAsync(before, after, version, _compute.Token).Forget();
+    }
+
+    private async Task CompareInBackgroundAsync(string before, string after, int version, CancellationToken token)
+    {
+        try
         {
-            if (version != _computeVersion) return;
-            if (task.Exception is { } error) ShowMessage(error.GetBaseException().Message, "Warning");
-            else Apply(task.Result);
-        }, TaskScheduler.FromCurrentSynchronizationContext()).Forget(fault => _ = Dispatcher.BeginInvoke(() => ShowMessage(fault.Message, "Warning")));
+            var diff = await Task.Run(() => TextDiff.Compute(before, after, cancellationToken: token), token);
+            if (version == _computeVersion) Apply(diff);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        // A failure while laying out the result lands here too; without a message the view would stay as it was.
+        catch (Exception exception) when (version == _computeVersion) { Clear(); ShowMessage(exception.Message, "Warning"); }
     }
 
     private void Apply(TextDiff diff)

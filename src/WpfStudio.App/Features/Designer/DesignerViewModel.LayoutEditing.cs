@@ -95,12 +95,14 @@ public sealed partial class DesignerViewModel
                 && _bindingOperations == 0 && _appearancePropertyOperations == 0
                 && ReferenceEquals(document, _document) && document.Version == sourceVersion && _sourceHash == sourceHash
                 && ReferenceEquals(snapshot, _snapshot) && ReferenceEquals(context, LayoutEditing)
-                && context.NodeId == SelectedNode?.Node.Id && _inspectedNodeId == context.NodeId && IsScenarioConfigurationCurrent();
+                && context.NodeId == SelectedNode?.Node.Id && _inspectedNodeId == context.NodeId;
             LayoutDraft = XamlLayoutEditService.Calculate(context, new(request.Handle, 0, 0, request.Zoom, true));
             return;
         }
-        if (_gestureCurrent is not { } current || !current() || _gestureContext is not { } captured
-            || request.Handle != _gestureHandle) { CancelLayoutGesture(); return; }
+        // Moves only redraw the draft, and come with every mouse event, so reading and hashing the scenario file
+        // waits for the commit. Its watcher still invalidates the preview, and so the gesture, on an ordinary change.
+        if (_gestureCurrent is not { } live || !live() || (request.Phase == PreviewLayoutGesturePhase.Commit && !IsScenarioConfigurationCurrent())
+            || _gestureContext is not { } captured || request.Handle != _gestureHandle) { CancelLayoutGesture(); return; }
         if (_layoutReviewPending) return;
         LayoutDraft = XamlLayoutEditService.Calculate(captured,
             new(request.Handle, request.DeltaX, request.DeltaY, request.Zoom, request.BypassSnap || !SnapToLayout));
@@ -110,11 +112,12 @@ public sealed partial class DesignerViewModel
         var sourceVersionForEdit = _sourceVersion;
         var sourceHashForEdit = _sourceHash!;
         var validation = new PreviewLayoutValidationRequest(captured.Version, captured.NodeId, captured.Token!, Surface: captured.Surface, Values: draft.Values);
+        bool StillCurrent() => live() && IsScenarioConfigurationCurrent();
         async Task<PreviewLayoutValidationResult> Validate(CancellationToken token)
         {
-            if (!current()) return new(validation, false, "The source or preview changed during the layout gesture. Refresh and try again.");
+            if (!StillCurrent()) return new(validation, false, "The source or preview changed during the layout gesture. Refresh and try again.");
             var result = await _client.ValidateLayoutEditAsync(validation, token);
-            if (result.Request != validation || !current())
+            if (result.Request != validation || !StillCurrent())
                 return new(validation, false, "The layout observation changed. Refresh and try again.");
             return result;
         }
@@ -128,8 +131,8 @@ public sealed partial class DesignerViewModel
                 documentForEdit.Version, sourceVersionForEdit, sourceHashForEdit, captured, bounds, request.Handle,
                 SourceAssembly: _sourceAssembly));
             if (!proposal.Success) { Status = proposal.Error ?? proposal.Explanation; return; }
-            if (!current() || LayoutEditRequested is not { } apply) return;
-            bool applied = await apply(new(proposal, current, Validate));
+            if (!StillCurrent() || LayoutEditRequested is not { } apply) return;
+            bool applied = await apply(new(proposal, StillCurrent, Validate));
             if (!_disposed && ReferenceEquals(documentForEdit, _document))
                 Status = applied ? "Layout updated in XAML. Save writes the file; Undo workspace edit restores the whole gesture."
                     : "Layout edit cancelled.";
