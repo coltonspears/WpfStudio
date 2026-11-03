@@ -36,7 +36,9 @@ public partial class App : Application
         {
             Directory.CreateDirectory(AppPaths.DataDirectory);
             var builder = Host.CreateApplicationBuilder(e.Args);
-            builder.Logging.ClearProviders(); builder.Logging.AddProvider(new StudioLogProvider());
+            builder.Logging.ClearProviders();
+            // By factory so the container owns it: disposing the host writes the last queued lines. An instance given to AddProvider is never disposed.
+            builder.Services.AddSingleton<ILoggerProvider>(_ => new StudioLogProvider());
             ConfigureServices(builder.Services);
             _host = builder.Build(); await _host.StartAsync();
             var shell = _host.Services.GetRequiredService<ShellViewModel>();
