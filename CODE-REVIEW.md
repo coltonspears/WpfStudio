@@ -48,6 +48,7 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 | A3, A5, A8, A9, A11, A13, A14, A17–A21, B44, B45 | Async and threading pass; see the fix log | ff2f978 … 6ee5446 |
 | B13, B21, B22, B26–B43, B46–B48, B50, B52, B53, B56–B68 | Bug pass; see the fix log | 4bd49c9 … 3d21bb6 |
 | Performance table, all rows | Same pass | fb2831a, 835ae7c, 9c9bd99, b281b7c |
+| T1–T5, T8, T9, F1–F5 | Toolkit and `field` pass; see the fix log | 70ce80f … 61ad744 |
 
 ### Partly done
 
@@ -66,8 +67,8 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 - **DI registration (1.3):** D1–D7, D9.
 - **Async (1.4):** none. A15 and A16 are partly done by design (above).
 - **Code-behind and MVVM (1.5):** M1–M10.
-- **CommunityToolkit.Mvvm (1.6):** T1–T9.
-- **`field` keyword (1.7):** F1–F6.
+- **CommunityToolkit.Mvvm (1.6):** T6, T7.
+- **`field` keyword (1.7):** none. F6 is a convention for new code.
 - **Bugs (Part 2):** none. B49, B51, B54 and B55 turned out not to need a change (see the fix log).
 
 ---
@@ -421,3 +422,9 @@ Bug pass:
 - **Packages, debugger install, Git, SQL.** **B38** a licence download timeout is tolerated; a user cancel still cancels. **B39** a partial `dotnet list` response falls back with the reason. **B40** stdout and stderr are separate, and JSON is read from the first line that opens with `{`. **B65** untracked files no longer block Pull, Merge or Switch, and git's own conflict error surfaces. **B66** a broken stdin no longer hides git's stderr. **B61** scripts continue past a failed `GO` batch like SSMS and say so; cancellation or a lost connection stops them. **B62** result columns are built from the table, so any column name displays.
 - **Preview, terminal, inspection, debugger.** **B46** the newest watch refresh wins. **B57** `_diagnostics` is always written under the lock. **B58** eviction takes the least recently observed entry. **B59** wrappers resolve through a hierarchy walk (`PropertyWrappers.Find`), including in the inspection agent. **B60** a null brush transform counts as identity. **B67** a renderer that fails to start keeps the shell session and offers Retry. **B68** the first inspection response gets 30 s, later ones keep 3 s. The compiled-preview row caches its hash by path, length and write time.
 - **Not changed, after checking.** **B49** on SDK 10.0.401 pipes reach EOF by the time the CLI exits even with reusable nodes alive, so the flag gives no benefit. **B51** the lease already dedupes paths. **B54** a real session does not throw cancellation here, and cancelling `_poll` changes the generation first. **B55** `ReloadWorkspaceAsync` now records a pending reload and has no `IsBusy` check.
+
+Toolkit and `field` pass:
+
+- **T1, T2** derived notifications and command refreshes are declared with `[NotifyPropertyChangedFor]` and `[NotifyCanExecuteChangedFor]`. Three stay in hooks because they are conditional: `EmptyCanvasText`, `ScenarioDescription`, `SelectBindingIssueCommand`. **T3** `Summary`, `Details` and `DocumentState` declare their dependents; `DocumentState` now has observable `DiskHash` and `SavedText`. `NotifyLists`, `NotifyCommands` and `NotifyCanvasState` remain because they have non-property triggers.
+- **T4, F4** `ShowInlineBlame` is generated, and its initial value still runs no hook. **T5** the last four hand-built commands are generated. **T8** `nameof` replaces the `"HasApiKey"` string. **T9** `notify` expands to a partial property, `notifylegacy` keeps `SetProperty`, and `propfield` is a plain property using `field`. The scaffold fallback applies below C# 14, not 13 as this review first said, because its template has an initializer.
+- **F1, F2, F5** lazy caches use `field`. **F3** `FontFamilies` uses `field`; `LoadFontFamiliesCommand` was not added, to keep the change small.

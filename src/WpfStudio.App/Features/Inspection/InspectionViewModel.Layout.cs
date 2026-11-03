@@ -6,9 +6,8 @@ namespace WpfStudio.App.Features.Inspection;
 
 public sealed partial class InspectionViewModel
 {
-    private LayoutInspectorViewModel? _layoutDetails;
     private bool _supportsLayout, _supportsLayoutOverlay, _layoutWasPaused, _layoutWasConnected;
-    public LayoutInspectorViewModel LayoutDetails => _layoutDetails ??= new(NotifyLayoutChanged, () => HighlightSelectedAsync().Forget(ReportFault));
+    public LayoutInspectorViewModel LayoutDetails => field ??= new(NotifyLayoutChanged, () => HighlightSelectedAsync().Forget(ReportFault));
     public LayoutSnapshot? Layout => LayoutDetails.Snapshot;
     public bool HasLayout => LayoutDetails.Available;
     public string LayoutStatus => LayoutDetails.Status;

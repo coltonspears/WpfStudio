@@ -103,7 +103,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public event Action? LayoutRestoreRequested;
     public event Action<string>? ThemeChanged;
 
-    [ObservableProperty] public partial WorkspaceSnapshot? Workspace { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(WindowTitle), nameof(HasWorkspace))] public partial WorkspaceSnapshot? Workspace { get; set; }
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SaveCommand))] public partial EditorViewModel? ActiveDocument { get; set; }
     [ObservableProperty] public partial string? ActiveWorkbench { get; set; }
     [ObservableProperty] public partial WorkspaceProject? StartupProject { get; set; }
@@ -120,7 +120,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial string ScaffoldName { get; set; } = "CustomerView";
     [ObservableProperty] public partial bool AddDataTemplate { get; set; }
     [ObservableProperty] public partial string SelectedBuildAction { get; set; } = "Resource";
-    [ObservableProperty] public partial string ThemeName { get; set; } = "Dark";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsLightTheme), nameof(IsDarkTheme))] public partial string ThemeName { get; set; } = "Dark";
     /// <summary>Inline parameter-name and type hints in C# editors.</summary>
     [ObservableProperty] public partial bool ShowInlayHints { get; set; } = true;
     partial void OnShowInlayHintsChanged(bool value) { foreach (var document in Documents) document.ShowInlayHints = value; }
@@ -138,7 +138,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public string WindowTitle => Workspace == null ? "WpfStudio" : $"{Path.GetFileNameWithoutExtension(Workspace.Path)} — WpfStudio";
     public bool HasWorkspace => Workspace != null;
     public bool IsWelcomeVisible => Documents.Count == 0;
-    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); XamlAnalysis.Reset(value); }
+    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { Features.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); XamlAnalysis.Reset(value); }
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
     partial void OnConfigurationChanged(string value) { if (!string.IsNullOrWhiteSpace(value)) ScheduleContextReload(); }
     partial void OnTargetFrameworkChanged(string? value) { if (value != null) ScheduleContextReload(); }

@@ -25,7 +25,6 @@ public sealed partial class ShellViewModel
     // ------------------------------------------------------------------ Theme
     public bool IsLightTheme => ThemeName.Equals("Light", IgnoreCase);
     public bool IsDarkTheme => !IsLightTheme;
-    partial void OnThemeNameChanged(string value) { OnPropertyChanged(nameof(IsLightTheme)); OnPropertyChanged(nameof(IsDarkTheme)); }
     [RelayCommand]
     private void SetTheme(string? name)
     {

@@ -22,8 +22,11 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     private bool _disposed, _updating;
     public ObservableCollection<ProfileProcess> Processes { get; } = [];
 
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CaptureCommand))] public partial ProfileProcess? SelectedProcess { get; set; }
-    [ObservableProperty] public partial HeapSummary? Summary { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsLiveSource), nameof(TimelineTitle)), NotifyCanExecuteChangedFor(nameof(CaptureCommand))] public partial ProfileProcess? SelectedProcess { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasCapture), nameof(SourceDescription), nameof(SourceName), nameof(CoverageDescription), nameof(IsIncomplete),
+        nameof(ManagedSize), nameof(ReachableSize), nameof(UnreachableSize), nameof(IsBrowserVisible)),
+        NotifyCanExecuteChangedFor(nameof(SetBaselineCommand), nameof(CloseCaptureCommand), nameof(ExportReportCommand))]
+    public partial HeapSummary? Summary { get; set; }
     [ObservableProperty] public partial string Status { get; set; } = "Open a full dump or capture a running .NET application to investigate memory.";
     [ObservableProperty] public partial string BusyMessage { get; set; } = "";
     [ObservableProperty] public partial string ComparisonDescription { get; set; } = "Set a baseline, repeat a workload, then open or capture another snapshot to compare type growth.";
@@ -62,13 +65,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         ? ReferenceEquals(b, CurrentSnapshot) ? $"Baseline {b.Title} (this snapshot)" : $"vs {b.Title}: {MemorySize.Signed((Summary?.ManagedBytes ?? 0) - b.Summary.ManagedBytes)}"
         : _baseline is null ? "No baseline" : $"Baseline {MemorySize.Format(_baseline.ManagedBytes)} · {_baseline.CapturedAt.LocalDateTime:t}";
 
-    partial void OnSummaryChanged(HeapSummary? value)
-    {
-        foreach (var name in new[] { nameof(HasCapture), nameof(SourceDescription), nameof(SourceName), nameof(CoverageDescription), nameof(IsIncomplete),
-            nameof(ManagedSize), nameof(ReachableSize), nameof(UnreachableSize), nameof(IsBrowserVisible) }) OnPropertyChanged(name);
-        SetBaselineCommand.NotifyCanExecuteChanged(); CloseCaptureCommand.NotifyCanExecuteChanged(); ExportReportCommand.NotifyCanExecuteChanged();
-        RefreshOverview();
-    }
+    partial void OnSummaryChanged(HeapSummary? value) => RefreshOverview();
     partial void OnFocusGraphChanged(bool value) { if (value) SelectedView = GraphView; }
 
     private bool CanLoad() => !_disposed && !IsBusy;

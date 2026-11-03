@@ -34,10 +34,10 @@ public sealed partial class MemoryProfilerViewModel
     [ObservableProperty] public partial string ComparisonHeadline { get; set; } = "";
     [ObservableProperty] public partial string ComparisonCountText { get; set; } = "";
     [ObservableProperty] public partial IReadOnlyList<LeakStep> LeakSteps { get; set; } = [];
-    [ObservableProperty] public partial IReadOnlyList<ProcessMemorySample> LiveSamples { get; set; } = [];
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasLiveSamples), nameof(TimelineTitle))] public partial IReadOnlyList<ProcessMemorySample> LiveSamples { get; set; } = [];
     [ObservableProperty] public partial IReadOnlyList<TimelineMarker> TimelineMarkers { get; set; } = [];
     [ObservableProperty] public partial string LiveMemoryText { get; set; } = "";
-    [ObservableProperty] public partial string TimelineWindow { get; set; } = "5 min";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(TimelineSeconds))] public partial string TimelineWindow { get; set; } = "5 min";
     /// <summary>Set by the pane while it is visible; sampling stops when nobody is looking.</summary>
     [ObservableProperty] public partial bool IsMonitorActive { get; set; }
     [ObservableProperty] public partial bool MonitorMemory { get; set; } = true;
@@ -60,17 +60,14 @@ public sealed partial class MemoryProfilerViewModel
     }
 
     partial void OnComparisonFilterChanged(string value) => RefreshComparison();
-    private RefreshThrottle? _comparisonSearchThrottle;
-    partial void OnComparisonSearchChanged(string value) => (_comparisonSearchThrottle ??= new(RefreshComparison)).Request();
+    private RefreshThrottle ComparisonSearchThrottle => field ??= new(RefreshComparison);
+    partial void OnComparisonSearchChanged(string value) => ComparisonSearchThrottle.Request();
     partial void OnComparisonOnlyMyCodeChanged(bool value) => RefreshComparison();
-    partial void OnTimelineWindowChanged(string value) => OnPropertyChanged(nameof(TimelineSeconds));
     partial void OnIsMonitorActiveChanged(bool value) => UpdateMonitor();
     partial void OnMonitorMemoryChanged(bool value) => UpdateMonitor();
-    partial void OnLiveSamplesChanged(IReadOnlyList<ProcessMemorySample> value) { OnPropertyChanged(nameof(HasLiveSamples)); OnPropertyChanged(nameof(TimelineTitle)); }
     partial void OnSelectedProcessChanged(ProfileProcess? value)
     {
         _samples.Clear(); LiveSamples = []; LiveMemoryText = "";
-        OnPropertyChanged(nameof(IsLiveSource)); OnPropertyChanged(nameof(TimelineTitle));
         RefreshTimelineMarkers(); UpdateMonitor();
     }
 

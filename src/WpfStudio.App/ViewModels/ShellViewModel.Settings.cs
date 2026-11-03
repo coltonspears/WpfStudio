@@ -24,8 +24,7 @@ public sealed partial class ShellViewModel
     partial void OnShowInlayHintsChanged(bool oldValue, bool newValue) => ScheduleSettingsSave();
     partial void OnShowCodeLensChanged(bool oldValue, bool newValue) => ScheduleSettingsSave();
     partial void OnShowInlineBlameChanged(bool oldValue, bool newValue) => ScheduleSettingsSave();
-    [ObservableProperty] public partial string ShortcutFilter { get; set; } = "";
-    partial void OnShortcutFilterChanged(string value) => OnPropertyChanged(nameof(Shortcuts));
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(Shortcuts))] public partial string ShortcutFilter { get; set; } = "";
 
     /// <summary>Commands with a keyboard shortcut, filtered by name, menu or keys.</summary>
     public IReadOnlyList<PaletteEntry> Shortcuts

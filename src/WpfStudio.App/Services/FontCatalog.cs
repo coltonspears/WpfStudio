@@ -13,19 +13,19 @@ namespace WpfStudio.App.Services;
 /// </summary>
 public sealed class FontCatalog : ObservableObject
 {
-    private IReadOnlyList<string>? _families;
     private bool _listingFamilies;
     public IReadOnlyList<string> Families
     {
         get
         {
-            if (_families is null && !_listingFamilies)
+            if (field is null && !_listingFamilies)
             {
                 _listingFamilies = true;
                 LoadFamiliesAsync().Forget();
             }
-            return _families ?? [];
+            return field ?? [];
         }
+        private set;
     }
 
     private async Task LoadFamiliesAsync()
@@ -33,7 +33,7 @@ public sealed class FontCatalog : ObservableObject
         IReadOnlyList<string> families;
         try { families = await Task.Run(ListFamilies).ConfigureAwait(false); }
         catch (Exception) { families = [EditorSettings.DefaultFontFamily]; } // The settings page only needs something to offer.
-        _families = families;
+        Families = families;
         // Not through the first reader's dispatcher: that reader may be on a thread that never runs one.
         if (Application.Current?.Dispatcher is { } ui) _ = ui.BeginInvoke(() => OnPropertyChanged(nameof(Families)));
         else OnPropertyChanged(nameof(Families));
