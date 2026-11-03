@@ -47,12 +47,14 @@ public partial class App : Application
             var window = _host.Services.GetRequiredService<MainWindow>();
             window.DataContext = shell; MainWindow = window;
             shell.ThemeChanged += ThemeService.Apply;
+#pragma warning disable VSTHRD101 // A WPF event handler; the awaits below are guarded.
             window.Closed += async (_, _) =>
             {
                 try { await _host.StopAsync(TimeSpan.FromSeconds(5)); if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync(); else _host.Dispose(); }
                 catch (Exception ex) { File.AppendAllText(Path.Combine(AppPaths.DataDirectory, "shutdown-error.log"), ex.ToString()); }
                 finally { Shutdown(); }
             };
+#pragma warning restore VSTHRD101
             window.Show();
             try { await shell.InitializeAsync(e.Args); }
             catch (Exception ex) { shell.Status = ex.Message; shell.AppendOutput(ex.ToString()); }
