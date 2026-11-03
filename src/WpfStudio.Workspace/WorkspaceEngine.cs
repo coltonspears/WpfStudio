@@ -386,7 +386,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 _semanticRevision++;
                 _xamlBatchCache.Clear();
             }
-            _versions.Remove(path); _syncedTexts.Remove(path);
+            _versions.Remove(path); _syncedTexts.Remove(path); _reportedDiagnostics.Remove(path);
             _completions.Clear(); _codeActions.Clear();
         }
         await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
@@ -520,25 +520,21 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 
     private Solution RequireSolution() => _solution ?? throw new InvalidOperationException("Language services are unavailable. Check workspace loading diagnostics.");
 
-    private static async Task<IReadOnlyList<WorkspaceDiagnostic>> GetDiagnosticsAsync(Document document, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<WorkspaceDiagnostic>> GetDiagnosticsAsync(Document document, CancellationToken cancellationToken)
     {
         var compilation = await document.Project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
-        if (compilation is null) return [];
-        var diagnostics = compilation.GetDiagnostics(cancellationToken);
+        var semantic = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+        if (compilation is null || semantic is null) return [];
+        var diagnostics = semantic.GetDiagnostics(cancellationToken: cancellationToken);
         var analyzers = document.Project.AnalyzerReferences.SelectMany(r => r.GetAnalyzers(document.Project.Language)).ToImmutableArray();
         if (!analyzers.IsEmpty)
         {
             var options = new CompilationWithAnalyzersOptions(document.Project.AnalyzerOptions, null, true, false, false);
             var analysis = compilation.WithAnalyzers(analyzers, options);
-            var semantic = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
-            if (semantic is not null)
-            {
-                diagnostics = diagnostics.AddRange(await analysis.GetAnalyzerSyntaxDiagnosticsAsync(semantic.SyntaxTree, cancellationToken).ConfigureAwait(false));
-                diagnostics = diagnostics.AddRange(await analysis.GetAnalyzerSemanticDiagnosticsAsync(semantic, null, cancellationToken).ConfigureAwait(false));
-            }
+            diagnostics = diagnostics.AddRange(await analysis.GetAnalyzerSyntaxDiagnosticsAsync(semantic.SyntaxTree, cancellationToken).ConfigureAwait(false));
+            diagnostics = diagnostics.AddRange(await analysis.GetAnalyzerSemanticDiagnosticsAsync(semantic, null, cancellationToken).ConfigureAwait(false));
         }
-        return diagnostics.Where(d => d.Severity != DiagnosticSeverity.Hidden && (!d.Location.IsInSource || string.Equals(d.Location.SourceTree?.FilePath, document.FilePath, StringComparison.OrdinalIgnoreCase)))
-            .Select(ToDiagnostic).Distinct().ToArray();
+        return CompleteDiagnostics(document, compilation, diagnostics);
     }
 
     private static WorkspaceDiagnostic ToDiagnostic(Diagnostic diagnostic)
@@ -572,13 +568,6 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             var text = await tree.GetTextAsync(cancellationToken).ConfigureAwait(false);
             path = await CacheGeneratedAsync(tree.FilePath, text, cancellationToken).ConfigureAwait(false);
             line = location.GetLineSpan();
-        }
-        else if (!string.Equals(path, location.SourceTree?.FilePath, StringComparison.OrdinalIgnoreCase))
-        {
-            // #line maps generated WPF fields back to XAML. Their C# offsets are not XAML offsets.
-            var text = SourceText.From(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false));
-            var sourceLine = text.Lines[Math.Clamp(line.StartLinePosition.Line, 0, text.Lines.Count - 1)];
-            start = Math.Min(sourceLine.End, sourceLine.Start + line.StartLinePosition.Character);
         }
         return new SourceLocation(path, start, location.SourceSpan.Length, line.StartLinePosition.Line + 1, line.StartLinePosition.Character + 1, display);
     }

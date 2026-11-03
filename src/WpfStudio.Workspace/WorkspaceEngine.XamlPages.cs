@@ -25,6 +25,7 @@ public sealed partial class WorkspaceEngine
         _solution = solution;
         _pageProjectionPending = true;
         _pageProjectionEpoch++;
+        CancelProjectDiagnostics();
     }
 
     private void ResetPageProjection()

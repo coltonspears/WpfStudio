@@ -116,6 +116,50 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task EditsReportFileDiagnosticsAtOnceAndProjectWideOnesWhenTheCompilationIsDone()
+    {
+        await File.WriteAllTextAsync(Project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><OutputType>Exe</OutputType></PropertyGroup></Project>");
+        var other = Path.Combine(_directory, "Other.cs");
+        await File.WriteAllTextAsync(other, "namespace Shop;\npublic class Other { public int Broken() => \"elsewhere\"; }\n");
+        var text = "namespace Shop;\npublic class Report\n{\n    private int _unused;\n    private int _assigned = 1;\n    public int Bad() => \"text\";\n}\n";
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        var pushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pushes = 0;
+        engine.SemanticStateChanged += (_, _) => { Interlocked.Increment(ref pushes); pushed.TrySetResult(); };
+
+        // Only this file was bound, so what needs every method body or has no file is not known yet.
+        var first = (await engine.UpdateDocumentAsync(new(Source, text, 1))).Diagnostics;
+        Assert.Contains(first, diagnostic => diagnostic.Id == "CS0029" && diagnostic.Severity == "Error");
+        Assert.DoesNotContain(first, diagnostic => diagnostic.Id is "CS0169" or "CS0414" or "CS5001");
+
+        await pushed.Task.WaitAsync(TimeSpan.FromMinutes(3));
+        var settled = (await engine.UpdateDocumentAsync(new(Source, text, 1))).Diagnostics;
+        Assert.Contains(settled, diagnostic => diagnostic.Id == "CS0029");
+        var unused = Assert.Single(settled, diagnostic => diagnostic.Id == "CS0169");
+        Assert.Equal(Source, unused.Path, ignoreCase: true);
+        Assert.Equal(4, unused.Line);
+        Assert.Equal(text.IndexOf("_unused", StringComparison.Ordinal), unused.Start);
+        Assert.Single(settled, diagnostic => diagnostic.Id == "CS0414");
+        Assert.Null(Assert.Single(settled, diagnostic => diagnostic.Id == "CS5001").Path);
+        // Other files' diagnostics stay out, as they always have.
+        Assert.DoesNotContain(settled, diagnostic => diagnostic.Message.Contains("elsewhere") || (diagnostic.Path?.EndsWith("Other.cs", StringComparison.OrdinalIgnoreCase) ?? false));
+        Assert.Equal(settled.Count, settled.Distinct().Count());
+
+        // The complete reply must not start another pass, or every open editor would keep analysing.
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        Assert.Equal(1, Volatile.Read(ref pushes));
+        Assert.Equal(settled, (await engine.UpdateDocumentAsync(new(Source, text, 1))).Diagnostics);
+
+        // After an edit nothing stale remains: source positions wait for the new compilation, a project-wide error stays.
+        var fixedText = "namespace Shop;\npublic class Report\n{\n    public int Good() => 1;\n}\n";
+        var edited = (await engine.UpdateDocumentAsync(new(Source, fixedText, 2))).Diagnostics;
+        Assert.DoesNotContain(edited, diagnostic => diagnostic.Id is "CS0029" or "CS0169" or "CS0414");
+        Assert.Contains(edited, diagnostic => diagnostic.Id == "CS5001");
+    }
+
     private static string Apply(string text, IReadOnlyList<TextEdit> edits) =>
         edits.OrderByDescending(edit => edit.Start).Aggregate(text, (current, edit) => current.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.NewText));
 

@@ -36,6 +36,7 @@ public sealed partial class WorkspaceEngine
         _diskPending.Clear();
         _diskCursor = null;
         _xamlBatchCache.Clear();
+        ResetProjectDiagnostics();
     }
 
     private void CaptureDiskDocuments(IEnumerable<Project> projects)
