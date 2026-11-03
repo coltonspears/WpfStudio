@@ -6,6 +6,7 @@ using WpfStudio.App.Features.Inspection;
 using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Features.WpfExplorer;
+using WpfStudio.Core.Documents;
 using WpfStudio.Core.Wpf;
 using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.App.Services;
@@ -15,7 +16,7 @@ using WpfStudio.Runtime.Debugging;
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewHost, IVerifiedEditHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -87,6 +88,11 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
 
     // ------------------------------------------------------------------ IChangeReviewHost
     void IChangeReviewHost.ReviewOpenChanged() { OnPropertyChanged(nameof(IsPreviewOpen)); UpdateDesignerOverlay(); }
+
+    // ------------------------------------------------------------------ IVerifiedEditHost
+    Task<bool> IVerifiedEditHost.ReviewChangesAsync(string title, IReadOnlyList<FileChange> changes, string warnings) => PreviewAsync(title, changes, warnings);
+    void IVerifiedEditHost.ShowDocument(DocumentState document) => AddDocument(document);
+    bool IVerifiedEditHost.IsDocumentOpen(DocumentState document) => Documents.Any(open => ReferenceEquals(open.State, document));
 
     // ------------------------------------------------------------------ IExternalChangesHost
     IReadOnlyList<EditorViewModel> IExternalChangesHost.Documents => Documents;

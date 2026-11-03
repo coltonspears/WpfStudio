@@ -121,7 +121,7 @@ public sealed partial class ShellViewModel
         int mappedCaret = MapFormattingOffset(caret, edit.Edits, rightAffinity: true);
         int mappedStart = length == 0 ? mappedCaret : MapFormattingOffset(start, edit.Edits, rightAffinity: true);
         int mappedEnd = length == 0 ? mappedCaret : MapFormattingOffset(start + length, edit.Edits, rightAffinity: false);
-        await _edits.ApplyAsync(changes, _lifetime.Token, CanApply);
+        await _verifiedEdits.ApplyAsync(changes, CanApply, _lifetime.Token);
         if (changes.Any(change => change.Before != change.After))
         {
             editor.RestoreSelection(mappedCaret, mappedStart, Math.Max(0, mappedEnd - mappedStart));

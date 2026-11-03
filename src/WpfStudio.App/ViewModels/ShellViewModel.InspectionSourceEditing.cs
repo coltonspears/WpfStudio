@@ -1,4 +1,5 @@
 using System.Text;
+using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.Inspection;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
@@ -52,10 +53,13 @@ public sealed partial class ShellViewModel
         // editing and saving remain possible; any changes invalidate this diff.
         if (IsPreviewOpen) return new(false, "Another source review opened while this change was being prepared.");
         var explanation = proposal.Explanation + " This updates the editor buffer only. The running application keeps its current build and temporary overrides until reset, disconnect or relaunch.";
-        if (!await PreviewAsync(request.Remove ? "Remove local XAML value from live inspection" : "Write live property value to XAML", changes, explanation))
-            return new(false, "XAML change cancelled. The source and running property were not changed by this action.");
         bool CanApply() => Current() && Documents.Contains(editor) && !editor.IsReadOnly;
-        if (!CanApply()) return StaleSourceEdit();
+        switch (await _verifiedEdits.ReviewAsync(request.Remove ? "Remove local XAML value from live inspection" : "Write live property value to XAML", changes, explanation, CanApply))
+        {
+            case VerifiedEditReview.Unchanged: return new(false, proposal.Explanation);
+            case VerifiedEditReview.Declined: return new(false, "XAML change cancelled. The source and running property were not changed by this action.");
+            case VerifiedEditReview.StaleBeforeReview or VerifiedEditReview.StaleAfterReview: return StaleSourceEdit();
+        }
         var modules = await request.RefreshModulesAsync(token);
         if (!CanApply()) return StaleSourceEdit();
         var checkedAgain = await InspectionSources.VerifyAsync(request.Node, modules, CanApply, token);
@@ -75,8 +79,7 @@ public sealed partial class ShellViewModel
                 return new(false, "The writable property identity changed during source review. Reload and review again.");
             // ApplyAsync rechecks this context after its asynchronous disk checks
             // and immediately before changing any buffer.
-            await _edits.ApplyAsync(changes, token, CanApply);
-            foreach (var change in changes) AddDocument(_store.Find(change.Path)!);
+            await _verifiedEdits.ApplyAsync(changes, CanApply, token);
         }
         return new(true, "XAML updated in the editor. Save to write the file; Undo workspace edit restores it. The running application has not been rebuilt. Rebuild with inspection before writing another source change.");
     }

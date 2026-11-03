@@ -2,6 +2,7 @@
 using System.IO;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Designer;
+using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Wpf;
@@ -60,19 +61,19 @@ public sealed partial class ShellViewModel
         var version = editor.State.Version;
         bool CanApply() => Documents.Contains(editor) && !editor.IsReadOnly && editor.State.Version == version && designerCurrent();
         var changes = await _edits.PrepareAsync(new WorkspaceEditResult([proposal.Edit], []), _lifetime.Token);
-        if (changes.All(change => change.Before == change.After)) return false;
-        if (!CanApply()) throw new InvalidOperationException("The source or preview changed while preparing the edit. Refresh and try again.");
-        if (!await PreviewAsync(title, changes, proposal.Explanation)) return false;
-        if (!CanApply())
-            throw new InvalidOperationException("The source document or preview changed while the edit was being reviewed. Refresh the preview and try again.");
+        switch (await _verifiedEdits.ReviewAsync(title, changes, proposal.Explanation, CanApply))
+        {
+            case VerifiedEditReview.Unchanged or VerifiedEditReview.Declined: return false;
+            case VerifiedEditReview.StaleBeforeReview: throw new InvalidOperationException("The source or preview changed while preparing the edit. Refresh and try again.");
+            case VerifiedEditReview.StaleAfterReview: throw new InvalidOperationException("The source document or preview changed while the edit was being reviewed. Refresh the preview and try again.");
+        }
         if (validate is not null)
         {
             var result = await validate(_lifetime.Token);
             if (!result.Success) throw new InvalidOperationException(result.Error ?? "The observed layout changed during review. Update the snapshot and try again.");
         }
         // The transaction rejects changes made while the diff was being reviewed.
-        await _edits.ApplyAsync(changes, _lifetime.Token, CanApply);
-        foreach (var change in changes) AddDocument(_store.Find(change.Path)!);
+        await _verifiedEdits.ApplyAsync(changes, CanApply, _lifetime.Token);
         return true;
     }
     [RelayCommand] private Task OpenDesignerAsync() => GuardAsync(async () =>

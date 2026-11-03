@@ -32,6 +32,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly WpfIndexService _indexer;
     private readonly ScaffoldingService _scaffolding;
     private readonly WorkspaceEditTransaction _edits;
+    private readonly VerifiedEditPipeline _verifiedEdits;
     private readonly XamlCompletionService _xaml;
     private readonly WpfStudio.Workspace.Xaml.XamlFormattingService _xamlFormatter;
     private readonly XamlResourceContext _xamlResources = new();
@@ -65,7 +66,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Theme.Apply(ThemeName);
         Designer.AttachSourceHost(this);
         TaskList = new(this, tools.Tasks, messenger); FileGroups = new(this, tools.FileGroups, messenger); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher, tools.WatchOpenDocuments);
-        Palette = new(this); ChangeReview = new(this, dispatcher);
+        Palette = new(this); ChangeReview = new(this, dispatcher); _verifiedEdits = new(this, store, _edits);
         XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
         Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
