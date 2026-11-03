@@ -59,9 +59,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         MemoryProfiler = memoryProfiler ?? new(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(), files, clipboard);
         Designer = designer ?? new(new WpfStudio.Runtime.Design.PreviewClient(), dispatcher);
         Designer.SourceRequested += source => _ = GuardAsync(() => NavigateAsync(source.Path, source.Line, source.Column));
-        Designer.SourceEditRequested += PreviewDesignerEditAsync;
-        Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
-        Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
+        Designer.AttachSourceHost(this);
         Designer.SelectionSourceChanged += RevealDesignerSelection;
         TaskList = new(this); FileGroups = new(this); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
         Palette = new(this); ChangeReview = new(this, dispatcher);
@@ -71,10 +69,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) { OnPropertyChanged(nameof(IsPreviewOpen)); UpdateDesignerOverlay(); } };
         Palette.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Palette.IsOpen)) UpdateDesignerOverlay(); };
         LiveInspection = new(dispatcher);
-        LiveInspection.LaunchRequested += debug => LaunchWithInspectionAsync(debug);
-        LiveInspection.SourceRequested += NavigateInspectionSourceAsync;
-        LiveInspection.BindingSourceRequested += NavigateInspectionBindingSourceAsync;
-        LiveInspection.SourceEditRequested += EditInspectionSourceAsync;
+        LiveInspection.AttachHost(this);
         InitializeFeatures(features);
         InitializeExperience();
         InitializeWorkbench();
@@ -412,6 +407,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources)
         {
             DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
+            XamlCodeActionApplier = ApplyXamlCodeActionAsync,
+            CSharpCodeActionApplier = (editor, action) => GuardAsync(() => ApplyCSharpCodeActionAsync(editor, action)),
             ShowInlayHints = ShowInlayHints,
             ShowInlineBlame = ShowInlineBlame,
             ShowCodeLens = ShowCodeLens,
@@ -429,8 +426,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
         vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
-        vm.CodeActionRequested += action => ApplyXamlCodeActionAsync(vm, action);
-        vm.CSharpCodeActionRequested += action => GuardAsync(() => ApplyCSharpCodeActionAsync(vm, action));
         vm.ContextChanged += () =>
         {
             if (ReferenceEquals(vm, ActiveDocument))

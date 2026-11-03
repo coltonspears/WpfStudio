@@ -71,10 +71,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public bool IsReadOnly => State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
     public ObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
     public ObservableCollection<XamlQuickFix> QuickFixes { get; } = [];
-    public event Func<XamlCodeAction, Task>? CodeActionRequested;
+    /// <summary>The shell computes a XAML quick fix's edits and opens the change review.</summary>
+    public Func<EditorViewModel, XamlCodeAction, Task>? XamlCodeActionApplier { get; init; }
     public ObservableCollection<CSharpQuickAction> CodeActions { get; } = [];
     /// <summary>The shell computes the action's edits and opens the change review.</summary>
-    public event Func<CodeActionEntry, Task>? CSharpCodeActionRequested;
+    public Func<EditorViewModel, CodeActionEntry, Task>? CSharpCodeActionApplier { get; init; }
     private long _codeActionsVersion = -1;
     public ObservableCollection<int> BreakpointLines { get; } = [];
     public ObservableCollection<BreakpointMarker> BreakpointMarkers { get; } = [];
@@ -465,7 +466,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             LanguageStatus = "The document changed. Press Ctrl+. again.";
             return;
         }
-        try { if (CSharpCodeActionRequested is { } apply) await apply(action); }
+        try { if (CSharpCodeActionApplier is { } apply) await apply(this, action); }
         catch (Exception ex) { LanguageStatus = ex.Message; _report(ex.Message); }
         finally { ClearQuickFixes(); }
     }
@@ -483,7 +484,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
         try
         {
-            if (CodeActionRequested is { } apply) await apply(action);
+            if (XamlCodeActionApplier is { } apply) await apply(this, action);
         }
         catch (Exception ex) { LanguageStatus = ex.Message; _report(ex.Message); }
         finally { ClearQuickFixes(); }

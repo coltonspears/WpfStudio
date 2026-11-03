@@ -12,7 +12,6 @@ public sealed record InspectionBindingSourceNavigation(BindingSourceDeclaration 
 
 public sealed partial class InspectionViewModel
 {
-    public event Func<InspectionBindingSourceNavigation, CancellationToken, Task<string>>? BindingSourceRequested;
     public ObservableCollection<BindingDeclarationItem> BindingDeclarations { get; } = [];
     [ObservableProperty] public partial BindingDeclarationItem? SelectedBindingDeclaration { get; set; }
     [ObservableProperty] public partial string BindingSourceStatus { get; set; } = "Select an element to inspect its binding declarations.";
@@ -85,14 +84,14 @@ public sealed partial class InspectionViewModel
         RefreshBindingExplanation();
     }
     private bool CanShowBindingSource(BindingDeclarationItem? item) => !_openingBindingSource && !_disposed && IsConnected && !IsPaused
-        && !IsPropertyOperationRunning && !IsSourceEditRunning && BindingSourceRequested is not null && SelectedNode is not null
+        && !IsPropertyOperationRunning && !IsSourceEditRunning && _host is not null && SelectedNode is not null
         && _session?.Hello?.Capabilities.Contains("binding-source") == true && _session.Hello.Capabilities.Contains("modules")
         && item?.PropertyId is not null && BindingDeclarations.Any(current => current.SameIdentity(item));
 
     [RelayCommand(CanExecute = nameof(CanShowBindingSource))]
     private async Task ShowBindingSourceAsync(BindingDeclarationItem? item)
     {
-        if (!CanShowBindingSource(item) || item is null || _session is not { } session || BindingSourceRequested is not { } navigate) return;
+        if (!CanShowBindingSource(item) || item is null || _session is not { } session || _host is not { } host) return;
         SelectedBindingDeclaration = item;
         var generation = _generation; var epoch = _bindingSourceEpoch; var sourceEpoch = _sourceEpoch;
         string nodeId = SelectedNode!.Node.Id;
@@ -121,7 +120,7 @@ public sealed partial class InspectionViewModel
             { BindingSourceStatus = response.Status ?? response.Declaration?.UnavailableReason ?? item.Description; return; }
             var modules = await session.GetModulesAsync(token);
             if (!CurrentBinding()) return;
-            var status = await navigate(new(response.Declaration, modules, CurrentBinding, ValidateAsync), token);
+            var status = await host.NavigateBindingSourceAsync(new(response.Declaration, modules, CurrentBinding, ValidateAsync), token);
             if (CurrentBinding()) BindingSourceStatus = status;
         }
         catch (OperationCanceledException) { }
@@ -136,7 +135,7 @@ public sealed partial class InspectionViewModel
     }
 
     private bool CanShowBindingIssueSource(InspectionBindingIssue? issue) => !_openingBindingSource && CanSelectBindingIssue(issue)
-        && !IsPropertyOperationRunning && !IsSourceEditRunning && BindingSourceRequested is not null
+        && !IsPropertyOperationRunning && !IsSourceEditRunning && _host is not null
         && _session?.Hello?.Capabilities.Contains("binding-source") == true;
     [RelayCommand(CanExecute = nameof(CanShowBindingIssueSource))]
     private async Task ShowBindingIssueSourceAsync(InspectionBindingIssue? issue)

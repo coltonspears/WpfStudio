@@ -13,7 +13,7 @@ using WpfStudio.Contracts;
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IWorkspaceMutationHost, IInspectionSourceHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IWorkspaceMutationHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -121,6 +121,17 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     private async Task WorkspaceMutatedAsync() { await CheckExternalChangesAsync(fromAppOperation: true); await ReloadWorkspaceAsync(); }
 
     WorkspaceSnapshot? IInspectionSourceHost.Workspace => Workspace;
+
+    // ------------------------------------------------------------------ IDesignerSourceHost
+    Task<bool> IDesignerSourceHost.ReviewPropertyEditAsync(XamlPropertyEditResult proposal) => PreviewDesignerEditAsync(proposal);
+    Task<bool> IDesignerSourceHost.ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit) => PreviewDesignerLayoutEditAsync(edit);
+    Task<string> IDesignerSourceHost.NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigatePreviewBindingSourceAsync(navigation, cancellationToken);
+
+    // ------------------------------------------------------------------ IInspectionRequestHost
+    Task IInspectionRequestHost.LaunchAsync(bool debug) => LaunchWithInspectionAsync(debug);
+    Task<string> IInspectionRequestHost.NavigateSourceAsync(InspectionSourceRequest request, CancellationToken cancellationToken) => NavigateInspectionSourceAsync(request, cancellationToken);
+    Task<string> IInspectionRequestHost.NavigateBindingSourceAsync(InspectionBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigateInspectionBindingSourceAsync(navigation, cancellationToken);
+    Task<InspectionSourceEditOutcome> IInspectionRequestHost.EditSourceAsync(InspectionSourceEditRequest request, CancellationToken cancellationToken) => EditInspectionSourceAsync(request, cancellationToken);
 
     // ------------------------------------------------------------------ WPF Explorer
     /// <summary>The resource declared at, or referenced from, the active caret; null (with a status) when the index no longer matches the buffer.</summary>

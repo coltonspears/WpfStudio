@@ -12,7 +12,6 @@ public sealed record PreviewBindingSourceNavigation(DocumentState Document, stri
 
 public sealed partial class DesignerViewModel
 {
-    public event Func<PreviewBindingSourceNavigation, CancellationToken, Task<string>>? BindingSourceRequested;
     public ObservableCollection<BindingDeclarationItem> BindingDeclarations { get; } = [];
     [ObservableProperty] public partial BindingDeclarationItem? SelectedBindingDeclaration { get; set; }
     [ObservableProperty] public partial string BindingSourceStatus { get; set; } = "Select an element to inspect its binding declarations.";
@@ -81,12 +80,12 @@ public sealed partial class DesignerViewModel
     }
     private bool CanShowBindingSource(BindingDeclarationItem? item) => !_openingBindingSource && !_disposed && IsCurrent && !IsCompiledPreview
         && _appearancePropertyOperations == 0 && _document is not null && _document.Version == _sourceVersion
-        && _inspectedNodeId == SelectedNode?.Node.Id && BindingSourceRequested is not null && item is not null
+        && _inspectedNodeId == SelectedNode?.Node.Id && _sourceHost is not null && item is not null
         && BindingDeclarations.Any(current => current.SameIdentity(item));
     [RelayCommand(CanExecute = nameof(CanShowBindingSource))]
     private async Task ShowBindingSourceAsync(BindingDeclarationItem? item)
     {
-        if (!CanShowBindingSource(item) || item is null || BindingSourceRequested is not { } navigate) return;
+        if (!CanShowBindingSource(item) || item is null || _sourceHost is not { } host) return;
         SelectedBindingDeclaration = item;
         var document = _document!; var text = document.Content; var version = document.Version;
         var revision = _revision; var selection = _selectionRevision; var epoch = _bindingSourceEpoch;
@@ -115,7 +114,7 @@ public sealed partial class DesignerViewModel
             var response = await ValidateAsync(_lifetime.Token);
             if (!response.Available || response.Declaration?.Source is null)
             { BindingSourceStatus = response.Status ?? response.Declaration?.UnavailableReason ?? item.Description; return; }
-            var status = await navigate(new(document, text, response.Declaration, CurrentBinding, ValidateAsync), _lifetime.Token);
+            var status = await host.NavigateBindingSourceAsync(new(document, text, response.Declaration, CurrentBinding, ValidateAsync), _lifetime.Token);
             if (CurrentBinding()) BindingSourceStatus = status;
         }
         catch (OperationCanceledException) { }

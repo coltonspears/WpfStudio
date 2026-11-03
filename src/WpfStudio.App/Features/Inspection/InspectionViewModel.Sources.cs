@@ -8,7 +8,6 @@ public sealed record InspectionSourceRequest(InspectionNode Node, InspectionModu
 
 public sealed partial class InspectionViewModel
 {
-    public event Func<InspectionSourceRequest, CancellationToken, Task<string>>? SourceRequested;
     private bool _openingSource;
     /// <summary>Source navigation's latest outcome, shown instead of the hint. Any outcome ends the verifying state.</summary>
     private string? SourceStatus { get; set { field = value; _verifyingSource = false; } }
@@ -22,7 +21,7 @@ public sealed partial class InspectionViewModel
         ? $"Source hint: {hint.Uri}:{hint.Line}:{hint.Column}. Show XAML verifies the running module, build source and editor buffer."
         : "WPF supplied no source location for this object. Code-created elements and some generated content cannot be mapped to XAML.");
     private bool CanShowSource() => !_openingSource && !_disposed && IsConnected && !IsPaused
-        && SelectedNode?.Node.Source != null && SourceRequested != null
+        && SelectedNode?.Node.Source != null && _host != null
         && _session?.Hello?.Capabilities.Contains("modules") == true;
 
     private void RefreshSourceState(bool clear = false)
@@ -47,7 +46,7 @@ public sealed partial class InspectionViewModel
     [RelayCommand(CanExecute = nameof(CanShowSource))]
     private async Task ShowSourceAsync()
     {
-        if (!CanShowSource() || _session is not { } session || SelectedNode is not { } selected || SourceRequested is not { } navigate) return;
+        if (!CanShowSource() || _session is not { } session || SelectedNode is not { } selected || _host is not { } host) return;
         var generation = _generation; var node = selected.Node; var epoch = _sourceEpoch;
         bool Current() => generation == _generation && epoch == _sourceEpoch && ReferenceEquals(session, _session) && !_disposed
             && IsConnected && !IsPaused && SelectedNode?.Node is { } current && current.Id == node.Id
@@ -58,7 +57,7 @@ public sealed partial class InspectionViewModel
             var token = _poll?.Token ?? default;
             var modules = await session.GetModulesAsync(token);
             if (!Current()) return;
-            var status = await navigate(new(node, modules, Current), token);
+            var status = await host.NavigateSourceAsync(new(node, modules, Current), token);
             if (Current()) SourceStatus = status;
         }
         catch (OperationCanceledException) { }

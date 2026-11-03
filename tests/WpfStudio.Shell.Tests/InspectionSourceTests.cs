@@ -110,7 +110,7 @@ public sealed partial class InspectionViewModelTests
         session.Modules = _ => Task.FromResult(modules);
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int navigations = 0;
-        if (callback) model.SourceRequested += (request, _) =>
+        if (callback) model.StubHost().Source = (request, _) =>
         {
             navigations++;
             Assert.Equal(session.Nodes[0], request.Node);
@@ -143,7 +143,7 @@ public sealed partial class InspectionViewModelTests
         session.Modules = _ => ready.Task; // Deliberately ignores cancellation, like a late transport response.
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int navigations = 0;
-        model.SourceRequested += (_, _) => { navigations++; return Task.FromResult("Stale navigation"); };
+        model.StubHost().Source = (_, _) => { navigations++; return Task.FromResult("Stale navigation"); };
         await model.AttachAsync(session, debugging: true);
         model.SelectedNode = model.Tree[0];
         var pending = model.ShowSourceCommand.ExecuteAsync(null);
@@ -171,7 +171,7 @@ public sealed partial class InspectionViewModelTests
         var session = SourceSession();
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         InspectionSourceRequest? captured = null;
-        model.SourceRequested += (request, _) => { captured = request; return ready.Task; };
+        model.StubHost().Source = (request, _) => { captured = request; return ready.Task; };
         await model.AttachAsync(session, debugging: true);
         model.SelectedNode = model.Tree[0];
         var pending = model.ShowSourceCommand.ExecuteAsync(null);
@@ -195,7 +195,7 @@ public sealed partial class InspectionViewModelTests
         session.Modules = _ => ready.Task;
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int navigations = 0;
-        model.SourceRequested += (request, _) =>
+        model.StubHost().Source = (request, _) =>
         {
             navigations++;
             Assert.Equal("first", request.Node.Id);
@@ -225,7 +225,7 @@ public sealed partial class InspectionViewModelTests
         var session = SourceSession();
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         InspectionSourceRequest? captured = null;
-        model.SourceRequested += (request, _) => { captured = request; return ready.Task; };
+        model.StubHost().Source = (request, _) => { captured = request; return ready.Task; };
         await model.AttachAsync(session, debugging: true);
         model.SelectedNode = model.Tree[0];
         var pending = model.ShowSourceCommand.ExecuteAsync(null);
@@ -245,7 +245,7 @@ public sealed partial class InspectionViewModelTests
     {
         var ready = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
-        model.SourceRequested += (_, _) => ready.Task;
+        model.StubHost().Source = (_, _) => ready.Task;
         await model.AttachAsync(SourceSession());
         model.SelectedNode = model.Tree[0];
         var pending = model.ShowSourceCommand.ExecuteAsync(null);
@@ -262,7 +262,7 @@ public sealed partial class InspectionViewModelTests
     {
         var session = SourceSession();
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
-        model.SourceRequested += (_, _) => Task.FromResult("Unexpected navigation");
+        model.StubHost().Source = (_, _) => Task.FromResult("Unexpected navigation");
         await model.AttachAsync(session, debugging: true);
         model.SelectedNode = model.Tree[0];
         model.SetDebuggerState(true);

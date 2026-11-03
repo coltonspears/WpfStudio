@@ -78,7 +78,7 @@ public sealed partial class DesignerTests
                 property with { CanWriteSource = property.Name == "Text" }).ToArray() };
         };
         await using var model = new DesignerViewModel(client, new InlineDispatcher());
-        model.SourceEditRequested += _ => Task.FromResult(false);
+        model.StubHost().PropertyEdit = _ => Task.FromResult(false);
         await model.OpenAsync(document); model.SelectedNode = model.Tree[0]; model.SelectedProperty = model.Properties[0];
         model.EditedValue = "Unsubmitted draft";
         var pendingValidation = new TaskCompletionSource<PreviewPropertyValidation>();

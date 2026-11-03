@@ -13,8 +13,6 @@ public sealed record InspectionSourceEditOutcome(bool Applied, string Status);
 
 public sealed partial class InspectionViewModel
 {
-    public event Func<InspectionSourceEditRequest, CancellationToken, Task<InspectionSourceEditOutcome>>? SourceEditRequested;
-
     private sealed record SourceEditContext(string? NodeId, string? PropertyId, string? Token, string Value, bool IsNull);
     private SourceEditContext? _sourceEditContext;
     private long _sourceEditEpoch, _sourceEditOperation;
@@ -38,7 +36,7 @@ public sealed partial class InspectionViewModel
         && _session?.Hello is { } hello && hello.Capabilities.Contains("modules")
         && hello.Capabilities.Contains("source-property-validation");
     private bool CanWritePropertySource() => HasSourcePropertyContext && !IsSourceEditRunning
-        && !IsPropertyOperationRunning && SourceEditRequested is not null;
+        && !IsPropertyOperationRunning && _host is not null;
 
     private void ResetSourceEditing()
     {
@@ -86,7 +84,7 @@ public sealed partial class InspectionViewModel
 
     private async Task EditPropertySourceAsync(bool remove)
     {
-        if (!CanWritePropertySource() || _session is not { } session || SourceEditRequested is not { } preview) return;
+        if (!CanWritePropertySource() || _session is not { } session || _host is not { } host) return;
         UpdateSourceEditingState();
         var generation = _generation; var epoch = _sourceEditEpoch; var sourceEpoch = _sourceEpoch;
         var node = SelectedNode!.Node; var property = SelectedProperty!;
@@ -130,7 +128,7 @@ public sealed partial class InspectionViewModel
         try
         {
             var modules = await RefreshModulesAsync(lifetime);
-            var result = await preview(new(node, property, modules, remove ? null : value, !remove && isNull,
+            var result = await host.EditSourceAsync(new(node, property, modules, remove ? null : value, !remove && isNull,
                 remove, Current, ValidateAsync, RefreshModulesAsync), lifetime);
             if (Current()) SourceEditStatus = result.Status;
         }
