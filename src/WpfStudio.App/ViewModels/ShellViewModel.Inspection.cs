@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Inspection;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Wpf;
 using WpfStudio.Runtime.Debugging;
@@ -32,7 +33,7 @@ public sealed partial class ShellViewModel
             if (!await SaveAllDocumentsAsync()) return;
             var configuration = Configuration; var profile = LaunchProfile;
             var sourceWorkspace = Workspace;
-            ToolRequested?.Invoke("Output"); Status = "Building with XAML source information for inspection…";
+            ToolRequested?.Invoke(Workbenches.Output); Status = "Building with XAML source information for inspection…";
             using var progress = CreateBuildProgress();
             BuildResult result;
             IReadOnlyList<XamlBuildSource> buildSources;
@@ -60,7 +61,7 @@ public sealed partial class ShellViewModel
             InspectionSources.Capture(buildSources, sourceWorkspace);
             session = new InspectionSession();
             var environment = InspectionLaunch.CreateEnvironment(launch.Environment, session, hook);
-            ToolRequested?.Invoke("LiveInspection");
+            ToolRequested?.Invoke(Workbenches.LiveInspection);
             var connection = LiveInspection.AttachAsync(attached = session, debug, _operation.Token);
             // AttachAsync owns disposal from here: it disposes a session it does not adopt, and
             // Disconnect one it did. The launch environment applies to the target only, never the build or adapter.

@@ -5,6 +5,7 @@ using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 
 using WpfStudio.App.Features.XamlAnalysis;
+using WpfStudio.App.Features.Workbench;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -100,7 +101,7 @@ public sealed partial class ShellViewModel
             SearchResults.Add(item);
             _symbolReferenceOrigins.Add(item, new(Workspace));
         }
-        ToolRequested?.Invoke("Search");
+        ToolRequested?.Invoke(Workbenches.Search);
         Status = $"{result.Locations.Count} symbol reference(s)" + SymbolWarnings(result.Warnings);
     }
 
@@ -123,7 +124,7 @@ public sealed partial class ShellViewModel
         }
         foreach (var usage in WpfExplorer.Index!.Usages.Where(usage => usage.ResolvedPath == declaration.Path && usage.ResolvedDeclarationStart == declaration.ValueStart))
             SearchResults.Add(new(usage.Path, usage.Line, 1, (usage.IsDynamic ? "DynamicResource " : "StaticResource ") + usage.Key));
-        ToolRequested?.Invoke("Search");
+        ToolRequested?.Invoke(Workbenches.Search);
         Status = $"{SearchResults.Count} resolved resource reference(s); runtime and code resource references are not indexed" + SymbolWarnings(warnings ?? []);
     }
 

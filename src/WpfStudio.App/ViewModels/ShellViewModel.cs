@@ -9,6 +9,7 @@ using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.WpfExplorer;
 using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.App.Services;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
 using WpfStudio.Core.Documents;
@@ -522,7 +523,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private Task RunBuildAsync(BuildOperation operation, string? target = null) => GuardAsync(async () =>
     {
         if (Workspace == null || IsBusy || _loading) return;
-        IsBusy = true; _operation = new(); ToolRequested?.Invoke("Output"); Output = "";
+        IsBusy = true; _operation = new(); ToolRequested?.Invoke(Workbenches.Output); Output = "";
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
@@ -555,7 +556,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
         if (!await EnsureDebuggerAsync()) return;
         if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
-        IsBusy = true; _operation = new(); ToolRequested?.Invoke("Debugger");
+        IsBusy = true; _operation = new(); ToolRequested?.Invoke(Workbenches.Debugger);
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
@@ -578,7 +579,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private async Task<bool> EnsureDebuggerAsync()
     {
         if (!Debugger.IsAdapterMissing) return true;
-        ToolRequested?.Invoke("Debugger");
+        ToolRequested?.Invoke(Workbenches.Debugger);
         Status = "Installing the debugger…";
         var ready = await Debugger.EnsureAdapterAsync(() => _dialogs.ConfirmAsync("Install the debugger",
             $"Debugging needs {Debugger.AdapterDescription}, which isn't installed. Download it now (about 5 MB from GitHub), verify its checksum and install it in your WpfStudio profile?"));
@@ -689,7 +690,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         await GuardAsync(async () =>
         {
             var query = SearchQuery; if (string.IsNullOrWhiteSpace(query)) return;
-            SearchResults.Clear(); ToolRequested?.Invoke("Search");
+            SearchResults.Clear(); ToolRequested?.Invoke(Workbenches.Search);
             var results = await Task.Run(async () =>
             {
                 var found = new List<NavigationResult>();
@@ -823,7 +824,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task ShowPackUriAsync() => GuardAsync(() =>
     {
         var path = WpfExplorer.SelectedItem?.Path ?? Explorer.SelectedNode?.Path;
-        if (path != null) { var owner = ResolveAssetOwner(path); var logicalPath = owner.Files.First(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).LogicalPath; var uri = ScaffoldingService.PackUri(owner.ProjectPath, path, owner.AssemblyName, logicalPath); AppendOutput(uri); ToolRequested?.Invoke("Output"); Status = uri; }
+        if (path != null) { var owner = ResolveAssetOwner(path); var logicalPath = owner.Files.First(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).LogicalPath; var uri = ScaffoldingService.PackUri(owner.ProjectPath, path, owner.AssemblyName, logicalPath); AppendOutput(uri); ToolRequested?.Invoke(Workbenches.Output); Status = uri; }
         return Task.CompletedTask;
     });
     private Task<bool> PreviewAsync(string title, IReadOnlyList<FileChange> changes, string warnings) => ChangeReview.ShowAsync(title, changes, warnings);
@@ -841,10 +842,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private void ToggleTheme() { ThemeName = ThemeName == "Dark" ? "Light" : "Dark"; ThemeChanged?.Invoke(ThemeName); }
     [RelayCommand] private void ShowTool(string? name)
     {
-        if (name == "Packages") _ = OpenPackagesCommand.ExecuteAsync(null);
-        else if (name == "Git") _ = OpenGitCommand.ExecuteAsync(null);
-        else if (name == "ColtonGPT") _ = OpenAssistantCommand.ExecuteAsync(null);
-        else if (name == "Designer") _ = OpenDesignerCommand.ExecuteAsync(null);
+        if (name == Workbenches.Packages) _ = OpenPackagesCommand.ExecuteAsync(null);
+        else if (name == Workbenches.Git) _ = OpenGitCommand.ExecuteAsync(null);
+        else if (name == Workbenches.Assistant) _ = OpenAssistantCommand.ExecuteAsync(null);
+        else if (name == Workbenches.Designer) _ = OpenDesignerCommand.ExecuteAsync(null);
         else if (name != null) ToolRequested?.Invoke(name);
     }
     [RelayCommand] private void SaveLayout() { LayoutSaveRequested?.Invoke(); Status = "Layout saved"; }

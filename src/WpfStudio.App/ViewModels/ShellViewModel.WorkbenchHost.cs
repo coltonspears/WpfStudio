@@ -138,7 +138,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
 
     private IEnumerable<PaletteEntry> FileGroupCommands()
     {
-        yield return Command("View", "File groups", ShowToolCommand, FileGroupsViewModel.ToolId, icon: "Pin", detail: "Pinned sets of files for a feature");
+        yield return Command("View", "File groups", ShowToolCommand, Workbenches.FileGroups, icon: "Pin", detail: "Pinned sets of files for a feature");
         yield return Command("Window", "Pin open tabs as a file group…", FileGroups.AddOpenTabsCommand, icon: "Pin");
         yield return Command("Window", "Add file to a file group…", FileGroups.AddActiveCommand, icon: "Pin");
         foreach (var group in FileGroups.Groups)

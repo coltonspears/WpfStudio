@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Data;
+using WpfStudio.App.Features.Workbench;
 
 namespace WpfStudio.App.Controls;
 
@@ -39,20 +40,20 @@ public sealed class ContentGlyphConverter : IValueConverter
 {
     public static string KindFor(string? contentId) => contentId switch
     {
-        "Explorer" => "Folder",
-        "WpfTools" => "Layers",
-        "ColtonGPT" => "Chat",
-        "Output" => "Output",
-        "Problems" => "Warning",
-        "TaskList" => "Check",
-        "FileGroups" => "Pin",
-        "Search" => "Search",
-        "Terminal" => "Terminal",
-        "Debugger" => "Bug",
-        "Database" => "Database",
-        "Packages" => "Package",
-        "Git" => "Git",
-        "Welcome" => "Window",
+        Workbenches.Explorer => "Folder",
+        Workbenches.WpfTools => "Layers",
+        Workbenches.Assistant => "Chat",
+        Workbenches.Output => "Output",
+        Workbenches.Problems => "Warning",
+        Workbenches.TaskList => "Check",
+        Workbenches.FileGroups => "Pin",
+        Workbenches.Search => "Search",
+        Workbenches.Terminal => "Terminal",
+        Workbenches.Debugger => "Bug",
+        Workbenches.Database => "Database",
+        Workbenches.Packages => "Package",
+        Workbenches.Git => "Git",
+        Workbenches.Welcome => "Window",
         _ => ""
     };
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => KindFor(value as string);

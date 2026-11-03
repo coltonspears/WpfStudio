@@ -62,7 +62,7 @@ public sealed partial class ShellViewModel
         }
         return null;
     }
-    [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke("Search"); SearchFocusRequested?.Invoke(); }
+    [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke(Workbenches.Search); SearchFocusRequested?.Invoke(); }
     [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(AppPaths.DataDirectory); DesktopNavigation.Reveal(AppPaths.DataDirectory); return Task.CompletedTask; });
     /// <summary>Opens the command palette on the snippets for the active editor's language.</summary>
     [RelayCommand] private void InsertSnippet()
@@ -107,7 +107,7 @@ public sealed partial class ShellViewModel
     private PaletteEntry MemoryCommand(string label, ICommand command, object? parameter = null, string icon = "", string detail = "")
         => new(label, detail, async () =>
         {
-            ShowToolCommand.Execute("Profiler");
+            ShowToolCommand.Execute(Workbenches.Profiler);
             if (!command.CanExecute(parameter)) { Status = label + " isn't available right now"; return; }
             if (command is IAsyncRelayCommand asyncCommand) await asyncCommand.ExecuteAsync(parameter);
             else command.Execute(parameter);
@@ -164,21 +164,21 @@ public sealed partial class ShellViewModel
         yield return Command("Debug", "Add watch", Breakpoints.AddWatchCommand, icon: "Eye", detail: "Watch the expression at the caret or the selection");
         yield return Command("Debug", "Show breakpoints", Breakpoints.ShowCommand, icon: "Bug", detail: "Conditions, enabled state and binding status");
         yield return Command("Debug", "Install or reinstall the debugger", Debugger.InstallAdapterCommand, icon: "Bug", detail: "Download netcoredbg into your WpfStudio profile");
-        yield return Command("Debug", "Attach to process…", ShowToolCommand, "Debugger", icon: "Plug");
-        yield return Command("View", "Solution Explorer", ShowToolCommand, "Explorer", icon: "Folder");
-        yield return Command("View", "WPF Explorer", ShowToolCommand, "WpfTools", icon: "Layers");
+        yield return Command("Debug", "Attach to process…", ShowToolCommand, Workbenches.Debugger, icon: "Plug");
+        yield return Command("View", "Solution Explorer", ShowToolCommand, Workbenches.Explorer, icon: "Folder");
+        yield return Command("View", "WPF Explorer", ShowToolCommand, Workbenches.WpfTools, icon: "Layers");
         yield return Command("View", "XAML Designer", OpenDesignerCommand, icon: "Layers");
-        yield return Command("View", "Live XAML", ShowToolCommand, "LiveInspection", icon: "Layers");
+        yield return Command("View", "Live XAML", ShowToolCommand, Workbenches.LiveInspection, icon: "Layers");
         yield return Command("Debug", "Run with XAML inspection", RunWithInspectionCommand, icon: "PlayOutline");
         yield return Command("Debug", "Debug with XAML inspection", DebugWithInspectionCommand, icon: "Play");
         yield return Command("View", "ColtonGPT", OpenAssistantCommand, icon: "Chat", detail: "Ask about code with optional editor context");
-        yield return Command("View", "Output", ShowToolCommand, "Output", icon: "Output");
-        yield return Command("View", "Problems", ShowToolCommand, "Problems", icon: "Warning");
-        yield return Command("View", "Search results", ShowToolCommand, "Search", icon: "Search");
-        yield return Command("View", "Terminal", ShowToolCommand, "Terminal", shortcut: "Ctrl+`", icon: "Terminal");
-        yield return Command("View", "Debugger", ShowToolCommand, "Debugger", icon: "Bug");
-        yield return Command("View", "SQL Server", ShowToolCommand, "Database", icon: "Database");
-        yield return Command("Tools", "Memory profiler", ShowToolCommand, "Profiler", icon: "Layers", detail: "Dumps, live snapshots, GC roots and reference-removal estimates");
+        yield return Command("View", "Output", ShowToolCommand, Workbenches.Output, icon: "Output");
+        yield return Command("View", "Problems", ShowToolCommand, Workbenches.Problems, icon: "Warning");
+        yield return Command("View", "Search results", ShowToolCommand, Workbenches.Search, icon: "Search");
+        yield return Command("View", "Terminal", ShowToolCommand, Workbenches.Terminal, shortcut: "Ctrl+`", icon: "Terminal");
+        yield return Command("View", "Debugger", ShowToolCommand, Workbenches.Debugger, icon: "Bug");
+        yield return Command("View", "SQL Server", ShowToolCommand, Workbenches.Database, icon: "Database");
+        yield return Command("Tools", "Memory profiler", ShowToolCommand, Workbenches.Profiler, icon: "Layers", detail: "Dumps, live snapshots, GC roots and reference-removal estimates");
         yield return MemoryCommand("Capture memory snapshot", MemoryProfiler.CaptureCommand, icon: "Camera", detail: "Snapshot the selected process's managed heap");
         yield return MemoryCommand("Open memory dump…", MemoryProfiler.OpenDumpCommand, icon: "FolderOpen");
         yield return MemoryCommand("Compare memory snapshots", MemoryProfiler.ShowViewCommand, "4", icon: "Timeline", detail: "Live memory, snapshot history and type growth");

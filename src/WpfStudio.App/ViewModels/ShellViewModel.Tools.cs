@@ -3,6 +3,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.Runtime.Debugging;
 using WpfStudio.Contracts;
 
@@ -58,12 +59,12 @@ public sealed partial class ShellViewModel
         ActiveDocument = null;
         // Restored tabs get the same lazy initialization as a menu-opened tab.
         if (Features == null) return;
-        if (name == "Git" && !_gitToolOpened)
+        if (name == Workbenches.Git && !_gitToolOpened)
         {
             _gitToolOpened = true;
             _ = GuardAsync(() => Features.Git.SetWorkspaceAsync(Workspace?.Path));
         }
-        else if (name == "Packages" && !_packagesToolOpened)
+        else if (name == Workbenches.Packages && !_packagesToolOpened)
         {
             _packagesToolOpened = true;
             Features.Packages.SetWorkspace(Workspace);
@@ -81,7 +82,7 @@ public sealed partial class ShellViewModel
     {
         if (Features == null) return;
         _packagesToolOpened = true;
-        ToolRequested?.Invoke("Packages"); Features.Packages.SetWorkspace(Workspace);
+        ToolRequested?.Invoke(Workbenches.Packages); Features.Packages.SetWorkspace(Workspace);
         await Features.Packages.ActivateAsync();
     });
     [RelayCommand] private Task OpenSelectedProjectPackagesAsync() => OpenProjectPackagesAsync(Explorer.SelectedNode?.ProjectPath);
@@ -89,13 +90,13 @@ public sealed partial class ShellViewModel
     {
         if (Features == null) return;
         _packagesToolOpened = true;
-        ToolRequested?.Invoke("Packages"); Features.Packages.SetWorkspace(Workspace);
+        ToolRequested?.Invoke(Workbenches.Packages); Features.Packages.SetWorkspace(Workspace);
         if (Features.Packages.Projects.FirstOrDefault(project => project.ProjectPath.Equals(projectPath, StringComparison.OrdinalIgnoreCase)) is { } selected)
             Features.Packages.SelectedProject = selected;
         await Features.Packages.ActivateAsync();
     });
-    [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { if (Features != null) { _gitToolOpened = true; ToolRequested?.Invoke("Git"); await Features.Git.SetWorkspaceAsync(Workspace?.Path); } });
-    [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { if (Features != null) { UpdateAssistantContext(); ToolRequested?.Invoke("ColtonGPT"); await Features.Assistant.InitializeAsync(); } });
+    [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { if (Features != null) { _gitToolOpened = true; ToolRequested?.Invoke(Workbenches.Git); await Features.Git.SetWorkspaceAsync(Workspace?.Path); } });
+    [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { if (Features != null) { UpdateAssistantContext(); ToolRequested?.Invoke(Workbenches.Assistant); await Features.Assistant.InitializeAsync(); } });
     [RelayCommand] private Task RefactorAsync(string? action) => GuardAsync(async () =>
     {
         if (ActiveDocument is not { IsReadOnly: false } document || document.State.Extension != ".cs" || action == null) { Status = "Open a C# source document to use this refactoring"; return; }
