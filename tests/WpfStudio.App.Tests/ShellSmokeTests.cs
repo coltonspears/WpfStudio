@@ -349,11 +349,11 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await VerifyPreviewAppearanceAsync(root, data, window, manager, shell);
             await VerifyRuntimeInspectionAsync(root, data, window, manager, shell);
             await VerifyRetainedPanesAsync(Path.Combine(data, "layout.xml"), manager, shell);
-            Assert.Empty(bindingErrors.Messages);
-            Assert.Empty(messages.OffThread);
             Assert.Contains(nameof(WorkspaceChangedMessage), messages.Seen);
             Assert.Contains(nameof(ThemeChangedMessage), messages.Seen);
-            Assert.Contains(nameof(DocumentSavedMessage), messages.Seen);
+            await VerifySaveMessagesAsync(data, shell, messages);
+            Assert.Empty(bindingErrors.Messages);
+            Assert.Empty(messages.OffThread);
         }
         catch (Exception exception)
         {
@@ -2154,6 +2154,24 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path); encoder.Save(stream);
     }
+    /// <summary>A save resumes after file IO, so its message is the one most likely to leave the UI thread, explicit or timed.</summary>
+    private static async Task VerifySaveMessagesAsync(string data, ShellViewModel shell, MessageProbe messages)
+    {
+        var path = Path.Combine(data, "saved.cs");
+        await File.WriteAllTextAsync(path, "class Saved { }");
+        await shell.OpenDocumentAsync(path);
+        var document = shell.ActiveDocument!;
+        document.State.Content = "class Saved { int explicitSave; }";
+        await shell.SaveCommand.ExecuteAsync(null);
+        Assert.Contains(nameof(DocumentSavedMessage), messages.Seen);
+        messages.Seen.Clear();
+        document.State.Content = "class Saved { int timedSave; }";
+        await shell.AutoSave.RunNowAsync();
+        Assert.Contains(nameof(DocumentSavedMessage), messages.Seen);
+        await shell.CloseDocumentAsync(document, discardChanges: true);
+        await Idle();
+    }
+
     /// <summary>Handlers run on the sender's thread, so every message has to arrive on the UI thread whichever feature sent it.</summary>
     private sealed class MessageProbe
     {
