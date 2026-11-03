@@ -11,7 +11,7 @@ public sealed partial class WorkspaceEngine
         var spans = await EditorDecorations.ClassifyAsync(document, cancellationToken).ConfigureAwait(false);
         var hints = await EditorDecorations.GetHintsAsync(document, cancellationToken).ConfigureAwait(false);
         lock (_gate)
-            return _versions.GetValueOrDefault(Path.GetFullPath(request.Path)) == request.Version && ReferenceEquals(document.Project.Solution, _solution)
+            return _documents.Version(Path.GetFullPath(request.Path)) == request.Version && ReferenceEquals(document.Project.Solution, CurrentSolution)
                 ? new(request.Version, spans, hints) : new(request.Version, [], []);
     }
 }

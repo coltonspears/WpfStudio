@@ -48,7 +48,7 @@ public sealed partial class NativePreviewIntegrationTests
         var document = new DocumentState(Path.Combine(Path.GetTempPath(), "WpfStudio-native-" + Guid.NewGuid().ToString("N") + ".xaml"), markup);
         var client = new PreviewClient(Environment.GetEnvironmentVariable("WPFSTUDIO_PREVIEW_HOST_UNDER_TEST"));
         var model = new DesignerViewModel(client, new UiDispatcher(Dispatcher.CurrentDispatcher))
-        { AutoRefresh = false, PreviewWidth = 640, PreviewHeight = 420 };
+        { AutoRefresh = false, Canvas = { PreviewWidth = 640, PreviewHeight = 420 } };
         var pane = new NativePreviewPane { DataContext = model };
         pane.SetBinding(NativePreviewPane.SessionProperty, new Binding(nameof(model.InteractionSession)));
         pane.SetBinding(NativePreviewPane.IsActiveProperty, new Binding(nameof(model.IsInteracting)));

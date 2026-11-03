@@ -130,12 +130,12 @@
     <Border Style="{StaticResource Panel}" Margin="0,0,0,18" Padding="14,10,14,8" Visibility="{Binding IsLiveSource, Converter={StaticResource BooleanToVisibility}}">
      <StackPanel>
       <DockPanel>
-       <CheckBox DockPanel.Dock="Right" Content="Live" c:Ui.Icon="Eye" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding MonitorMemory}" ToolTip="Sample private bytes and working set every second"/>
+       <CheckBox DockPanel.Dock="Right" Content="Live" c:Ui.Icon="Eye" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding Timeline.MonitorMemory}" ToolTip="Sample private bytes and working set every second"/>
        <c:Glyph Kind="Timeline" Width="16" Height="16" Foreground="{DynamicResource AccentBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-       <TextBlock Text="{Binding TimelineTitle}" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-       <TextBlock Text="{Binding LiveMemoryText}" Style="{StaticResource Note}" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="NoWrap"/>
+       <TextBlock Text="{Binding Timeline.Title}" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+       <TextBlock Text="{Binding Timeline.LiveMemoryText}" Style="{StaticResource Note}" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="NoWrap"/>
       </DockPanel>
-      <v:MemoryTimeline Height="120" Margin="0,6,0,0" Samples="{Binding LiveSamples}" Markers="{Binding TimelineMarkers}" WindowSeconds="{Binding TimelineSeconds}" EmptyText="Sampling process memory…" AutomationProperties.Name="Live process memory"/>
+      <v:MemoryTimeline Height="120" Margin="0,6,0,0" Samples="{Binding Timeline.LiveSamples}" Markers="{Binding TimelineMarkers}" WindowSeconds="{Binding Timeline.WindowSeconds}" EmptyText="Sampling process memory…" AutomationProperties.Name="Live process memory"/>
       <TextBlock Style="{StaticResource SubtleNote}" Margin="0,4,0,0" Text="Watch memory while you use the app. If it climbs with each repetition of an action, capture before and after to see which types grew."/>
      </StackPanel>
     </Border>

@@ -214,14 +214,13 @@ public sealed partial class WorkspaceEngine
         if (!complete) warnings.Add(refresh.Status ?? "Model source refresh is incomplete.");
         lock (_gate)
         {
-            solution = RequireSolution(); revision = _semanticRevision;
-            versions = new(_versions, StringComparer.OrdinalIgnoreCase);
-            synchronizedXaml = _syncedTexts.Where(pair => pair.Key.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
-                .Select(pair => new XamlDocumentOverlay(pair.Key, pair.Value, _versions.GetValueOrDefault(pair.Key))).ToArray();
+            solution = RequireSolution(); revision = SemanticRevision;
+            versions = _documents.Versions();
+            synchronizedXaml = _documents.XamlOverlays();
             unavailable = UnavailableModelProjects(solution);
-            if (solution.Projects.Any(project => _xamlInventoryUnavailable.Contains(project.Id) || !_xamlInventory.ContainsKey(project.Id)))
+            if (solution.Projects.Any(project => !_ownership.IsEvaluated(project.Id)))
             { complete = false; warnings.Add("Evaluated XAML inventory is unavailable; reload the workspace."); }
-            inventory = solution.Projects.SelectMany(project => _xamlInventory.GetValueOrDefault(project.Id, []).Select(path => (project, path))).ToArray();
+            inventory = solution.Projects.SelectMany(project => _ownership.Files.GetValueOrDefault(project.Id, []).Select(path => (project, path))).ToArray();
         }
         var overlays = new Dictionary<string, XamlDocumentOverlay>(StringComparer.OrdinalIgnoreCase);
         if (request.XamlOverlays is { Count: > 2048 }) throw new InvalidOperationException("The XAML overlay snapshot exceeds the 2,048-file limit.");
@@ -407,7 +406,7 @@ public sealed partial class WorkspaceEngine
     private void EnsureSymbolSnapshotCurrent(SymbolSnapshot snapshot)
     {
         lock (_gate)
-            if (_pageProjectionPending || !ReferenceEquals(snapshot.Solution, _solution) || snapshot.Revision != _semanticRevision)
+            if (_pages.Pending || !ReferenceEquals(snapshot.Solution, CurrentSolution) || snapshot.Revision != SemanticRevision)
                 throw new InvalidOperationException("Project types or buffers changed during the operation. Request it again.");
     }
 

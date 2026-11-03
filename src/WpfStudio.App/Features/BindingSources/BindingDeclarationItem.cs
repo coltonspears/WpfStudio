@@ -14,6 +14,12 @@ public sealed record BindingDeclarationItem(string Property, string OwnerType, s
     public bool SameIdentity(BindingDeclarationItem? other) => other is not null && Property == other.Property
         && OwnerType == other.OwnerType && OwnerAssembly == other.OwnerAssembly && PropertyId == other.PropertyId
         && BindingId == other.BindingId && SameDeclaration(Declaration, other.Declaration);
+    /// <summary>Refuses an answer for another request or declaration: navigating on it would open the wrong source.</summary>
+    public void RequireAcknowledgement(BindingSourceRequest request, BindingSourceResponse response)
+    {
+        if (response.Request != request || response.Available && (response.Declaration is not { } declaration || !SameDeclaration(Declaration, declaration)))
+            throw new InvalidOperationException("The binding source acknowledgement did not match the observed declaration.");
+    }
     public static bool SameDeclaration(BindingSourceDeclaration left, BindingSourceDeclaration right) =>
         left.ExpressionId == right.ExpressionId && left.DeclarationId == right.DeclarationId
         && left.ParentExpressionId == right.ParentExpressionId && left.ChildIndex == right.ChildIndex

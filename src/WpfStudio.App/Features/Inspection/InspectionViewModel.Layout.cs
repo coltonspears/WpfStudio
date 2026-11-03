@@ -1,5 +1,4 @@
 using WpfStudio.App.Features.Layout;
-using WpfStudio.Inspection.Protocol;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Inspection;
@@ -7,19 +6,8 @@ namespace WpfStudio.App.Features.Inspection;
 public sealed partial class InspectionViewModel
 {
     private bool _supportsLayout, _supportsLayoutOverlay, _layoutWasPaused, _layoutWasConnected;
-    public LayoutInspectorViewModel LayoutDetails => field ??= new(NotifyLayoutChanged, () => HighlightSelectedAsync().Forget(ReportFault));
-    public LayoutSnapshot? Layout => LayoutDetails.Snapshot;
-    public bool HasLayout => LayoutDetails.Available;
-    public string LayoutStatus => LayoutDetails.Status;
-    public bool CanShowLayoutOverlay => LayoutDetails.CanShowOverlay;
-    public bool ShowLayoutOverlay { get => LayoutDetails.ShowOverlay; set => LayoutDetails.ShowOverlay = value; }
+    public LayoutInspectorViewModel LayoutDetails => field ??= new(() => HighlightSelectedAsync().Forget(ReportFault));
 
-    private void NotifyLayoutChanged()
-    {
-        OnPropertyChanged(nameof(Layout)); OnPropertyChanged(nameof(HasLayout));
-        OnPropertyChanged(nameof(LayoutStatus)); OnPropertyChanged(nameof(CanShowLayoutOverlay));
-        OnPropertyChanged(nameof(ShowLayoutOverlay));
-    }
     private void UpdateLayoutState()
     {
         bool resumed = IsConnected && !IsPaused && _layoutWasPaused;

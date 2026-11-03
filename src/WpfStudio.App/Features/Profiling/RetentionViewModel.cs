@@ -9,7 +9,7 @@ namespace WpfStudio.App.Features.Profiling;
 
 /// <summary>The Retention view: the dominator tree ("what keeps what alive") with a drill-down treemap of the selected
 /// node's exclusively retained children.</summary>
-public sealed partial class MemoryProfilerViewModel
+public sealed partial class RetentionViewModel(IMemorySessionHost host) : ObservableObject
 {
     public ObservableCollection<DominatorNodeViewModel> DominatorRoots { get; } = [];
     public ObservableCollection<DominatorNodeViewModel> RetentionTrail { get; } = [];
@@ -27,15 +27,15 @@ public sealed partial class MemoryProfilerViewModel
     private long _sunburstRevision;
     public string RetentionMapTitle => RetentionFocus is { } focus ? $"What {focus.Title} keeps alive" : "What the GC roots keep alive";
     public string RetentionMapDetail => RetentionFocus is { } focus ? $"{focus.RetainedText} · {focus.PercentText} of the heap · double-click {(IsSunburst ? "a segment" : "a rectangle")} to drill in"
-        : Summary is { } s ? $"{MemorySize.Format(s.ReachableBytes)} reachable · " + (IsSunburst ? "rings show what each owner keeps alive, several levels deep" : "each rectangle is memory owned exclusively by one object or group") : "";
+        : host.Summary is { } s ? $"{MemorySize.Format(s.ReachableBytes)} reachable · " + (IsSunburst ? "rings show what each owner keeps alive, several levels deep" : "each rectangle is memory owned exclusively by one object or group") : "";
 
-    partial void OnRetentionChartChanged(string value) { if (value == "Sunburst") LoadSunburstAsync(_lifetime.Token).Forget(ReportFault); }
+    partial void OnRetentionChartChanged(string value) { if (value == "Sunburst") LoadSunburstAsync(host.Lifetime).Forget(host.ReportFault); }
 
     /// <summary>Loads the nested dominator slice around the current focus for the sunburst.</summary>
     private async Task LoadSunburstAsync(CancellationToken token)
     {
-        if (_session is not { } session || _disposed || !IsSunburst) return;
-        var revision = _revision; var sunburstRevision = ++_sunburstRevision;
+        if (host.Session is not { } session || host.IsDisposed || !IsSunburst) return;
+        var revision = host.Revision; var sunburstRevision = ++_sunburstRevision;
         var focus = RetentionFocus;
         var request = focus is null ? new MemoryDominatorTreeRequest()
             : focus.IsGroup ? new MemoryDominatorTreeRequest(focus.ParentId, focus.Node.TypeKey) : new MemoryDominatorTreeRequest(focus.Object?.Id);
@@ -43,11 +43,11 @@ public sealed partial class MemoryProfilerViewModel
         try
         {
             var sunburst = await session.GetDominatorTreeAsync(request, token);
-            if (_disposed || revision != _revision || sunburstRevision != _sunburstRevision) return;
+            if (host.IsDisposed || revision != host.Revision || sunburstRevision != _sunburstRevision) return;
             Sunburst = sunburst;
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { if (!_disposed && sunburstRevision == _sunburstRevision) Status = "The sunburst is unavailable: " + ex.Message; }
+        catch (Exception ex) { if (!host.IsDisposed && sunburstRevision == _sunburstRevision) host.ReportStatus("The sunburst is unavailable: " + ex.Message); }
         finally { if (sunburstRevision == _sunburstRevision) IsLoadingSunburst = false; }
     }
 
@@ -58,7 +58,7 @@ public sealed partial class MemoryProfilerViewModel
     {
         if (node is null || node.IsOther) return;
         SelectedRetentionKey = node.Key;
-        if (node.ObjectId is int id) ShowObject(id);
+        if (node.ObjectId is int id) host.ShowObject(id);
     }
 
     /// <summary>Drills into a sunburst segment by walking the same path in the dominator tree, so the breadcrumb, tree
@@ -73,7 +73,7 @@ public sealed partial class MemoryProfilerViewModel
             if (at is not null) await at.EnsureLoadedAsync();
             var children = at?.Children ?? DominatorRoots;
             var next = children.FirstOrDefault(c => c.Key == step.Key);
-            if (next is null) { Status = $"{step.Label} is not among the largest owners listed in the tree."; break; }
+            if (next is null) { host.ReportStatus($"{step.Label} is not among the largest owners listed in the tree."); break; }
             at = next;
         }
         if (at is not null && !ReferenceEquals(at, RetentionFocus)) await FocusDominatorAsync(at);
@@ -81,26 +81,29 @@ public sealed partial class MemoryProfilerViewModel
 
     [RelayCommand]
     private Task RetentionUpAsync() => RetentionFocus is { } focus ? FocusDominatorAsync(focus.Parent) : Task.CompletedTask;
-    private long HeapBytes => Math.Max(1, Summary?.ManagedBytes ?? 1);
+    private long HeapBytes => Math.Max(1, host.Summary?.ManagedBytes ?? 1);
 
-    private async Task LoadDominatorRootsAsync(CancellationToken token)
+    internal async Task LoadDominatorRootsAsync(CancellationToken token)
     {
-        if (_session is not { } session) return;
-        var revision = _revision;
+        if (host.Session is not { } session) return;
+        var revision = host.Revision;
         IsLoadingDominators = true;
         try
         {
             var page = await session.GetDominatorsAsync(new(Take: 150), token);
-            if (_disposed || revision != _revision) return;
+            if (host.IsDisposed || revision != host.Revision) return;
             DominatorRoots.Clear();
             foreach (var node in Wrap(page, null)) DominatorRoots.Add(node);
             RetentionFocus = null; RetentionTrail.Clear(); RefreshRetentionMap();
-            if (IsSunburst) LoadSunburstAsync(_lifetime.Token).Forget(ReportFault);
+            if (IsSunburst) LoadSunburstAsync(host.Lifetime).Forget(host.ReportFault);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { if (!_disposed && revision == _revision) Status = "The dominator tree is unavailable: " + ex.Message; }
+        catch (Exception ex) { if (!host.IsDisposed && revision == host.Revision) host.ReportStatus("The dominator tree is unavailable: " + ex.Message); }
         finally { IsLoadingDominators = false; }
     }
+
+    /// <summary>Forgets the capture's tree and charts.</summary>
+    internal void Reset() { DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear(); Sunburst = null; }
 
     private IEnumerable<DominatorNodeViewModel> Wrap(MemoryDominatorPage page, DominatorNodeViewModel? parent)
     {
@@ -110,11 +113,11 @@ public sealed partial class MemoryProfilerViewModel
 
     private async Task LoadDominatorChildrenAsync(DominatorNodeViewModel node)
     {
-        if (_session is not { } session) return;
-        var revision = _revision;
+        if (host.Session is not { } session) return;
+        var revision = host.Revision;
         var query = node.IsGroup ? new MemoryDominatorQuery(node.ParentId, node.Node.TypeKey, Take: 200) : new MemoryDominatorQuery(node.Object!.Id, Take: 150);
-        var page = await session.GetDominatorsAsync(query, _lifetime.Token);
-        if (revision != _revision) return;
+        var page = await session.GetDominatorsAsync(query, host.Lifetime);
+        if (revision != host.Revision) return;
         node.ReplaceChildren(Wrap(page, node));
         if (RetentionFocus == node) RefreshRetentionMap();
     }
@@ -123,7 +126,7 @@ public sealed partial class MemoryProfilerViewModel
     {
         if (value is null || value.IsPlaceholder || value.IsMoreRow) return;
         SelectedRetentionKey = value.Key;
-        if (value.Object is { } obj) ShowObject(obj.Id);
+        if (value.Object is { } obj) host.ShowObject(obj.Id);
     }
 
     [RelayCommand]
@@ -136,7 +139,7 @@ public sealed partial class MemoryProfilerViewModel
         if (node is not null) { await node.EnsureLoadedAsync(); node.IsExpanded = true; }
         RefreshRetentionMap();
         OnPropertyChanged(nameof(RetentionMapDetail));
-        if (IsSunburst) await LoadSunburstAsync(_lifetime.Token);
+        if (IsSunburst) await LoadSunburstAsync(host.Lifetime);
     }
 
     [RelayCommand] private Task RetentionHomeAsync() => FocusDominatorAsync(null);
@@ -162,7 +165,7 @@ public sealed partial class MemoryProfilerViewModel
     {
         if (item?.Tag is not DominatorNodeViewModel node || node.IsMoreRow) return;
         SelectedRetentionKey = node.Key;
-        if (node.Object is { } obj) ShowObject(obj.Id);
+        if (node.Object is { } obj) host.ShowObject(obj.Id);
     }
 
     [RelayCommand]

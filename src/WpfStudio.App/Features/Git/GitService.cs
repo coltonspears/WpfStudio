@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using WpfStudio.Core.Git;
 
 namespace WpfStudio.App.Features.Git;
 
@@ -41,7 +42,7 @@ public sealed class GitService
         if (hasHead)
         {
             var log = await RunAsync(root, ["log", $"-{Math.Max(1, historyLimit)}", "--no-show-signature", HistoryFormat], cancellationToken, readOnly: true);
-            history = [.. ParseHistory(log.Output)];
+            history = [.. GitOutput.ParseHistory(log.Output)];
             var upstreamResult = await RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true);
             if (upstreamResult.ExitCode == 0)
             {
@@ -51,7 +52,7 @@ public sealed class GitService
                 tracking = $"{upstream} · {parts[0]} ahead · {parts[1]} behind";
             }
         }
-        var changes = ParseStatus(status.Output);
+        var changes = GitOutput.ParseStatus(status.Output);
         var remote = await GetRemoteAsync(root, upstream, cancellationToken);
         var operation = await GetOperationAsync(root, cancellationToken);
         return new(root, branch, upstream, tracking, changes, branches, history,
@@ -59,7 +60,7 @@ public sealed class GitService
     }
 
     /// <summary>The web location of the upstream's remote, else origin, else the only remote.</summary>
-    public async Task<WpfStudio.Core.Git.GitRemote?> GetRemoteAsync(string root, string? upstream, CancellationToken cancellationToken = default)
+    public async Task<GitRemote?> GetRemoteAsync(string root, string? upstream, CancellationToken cancellationToken = default)
     {
         var names = (await RunAsync(root, ["remote"], cancellationToken, allowFailure: true, readOnly: true)).Output
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -67,7 +68,7 @@ public sealed class GitService
         var name = names.FirstOrDefault(n => n == preferred) ?? names.FirstOrDefault(n => n == "origin") ?? (names.Length == 1 ? names[0] : null);
         if (name is null) return null;
         var url = await RunAsync(root, ["remote", "get-url", "--", name], cancellationToken, allowFailure: true, readOnly: true);
-        return url.ExitCode == 0 ? WpfStudio.Core.Git.GitRemote.Parse(url.Output.Trim()) : null;
+        return url.ExitCode == 0 ? GitRemote.Parse(url.Output.Trim()) : null;
     }
 
     public async Task<GitOperation> GetOperationAsync(string root, CancellationToken cancellationToken = default)
@@ -114,11 +115,11 @@ public sealed class GitService
     }
 
     /// <summary>Blame for the editor's current (possibly unsaved) text, so line numbers match the buffer.</summary>
-    public async Task<IReadOnlyList<WpfStudio.Core.Git.BlameLine>> BlameAsync(string root, string relativePath, string contents, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<BlameLine>> BlameAsync(string root, string relativePath, string contents, CancellationToken cancellationToken = default)
     {
         ValidatePaths(root, [relativePath]);
         var result = await RunAsync(root, ["blame", "--porcelain", "--contents", "-", "--", relativePath], cancellationToken, input: contents, readOnly: true);
-        return WpfStudio.Core.Git.GitBlame.Parse(result.Output);
+        return GitBlame.Parse(result.Output);
     }
 
     /// <summary>Merges a branch into the current one. Conflicts are not an error: they are left for the resolver.</summary>
@@ -148,7 +149,7 @@ public sealed class GitService
     /// <summary>Commits a resolved merge, or continues a rebase, cherry-pick or revert, keeping Git's prepared message.</summary>
     public async Task<string> ContinueOperationAsync(string root, CancellationToken cancellationToken = default)
     {
-        var status = ParseStatus((await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=no"], cancellationToken)).Output);
+        var status = GitOutput.ParseStatus((await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=no"], cancellationToken)).Output);
         if (status.Any(change => change.IsConflict)) throw new InvalidOperationException("Resolve and stage every conflicted file first.");
         var operation = await GetOperationAsync(root, cancellationToken);
         // GIT_EDITOR=":" (set by noEditor) is Git's own "accept the prepared message" editor on every platform.
@@ -171,7 +172,7 @@ public sealed class GitService
         var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, change.Path));
         var file = await ReadWorkingFileAsync(path, cancellationToken);
         if (file.Text is null) throw new InvalidOperationException(file.Message ?? "The conflicted file was deleted on one side. Choose a side in the terminal (git add or git rm).");
-        return new(root, change.Path, path, file.Text, WpfStudio.Core.Git.MergeConflicts.Parse(file.Text));
+        return new(root, change.Path, path, file.Text, MergeConflicts.Parse(file.Text));
     }
 
     /// <summary>Writes the resolved text and stages it, unless the file changed since it was read.</summary>
@@ -180,32 +181,11 @@ public sealed class GitService
         ValidatePaths(conflict.Root, [conflict.RelativePath]);
         var current = await ReadWorkingFileAsync(conflict.FullPath, cancellationToken);
         if (current.Text != conflict.Text) throw new InvalidOperationException("The file changed since the conflicts were loaded. Reload it and resolve again.");
-        if (WpfStudio.Core.Git.MergeConflicts.Parse(resolved).Count > 0) throw new InvalidOperationException("The result still contains conflict markers.");
+        if (MergeConflicts.Parse(resolved).Count > 0) throw new InvalidOperationException("The result still contains conflict markers.");
         // Write the file back in the encoding it was read in (UTF-16 stays UTF-16; a UTF-8 mark is kept only if present).
         var bytes = await File.ReadAllBytesAsync(conflict.FullPath, cancellationToken);
         await File.WriteAllTextAsync(conflict.FullPath, resolved, WpfStudio.Core.Text.TextEncoding.Detect(bytes), cancellationToken);
         return (await RunAsync(conflict.Root, ["add", "--", conflict.RelativePath], cancellationToken)).Display;
-    }
-
-    // The -z porcelain format emits destination before source for renamed/copied paths.
-    public static IReadOnlyList<GitChange> ParseStatus(string status)
-    {
-        var fields = status.Split('\0');
-        var result = new List<GitChange>();
-        for (var index = 0; index < fields.Length; index++)
-        {
-            var field = fields[index];
-            if (field.Length == 0) continue;
-            if (field.Length < 4 || field[2] != ' ') throw new InvalidOperationException("Git returned an invalid status record.");
-            string? original = null;
-            if (field[0] is 'R' or 'C' || field[1] is 'R' or 'C')
-            {
-                if (++index >= fields.Length || fields[index].Length == 0) throw new InvalidOperationException("Git returned an incomplete rename record.");
-                original = fields[index];
-            }
-            result.Add(new(field[3..], original, field[0], field[1]));
-        }
-        return result;
     }
 
     public async Task<string> StageAsync(string root, GitChange? change, CancellationToken cancellationToken = default)
@@ -227,7 +207,7 @@ public sealed class GitService
     public async Task<string> CommitAsync(string root, string message, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(message)) throw new InvalidOperationException("Write a commit message first.");
-        var status = ParseStatus((await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cancellationToken)).Output);
+        var status = GitOutput.ParseStatus((await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cancellationToken)).Output);
         if (status.Any(x => x.IsConflict)) throw new InvalidOperationException("Resolve all merge conflicts before committing.");
         if (!status.Any(x => x.IsStaged)) throw new InvalidOperationException("Stage at least one change before committing.");
         return (await RunAsync(root, ["commit", "--file=-"], cancellationToken, input: message)).Display;
@@ -290,7 +270,7 @@ public sealed class GitService
     public async Task<IReadOnlyList<GitCommit>> LoadHistoryAsync(string root, int skip, int count, CancellationToken cancellationToken = default)
     {
         var log = await RunAsync(root, ["log", $"--skip={Math.Max(0, skip)}", $"-{Math.Max(1, count)}", "--no-show-signature", HistoryFormat], cancellationToken, readOnly: true);
-        return ParseHistory(log.Output);
+        return GitOutput.ParseHistory(log.Output);
     }
 
     /// <summary>Reads a commit's full message, authorship and the files it changed relative to its first parent.</summary>
@@ -306,7 +286,7 @@ public sealed class GitService
         var names = await RunAsync(root, ["diff-tree", "-r", "-M", "-z", "--no-commit-id", "--no-ext-diff", "--name-status", .. range, "--"], cancellationToken, readOnly: true);
         var counts = await RunAsync(root, ["diff-tree", "-r", "-M", "-z", "--no-commit-id", "--no-ext-diff", "--numstat", .. range, "--"], cancellationToken, readOnly: true);
         return new(fields[0].Trim(), parents, fields[2], fields[3], fields[4], fields[5], fields[6], fields[7].TrimEnd('\r', '\n'),
-            ParseCommitFiles(names.Output, counts.Output));
+            GitOutput.ParseCommitFiles(names.Output, counts.Output));
     }
 
     /// <summary>Both versions of one file in a commit, compared with the commit's first parent.</summary>
@@ -333,46 +313,6 @@ public sealed class GitService
             parent is null ? "Empty (root commit)" : $"Parent {parent[..Math.Min(8, parent.Length)]}", $"Commit {commit.Id[..Math.Min(8, commit.Id.Length)]}", message);
     }
 
-    /// <summary>Joins diff-tree's -z name-status and numstat records. Binary files have no line counts.</summary>
-    public static IReadOnlyList<GitCommitFile> ParseCommitFiles(string nameStatus, string numstat)
-    {
-        var counts = new Dictionary<string, (int? Added, int? Deleted)>(StringComparer.Ordinal);
-        var records = numstat.Split('\0');
-        for (var index = 0; index < records.Length; index++)
-        {
-            var parts = records[index].Split('\t', 3);
-            if (parts.Length < 3) continue;
-            var path = parts[2];
-            // Renames and copies leave the path empty and follow with the source and destination records.
-            if (path.Length == 0)
-            {
-                index += 2;
-                if (index >= records.Length) break;
-                path = records[index];
-            }
-            counts[path] = (int.TryParse(parts[0], out var added) ? added : null, int.TryParse(parts[1], out var deleted) ? deleted : null);
-        }
-        var fields = nameStatus.Split('\0');
-        var files = new List<GitCommitFile>();
-        for (var index = 0; index < fields.Length; index++)
-        {
-            var status = fields[index];
-            if (status.Length == 0) continue;
-            if (++index >= fields.Length) break;
-            string? original = null;
-            var path = fields[index];
-            if (status[0] is 'R' or 'C')
-            {
-                original = path;
-                if (++index >= fields.Length) break;
-                path = fields[index];
-            }
-            var (added, deleted) = counts.TryGetValue(path, out var count) ? count : (null, null);
-            files.Add(new(path, original, status[0], added, deleted));
-        }
-        return files;
-    }
-
     /// <param name="signIn">
     /// Lets Git Credential Manager show its sign-in window (Microsoft Entra for Azure DevOps, a browser for GitHub).
     /// Without it, network operations use only stored credentials and never prompt.
@@ -389,13 +329,6 @@ public sealed class GitService
     public async Task<string> PushAsync(string root, CancellationToken cancellationToken = default, bool signIn = false) =>
         (await RunAsync(root, ["push"], cancellationToken, signIn: signIn)).Display;
 
-    /// <summary>Recognizes the messages Git and credential helpers print when stored credentials are missing or rejected.</summary>
-    public static bool IsAuthenticationFailure(string message) =>
-        new[] { "Authentication failed", "could not read Username", "could not read Password", "terminal prompts disabled", "Logon failed",
-                "returned error: 401", "returned error: 403", "HTTP 401", "HTTP 403", "Permission denied (publickey)", "TF401019",
-                "fatal: credential", "Unauthorized" }
-            .Any(marker => message.Contains(marker, StringComparison.OrdinalIgnoreCase));
-
     public async Task<string> SwitchBranchAsync(string root, string branch, bool create = false, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(branch) || branch.StartsWith('-')) throw new InvalidOperationException("Enter a valid branch name.");
@@ -408,7 +341,7 @@ public sealed class GitService
     {
         // Untracked files don't count: Git refuses by itself, keeping the file, if an operation would overwrite one.
         var status = await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=no"], cancellationToken);
-        if (ParseStatus(status.Output).Count != 0)
+        if (GitOutput.ParseStatus(status.Output).Count != 0)
             throw new InvalidOperationException("Commit or stash your changes in the terminal before switching branches or pulling. WpfStudio keeps all working files intact.");
     }
 
@@ -428,19 +361,6 @@ public sealed class GitService
                 throw new InvalidOperationException("The selected file is outside this Git repository.");
         }
         return paths;
-    }
-
-    /// <summary>Parses the NUL-separated history format: id, short id, author, date, subject, decorations, parents.</summary>
-    public static IReadOnlyList<GitCommit> ParseHistory(string text)
-    {
-        var fields = text.Split('\0');
-        var commits = new List<GitCommit>();
-        for (var i = 0; i + 6 < fields.Length; i += 7)
-        {
-            var parents = fields[i + 6].Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
-            commits.Add(new(fields[i].TrimStart('\r', '\n'), fields[i + 1], fields[i + 2], fields[i + 3], fields[i + 4], fields[i + 5], parents));
-        }
-        return commits;
     }
 
     private static void RequireCommitId(string id)

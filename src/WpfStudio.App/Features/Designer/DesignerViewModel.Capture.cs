@@ -26,7 +26,7 @@ public sealed partial class DesignerViewModel
         ClearBindingExplanation("Updating the preview binding observation…");
         var operationEpoch = _bindingOperationEpoch;
         ++_appearancePropertyOperations;
-        ++_bindingSourceEpoch;
+        BindingDeclarations.AdvanceEpoch();
         RefreshBindingSourceState();
         NotifySourceCommands();
         ClearAppearance("Updating the preview observation…");
@@ -96,8 +96,8 @@ public sealed partial class DesignerViewModel
     partial void OnIsBusyChanged(bool value)
     {
         NotifyCanvasState();
-        if (value) ClearLayoutEditing();
-        NotifyLayoutEditingState();
+        if (value) LayoutGesture.Clear();
+        LayoutGesture.NotifyStatus();
         NotifyInteractionState();
     }
 }

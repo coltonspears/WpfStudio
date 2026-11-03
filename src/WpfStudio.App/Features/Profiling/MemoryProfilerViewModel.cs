@@ -9,10 +9,10 @@ using WpfStudio.Contracts.Profiling;
 namespace WpfStudio.App.Features.Profiling;
 
 /// <summary>Memory investigations are snapshot based. The target is never mutated by an estimate or field inspection.
-/// This file owns capture lifetime; the Overview, Types, Retention, Graph and Browser partials own their views.</summary>
-public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IFileDialogService files, IClipboardService clipboard, IProcessMemorySampler sampler) : ObservableObject, IAsyncDisposable
+/// This file owns capture lifetime; the Overview, Types and Graph partials own their views, and the browser, retention view
+/// and timeline are view models of their own.</summary>
+public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IFileDialogService files, IClipboardService clipboard, IProcessMemorySampler sampler) : ObservableObject, IAsyncDisposable, IObjectBrowserHost
 {
-    private readonly IProcessMemorySampler _sampler = sampler;
     public const int OverviewView = 0, TypesView = 1, RetentionView = 2, GraphView = 3;
     public const int FieldsTab = 0, RootsTab = 1, KeepsAliveTab = 2, ReferencesTab = 3;
     private readonly CancellationTokenSource _lifetime = new();
@@ -21,8 +21,11 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     private long _revision;
     private bool _disposed, _updating;
     public ObservableCollection<ProfileProcess> Processes { get; } = [];
+    public ObjectBrowserViewModel Browser => field ??= new(this, clipboard);
+    public RetentionViewModel Retention => field ??= new(this);
+    public ProcessMemoryTimeline Timeline => field ??= new(sampler, this, RefreshTimelineMarkers);
 
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsLiveSource), nameof(TimelineTitle)), NotifyCanExecuteChangedFor(nameof(CaptureCommand))] public partial ProfileProcess? SelectedProcess { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsLiveSource)), NotifyCanExecuteChangedFor(nameof(CaptureCommand))] public partial ProfileProcess? SelectedProcess { get; set; }
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasCapture), nameof(SourceDescription), nameof(SourceName), nameof(CoverageDescription), nameof(IsIncomplete),
         nameof(ManagedSize), nameof(ReachableSize), nameof(UnreachableSize), nameof(IsBrowserVisible)),
         NotifyCanExecuteChangedFor(nameof(SetBaselineCommand), nameof(CloseCaptureCommand), nameof(ExportReportCommand))]
@@ -42,7 +45,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     [ObservableProperty, NotifyPropertyChangedFor(nameof(IsBrowserVisible))] public partial bool ShowBrowser { get; set; } = true;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(IsIdle)), NotifyCanExecuteChangedFor(nameof(OpenDumpCommand), nameof(CaptureCommand),
         nameof(RefreshProcessesCommand), nameof(SetBaselineCommand), nameof(ClearBaselineCommand), nameof(CloseCaptureCommand),
-        nameof(EstimateObjectCommand), nameof(EstimateReferenceCommand), nameof(ExportReportCommand), nameof(OpenTypeCommand))]
+        nameof(ExportReportCommand), nameof(OpenTypeCommand))]
     public partial bool IsBusy { get; set; }
     /// <summary>A new capture is open and filling its first views. Another load has to wait for them.</summary>
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(OpenDumpCommand), nameof(CaptureCommand))] public partial bool IsLoadingFirstViews { get; set; }
@@ -66,6 +69,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         : _baseline is null ? "No baseline" : $"Baseline {MemorySize.Format(_baseline.ManagedBytes)} · {_baseline.CapturedAt.LocalDateTime:t}";
 
     partial void OnSummaryChanged(HeapSummary? value) => RefreshOverview();
+    partial void OnIsBusyChanged(bool value) => Browser.NotifyEstimates();
     partial void OnFocusGraphChanged(bool value) { if (value) SelectedView = GraphView; }
 
     private bool CanLoad() => !_disposed && !IsBusy;
@@ -102,12 +106,12 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
             pending = await profiler.OpenAsync(request, operation.Token);
             if (_disposed) return;
             var old = _session; _session = pending; pending = null; opened = true;
-            _revision++; CancelSelection(); ResetHistory(); _skip = 0;
+            _revision++; CancelSelection(); Browser.ResetHistory(); _skip = 0;
             _updating = true;
             try
             {
-                Objects.Clear(); SelectedObject = null; SelectedType = null; Details = null; Graph = null; Flow = null; ResetEstimate(); ResetBrowser();
-                DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear(); Sunburst = null; ResetGroups(); Summary = _session.Summary;
+                Objects.Clear(); SelectedObject = null; SelectedType = null; Browser.ClearObject(); Graph = null; Flow = null;
+                Retention.Reset(); ResetGroups(); Summary = _session.Summary;
             }
             finally { _updating = false; }
             if (old is not null) await old.DisposeAsync();
@@ -135,7 +139,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         void Failed(Exception ex) { if (!_disposed) Status = "The capture is open, but its first views failed to load: " + ex.Message; }
         try
         {
-            background.Add(LoadDominatorRootsAsync(token));
+            background.Add(Retention.LoadDominatorRootsAsync(token));
             _updating = true;
             try { SelectedType = Types.FirstOrDefault(); }
             finally { _updating = false; }
@@ -145,7 +149,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
             // Start the browser on the biggest owner rather than an arbitrary instance of the largest type.
             // Prefer an application type: a runtime cache is rarely what someone opening a snapshot wants to see first.
             if (Summary?.TopRetainers is { Count: > 0 } owners && _session is not null)
-                await NavigateAsync((owners.FirstOrDefault(o => !MemoryLabels.IsFrameworkModule(o.Module)) ?? owners[0]).Id, Navigation.Replace, token);
+                await Browser.OpenFirstAsync((owners.FirstOrDefault(o => !MemoryLabels.IsFrameworkModule(o.Module)) ?? owners[0]).Id, token);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { Failed(ex); }
@@ -235,7 +239,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
             if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             {
                 var report = new { Version = 3, Summary, Baseline = _baseline, Snapshots = Snapshots.Select(s => new { s.Number, s.SourceName, s.Summary.CapturedAt, s.Summary.ManagedBytes, s.Summary.ReachableBytes, s.Summary.ObjectCount }),
-                    Comparison = ComparisonRows, Object = Details, Graph, Estimate = ReleaseEstimate, Retained = RetainedComposition, Flow, Groups = InstanceGroups };
+                    Comparison = ComparisonRows, Object = Browser.Details, Graph, Estimate = Browser.ReleaseEstimate, Retained = Browser.RetainedComposition, Flow, Groups = InstanceGroups };
                 content = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
             }
             else
@@ -254,14 +258,14 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     [RelayCommand(CanExecute = nameof(CanUseCapture))]
     private async Task CloseCaptureAsync()
     {
-        _revision++; CancelSelection(); ResetHistory();
+        _revision++; CancelSelection(); Browser.ResetHistory();
         var session = _session; _session = null;
         _updating = true;
         try
         {
-            Summary = null; Types.Clear(); Objects.Clear(); SelectedType = null; SelectedObject = null; SelectedReference = null; SelectedIncomingReference = null;
-            SelectedOutgoingReference = null; Details = null; Graph = null; Flow = null; ResetEstimate(); ResetBrowser(); TotalObjects = 0;
-            DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear(); Sunburst = null; ResetGroups();
+            Summary = null; Types.Clear(); Objects.Clear(); SelectedType = null; SelectedObject = null;
+            Browser.ClearObject(); Graph = null; Flow = null; TotalObjects = 0;
+            Retention.Reset(); ResetGroups();
         }
         finally { _updating = false; }
         CurrentSnapshot = null; RefreshSnapshotCards(); RefreshComparison();
@@ -276,13 +280,26 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     /// <summary>For a load nobody awaits. Only a scalar changes, so a fault may arrive on any thread.</summary>
     private void ReportFault(Exception fault) { if (!_disposed) Status = fault.Message; }
 
-    private void CancelSelection() { CancelQuery(); CancelInspection(); CancelFlow(); CancelGraph(); }
+    private void CancelSelection() { CancelQuery(); Browser.CancelInspection(); CancelFlow(); CancelGraph(); }
 
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
-        _disposed = true; _revision++; StopMonitor(); _lifetime.Cancel(); CancelSelection(); ResetGroups();
+        _disposed = true; _revision++; Timeline.Stop(); _lifetime.Cancel(); CancelSelection(); ResetGroups();
         if (_session is not null) await _session.DisposeAsync();
         _session = null; _lifetime.Dispose();
     }
+
+    IMemorySession? IMemorySessionHost.Session => _session;
+    long IMemorySessionHost.Revision => _revision;
+    bool IMemorySessionHost.IsDisposed => _disposed;
+    CancellationToken IMemorySessionHost.Lifetime => _lifetime.Token;
+    void IMemorySessionHost.ReportStatus(string status) => Status = status;
+    void IMemorySessionHost.ReportFault(Exception fault) => ReportFault(fault);
+    void IMemorySessionHost.ShowObject(int objectId) => ShowObject(objectId);
+    bool IObjectBrowserHost.CanUseCapture => CanUseCapture();
+    string? IObjectBrowserHost.KnownTypeOf(int objectId) => Objects.FirstOrDefault(o => o.Id == objectId)?.Type ?? Graph?.Nodes.FirstOrDefault(n => n.Object.Id == objectId)?.Object.Type;
+    void IObjectBrowserHost.ClearGraph() { CancelGraph(); Graph = null; }
+    void IObjectBrowserHost.ShowGraph(int objectId, MemoryGraph graph) { Graph = graph; _graphObject = objectId; }
+    void IObjectBrowserHost.OpenType(string typeKey) => OpenType(typeKey);
 }

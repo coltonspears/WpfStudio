@@ -65,10 +65,10 @@ public sealed partial class DesignerTests
         model.SelectedNode = model.Tree[0]; model.SelectedProperty = model.Properties[0];
         model.EditedValue = "Keep this draft";
         var selectedProperty = model.SelectedProperty;
-        model.SelectedBindingDeclaration = model.BindingDeclarations.Single(item => item.Declaration.ExpressionId == "second-expression");
-        await model.ShowBindingSourceCommand.ExecuteAsync(model.SelectedBindingDeclaration);
+        model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Single(item => item.Declaration.ExpressionId == "second-expression");
+        await model.BindingDeclarations.ShowSourceCommand.ExecuteAsync(model.BindingDeclarations.Selected);
         Assert.Equal("<Binding Path=\"Second\" />", editor.SelectedText);
-        Assert.StartsWith("Opened verified preview binding declaration:", model.BindingSourceStatus);
+        Assert.StartsWith("Opened verified preview binding declaration:", model.BindingDeclarations.Status);
         Assert.Equal(2, client.BindingSourceRequests.Count);
         Assert.All(client.BindingSourceRequests, request =>
         {
@@ -100,20 +100,20 @@ public sealed partial class DesignerTests
         var editor = context.Shell.ActiveDocument!; var model = context.Shell.Designer; model.AutoRefresh = false;
         await model.OpenAsync(editor.State);
         model.SelectedNode = model.Tree[0]; model.SelectedProperty = model.Properties[0];
-        var selected = model.SelectedBindingDeclaration!;
-        var pending = model.ShowBindingSourceCommand.ExecuteAsync(selected);
+        var selected = model.BindingDeclarations.Selected!;
+        var pending = model.BindingDeclarations.ShowSourceCommand.ExecuteAsync(selected);
         Assert.Equal(2, client.BindingSourceRequests.Count);
         switch (change)
         {
             case "source": editor.State.Content += "<!-- changed -->"; break;
-            case "selection-round-trip": model.SelectedBindingDeclaration = model.BindingDeclarations.Last(); model.SelectedBindingDeclaration = selected; break;
+            case "selection-round-trip": model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Last(); model.BindingDeclarations.Selected = selected; break;
             case "property-round-trip": model.SelectedProperty = model.Properties[1]; model.SelectedProperty = model.Properties[0]; break;
             case "scenario": model.UseDesignTimeValues = false; break;
         }
         reply.SetResult(await respond(client.BindingSourceRequests.Last()));
         await pending;
         Assert.Equal(0, editor.SelectionLength);
-        Assert.DoesNotContain("Opened verified", model.BindingSourceStatus);
+        Assert.DoesNotContain("Opened verified", model.BindingDeclarations.Status);
     }
 
     [Fact]
@@ -133,14 +133,14 @@ public sealed partial class DesignerTests
         int navigations = 0;
         model.StubHost().BindingSource = (_, _) => { navigations++; return Task.FromResult("Unexpected navigation"); };
         await model.OpenAsync(Document("Binding.xaml")); model.SelectedNode = model.Tree[0];
-        Assert.Contains("omitted", model.BindingDeclarationCoverage);
-        await model.ShowBindingSourceCommand.ExecuteAsync(model.SelectedBindingDeclaration);
-        Assert.Contains("Template clone", model.BindingSourceStatus);
+        Assert.Contains("omitted", model.BindingDeclarations.Coverage);
+        await model.BindingDeclarations.ShowSourceCommand.ExecuteAsync(model.BindingDeclarations.Selected);
+        Assert.Contains("Template clone", model.BindingDeclarations.Status);
         Assert.Equal(0, navigations);
         model.Mode = PreviewMode.Compiled;
         await model.RefreshCommand.ExecuteAsync(null); model.SelectedNode = model.Tree[0];
-        Assert.False(model.ShowBindingSourceCommand.CanExecute(model.SelectedBindingDeclaration));
-        Assert.Contains("Compiled preview", model.BindingSourceStatus);
+        Assert.False(model.BindingDeclarations.ShowSourceCommand.CanExecute(model.BindingDeclarations.Selected));
+        Assert.Contains("Compiled preview", model.BindingDeclarations.Status);
     }
 }
 
@@ -180,9 +180,9 @@ public sealed partial class InspectionViewModelTests
         };
         await model.AttachAsync(session); model.SelectedNode = model.Tree[0]; model.SelectedProperty = model.Properties[0];
         model.EditedValue = "Keep draft";
-        Assert.Contains("omitted", model.BindingDeclarationCoverage);
-        model.SelectedBindingDeclaration = model.BindingDeclarations.Last();
-        await model.ShowBindingSourceCommand.ExecuteAsync(model.SelectedBindingDeclaration);
+        Assert.Contains("omitted", model.BindingDeclarations.Coverage);
+        model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Last();
+        await model.BindingDeclarations.ShowSourceCommand.ExecuteAsync(model.BindingDeclarations.Selected);
         Assert.Equal(1, navigations);
         Assert.Equal(2, session.BindingSourceRequests.Count);
         Assert.True(session.BindingSourceRequests[1].Revision > session.BindingSourceRequests[0].Revision);
@@ -206,11 +206,11 @@ public sealed partial class InspectionViewModelTests
         int navigations = 0;
         model.StubHost().BindingSource = (_, _) => { navigations++; return Task.FromResult("Unexpected navigation"); };
         await model.AttachAsync(session, debugging: true); model.SelectedNode = model.Tree[0]; model.SelectedProperty = model.Properties[0];
-        var selected = model.SelectedBindingDeclaration;
-        var pending = model.ShowBindingSourceCommand.ExecuteAsync(selected);
+        var selected = model.BindingDeclarations.Selected;
+        var pending = model.BindingDeclarations.ShowSourceCommand.ExecuteAsync(selected);
         switch (change)
         {
-            case "selection-round-trip": model.SelectedBindingDeclaration = model.BindingDeclarations.Last(); model.SelectedBindingDeclaration = selected; break;
+            case "selection-round-trip": model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Last(); model.BindingDeclarations.Selected = selected; break;
             case "property-round-trip": model.SelectedProperty = model.Properties[1]; model.SelectedProperty = model.Properties[0]; break;
             case "pause-resume": model.SetDebuggerState(true); model.SetDebuggerState(false); break;
             case "disconnect": await model.DisconnectCommand.ExecuteAsync(null); break;
@@ -219,7 +219,7 @@ public sealed partial class InspectionViewModelTests
         reply.SetResult(await respond(session.BindingSourceRequests.Single()));
         await pending;
         Assert.Equal(0, navigations);
-        Assert.DoesNotContain("Unexpected", model.BindingSourceStatus);
+        Assert.DoesNotContain("Unexpected", model.BindingDeclarations.Status);
     }
 
     [Theory]
@@ -242,7 +242,7 @@ public sealed partial class InspectionViewModelTests
         if (replaced)
         {
             Assert.Empty(session.BindingSourceRequests);
-            Assert.Contains("no longer present", model.BindingSourceStatus);
+            Assert.Contains("no longer present", model.BindingDeclarations.Status);
         }
     }
 
@@ -256,9 +256,9 @@ public sealed partial class InspectionViewModelTests
         int navigations = 0;
         model.StubHost().BindingSource = (_, _) => { navigations++; return Task.FromResult("Unexpected"); };
         await model.AttachAsync(session); model.SelectedNode = model.Tree[0];
-        await model.ShowBindingSourceCommand.ExecuteAsync(model.SelectedBindingDeclaration);
+        await model.BindingDeclarations.ShowSourceCommand.ExecuteAsync(model.BindingDeclarations.Selected);
         Assert.Equal(0, navigations);
-        Assert.Contains("did not match", model.BindingSourceStatus);
+        Assert.Contains("did not match", model.BindingDeclarations.Status);
     }
 
     [Fact]
@@ -276,10 +276,10 @@ public sealed partial class InspectionViewModelTests
         var inspect = session.Inspect;
         session.Inspect = _ => read.Task;
         var pending = model.ShowBindingIssueSourceCommand.ExecuteAsync(Assert.Single(Assert.Single(model.IssueGroups).Instances));
-        model.SelectedBindingDeclaration = model.BindingDeclarations.Last();
+        model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Last();
         read.SetResult(await inspect(new(1, "first")));
         await pending;
-        Assert.Equal("second-expression", model.SelectedBindingDeclaration!.Declaration.ExpressionId);
+        Assert.Equal("second-expression", model.BindingDeclarations.Selected!.Declaration.ExpressionId);
         Assert.Empty(session.BindingSourceRequests);
         Assert.Equal(0, navigations);
     }

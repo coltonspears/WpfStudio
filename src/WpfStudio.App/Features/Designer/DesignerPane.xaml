@@ -49,10 +49,10 @@
   </HierarchicalDataTemplate>
  </UserControl.Resources>
  <UserControl.InputBindings>
-  <KeyBinding Gesture="Ctrl+D0" Command="{Binding ZoomToFitCommand}"/>
-  <KeyBinding Gesture="Ctrl+D1" Command="{Binding ZoomToActualSizeCommand}"/>
-  <KeyBinding Gesture="Ctrl+OemPlus" Command="{Binding ZoomInCommand}"/>
-  <KeyBinding Gesture="Ctrl+OemMinus" Command="{Binding ZoomOutCommand}"/>
+  <KeyBinding Gesture="Ctrl+D0" Command="{Binding Canvas.ZoomToFitCommand}"/>
+  <KeyBinding Gesture="Ctrl+D1" Command="{Binding Canvas.ZoomToActualSizeCommand}"/>
+  <KeyBinding Gesture="Ctrl+OemPlus" Command="{Binding Canvas.ZoomInCommand}"/>
+  <KeyBinding Gesture="Ctrl+OemMinus" Command="{Binding Canvas.ZoomOutCommand}"/>
  </UserControl.InputBindings>
 
  <DockPanel Background="{DynamicResource SurfaceBrush}">
@@ -84,12 +84,12 @@
         <DataTrigger Binding="{Binding IsInteracting}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
        </Style.Triggers></Style></Button.Style>
       </Button>
-      <CheckBox Content="Edit layout" IsChecked="{Binding IsLayoutEditingEnabled}" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Move"
+      <CheckBox Content="Edit layout" IsChecked="{Binding LayoutGesture.IsEnabled}" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Move"
                 AutomationProperties.Name="Edit preview layout" ToolTip="Move or resize an authored element, then review one XAML edit. Source preview in Inspect mode only."/>
-      <CheckBox IsChecked="{Binding SnapToLayout}" IsEnabled="{Binding IsLayoutEditingEnabled}" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Magnet"
+      <CheckBox IsChecked="{Binding LayoutGesture.SnapToLayout}" IsEnabled="{Binding LayoutGesture.IsEnabled}" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Magnet"
                 AutomationProperties.Name="Snap preview layout" ToolTip="Snap to layout: snap pointer gestures to nearby layout edges and centers; hold Alt to bypass. Keyboard nudges do not snap."/>
       <Border Style="{StaticResource ToolbarSeparator}"/>
-      <ComboBox ItemsSource="{Binding Scenarios}" SelectedItem="{Binding SelectedScenario}" DisplayMemberPath="Name" Height="28" VerticalAlignment="Center"
+      <ComboBox ItemsSource="{Binding Scenarios.Items}" SelectedItem="{Binding Scenarios.Selected}" DisplayMemberPath="Name" Height="28" VerticalAlignment="Center"
                 MinWidth="130" MaxWidth="240" AutomationProperties.Name="Preview scenario" Margin="1,0"
                 ToolTip="{Binding ScenarioDescription}"/>
       <CheckBox Content="d:" IsChecked="{Binding UseDesignTimeValues}" IsEnabled="{Binding SupportsLivePreview}" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Braces"
@@ -120,13 +120,13 @@
      <StackPanel>
       <WrapPanel>
        <TextBlock Text="Artboard" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-       <ComboBox ItemsSource="{Binding SizePresets}" SelectedItem="{Binding SelectedSizePreset}" MinWidth="130" Margin="0,0,8,0"
+       <ComboBox ItemsSource="{Binding Canvas.SizePresets}" SelectedItem="{Binding Canvas.SelectedSizePreset}" MinWidth="130" Margin="0,0,8,0"
                  AutomationProperties.Name="Artboard size preset" ToolTip="Auto uses the root's Width/Height or d:DesignWidth/d:DesignHeight"/>
-       <TextBox Text="{Binding PreviewWidth}" Width="62" Margin="2" AutomationProperties.Name="Artboard width" ToolTip="Width in DIPs, used when the size is fixed or the root has no width"/>
+       <TextBox Text="{Binding Canvas.PreviewWidth}" Width="62" Margin="2" AutomationProperties.Name="Artboard width" ToolTip="Width in DIPs, used when the size is fixed or the root has no width"/>
        <TextBlock Text="×" VerticalAlignment="Center" Margin="2,0" Foreground="{DynamicResource MutedBrush}"/>
-       <TextBox Text="{Binding PreviewHeight}" Width="62" Margin="2" AutomationProperties.Name="Artboard height" ToolTip="Height in DIPs, used when the size is fixed or the root has no height"/>
-       <Button Content="Reload scenarios" Command="{Binding ReloadScenariosCommand}" Margin="16,2,2,2" c:Ui.Icon="Refresh"/>
-       <Button Content="Open configuration" Command="{Binding OpenScenarioConfigurationCommand}" Margin="2" c:Ui.Icon="File"/>
+       <TextBox Text="{Binding Canvas.PreviewHeight}" Width="62" Margin="2" AutomationProperties.Name="Artboard height" ToolTip="Height in DIPs, used when the size is fixed or the root has no height"/>
+       <Button Content="Reload scenarios" Command="{Binding Scenarios.ReloadCommand}" Margin="16,2,2,2" c:Ui.Icon="Refresh"/>
+       <Button Content="Open configuration" Command="{Binding Scenarios.OpenConfigurationCommand}" Margin="2" c:Ui.Icon="File"/>
       </WrapPanel>
       <StackPanel Visibility="{Binding UsesApplicationResources, Converter={StaticResource DesignerBoolVisibility}}" Margin="0,8,0,0">
        <WrapPanel>
@@ -141,11 +141,11 @@
       </StackPanel>
       <TextBlock Text="{Binding SessionDescription}" TextWrapping="Wrap" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="0,8,0,0"/>
       <TextBlock Text="{Binding ScenarioDescription}" TextWrapping="Wrap" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="0,2,0,0"/>
-      <TextBlock Text="{Binding ScenarioConfigurationTitle}" FontWeight="SemiBold" Margin="0,8,0,0"/>
-      <TextBlock Text="{Binding ScenarioConfigurationDescription}" TextWrapping="Wrap" FontSize="11" Margin="0,2,0,0" Foreground="{DynamicResource MutedBrush}"/>
+      <TextBlock Text="{Binding Scenarios.ConfigurationTitle}" FontWeight="SemiBold" Margin="0,8,0,0"/>
+      <TextBlock Text="{Binding Scenarios.ConfigurationDescription}" TextWrapping="Wrap" FontSize="11" Margin="0,2,0,0" Foreground="{DynamicResource MutedBrush}"/>
       <TextBlock Text="Factories run from the last built project in the isolated preview. Save configuration changes, then Refresh."
                  TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource SubtleBrush}" Margin="0,2"/>
-      <ItemsControl ItemsSource="{Binding ScenarioWarnings}">
+      <ItemsControl ItemsSource="{Binding Scenarios.Warnings}">
        <ItemsControl.ItemTemplate><DataTemplate>
         <DockPanel Margin="0,2"><c:Glyph Kind="Warning" Width="14" Height="14" Foreground="{DynamicResource WarningBrush}" Margin="0,1,6,0" VerticalAlignment="Top"/><TextBlock Text="{Binding}" TextWrapping="Wrap"/></DockPanel>
        </DataTemplate></ItemsControl.ItemTemplate>
@@ -194,23 +194,23 @@
     <Border DockPanel.Dock="Bottom" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="8,3">
      <DockPanel>
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-       <TextBlock Text="{Binding ArtboardSizeText}" Foreground="{DynamicResource SubtleBrush}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11"
+       <TextBlock Text="{Binding Canvas.ArtboardSizeText}" Foreground="{DynamicResource SubtleBrush}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11"
                   ToolTip="Artboard size in device-independent pixels"/>
-       <ComboBox ItemsSource="{Binding SizePresets}" SelectedItem="{Binding SelectedSizePreset}" Style="{StaticResource ToolbarCombo}" Height="24" MinWidth="92"
+       <ComboBox ItemsSource="{Binding Canvas.SizePresets}" SelectedItem="{Binding Canvas.SelectedSizePreset}" Style="{StaticResource ToolbarCombo}" Height="24" MinWidth="92"
                  AutomationProperties.Name="Artboard size" ToolTip="Artboard size. Auto uses the root's Width/Height or d:DesignWidth/d:DesignHeight."/>
        <Border Style="{StaticResource ToolbarSeparator}" Height="14"/>
-       <Button Command="{Binding ZoomOutCommand}" Style="{StaticResource CanvasBarButton}" c:Ui.Icon="ZoomOut" AutomationProperties.Name="Zoom out" ToolTip="Zoom out (Ctrl+wheel)"/>
-       <TextBlock Text="{Binding ZoomText}" MinWidth="40" TextAlignment="Center" VerticalAlignment="Center" FontSize="11" AutomationProperties.Name="Zoom level"/>
-       <Button Command="{Binding ZoomInCommand}" Style="{StaticResource CanvasBarButton}" c:Ui.Icon="ZoomIn" AutomationProperties.Name="Zoom in" ToolTip="Zoom in (Ctrl+wheel)"/>
-       <ToggleButton IsChecked="{Binding IsZoomToFit}" Style="{StaticResource IconButton}" Width="26" Height="24" c:Ui.Icon="Fit" AutomationProperties.Name="Zoom to fit" ToolTip="Fit the artboard in the canvas"/>
-       <Button Command="{Binding ZoomToActualSizeCommand}" Style="{StaticResource CanvasBarButton}" c:Ui.Icon="ActualSize" AutomationProperties.Name="Actual size" ToolTip="Actual size (100%)"/>
+       <Button Command="{Binding Canvas.ZoomOutCommand}" Style="{StaticResource CanvasBarButton}" c:Ui.Icon="ZoomOut" AutomationProperties.Name="Zoom out" ToolTip="Zoom out (Ctrl+wheel)"/>
+       <TextBlock Text="{Binding Canvas.ZoomText}" MinWidth="40" TextAlignment="Center" VerticalAlignment="Center" FontSize="11" AutomationProperties.Name="Zoom level"/>
+       <Button Command="{Binding Canvas.ZoomInCommand}" Style="{StaticResource CanvasBarButton}" c:Ui.Icon="ZoomIn" AutomationProperties.Name="Zoom in" ToolTip="Zoom in (Ctrl+wheel)"/>
+       <ToggleButton IsChecked="{Binding Canvas.IsZoomToFit}" Style="{StaticResource IconButton}" Width="26" Height="24" c:Ui.Icon="Fit" AutomationProperties.Name="Zoom to fit" ToolTip="Fit the artboard in the canvas"/>
+       <Button Command="{Binding Canvas.ZoomToActualSizeCommand}" Style="{StaticResource CanvasBarButton}" c:Ui.Icon="ActualSize" AutomationProperties.Name="Actual size" ToolTip="Actual size (100%)"/>
       </StackPanel>
       <StackPanel VerticalAlignment="Center">
        <TextBlock Text="{Binding SelectionDescription}" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectionDescription}"
                   Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
-       <TextBlock Text="{Binding LayoutEditingStatus}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource AccentBrush}"
-                  ToolTip="{Binding LayoutEditingStatus}" AutomationProperties.Name="Preview layout editing status"
-                  Visibility="{Binding IsLayoutEditingEnabled, Converter={StaticResource DesignerBoolVisibility}}"/>
+       <TextBlock Text="{Binding LayoutGesture.Status}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource AccentBrush}"
+                  ToolTip="{Binding LayoutGesture.Status}" AutomationProperties.Name="Preview layout editing status"
+                  Visibility="{Binding LayoutGesture.IsEnabled, Converter={StaticResource DesignerBoolVisibility}}"/>
       </StackPanel>
      </DockPanel>
     </Border>
@@ -225,7 +225,7 @@
        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
        <DockPanel Margin="1,0,0,6" MaxWidth="{Binding ActualWidth, ElementName=ArtboardFrame}" HorizontalAlignment="Left" MinWidth="0">
         <c:Glyph Kind="Artboard" Width="12" Height="12" Margin="0,0,5,0" Foreground="{DynamicResource SubtleBrush}"/>
-        <TextBlock Text="{Binding ArtboardTitle}" FontSize="11" Foreground="{DynamicResource SubtleBrush}" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Canvas.ArtboardTitle}" FontSize="11" Foreground="{DynamicResource SubtleBrush}" TextTrimming="CharacterEllipsis"/>
        </DockPanel>
        <Grid x:Name="ArtboardFrame" Grid.Row="1" HorizontalAlignment="Left" VerticalAlignment="Top">
         <Grid.Style><Style TargetType="Grid"><Style.Triggers>
@@ -234,10 +234,10 @@
         <Border Background="White" BorderBrush="{DynamicResource StrongBorderBrush}" BorderThickness="1" Margin="-1">
          <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="3" Direction="270" Opacity="0.3" Color="Black" RenderingBias="Performance"/></Border.Effect>
         </Border>
-        <local:PreviewSurface ImageBytes="{Binding DisplayImage}" Scale="{Binding Zoom}" Selection="{Binding SelectionBounds}" LayoutOverlays="{Binding LayoutDetails.VisibleOverlays}"
+        <local:PreviewSurface ImageBytes="{Binding DisplayImage}" Scale="{Binding Canvas.Zoom}" Selection="{Binding SelectionBounds}" LayoutOverlays="{Binding LayoutDetails.VisibleOverlays}"
                               PickCommand="{Binding PickElementCommand}" IsEnabled="{Binding IsCurrent}" HorizontalAlignment="Left" VerticalAlignment="Top"
-                              LayoutEditing="{Binding LayoutEditing}" LayoutDraft="{Binding LayoutDraft}" LayoutGestureCommand="{Binding LayoutGestureCommand}"
-                              IsLayoutEditingEnabled="{Binding IsLayoutEditingEnabled}" HoverNodes="{Binding CanvasNodes}" SelectionLabel="{Binding SelectionLabel}"
+                              LayoutEditing="{Binding LayoutGesture.Context}" LayoutDraft="{Binding LayoutGesture.Draft}" LayoutGestureCommand="{Binding LayoutGesture.GestureCommand}"
+                              IsLayoutEditingEnabled="{Binding LayoutGesture.IsEnabled}" HoverNodes="{Binding CanvasNodes}" SelectionLabel="{Binding SelectionLabel}"
                               AutomationProperties.Name="Preview canvas"/>
        </Grid>
       </Grid>
@@ -404,7 +404,7 @@
     </TabItem>
     <TabItem Header="Bindings">
      <DockPanel>
-      <bindings:BindingSourcePanel DockPanel.Dock="Top"/>
+      <bindings:BindingSourcePanel DockPanel.Dock="Top" DataContext="{Binding BindingDeclarations}"/>
       <diagnostics:BindingExplanationPanel xmlns:diagnostics="clr-namespace:WpfStudio.App.Features.BindingDiagnostics" DataContext="{Binding BindingExplanation}"/>
      </DockPanel>
     </TabItem>

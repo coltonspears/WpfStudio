@@ -430,9 +430,9 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         Assert.Equal("Git", shell.ActiveWorkbench);
         foreach (var tab in new[] { 2, 1 }) { shell.Features.Git.SelectedTab = tab; await Idle(); }
         await shell.Features.Git.WhenLoadedAsync(); await Idle();
-        Assert.NotEmpty(shell.Features.Git.VisibleHistory);
-        Assert.Equal(shell.Features.Git.VisibleHistory[0], shell.Features.Git.SelectedCommit);
-        Assert.Equal(shell.Features.Git.SelectedCommit!.Id, shell.Features.Git.CommitDetails?.Id);
+        Assert.NotEmpty(shell.Features.Git.CommitHistory.VisibleHistory);
+        Assert.Equal(shell.Features.Git.CommitHistory.VisibleHistory[0], shell.Features.Git.CommitHistory.SelectedCommit);
+        Assert.Equal(shell.Features.Git.CommitHistory.SelectedCommit!.Id, shell.Features.Git.CommitHistory.CommitDetails?.Id);
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git-history.png"));
         shell.ToggleThemeCommand.Execute(null); await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git-history-light.png"));
@@ -1282,8 +1282,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var bindingPane = (FrameworkElement)manager.Layout.Descendents().OfType<LayoutAnchorable>().Single(t => t.ContentId == "LiveInspection").Content;
             await model.ShowBindingIssueSourceCommand.ExecuteAsync(runtimeIssue);
             Assert.Equal("{Binding Misspelled}", sourceEditor.SelectedText);
-            Assert.Contains("Opened verified", model.BindingSourceStatus);
-            Assert.Equal(runtimeIssue.Id, model.SelectedBindingDeclaration?.BindingId);
+            Assert.Contains("Opened verified", model.BindingDeclarations.Status);
+            Assert.Equal(runtimeIssue.Id, model.BindingDeclarations.Selected?.BindingId);
             Assert.True(model.BindingExplanation.Available, model.BindingExplanation.Status);
             Assert.Equal("PathError", model.BindingExplanation.Observation?.Status);
             sourceEditor.RestoreSelection(0, 0, 0);
@@ -1292,14 +1292,14 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             model.EditedValue = "Preserved binding navigation draft";
             var bindingSelector = Descendants<ComboBox>(bindingPane).Single(control =>
                 System.Windows.Automation.AutomationProperties.GetName(control) == "Binding declaration");
-            bindingSelector.SelectedItem = model.BindingDeclarations.Single(item => item.Property == "Text" && item.Declaration.ParentExpressionId is null);
+            bindingSelector.SelectedItem = model.BindingDeclarations.Items.Single(item => item.Property == "Text" && item.Declaration.ParentExpressionId is null);
             var showBinding = Descendants<Button>(bindingPane).Single(control =>
                 System.Windows.Automation.AutomationProperties.GetName(control) == "Show binding XAML");
-            Assert.Same(model.ShowBindingSourceCommand, showBinding.Command);
-            Assert.True(showBinding.Command.CanExecute(showBinding.CommandParameter), model.BindingSourceStatus);
-            await model.ShowBindingSourceCommand.ExecuteAsync(showBinding.CommandParameter);
+            Assert.Same(model.BindingDeclarations.ShowSourceCommand, showBinding.Command);
+            Assert.True(showBinding.Command.CanExecute(showBinding.CommandParameter), model.BindingDeclarations.Status);
+            await model.BindingDeclarations.ShowSourceCommand.ExecuteAsync(showBinding.CommandParameter);
             Assert.Equal("{Binding Misspelled}", sourceEditor.SelectedText);
-            Assert.StartsWith("Opened verified binding declaration:", model.BindingSourceStatus);
+            Assert.StartsWith("Opened verified binding declaration:", model.BindingDeclarations.Status);
             Assert.Same(bindingProperty, model.SelectedProperty);
             Assert.Equal("Preserved binding navigation draft", model.EditedValue);
             Assert.Equal(originalXaml, sourceEditor.State.Content);
@@ -1444,8 +1444,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var rowTop = selectedRow.TransformToAncestor(runtimeTree).Transform(new Point(0, 0)).Y;
             Assert.True(rowTop >= 0 && rowTop + 20 <= runtimeTree.ActualHeight, $"Picked row must be visible: {rowTop} / {runtimeTree.ActualHeight}.");
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/live-xaml-picked.png"));
-            Assert.True(model.HasLayout, model.LayoutStatus);
-            Assert.Contains(model.Layout!.Facts, fact => fact.Name == "Render size");
+            Assert.True(model.LayoutDetails.Available, model.LayoutDetails.Status);
+            Assert.Contains(model.LayoutDetails.Snapshot!.Facts, fact => fact.Name == "Render size");
             var runtimeLayoutTab = Descendants<TabItem>(inspectionContent).Single(tab =>
                 System.Windows.Automation.AutomationProperties.GetName(tab) == "Element layout");
             runtimeLayoutTab.IsSelected = true;
@@ -1454,7 +1454,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
                 System.Windows.Automation.AutomationProperties.GetName(box) == "Show layout overlay");
             Assert.True(runtimeLayoutToggle.IsEnabled);
             runtimeLayoutToggle.IsChecked = true;
-            Assert.True(model.ShowLayoutOverlay);
+            Assert.True(model.LayoutDetails.ShowOverlay);
             await model.RefreshCommand.ExecuteAsync(null);
             await Idle();
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/live-xaml-layout.png"));
@@ -1753,7 +1753,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var timings = new Dictionary<string, long>();
         foreach (var state in new[] { ("Loading", "Loading orders"), ("Empty", "No orders"), ("Populated", "3 orders"), ("Error", "Unable to load orders") })
         {
-            selector.SelectedItem = model.Scenarios.Single(item => item.Name == state.Item1);
+            selector.SelectedItem = model.Scenarios.Items.Single(item => item.Name == state.Item1);
             Assert.False(model.IsCurrent);
             var timer = Stopwatch.StartNew();
             await Assert.IsAssignableFrom<CommunityToolkit.Mvvm.Input.IAsyncRelayCommand>(refresh.Command).ExecuteAsync(null);
@@ -1788,7 +1788,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         shell.ToggleThemeCommand.Execute(null); await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-preview-scenarios-light.png"));
         shell.ToggleThemeCommand.Execute(null);
-        selector.SelectedItem = model.Scenarios.Single(item => item.Name == "Injected view");
+        selector.SelectedItem = model.Scenarios.Items.Single(item => item.Name == "Injected view");
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.False(model.IsCurrent);
         Assert.Contains("Compiled", model.Status);
@@ -1879,7 +1879,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         Assert.True(model.ShowBindingDiagnosticCommand.CanExecute(diagnostic));
         await model.ShowBindingDiagnosticCommand.ExecuteAsync(diagnostic);
         Assert.Equal(badBinding.Node.Id, model.SelectedNode?.Node.Id);
-        Assert.Equal(diagnostic.BindingId, model.SelectedBindingDeclaration?.BindingId);
+        Assert.Equal(diagnostic.BindingId, model.BindingDeclarations.Selected?.BindingId);
         Assert.True(model.BindingExplanation.Available, model.BindingExplanation.Status);
         Assert.Equal("PathError", model.BindingExplanation.Observation?.Status);
         Descendants<TabItem>(paneView).Single(tab => Equals(tab.Header, "Bindings")).IsSelected = true;
@@ -1889,12 +1889,12 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         await Idle();
         var bindingSelector = Descendants<ComboBox>(paneView).Single(control =>
             System.Windows.Automation.AutomationProperties.GetName(control) == "Binding declaration");
-        bindingSelector.SelectedItem = model.BindingDeclarations.Single(item => item.Property == "Text" && item.Declaration.ParentExpressionId is null);
+        bindingSelector.SelectedItem = model.BindingDeclarations.Items.Single(item => item.Property == "Text" && item.Declaration.ParentExpressionId is null);
         var showBinding = Descendants<Button>(paneView).Single(control =>
             System.Windows.Automation.AutomationProperties.GetName(control) == "Show binding XAML");
-        Assert.Same(model.ShowBindingSourceCommand, showBinding.Command);
-        Assert.True(showBinding.Command.CanExecute(showBinding.CommandParameter), model.BindingSourceStatus);
-        await model.ShowBindingSourceCommand.ExecuteAsync(showBinding.CommandParameter);
+        Assert.Same(model.BindingDeclarations.ShowSourceCommand, showBinding.Command);
+        Assert.True(showBinding.Command.CanExecute(showBinding.CommandParameter), model.BindingDeclarations.Status);
+        await model.BindingDeclarations.ShowSourceCommand.ExecuteAsync(showBinding.CommandParameter);
         Assert.Equal("{Binding MisspelledProperty, ElementName=Root}", document.SelectedText);
         Assert.Same(selectedBindingProperty, model.SelectedProperty);
         Assert.Equal("Preserved preview navigation draft", model.EditedValue);
@@ -1908,9 +1908,9 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-preview-binding-details.png"));
         model.SelectedNode = Flatten(model.Tree).Single(n => n.Node.Name == "LayoutTarget");
         using (var layoutDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
-            while (!model.HasLayout) await Task.Delay(25, layoutDeadline.Token);
-        Assert.Contains(model.Layout!.Facts, fact => fact.Name == "Render size");
-        Assert.Contains(model.Layout.Overlays, overlay => overlay.Kind == "clip-bounds");
+            while (!model.LayoutDetails.Available) await Task.Delay(25, layoutDeadline.Token);
+        Assert.Contains(model.LayoutDetails.Snapshot!.Facts, fact => fact.Name == "Render size");
+        Assert.Contains(model.LayoutDetails.Snapshot.Overlays, overlay => overlay.Kind == "clip-bounds");
         var designerLayoutTab = Descendants<TabItem>(paneView).Single(tab =>
             System.Windows.Automation.AutomationProperties.GetName(tab) == "Element layout");
         designerLayoutTab.IsSelected = true;
@@ -1922,7 +1922,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var previewSurface = Descendants<WpfStudio.App.Features.Designer.PreviewSurface>(paneView).Single();
         var plainPreview = RenderPixels(previewSurface);
         designerLayoutToggle.IsChecked = true;
-        Assert.True(model.ShowLayoutOverlay);
+        Assert.True(model.LayoutDetails.ShowOverlay);
         await Idle();
         Assert.False(plainPreview.SequenceEqual(RenderPixels(previewSurface)), "Layout overlay should visibly change the rendered preview surface.");
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-designer-layout-details.png"));

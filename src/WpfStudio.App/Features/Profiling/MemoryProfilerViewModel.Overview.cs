@@ -166,7 +166,7 @@ public sealed partial class MemoryProfilerViewModel
     private void ShowObject(int id)
     {
         ShowBrowser = true; if (FocusGraph) FocusGraph = false;
-        InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault);
+        Browser.InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault);
     }
 
     private bool CanOpenComparisonRow(ComparisonRow? row) => row is { IsGone: false } && OpenTypeCommand.CanExecute(row.Key);
