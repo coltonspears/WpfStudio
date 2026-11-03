@@ -165,6 +165,20 @@ public sealed class DebuggerFlowTests
     });
 
     [Fact]
+    public Task AnAdapterThatEndsDuringAttachLeavesTheSessionEnded() => WithAttachedModelAsync("debug-terminate-starting", model =>
+    {
+        AssertSessionEnded(model);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task AnAdapterThatEndsDuringLaunchLeavesTheSessionEnded() => WithAttachedModelAsync("debug-terminate-starting", model =>
+    {
+        AssertSessionEnded(model);
+        return Task.CompletedTask;
+    }, start: model => model.LaunchAsync(new DebugLaunchConfiguration(@"C:\src\App.exe", @"C:\src")));
+
+    [Fact]
     public Task TerminationEndsTheSession() => WithAttachedModelAsync("debug-terminate", async model =>
     {
         await model.PauseCommand.ExecuteAsync(null);
@@ -174,6 +188,14 @@ public sealed class DebuggerFlowTests
         Assert.Equal("Pending", model.Breakpoints.Single().Status);
         Assert.Empty(model.Threads);
     });
+
+    private static void AssertSessionEnded(DebuggerViewModel model)
+    {
+        Assert.False(model.IsActive);
+        Assert.False(model.IsStopped);
+        Assert.Equal("Session ended", model.Status);
+        Assert.Equal("", model.Error);
+    }
 
     private static async Task Until(Func<bool> condition)
     {
@@ -186,7 +208,8 @@ public sealed class DebuggerFlowTests
     }
 
     /// <param name="breakpoint">Shapes the one breakpoint before the session starts.</param>
-    private static Task WithAttachedModelAsync(string scenario, Func<DebuggerViewModel, Task> test, Action<BreakpointViewModel>? breakpoint = null)
+    /// <param name="start">How the session starts, when not by attaching.</param>
+    private static Task WithAttachedModelAsync(string scenario, Func<DebuggerViewModel, Task> test, Action<BreakpointViewModel>? breakpoint = null, Func<DebuggerViewModel, Task>? start = null)
     {
         var result = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -204,7 +227,7 @@ public sealed class DebuggerFlowTests
                     model.Breakpoints.Add(item);
                     await model.AddWatchAsync("a");
                     model.AttachProcessId = Environment.ProcessId;
-                    await model.AttachCommand.ExecuteAsync(null);
+                    await (start is null ? model.AttachCommand.ExecuteAsync(null) : start(model));
                     await test(model);
                     result.TrySetResult();
                 }

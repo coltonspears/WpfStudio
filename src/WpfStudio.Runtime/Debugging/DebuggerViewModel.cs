@@ -18,6 +18,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private int threadId;
     private int stopVersion;
     private int watchRefresh;
+    private int sessionEnds;
     public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters)
     {
         this.session = session; this.dispatcher = dispatcher; this.adapters = adapters;
@@ -93,11 +94,11 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     {
         Error = ""; ExceptionDetails = ""; Status = "Starting debugger…";
         store.ResetForSession();
+        var ends = sessionEnds;
         try
         {
             await session.LaunchAsync(configuration, store.ToModels(), BreakOnThrown, cancellationToken);
-            IsActive = true; if (!IsStopped) Status = "Running";
-            foreach (var path in store.Files) await ApplyFileBreakpointsAsync(path);
+            await EnterRunningAsync(ends);
         }
         catch (Exception ex) { Error = ex.Message; Status = "Debug launch failed"; IsActive = false; throw; }
     }
@@ -115,10 +116,18 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         if (IsAdapterMissing) { Error = "Install the debugger first: choose Install debugger above."; return; }
         Status = "Attaching…";
         store.ResetForSession();
+        var ends = sessionEnds;
         await session.AttachAsync(AttachProcessId, store.ToModels(), BreakOnThrown);
-        IsActive = true; if (!IsStopped) Status = "Running";
-        foreach (var path in store.Files) await ApplyFileBreakpointsAsync(path);
+        await EnterRunningAsync(ends);
     });
+    /// <summary>The adapter accepted the start, but a program that exits at once may already have ended the session, and nothing here may reopen it.</summary>
+    private async Task EnterRunningAsync(int ends)
+    {
+        if (ends != sessionEnds) return;
+        IsActive = true; if (!IsStopped) Status = "Running";
+        try { foreach (var path in store.Files) await ApplyFileBreakpointsAsync(path); }
+        catch (Exception) when (ends != sessionEnds) { } // The session ending is why this failed, and the pane already says it ended.
+    }
     [RelayCommand] private Task ContinueAsync() => GuardAsync(async () => { await session.ContinueAsync(threadId); IsStopped = false; Status = "Running"; });
     [RelayCommand] private Task PauseAsync() => GuardAsync(() => session.PauseAsync(threadId));
     [RelayCommand] private Task StepOverAsync() => GuardAsync(() => session.StepAsync("next", threadId));
@@ -305,7 +314,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     }
     /// <summary>Empties the rows and supersedes any refresh still awaiting the adapter, whose answers would land on top of the newer rows.</summary>
     private int ResetWatchRows() { Watches.Clear(); return ++watchRefresh; }
-    private void EndSession() { IsActive = false; IsStopped = false; Status = "Session ended"; store.MarkPending(); stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
+    private void EndSession() { sessionEnds++; IsActive = false; IsStopped = false; Status = "Session ended"; store.MarkPending(); stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
     private void OnError(string value) => dispatcher.Post(() => { Error = value; EndSession(); });
     private async Task GuardAsync(Func<Task> action) { try { Error = ""; await action(); } catch (Exception ex) { Error = ex.Message; } }
     public async ValueTask DisposeAsync() { output.Close(); session.EventReceived -= OnDebugEvent; session.Output -= output.Append; session.Error -= OnError; await session.DisposeAsync(); }

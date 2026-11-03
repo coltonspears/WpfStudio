@@ -77,6 +77,11 @@ while (ReadFrame(input) is { } request)
             Reply(sequence);
             Event("terminated");
             return;
+        // The event goes first, so the view model always handles it before attach or launch returns to it.
+        case ("debug-terminate-starting", "configurationDone"):
+            Event("terminated");
+            Reply(sequence);
+            return;
         case ("partial", "configurationDone"):
             Reply(sequence);
             EventWith("stopped", """{"threadId":7}""");
