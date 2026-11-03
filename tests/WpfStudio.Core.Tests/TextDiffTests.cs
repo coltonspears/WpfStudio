@@ -5,6 +5,14 @@ namespace WpfStudio.Core.Tests;
 public sealed class TextDiffTests
 {
     [Fact]
+    public void ACancelledComparisonStopsInsteadOfFinishing()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => TextDiff.Compute("a\nb\n", "c\nd\n", cancellationToken: cancelled.Token));
+    }
+
+    [Fact]
     public void IdenticalTextAndLineEndingOnlyDifferencesHaveNoChanges()
     {
         Assert.True(TextDiff.Compute("a\nb\n", "a\nb\n").IsIdentical);
