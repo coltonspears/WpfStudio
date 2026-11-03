@@ -95,4 +95,60 @@ public sealed class TerminalRenderingTests
         thread.SetApartmentState(ApartmentState.STA); thread.Start();
         await completion.Task.WaitAsync(TimeSpan.FromSeconds(50));
     }
+
+    // Shares this class with the other WebView2 test because the override is process-wide: xunit runs a class's tests one at a time.
+    [Fact]
+    public async Task RendererInitializationFailureKeepsTheShellAndRetryAttachesANewRenderer()
+    {
+        const string browserFolder = "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER";
+        var noBrowser = Directory.CreateTempSubdirectory("WpfStudio.NoWebView2.");
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+            var window = new Window { Width = 700, Height = 300, Opacity = 0, ShowInTaskbar = false, WindowStyle = WindowStyle.None };
+            window.Loaded += async (_, _) =>
+            {
+                ConPtySession? session = null;
+                try
+                {
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
+                    session = new ConPtySession(Environment.GetEnvironmentVariable("COMSPEC")!, "/Q", Path.GetTempPath());
+                    using var shell = Process.GetProcessById(session.ProcessId);
+                    Environment.SetEnvironmentVariable(browserFolder, noBrowser.FullName);
+                    var surface = new TerminalSurface { Session = session }; window.Content = surface;
+                    while (surface.Content is not StackPanel) await Task.Delay(50, timeout.Token);
+                    var failure = (StackPanel)surface.Content;
+                    Assert.Contains("still running", ((TextBlock)failure.Children[0]).Text);
+                    Assert.False(shell.HasExited);
+                    Environment.SetEnvironmentVariable(browserFolder, null);
+                    await session.WriteAsync("echo RETRY_READY\r", timeout.Token); // Output written with no renderer reaches the next one.
+                    ((Button)failure.Children[1]).Command.Execute(null);
+                    WebView2? browser = null;
+                    while (browser?.CoreWebView2 is null || await browser.ExecuteScriptAsync("typeof terminal") != "\"object\"")
+                    {
+                        await Task.Delay(100, timeout.Token);
+                        browser = surface.Content as WebView2;
+                    }
+                    const string transcript = "Array.from({length:terminal.buffer.active.length},(_,i)=>terminal.buffer.active.getLine(i).translateToString()).join('\\n')";
+                    string rendered = "";
+                    while (!rendered.Contains("RETRY_READY")) { await Task.Delay(100, timeout.Token); rendered = await browser.ExecuteScriptAsync(transcript); }
+                    Assert.False(shell.HasExited);
+                    completion.TrySetResult();
+                }
+                catch (Exception ex) { completion.TrySetException(ex); }
+                finally
+                {
+                    Environment.SetEnvironmentVariable(browserFolder, null);
+                    if (session is not null) await session.DisposeAsync();
+                    window.Close(); dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
+                }
+            };
+            window.Show(); Dispatcher.Run();
+        }) { IsBackground = true, Name = "Terminal renderer retry test" };
+        thread.SetApartmentState(ApartmentState.STA); thread.Start();
+        try { await completion.Task.WaitAsync(TimeSpan.FromSeconds(50)); }
+        finally { noBrowser.Delete(recursive: true); }
+    }
 }
