@@ -92,6 +92,20 @@ public sealed class WorkerProcessHostTests : IDisposable
     }
 
     [Fact]
+    public async Task AWorkerBehindALauncherConnectsWhenTheCheckIsOff()
+    {
+        var pipeName = NewPipeName();
+        // The test process serves the pipe as the real host would behind a shim that is still running.
+        await using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        var accepted = server.WaitForConnectionAsync();
+        using var worker = new WorkerProcessHost(new(StalledWorker(), pipeName, TimeSpan.FromSeconds(30)) { KillProcessTree = true, VerifyServerProcess = false });
+        worker.Start();
+        await worker.ConnectAsync(CancellationToken.None);
+        await accepted;
+        Assert.True(worker.Pipe.IsConnected);
+    }
+
+    [Fact]
     public async Task ARealWorkerConnectsAndStops()
     {
         var project = Path.Combine(_directory, "App.csproj");

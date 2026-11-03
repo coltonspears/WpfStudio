@@ -376,7 +376,9 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(workspacePath))!,
             Arguments = ["--workspace", Path.GetFullPath(workspacePath)],
             KillProcessTree = true,
-            ConfigureStart = ProcessRunner.ClearInheritedToolchain
+            ConfigureStart = ProcessRunner.ClearInheritedToolchain,
+            // Launched through whatever dotnet is on PATH, which may be a shim that starts the real host as a child.
+            VerifyServerProcess = false
         });
         worker.Exited += () =>
         {

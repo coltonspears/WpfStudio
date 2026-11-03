@@ -19,6 +19,8 @@ public sealed record WorkerProcessOptions(string HostPath, string PipeName, Time
     public bool KillProcessTree { get; init; }
     /// <summary>Last changes to the start info, such as its environment.</summary>
     public Action<ProcessStartInfo>? ConfigureStart { get; init; }
+    /// <summary>Refuses a pipe served by anything but the launched process. Turn off only when that process may be a launcher, such as a shim <c>dotnet</c> on PATH that starts the real host as a child; the pipe stays limited to the current user.</summary>
+    public bool VerifyServerProcess { get; init; } = true;
 }
 
 /// <summary>A worker that never opened its pipe. <see cref="ExitCode"/> is set when it exited, and null when its connect budget ran out.</summary>
@@ -123,7 +125,7 @@ public sealed class WorkerProcessHost(WorkerProcessOptions options) : IDisposabl
         try { await connected.ConfigureAwait(false); }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { throw new WorkerConnectionException($"The worker did not connect within {options.ConnectTimeout.TotalSeconds:0.#} s. {ErrorTail}", ErrorTail); }
-        if (!NamedPipeIdentity.TryGetServerProcessId(pipe, out var server) || server != ProcessId)
+        if (options.VerifyServerProcess && (!NamedPipeIdentity.TryGetServerProcessId(pipe, out var server) || server != ProcessId))
             throw new InvalidDataException("The worker's pipe server is not the process launched for this session.");
     }
 
