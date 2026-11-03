@@ -19,7 +19,7 @@ public interface IPreviewClient : IPreviewRpc, IAsyncDisposable
 }
 
 /// <summary>Owns one isolated WPF process, with bounded requests and an independent native-interaction watchdog.</summary>
-public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? requestTimeout = null) : IPreviewClient
+public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? requestTimeout = null, TimeSpan? supersededRequestGrace = null) : IPreviewClient
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _lifecycle = new();
@@ -27,6 +27,8 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
     private CancellationTokenSource _requestEpoch = new();
     private Task _stopBarrier = Task.CompletedTask;
     private readonly TimeSpan _timeout = requestTimeout ?? TimeSpan.FromSeconds(30);
+    /// <summary>How long a superseded render may keep the host busy before it is treated as hung.</summary>
+    private readonly TimeSpan _supersededRequestGrace = supersededRequestGrace ?? TimeSpan.FromSeconds(3);
     private PreviewProcessLease? _lease;
     private PreviewShadowDirectory? _shadowDirectory;
     private NamedPipeClientStream? _pipe;
@@ -165,14 +167,11 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         finally { if (releaseGate) _gate.Release(); }
     }
 
-    /// <summary>How long a superseded render may keep the host busy before it is treated as hung.</summary>
-    internal static TimeSpan SupersededRequestGrace { get; set; } = TimeSpan.FromSeconds(3);
-
     private async Task DrainSupersededAsync(Task call)
     {
         try
         {
-            try { await call.WaitAsync(SupersededRequestGrace, _shutdown.Token).ConfigureAwait(false); }
+            try { await call.WaitAsync(_supersededRequestGrace, _shutdown.Token).ConfigureAwait(false); }
             // The host acknowledged the cancellation before starting the work.
             catch (OperationCanceledException) when (!_shutdown.IsCancellationRequested) { }
             // A host that is still busy after the grace period, disconnected, or failed

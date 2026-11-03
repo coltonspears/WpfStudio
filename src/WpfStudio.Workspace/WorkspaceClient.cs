@@ -10,6 +10,7 @@ namespace WpfStudio.Workspace;
 public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
 {
     private readonly string? _hostPath;
+    private readonly TimeSpan _disposeTimeout;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Dictionary<string, UpdateDocumentRequest> _buffers = new(StringComparer.OrdinalIgnoreCase);
@@ -31,7 +32,12 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         lock (_workerErrorLines) { _workerErrorLines.Enqueue(line); while (_workerErrorLines.Count > WorkerErrorTailLines) _workerErrorLines.Dequeue(); }
     }
 
-    public WorkspaceClient(string? hostPath = null) => _hostPath = hostPath;
+    /// <param name="disposeTimeout">How long shutdown waits for an in-flight call to let go of the lifecycle lock before the worker is stopped regardless.</param>
+    public WorkspaceClient(string? hostPath = null, TimeSpan? disposeTimeout = null)
+    {
+        _hostPath = hostPath;
+        _disposeTimeout = disposeTimeout ?? TimeSpan.FromSeconds(5);
+    }
     public event EventHandler<WorkspaceDiagnosticEvent>? DiagnosticsReceived;
     public event EventHandler<string>? WorkerExited;
     /// <summary>Project types or worker availability changed; subscribers must marshal to their UI dispatcher.</summary>
@@ -463,14 +469,12 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         if (process is not null) { ProcessRunner.Kill(process); process.Dispose(); }
     }
 
-    /// <summary>How long shutdown waits for an in-flight call to let go of the lifecycle lock before the worker is stopped regardless.</summary>
-    internal static TimeSpan DisposeTimeout { get; set; } = TimeSpan.FromSeconds(5);
     public async ValueTask DisposeAsync()
     {
         _shutdown.Cancel();
         // Cancelling the shutdown token ends every bounded call. A caller that still holds the lock after that is
         // stuck in the worker; killing the worker is what releases it, so do not wait forever to do so.
-        bool acquired = await _lifecycle.WaitAsync(DisposeTimeout).ConfigureAwait(false);
+        bool acquired = await _lifecycle.WaitAsync(_disposeTimeout).ConfigureAwait(false);
         try { if (_disposed) return; _disposed = true; StopWorker(); }
         finally { if (acquired) _lifecycle.Release(); }
     }
