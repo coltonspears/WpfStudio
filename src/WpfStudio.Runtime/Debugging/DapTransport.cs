@@ -2,12 +2,14 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.Runtime.Debugging;
 
 /// <summary>Bounded DAP stream framing, independent of processes and UI.</summary>
 public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
 {
+    private static readonly TimeSpan CloseGrace = TimeSpan.FromSeconds(2);
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> pending = new();
     private readonly SemaphoreSlim writer = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
@@ -80,38 +82,46 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
     private async Task ReadLoopAsync()
     {
         Exception failure = new EndOfStreamException("The debugger connection closed.");
-        try
+        // Nothing observes this task until disposal, so whatever ended the loop becomes the reason and nothing escapes it.
+        try { while (await ReadFrameAsync(input, lifetime.Token).ConfigureAwait(false) is { } message) Dispatch(message); }
+        catch (Exception ex) { failure = ex; }
+        foreach (var item in pending.Values) item.TrySetException(failure);
+        pending.Clear();
+        if (lifetime.IsCancellationRequested) return;
+        try { ConnectionClosed?.Invoke(failure); }
+        catch (Exception) { /* A failing subscriber cannot change that the connection closed. */ }
+    }
+
+    /// <summary>A frame that lacks the fields of its kind matches nothing and is skipped; the request it may have answered times out.</summary>
+    private void Dispatch(JsonElement message)
+    {
+        if (message.ValueKind != JsonValueKind.Object) return;
+        switch (Text(message, "type"))
         {
-            while (await ReadFrameAsync(input, lifetime.Token).ConfigureAwait(false) is { } message)
-            {
-                var type = message.GetProperty("type").GetString();
-                if (type == "response" && pending.TryRemove(message.GetProperty("request_seq").GetInt32(), out var completion))
-                {
-                    if (message.TryGetProperty("success", out var success) && success.GetBoolean())
-                        completion.TrySetResult(message.TryGetProperty("body", out var body) ? body.Clone() : default);
-                    else completion.TrySetException(new InvalidOperationException(message.TryGetProperty("message", out var error) ? error.GetString() : "Debugger request failed."));
-                }
-                else if (type == "event")
-                {
-                    EventReceived?.Invoke(message.GetProperty("event").GetString()!, message.TryGetProperty("body", out var body) ? body.Clone() : default);
-                }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or JsonException or OperationCanceledException or InvalidOperationException) { failure = ex; }
-        finally
-        {
-            foreach (var item in pending.Values) item.TrySetException(failure);
-            pending.Clear();
-            if (!lifetime.IsCancellationRequested) ConnectionClosed?.Invoke(failure);
+            case "response" when message.TryGetProperty("request_seq", out var sequenceNumber) && sequenceNumber.ValueKind == JsonValueKind.Number
+                && sequenceNumber.TryGetInt32(out var id) && pending.TryRemove(id, out var completion):
+                if (message.TryGetProperty("success", out var success) && success.ValueKind == JsonValueKind.True)
+                    completion.TrySetResult(message.TryGetProperty("body", out var body) ? body.Clone() : default);
+                else completion.TrySetException(new InvalidOperationException(Text(message, "message") ?? "Debugger request failed."));
+                break;
+            case "event" when Text(message, "event") is { } name:
+                EventReceived?.Invoke(name, message.TryGetProperty("body", out var eventBody) ? eventBody.Clone() : default);
+                break;
         }
     }
 
+    private static string? Text(JsonElement message, string name) =>
+        message.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    /// <summary>Never throws and never waits without limit: callers go on to end the adapter process, whatever these streams do.</summary>
     public async ValueTask DisposeAsync()
     {
         await lifetime.CancelAsync();
-        await input.DisposeAsync();
-        await output.DisposeAsync();
-        if (reader is not null) { try { await reader; } catch (ObjectDisposedException) { } }
+        var closing = Task.WhenAll(CloseAsync(input), CloseAsync(output), reader ?? Task.CompletedTask);
+        try { await closing.WaitAsync(CloseGrace).ConfigureAwait(false); }
+        catch (Exception) { closing.Forget(); }
         lifetime.Dispose();
     }
+
+    private static async Task CloseAsync(Stream stream) => await stream.DisposeAsync().ConfigureAwait(false);
 }
