@@ -42,15 +42,15 @@ public sealed partial class ShellSmokeTests
             model.SelectedProcess = model.Processes.Single(p => p.Id == fixture.Id);
             // The empty state watches the selected process live while the pane is visible.
             using (var live = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
-                while (model.LiveSamples.Count < 3) await Task.Delay(50, live.Token);
-            Assert.True(model.IsMonitorActive); Assert.Contains("Private", model.LiveMemoryText);
+                while (model.Timeline.LiveSamples.Count < 3) await Task.Delay(50, live.Token);
+            Assert.True(model.Timeline.IsMonitorActive); Assert.Contains("Private", model.Timeline.LiveMemoryText);
             await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-empty-live.png"));
             await model.CaptureCommand.ExecuteAsync(null);
             Assert.True(model.HasCapture, model.Status); Assert.True(model.Summary!.IsComplete, model.Status);
             Assert.Equal(5, model.Kpis.Count); Assert.NotEmpty(model.GenerationSegments); Assert.NotEmpty(model.CompositionItems);
             Assert.NotEmpty(model.Summary.TopRetainers!);
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            while (model.DominatorRoots.Count == 0 || model.IsInspecting) await Task.Delay(20, deadline.Token);
+            while (model.Retention.DominatorRoots.Count == 0 || model.Browser.IsInspecting) await Task.Delay(20, deadline.Token);
             await Idle();
             Assert.Equal(MemoryProfilerViewModel.OverviewView, model.SelectedView);
             Assert.True(Descendants<MemoryTreemap>(pane).First(t => t.IsVisible).ActualHeight > 200);
@@ -61,17 +61,17 @@ public sealed partial class ShellSmokeTests
             Assert.Equal(3, pageType.Count);
             model.OpenTypeCommand.Execute(pageType.Key);
             Assert.Equal(MemoryProfilerViewModel.TypesView, model.SelectedView);
-            while (model.Details?.Object.Type != pageType.Name || model.IsInspecting || model.Flow is null || model.IsLoadingFlow) await Task.Delay(20, deadline.Token);
+            while (model.Browser.Details?.Object.Type != pageType.Name || model.Browser.IsInspecting || model.Flow is null || model.IsLoadingFlow) await Task.Delay(20, deadline.Token);
             Assert.Contains(model.Flow!.Nodes, n => n.Kind == "Static" && n.Label.Contains("Cache.Pages"));
             Assert.Equal(3, model.Flow.Nodes.Single(n => n.Kind == "Target").Count);
-            Assert.NotEmpty(model.RootPaths); Assert.Contains(model.FieldNodes, f => f.Name == "CustomerId");
+            Assert.NotEmpty(model.Browser.RootPaths); Assert.Contains(model.Browser.FieldNodes, f => f.Name == "CustomerId");
             await Idle();
             var sankey = Descendants<MemorySankey>(pane).Single();
             Assert.True(sankey.ActualWidth > 300 && sankey.ActualHeight > 150, $"Sankey is {sankey.ActualWidth} × {sankey.ActualHeight}");
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-types.png"));
             var fields = Descendants<System.Windows.Controls.TreeView>(pane).Single(g => System.Windows.Automation.AutomationProperties.GetName(g) == "Object fields");
             Assert.True(fields.ActualHeight > 60, $"Object fields tree height is {fields.ActualHeight}");
-            var payload = model.FieldNodes.Single(f => f.Name == "Payload");
+            var payload = model.Browser.FieldNodes.Single(f => f.Name == "Payload");
             Assert.True(payload.IsReference);
             payload.IsExpanded = true;
             while (payload.IsLoading || payload.Children.Any(c => c.IsPlaceholder)) await Task.Delay(20, deadline.Token);
@@ -95,7 +95,7 @@ public sealed partial class ShellSmokeTests
             Assert.Contains(model.GroupRows, g => g.Kind == "Value" && g.Group.Count == 3 && g.HasWaste);
             await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-groups-value.png"));
             model.InstanceGrouping = "None"; model.TypeDetailTab = 0; model.OpenTypeCommand.Execute(pageType.Key);
-            while (model.Objects.FirstOrDefault()?.TypeKey != pageType.Key || model.IsInspecting) await Task.Delay(20, deadline.Token);
+            while (model.Objects.FirstOrDefault()?.TypeKey != pageType.Key || model.Browser.IsInspecting) await Task.Delay(20, deadline.Token);
 
             // Graph: vertical layout with roots on top and a minimap.
             model.SelectedView = MemoryProfilerViewModel.GraphView; await Idle();
@@ -119,31 +119,31 @@ public sealed partial class ShellSmokeTests
 
             // Retention: dominator tree and treemap.
             model.SelectedView = MemoryProfilerViewModel.RetentionView; await Idle();
-            Assert.NotEmpty(model.RetentionMapItems);
+            Assert.NotEmpty(model.Retention.RetentionMapItems);
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-retention.png"));
-            model.RetentionChart = "Sunburst";
-            while (model.Sunburst is null || model.IsLoadingSunburst) await Task.Delay(20, deadline.Token);
+            model.Retention.RetentionChart = "Sunburst";
+            while (model.Retention.Sunburst is null || model.Retention.IsLoadingSunburst) await Task.Delay(20, deadline.Token);
             await Idle();
             var sunburst = Descendants<SunburstChart>(pane).Single();
             // The full smoke run uses the default window, so only require room for a readable chart.
             Assert.True(sunburst.IsVisible && Math.Min(sunburst.ActualWidth, sunburst.ActualHeight) > (focused ? 250 : 140), $"Sunburst is {sunburst.ActualWidth} × {sunburst.ActualHeight}");
-            Assert.NotEmpty(model.Sunburst!.Root.Children);
+            Assert.NotEmpty(model.Retention.Sunburst!.Root.Children);
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-sunburst.png"));
-            model.RetentionChart = "Treemap";
+            model.Retention.RetentionChart = "Treemap";
 
             // Why alive, then the shared-root and exclusive-release estimates.
             model.SelectedView = MemoryProfilerViewModel.TypesView;
-            await model.InspectObjectCommand.ExecuteAsync(model.Objects[0].Id);
-            model.InspectorTab = MemoryProfilerViewModel.RootsTab; await Idle();
+            await model.Browser.InspectObjectCommand.ExecuteAsync(model.Objects[0].Id);
+            model.Browser.InspectorTab = MemoryProfilerViewModel.RootsTab; await Idle();
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-roots.png"));
-            model.SelectedReference = model.Details!.Incoming.First(r => !r.IsRoot && r.Owner.Contains("[]"));
-            await model.EstimateReferenceCommand.ExecuteAsync(null); await Idle();
-            Assert.True(model.ReleaseEstimate!.SelectedObjectRemainsReachable);
-            Assert.NotNull(model.ReleaseEstimate.RemainingRootPath);
-            Assert.Equal(MemoryProfilerViewModel.KeepsAliveTab, model.InspectorTab);
+            model.Browser.SelectedReference = model.Browser.Details!.Incoming.First(r => !r.IsRoot && r.Owner.Contains("[]"));
+            await model.Browser.EstimateReferenceCommand.ExecuteAsync(null); await Idle();
+            Assert.True(model.Browser.ReleaseEstimate!.SelectedObjectRemainsReachable);
+            Assert.NotNull(model.Browser.ReleaseEstimate.RemainingRootPath);
+            Assert.Equal(MemoryProfilerViewModel.KeepsAliveTab, model.Browser.InspectorTab);
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-shared-root.png"));
-            await model.EstimateObjectCommand.ExecuteAsync(null); await Idle();
-            Assert.True(model.ReleaseEstimate.ReclaimableBytes >= 65_536); Assert.False(model.ReleaseEstimate.SelectedObjectRemainsReachable);
+            await model.Browser.EstimateObjectCommand.ExecuteAsync(null); await Idle();
+            Assert.True(model.Browser.ReleaseEstimate.ReclaimableBytes >= 65_536); Assert.False(model.Browser.ReleaseEstimate.SelectedObjectRemainsReachable);
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-release.png"));
             shell.Theme.Apply("Light"); await Idle();
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-release-light.png"));
@@ -161,7 +161,7 @@ public sealed partial class ShellSmokeTests
             Assert.Contains(model.Findings, f => f.Insight.Id == "baseline-growth");
             Assert.Contains(model.GrowthRows, g => g.Type.Key == pageType.Key);
             model.SelectedView = MemoryProfilerViewModel.OverviewView;
-            while (model.IsInspecting) await Task.Delay(20, deadline.Token);
+            while (model.Browser.IsInspecting) await Task.Delay(20, deadline.Token);
             await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-comparison.png"));
             model.TypeSort = "Growth since baseline"; model.TypeFilter = "RetentionFixture"; model.SelectedView = MemoryProfilerViewModel.TypesView;
             await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-comparison-types.png"));
@@ -174,7 +174,7 @@ public sealed partial class ShellSmokeTests
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-snapshots.png"));
             await Command(fixture, "grow");
             await model.CaptureCommand.ExecuteAsync(null);
-            while (model.IsInspecting) await Task.Delay(20, deadline.Token);
+            while (model.Browser.IsInspecting) await Task.Delay(20, deadline.Token);
             Assert.Same(model.Snapshots[0], model.BaselineSnapshot);
             Assert.True(model.ComparisonRows.First(r => r.Key == pageType.Key).GrowsEveryTime);
             Assert.Contains(model.Findings, f => f.Insight.Id == "steady-growth");

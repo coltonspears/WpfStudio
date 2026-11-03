@@ -29,7 +29,7 @@ public sealed class MemoryProfilerViewModelTests
         await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         Assert.True(model.HasCapture); Assert.False(model.IsBusy);
-        Assert.NotNull(model.Details); Assert.NotNull(model.Graph);
+        Assert.NotNull(model.Browser.Details); Assert.NotNull(model.Graph);
         model.SetBaselineCommand.Execute(null);
         await model.OpenDumpCommand.ExecuteAsync(null);
         Assert.True(first.Disposed);
@@ -37,11 +37,11 @@ public sealed class MemoryProfilerViewModelTests
         Assert.Equal(20, grown.BytesDelta); Assert.Equal("+2", grown.CountGrowth);
         var removed = Assert.Single(model.Types, t => t.Key == "Removed");
         Assert.Equal(-60, removed.BytesDelta); Assert.Equal(0, removed.Count);
-        model.SelectedReference = second.Reference;
-        await model.EstimateReferenceCommand.ExecuteAsync(null);
+        model.Browser.SelectedReference = second.Reference;
+        await model.Browser.EstimateReferenceCommand.ExecuteAsync(null);
         Assert.Equal(second.Reference.Id, second.LastRelease!.ReferenceId);
-        Assert.Equal(MemoryProfilerViewModel.KeepsAliveTab, model.InspectorTab); Assert.NotNull(model.ReleaseEstimate);
-        await model.EstimateObjectCommand.ExecuteAsync(null);
+        Assert.Equal(MemoryProfilerViewModel.KeepsAliveTab, model.Browser.InspectorTab); Assert.NotNull(model.Browser.ReleaseEstimate);
+        await model.Browser.EstimateObjectCommand.ExecuteAsync(null);
         Assert.Null(second.LastRelease.ReferenceId);
         model.ClearBaselineCommand.Execute(null);
         Assert.False(model.HasBaseline); Assert.DoesNotContain(model.Types, t => t.Key == "Removed");
@@ -78,11 +78,11 @@ public sealed class MemoryProfilerViewModelTests
         await model.OpenDumpCommand.ExecuteAsync(null);
         var pending = new TaskCompletionSource<MemoryObjectDetails>(TaskCreationOptions.RunContinuationsAsynchronously);
         session.Inspection = id => id == 1 ? pending.Task : Task.FromResult(session.Detail(id));
-        var older = model.InspectObjectCommand.ExecuteAsync(1);
-        await model.OpenReferenceTargetCommand.ExecuteAsync(session.Reference with { ToId = 2 });
-        Assert.Equal(2, model.Details!.Object.Id);
+        var older = model.Browser.InspectObjectCommand.ExecuteAsync(1);
+        await model.Browser.OpenReferenceTargetCommand.ExecuteAsync(session.Reference with { ToId = 2 });
+        Assert.Equal(2, model.Browser.Details!.Object.Id);
         pending.SetResult(session.Detail(1)); await older;
-        Assert.Equal(2, model.Details.Object.Id); Assert.False(model.IsInspecting);
+        Assert.Equal(2, model.Browser.Details.Object.Id); Assert.False(model.Browser.IsInspecting);
     }
 
     [Fact]
@@ -92,16 +92,16 @@ public sealed class MemoryProfilerViewModelTests
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
         await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
-        model.SelectedIncomingReference = session.Reference;
-        await model.EstimateObjectCommand.ExecuteAsync(null);
-        Assert.NotNull(model.ReleaseEstimate);
+        model.Browser.SelectedIncomingReference = session.Reference;
+        await model.Browser.EstimateObjectCommand.ExecuteAsync(null);
+        Assert.NotNull(model.Browser.ReleaseEstimate);
         session.Query = _ => Task.FromResult(new MemoryObjectPage(0, []));
         model.ObjectFilter = "absent type";
         Assert.Empty(model.Objects); Assert.Null(model.SelectedObject);
-        Assert.Null(model.Details); Assert.Null(model.Graph); Assert.Null(model.ReleaseEstimate);
-        Assert.Null(model.SelectedReference); Assert.Null(model.SelectedIncomingReference);
-        Assert.False(model.EstimateObjectCommand.CanExecute(null));
-        Assert.False(model.EstimateReferenceCommand.CanExecute(null));
+        Assert.Null(model.Browser.Details); Assert.Null(model.Graph); Assert.Null(model.Browser.ReleaseEstimate);
+        Assert.Null(model.Browser.SelectedReference); Assert.Null(model.Browser.SelectedIncomingReference);
+        Assert.False(model.Browser.EstimateObjectCommand.CanExecute(null));
+        Assert.False(model.Browser.EstimateReferenceCommand.CanExecute(null));
     }
 
     [Fact]
@@ -125,27 +125,27 @@ public sealed class MemoryProfilerViewModelTests
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
         await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
-        Assert.Equal(0, model.Details!.Object.Id);
-        Assert.Equal(2, model.FieldNodes.Count);
-        var owner = model.FieldNodes[1];
+        Assert.Equal(0, model.Browser.Details!.Object.Id);
+        Assert.Equal(2, model.Browser.FieldNodes.Count);
+        var owner = model.Browser.FieldNodes[1];
         Assert.True(owner.IsReference); Assert.Single(owner.Children); Assert.True(owner.Children[0].IsPlaceholder);
         owner.IsExpanded = true;
         while (owner.IsLoading) await Task.Delay(5);
         Assert.Equal(new[] { "Name", "Owner" }, owner.Children.Select(c => c.Name));
-        await model.OpenNodeCommand.ExecuteAsync(owner);
-        Assert.Equal(1, model.Details!.Object.Id);
-        await model.InspectObjectCommand.ExecuteAsync(5);
-        Assert.True(model.CanGoBack); Assert.False(model.CanGoForward);
-        Assert.Equal(new[] { 0, 1, 5 }, model.Trail.Select(t => t.Id));
-        await model.BackCommand.ExecuteAsync(null);
-        Assert.Equal(1, model.Details!.Object.Id); Assert.True(model.CanGoForward);
-        await model.BackCommand.ExecuteAsync(null);
-        Assert.Equal(0, model.Details!.Object.Id); Assert.False(model.CanGoBack);
-        await model.ForwardCommand.ExecuteAsync(null);
-        Assert.Equal(1, model.Details!.Object.Id);
-        await model.InspectObjectCommand.ExecuteAsync(9);
-        Assert.False(model.CanGoForward);
-        Assert.NotNull(model.RetainedComposition); Assert.Single(model.RetainedTypes);
+        await model.Browser.OpenNodeCommand.ExecuteAsync(owner);
+        Assert.Equal(1, model.Browser.Details!.Object.Id);
+        await model.Browser.InspectObjectCommand.ExecuteAsync(5);
+        Assert.True(model.Browser.CanGoBack); Assert.False(model.Browser.CanGoForward);
+        Assert.Equal(new[] { 0, 1, 5 }, model.Browser.Trail.Select(t => t.Id));
+        await model.Browser.BackCommand.ExecuteAsync(null);
+        Assert.Equal(1, model.Browser.Details!.Object.Id); Assert.True(model.Browser.CanGoForward);
+        await model.Browser.BackCommand.ExecuteAsync(null);
+        Assert.Equal(0, model.Browser.Details!.Object.Id); Assert.False(model.Browser.CanGoBack);
+        await model.Browser.ForwardCommand.ExecuteAsync(null);
+        Assert.Equal(1, model.Browser.Details!.Object.Id);
+        await model.Browser.InspectObjectCommand.ExecuteAsync(9);
+        Assert.False(model.Browser.CanGoForward);
+        Assert.NotNull(model.Browser.RetainedComposition); Assert.Single(model.Browser.RetainedTypes);
     }
 
     [Fact]
@@ -166,7 +166,7 @@ public sealed class MemoryProfilerViewModelTests
         Assert.Equal("Page", first.FlowRequests[^1].TypeKey);
         Assert.Contains("FinalizerQueue", first.FlowRequests[^1].HiddenRootKinds!);
         model.OpenFindingItemCommand.Execute(model.Findings[0].Items[0]);
-        while (model.Details?.Object.Id != 3) await Task.Delay(5);
+        while (model.Browser.Details?.Object.Id != 3) await Task.Delay(5);
         await model.ExpandGraphCommand.ExecuteAsync(new GraphExpandRequest(3, true));
         Assert.Contains(model.Graph!.Nodes, n => n.Object.Id == 103);
         Assert.Single(model.Graph.Nodes, n => n.IsFocus);
@@ -245,26 +245,68 @@ public sealed class MemoryProfilerViewModelTests
         Assert.Equal(["List<Page> · _items"], model.GroupRows[0].Steps);
         Assert.True(model.GroupRows[0].IsRoot); Assert.True(model.GroupRows[1].IsCollectible);
         model.InspectGroupCommand.Execute(model.GroupRows[0]);
-        while (model.Details?.Object.Id != 0) await Task.Delay(5);
+        while (model.Browser.Details?.Object.Id != 0) await Task.Delay(5);
         model.InstanceGrouping = "None";
         Assert.Empty(model.GroupRows);
 
-        while (model.DominatorRoots.Count == 0) await Task.Delay(5);
-        model.RetentionChart = "Sunburst";
-        while (model.Sunburst is null) await Task.Delay(5);
+        while (model.Retention.DominatorRoots.Count == 0) await Task.Delay(5);
+        model.Retention.RetentionChart = "Sunburst";
+        while (model.Retention.Sunburst is null) await Task.Delay(5);
         Assert.Null(session.TreeRequests[^1].ParentId);
-        await model.OpenSunburstNodeCommand.ExecuteAsync(model.Sunburst.Root.Children);
-        Assert.Equal("o0", model.RetentionFocus!.Key);
+        await model.Retention.OpenSunburstNodeCommand.ExecuteAsync(model.Retention.Sunburst.Root.Children);
+        Assert.Equal("o0", model.Retention.RetentionFocus!.Key);
         while (session.TreeRequests.Count < 2) await Task.Delay(5);
         Assert.Equal(0, session.TreeRequests[^1].ParentId);
-        await model.RetentionUpCommand.ExecuteAsync(null);
-        Assert.Null(model.RetentionFocus);
+        await model.Retention.RetentionUpCommand.ExecuteAsync(null);
+        Assert.Null(model.Retention.RetentionFocus);
 
         await model.RefreshProcessesCommand.ExecuteAsync(null);
         Assert.NotNull(model.SelectedProcess);
-        model.SampleMemory(); sampler.PrivateBytes = 200 << 20; model.SampleMemory();
-        Assert.Equal(2, model.LiveSamples.Count); Assert.True(model.HasLiveSamples);
-        Assert.Contains("200.00 MiB", model.LiveMemoryText);
+        model.Timeline.SampleMemory(); sampler.PrivateBytes = 200 << 20; model.Timeline.SampleMemory();
+        Assert.Equal(2, model.Timeline.LiveSamples.Count); Assert.True(model.Timeline.HasLiveSamples);
+        Assert.Contains("200.00 MiB", model.Timeline.LiveMemoryText);
+    }
+
+    [Fact]
+    public async Task TheTimelineSamplesOnlyWhileWatchedAndStartsOverForAnotherProcess()
+    {
+        var sampler = new Sampler();
+        await using var model = new MemoryProfilerViewModel(new Profiler(), new Files(), new FakeDesktop(), sampler);
+        var timeline = model.Timeline;
+        timeline.IsMonitorActive = true;
+        Assert.Empty(timeline.LiveSamples);
+        Assert.Equal("Managed heap across snapshots", timeline.Title);
+
+        await model.RefreshProcessesCommand.ExecuteAsync(null);
+        var process = model.SelectedProcess!;
+        // The monitor samples as it starts, so the title names the process at once.
+        Assert.Single(timeline.LiveSamples);
+        Assert.Equal($"Process memory · {process.Name} (PID {process.Id})", timeline.Title);
+        Assert.Empty(model.TimelineMarkers);
+
+        timeline.IsMonitorActive = false;
+        timeline.IsMonitorActive = true;
+        Assert.Equal(2, timeline.LiveSamples.Count);
+        timeline.MonitorMemory = false;
+        timeline.MonitorMemory = true;
+        Assert.Equal(3, timeline.LiveSamples.Count);
+
+        timeline.IsMonitorActive = false;
+        model.SelectedProcess = process with { Id = process.Id + 1 };
+        Assert.Empty(timeline.LiveSamples);
+        Assert.False(timeline.HasLiveSamples);
+        Assert.Equal("", timeline.LiveMemoryText);
+        Assert.Equal("Managed heap across snapshots", timeline.Title);
+
+        sampler.Exited = true;
+        timeline.SampleMemory();
+        Assert.Empty(timeline.LiveSamples);
+        Assert.Equal("Process has exited", timeline.LiveMemoryText);
+
+        timeline.Window = "1 hour";
+        Assert.Equal(3600, timeline.WindowSeconds);
+        timeline.SetWindowCommand.Execute("no such window");
+        Assert.Equal("1 hour", timeline.Window);
     }
 
     [Fact]
@@ -336,13 +378,13 @@ public sealed class MemoryProfilerViewModelTests
         await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         session.GraphLoad = _ => Task.FromException<MemoryGraph>(new InvalidOperationException("graph unavailable"));
-        await model.InspectObjectCommand.ExecuteAsync(7);
-        Assert.Equal(7, model.Details!.Object.Id);
+        await model.Browser.InspectObjectCommand.ExecuteAsync(7);
+        Assert.Equal(7, model.Browser.Details!.Object.Id);
         Assert.Null(model.Graph);
-        Assert.Equal(2, model.FieldNodes.Count);
-        Assert.NotNull(model.RetainedComposition);
+        Assert.Equal(2, model.Browser.FieldNodes.Count);
+        Assert.NotNull(model.Browser.RetainedComposition);
         Assert.Contains("graph unavailable", model.Status);
-        Assert.False(model.IsInspecting);
+        Assert.False(model.Browser.IsInspecting);
     }
 
     [Fact]
@@ -354,12 +396,12 @@ public sealed class MemoryProfilerViewModelTests
         await model.OpenDumpCommand.ExecuteAsync(null);
         session.Inspection = _ => Task.FromException<MemoryObjectDetails>(new InvalidOperationException("details unavailable"));
         session.ChildrenLoad = _ => Task.FromException<MemoryObjectChildren>(new InvalidOperationException("fields unavailable"));
-        await model.InspectObjectCommand.ExecuteAsync(7);
-        Assert.Null(model.Details);
+        await model.Browser.InspectObjectCommand.ExecuteAsync(7);
+        Assert.Null(model.Browser.Details);
         Assert.Equal(7, model.Graph!.Nodes.Single().Object.Id);
         Assert.Contains("details unavailable", model.Status);
-        Assert.Contains("fields unavailable", model.ObjectPreview);
-        Assert.NotNull(model.RetainedComposition);
+        Assert.Contains("fields unavailable", model.Browser.ObjectPreview);
+        Assert.NotNull(model.Browser.RetainedComposition);
     }
 
     [Fact]
@@ -385,7 +427,7 @@ public sealed class MemoryProfilerViewModelTests
         model.OpenDumpCancelCommand.Execute(null);
         await opening.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Same(summary, model.Summary); Assert.False(session.Disposed);
-        Assert.Null(model.Details); Assert.False(model.IsInspecting);
+        Assert.Null(model.Browser.Details); Assert.False(model.Browser.IsInspecting);
         Assert.Contains("cancelled", model.Status);
         Assert.True(model.CaptureCommand.CanExecute(null));
     }
@@ -409,7 +451,8 @@ public sealed class MemoryProfilerViewModelTests
     private sealed class Sampler : IProcessMemorySampler
     {
         public long PrivateBytes { get; set; } = 100 << 20;
-        public ProcessMemorySample? Sample(int processId, long startTimeUtcTicks) => new(DateTimeOffset.Now, PrivateBytes, PrivateBytes / 2);
+        public bool Exited { get; set; }
+        public ProcessMemorySample? Sample(int processId, long startTimeUtcTicks) => Exited ? null : new(DateTimeOffset.Now, PrivateBytes, PrivateBytes / 2);
     }
     private sealed class Profiler : IMemoryProfiler
     {

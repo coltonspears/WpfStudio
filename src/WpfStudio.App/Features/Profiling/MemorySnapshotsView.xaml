@@ -28,24 +28,24 @@
    <Grid>
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <DockPanel>
-     <Border DockPanel.Dock="Right" Style="{StaticResource SegmentHost}" Margin="6,0,0,0" Visibility="{Binding HasLiveSamples, Converter={StaticResource BooleanToVisibility}}" ToolTip="Longest stretch of time to show">
+     <Border DockPanel.Dock="Right" Style="{StaticResource SegmentHost}" Margin="6,0,0,0" Visibility="{Binding Timeline.HasLiveSamples, Converter={StaticResource BooleanToVisibility}}" ToolTip="Longest stretch of time to show">
       <StackPanel Orientation="Horizontal">
-       <RadioButton Content="1 min" Style="{StaticResource Segment}" IsChecked="{Binding TimelineWindow, Converter={StaticResource EqualsText}, ConverterParameter='1 min', Mode=OneWay}" Command="{Binding SetTimelineWindowCommand}" CommandParameter="1 min"/>
-       <RadioButton Content="5 min" Style="{StaticResource Segment}" IsChecked="{Binding TimelineWindow, Converter={StaticResource EqualsText}, ConverterParameter='5 min', Mode=OneWay}" Command="{Binding SetTimelineWindowCommand}" CommandParameter="5 min"/>
-       <RadioButton Content="15 min" Style="{StaticResource Segment}" IsChecked="{Binding TimelineWindow, Converter={StaticResource EqualsText}, ConverterParameter='15 min', Mode=OneWay}" Command="{Binding SetTimelineWindowCommand}" CommandParameter="15 min"/>
-       <RadioButton Content="1 hour" Style="{StaticResource Segment}" IsChecked="{Binding TimelineWindow, Converter={StaticResource EqualsText}, ConverterParameter='1 hour', Mode=OneWay}" Command="{Binding SetTimelineWindowCommand}" CommandParameter="1 hour"/>
+       <RadioButton Content="1 min" Style="{StaticResource Segment}" IsChecked="{Binding Timeline.Window, Converter={StaticResource EqualsText}, ConverterParameter='1 min', Mode=OneWay}" Command="{Binding Timeline.SetWindowCommand}" CommandParameter="1 min"/>
+       <RadioButton Content="5 min" Style="{StaticResource Segment}" IsChecked="{Binding Timeline.Window, Converter={StaticResource EqualsText}, ConverterParameter='5 min', Mode=OneWay}" Command="{Binding Timeline.SetWindowCommand}" CommandParameter="5 min"/>
+       <RadioButton Content="15 min" Style="{StaticResource Segment}" IsChecked="{Binding Timeline.Window, Converter={StaticResource EqualsText}, ConverterParameter='15 min', Mode=OneWay}" Command="{Binding Timeline.SetWindowCommand}" CommandParameter="15 min"/>
+       <RadioButton Content="1 hour" Style="{StaticResource Segment}" IsChecked="{Binding Timeline.Window, Converter={StaticResource EqualsText}, ConverterParameter='1 hour', Mode=OneWay}" Command="{Binding Timeline.SetWindowCommand}" CommandParameter="1 hour"/>
       </StackPanel>
      </Border>
-     <CheckBox DockPanel.Dock="Right" Content="Live" c:Ui.Icon="Eye" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding MonitorMemory}" Visibility="{Binding IsLiveSource, Converter={StaticResource BooleanToVisibility}}"
+     <CheckBox DockPanel.Dock="Right" Content="Live" c:Ui.Icon="Eye" Style="{StaticResource ToolbarToggle}" IsChecked="{Binding Timeline.MonitorMemory}" Visibility="{Binding IsLiveSource, Converter={StaticResource BooleanToVisibility}}"
       ToolTip="Sample the selected process's private bytes and working set every second while this pane is visible"/>
      <c:Glyph Kind="Timeline" Width="16" Height="16" Foreground="{DynamicResource AccentBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-     <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis"><Run Text="{Binding TimelineTitle, Mode=OneWay}" FontSize="13" FontWeight="SemiBold"/><Run Text="   "/><Run Text="{Binding LiveMemoryText, Mode=OneWay}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
+     <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis"><Run Text="{Binding Timeline.Title, Mode=OneWay}" FontSize="13" FontWeight="SemiBold"/><Run Text="   "/><Run Text="{Binding Timeline.LiveMemoryText, Mode=OneWay}" FontSize="11" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
     </DockPanel>
-    <v:MemoryTimeline Grid.Row="1" Height="118" MinHeight="100" Margin="0,4,0,0" Samples="{Binding LiveSamples}" Markers="{Binding TimelineMarkers}" WindowSeconds="{Binding TimelineSeconds}"
+    <v:MemoryTimeline Grid.Row="1" Height="118" MinHeight="100" Margin="0,4,0,0" Samples="{Binding Timeline.LiveSamples}" Markers="{Binding TimelineMarkers}" WindowSeconds="{Binding Timeline.WindowSeconds}"
      SelectCommand="{Binding CompareWithCommand}" EmptyText="Choose a running process above to watch its memory live, or capture snapshots to see a trend." AutomationProperties.Name="Memory timeline"/>
     <WrapPanel Grid.Row="2" Margin="58,0,0,0" TextElement.FontSize="10.5" TextElement.Foreground="{DynamicResource MutedBrush}">
-     <StackPanel Orientation="Horizontal" Margin="0,0,14,0" Visibility="{Binding HasLiveSamples, Converter={StaticResource BooleanToVisibility}}"><Border Width="10" Height="8" CornerRadius="2" Background="{DynamicResource AccentBrush}" Opacity="0.5" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Private bytes"/></StackPanel>
-     <StackPanel Orientation="Horizontal" Margin="0,0,14,0" Visibility="{Binding HasLiveSamples, Converter={StaticResource BooleanToVisibility}}"><Border Width="12" Height="2" Background="{DynamicResource MutedBrush}" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Working set"/></StackPanel>
+     <StackPanel Orientation="Horizontal" Margin="0,0,14,0" Visibility="{Binding Timeline.HasLiveSamples, Converter={StaticResource BooleanToVisibility}}"><Border Width="10" Height="8" CornerRadius="2" Background="{DynamicResource AccentBrush}" Opacity="0.5" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Private bytes"/></StackPanel>
+     <StackPanel Orientation="Horizontal" Margin="0,0,14,0" Visibility="{Binding Timeline.HasLiveSamples, Converter={StaticResource BooleanToVisibility}}"><Border Width="12" Height="2" Background="{DynamicResource MutedBrush}" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Working set"/></StackPanel>
      <StackPanel Orientation="Horizontal" Margin="0,0,14,0"><Ellipse Width="8" Height="8" Stroke="{DynamicResource AccentBrush}" StrokeThickness="2" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Snapshot: managed heap"/></StackPanel>
      <StackPanel Orientation="Horizontal"><Ellipse Width="8" Height="8" Stroke="{DynamicResource WarningBrush}" StrokeThickness="2" Margin="0,0,5,0" VerticalAlignment="Center"/><TextBlock Text="Baseline · click a snapshot to compare with it"/></StackPanel>
     </WrapPanel>

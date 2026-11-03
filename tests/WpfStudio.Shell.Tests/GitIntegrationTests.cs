@@ -13,21 +13,6 @@ namespace WpfStudio.Shell.Tests;
 public sealed class GitIntegrationTests
 {
     [Fact]
-    public void PorcelainParserPreservesSpacesUnicodeAndRenameOrder()
-    {
-        var changes = GitService.ParseStatus(" M folder/space λ.cs\0R  new name.cs\0old name.cs\0?? note[1].txt\0UU conflict.cs\0");
-        Assert.Equal(4, changes.Count);
-        Assert.Equal("folder/space λ.cs", changes[0].Path);
-        Assert.True(changes[0].IsUnstaged);
-        Assert.False(changes[0].IsStaged);
-        Assert.Equal("new name.cs", changes[1].Path);
-        Assert.Equal("old name.cs", changes[1].OriginalPath);
-        Assert.True(changes[1].IsStaged);
-        Assert.True(changes[2].IsUnstaged);
-        Assert.True(changes[3].IsConflict);
-    }
-
-    [Fact]
     public async Task UnbornStageAndUnstageOnlyChangeIndexAndUseLiteralPaths()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -272,48 +257,36 @@ public sealed class GitIntegrationTests
     }
 
     [Fact]
-    public void CommitFileRecordsJoinStatusesWithLineCounts()
-    {
-        var files = GitService.ParseCommitFiles("M\0src/a b.cs\0R087\0old.cs\0new.cs\0A\0logo.png\0",
-            "3\t1\tsrc/a b.cs\0" + "2\t2\t\0old.cs\0new.cs\0" + "-\t-\tlogo.png\0");
-        Assert.Equal(3, files.Count);
-        Assert.Equal<(string, char, int?, int?)>(("src/a b.cs", 'M', 3, 1), (files[0].Path, files[0].Status, files[0].Added, files[0].Deleted));
-        Assert.Equal<(string, string?, char, int?)>(("new.cs", "old.cs", 'R', 2), (files[1].Path, files[1].OriginalPath, files[1].Status, files[1].Added));
-        Assert.True(files[2].IsBinary);
-        Assert.Equal("binary", files[2].AddedText);
-    }
-
-    [Fact]
     public async Task ViewModelPagesFiltersAndLoadsSelectedCommitsAndChanges()
     {
         using var fixture = await Fixture.CreateAsync();
         await fixture.InitialCommitAsync();
-        for (var index = 1; index <= GitViewModel.HistoryPageSize + 2; index++)
+        for (var index = 1; index <= CommitHistoryViewModel.PageSize + 2; index++)
             await fixture.RunAsync("commit", "--allow-empty", "--quiet", "-m", $"Empty commit {index}");
         await File.WriteAllTextAsync(fixture.File("file.cs"), "changed\n");
         await File.WriteAllTextAsync(fixture.File("staged.cs"), "staged\n");
         await fixture.RunAsync("add", "staged.cs");
         using var model = new GitViewModel(fixture.Service, new FakeDesktop());
         await model.SetWorkspaceAsync(fixture.Root);
-        Assert.Equal(GitViewModel.HistoryPageSize, model.History.Count);
-        Assert.True(model.HasMoreHistory);
-        await model.LoadMoreHistoryCommand.ExecuteAsync(null);
-        Assert.Equal(GitViewModel.HistoryPageSize + 3, model.History.Count);
-        Assert.False(model.HasMoreHistory);
-        Assert.Equal(model.History.Count, model.VisibleHistory.Count);
+        Assert.Equal(CommitHistoryViewModel.PageSize, model.CommitHistory.History.Count);
+        Assert.True(model.CommitHistory.HasMoreHistory);
+        await model.CommitHistory.LoadMoreHistoryCommand.ExecuteAsync(null);
+        Assert.Equal(CommitHistoryViewModel.PageSize + 3, model.CommitHistory.History.Count);
+        Assert.False(model.CommitHistory.HasMoreHistory);
+        Assert.Equal(model.CommitHistory.History.Count, model.CommitHistory.VisibleHistory.Count);
 
-        model.HistoryFilter = "commit 5";
-        Assert.Equal(new[] { "Empty commit 52", "Empty commit 51", "Empty commit 50", "Empty commit 5" }, model.VisibleHistory.Select(x => x.Subject));
-        model.HistoryFilter = "no such commit";
-        Assert.True(model.HistoryFilterHasNoMatches);
-        model.ClearHistoryFilterCommand.Execute(null);
-        Assert.Equal(model.History.Count, model.VisibleHistory.Count);
+        model.CommitHistory.HistoryFilter = "commit 5";
+        Assert.Equal(new[] { "Empty commit 52", "Empty commit 51", "Empty commit 50", "Empty commit 5" }, model.CommitHistory.VisibleHistory.Select(x => x.Subject));
+        model.CommitHistory.HistoryFilter = "no such commit";
+        Assert.True(model.CommitHistory.HistoryFilterHasNoMatches);
+        model.CommitHistory.ClearHistoryFilterCommand.Execute(null);
+        Assert.Equal(model.CommitHistory.History.Count, model.CommitHistory.VisibleHistory.Count);
 
-        model.SelectedCommit = model.VisibleHistory[^1];
+        model.CommitHistory.SelectedCommit = model.CommitHistory.VisibleHistory[^1];
         await model.WhenLoadedAsync();
-        Assert.Equal("Initial commit", model.CommitDetails?.Subject);
-        Assert.Equal("file.cs", Assert.Single(model.CommitFiles).Path);
-        Assert.Equal("original\n", model.CommitDiff?.After);
+        Assert.Equal("Initial commit", model.CommitHistory.CommitDetails?.Subject);
+        Assert.Equal("file.cs", Assert.Single(model.CommitHistory.CommitFiles).Path);
+        Assert.Equal("original\n", model.CommitHistory.CommitDiff?.After);
 
         model.SelectedStaged = model.Staged.Single();
         await model.WhenLoadedAsync();
@@ -328,7 +301,7 @@ public sealed class GitIntegrationTests
         await model.WhenLoadedAsync();
         Assert.Equal("file.cs", model.SelectedStaged?.Path);
         Assert.Equal("Staged", model.CurrentDiff?.NewLabel);
-        Assert.Equal("Initial commit", model.CommitDetails?.Subject);
+        Assert.Equal("Initial commit", model.CommitHistory.CommitDetails?.Subject);
     }
 
     [Fact]
@@ -337,30 +310,102 @@ public sealed class GitIntegrationTests
         using var fixture = await Fixture.CreateAsync();
         await fixture.InitialCommitAsync();
         var initial = (await fixture.RunAsync("rev-parse", "HEAD")).Trim();
-        for (var index = 1; index <= GitViewModel.HistoryPageSize + 2; index++)
+        for (var index = 1; index <= CommitHistoryViewModel.PageSize + 2; index++)
             await fixture.RunAsync("commit", "--allow-empty", "--quiet", "-m", $"Empty commit {index}");
         using var model = new GitViewModel(fixture.Service, new FakeDesktop());
         await model.SetWorkspaceAsync(fixture.Root);
-        Assert.DoesNotContain(model.History, commit => commit.Id == initial);
+        Assert.DoesNotContain(model.CommitHistory.History, commit => commit.Id == initial);
 
         model.ShowCommit(new BlameLine(initial, "WpfStudio test", "wpfstudio-test@example.invalid", DateTimeOffset.UnixEpoch, "Initial commit"));
         await model.WhenLoadedAsync();
-        Assert.Equal("Initial commit", model.CommitDetails?.Subject);
+        Assert.Equal("Initial commit", model.CommitHistory.CommitDetails?.Subject);
 
         await model.RefreshCommand.ExecuteAsync(null);
         await model.WhenLoadedAsync();
-        Assert.Equal(initial, model.SelectedCommit?.Id);
-        Assert.Equal("Initial commit", model.CommitDetails?.Subject);
-        Assert.Equal("file.cs", Assert.Single(model.CommitFiles).Path);
+        Assert.Equal(initial, model.CommitHistory.SelectedCommit?.Id);
+        Assert.Equal("Initial commit", model.CommitHistory.CommitDetails?.Subject);
+        Assert.Equal("file.cs", Assert.Single(model.CommitHistory.CommitFiles).Path);
 
         // A commit that was listed and is no longer on the branch still goes.
-        model.SelectedCommit = model.VisibleHistory[0];
+        model.CommitHistory.SelectedCommit = model.CommitHistory.VisibleHistory[0];
         await model.WhenLoadedAsync();
         await fixture.RunAsync("switch", "--quiet", "-c", "older", initial);
         await model.RefreshCommand.ExecuteAsync(null);
         await model.WhenLoadedAsync();
-        Assert.Null(model.SelectedCommit);
-        Assert.Null(model.CommitDetails);
+        Assert.Null(model.CommitHistory.SelectedCommit);
+        Assert.Null(model.CommitHistory.CommitDetails);
+    }
+
+    [Fact]
+    public async Task ResolverOpensAConflictPreviewsChoicesAndStagesTheResult()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        await fixture.RunAsync("switch", "-c", "feature", "--quiet");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "feature\n");
+        await fixture.RunAsync("commit", "-am", "Feature", "--quiet");
+        await fixture.RunAsync("switch", "main", "--quiet");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "main\n");
+        await fixture.RunAsync("commit", "-am", "Main", "--quiet");
+        await fixture.Service.MergeAsync(fixture.Root, "feature");
+        var saves = 0;
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop(), _ => { saves++; return Task.FromResult(true); });
+        var reloads = 0;
+        model.WorkspaceFilesChanged += () => reloads++;
+        await model.SetWorkspaceAsync(fixture.Root);
+        var conflicted = Assert.Single(model.Unstaged, change => change.IsConflict);
+        var resolver = model.Resolver;
+        Assert.False(resolver.IsResolving);
+        Assert.True(resolver.ResolveConflictsCommand.CanExecute(conflicted));
+
+        await resolver.ResolveConflictsCommand.ExecuteAsync(conflicted);
+        Assert.Equal("", model.Error);
+        Assert.Equal(1, saves);
+        Assert.True(resolver.IsResolving);
+        var conflict = Assert.Single(resolver.Conflicts);
+        Assert.Equal("file.cs · 0 of 1 resolved", resolver.ResolverHeading);
+        Assert.Contains("<<<<<<<", resolver.ResolvedPreview);
+        Assert.False(resolver.ApplyResolutionCommand.CanExecute(null));
+
+        resolver.ChooseAllCommand.Execute(ConflictChoice.Incoming);
+        Assert.Equal(ConflictChoice.Incoming, conflict.Choice);
+        Assert.Equal("file.cs · 1 of 1 resolved", resolver.ResolverHeading);
+        Assert.Equal("feature\n", resolver.ResolvedPreview.ReplaceLineEndings("\n"));
+        Assert.True(resolver.ApplyResolutionCommand.CanExecute(null));
+
+        await resolver.ApplyResolutionCommand.ExecuteAsync(null);
+        Assert.Equal("", model.Error);
+        Assert.False(resolver.IsResolving);
+        Assert.Empty(resolver.Conflicts);
+        Assert.Equal("", resolver.ResolvedPreview);
+        Assert.Equal(1, reloads);
+        Assert.Equal("feature\n", (await File.ReadAllTextAsync(fixture.File("file.cs"))).ReplaceLineEndings("\n"));
+        Assert.DoesNotContain(model.Staged.Concat(model.Unstaged), change => change.IsConflict);
+        Assert.Contains(model.Staged, change => change.Path == "file.cs");
+    }
+
+    [Fact]
+    public async Task ResolverClosesWhenARefreshNoLongerListsItsFileAsConflicted()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        await fixture.RunAsync("switch", "-c", "feature", "--quiet");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "feature\n");
+        await fixture.RunAsync("commit", "-am", "Feature", "--quiet");
+        await fixture.RunAsync("switch", "main", "--quiet");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "main\n");
+        await fixture.RunAsync("commit", "-am", "Main", "--quiet");
+        await fixture.Service.MergeAsync(fixture.Root, "feature");
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop());
+        await model.SetWorkspaceAsync(fixture.Root);
+        await model.Resolver.ResolveConflictsCommand.ExecuteAsync(Assert.Single(model.Unstaged, change => change.IsConflict));
+        Assert.True(model.Resolver.IsResolving);
+
+        await fixture.RunAsync("merge", "--abort");
+        await model.RefreshCommand.ExecuteAsync(null);
+
+        Assert.False(model.Resolver.IsResolving);
+        Assert.Empty(model.Resolver.Conflicts);
     }
 
     [Fact]

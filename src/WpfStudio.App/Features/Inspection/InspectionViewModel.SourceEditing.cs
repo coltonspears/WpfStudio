@@ -72,7 +72,7 @@ public sealed partial class InspectionViewModel
     {
         UpdatePropertyEditingState();
         AppearanceOperationChanged(value);
-        if (value) { ++_bindingSourceEpoch; ++_bindingOperationEpoch; ClearBindingExplanation("Source review in progress. Refresh to observe bindings after the review."); }
+        if (value) { BindingDeclarations.AdvanceEpoch(); ++_bindingOperationEpoch; ClearBindingExplanation("Source review in progress. Refresh to observe bindings after the review."); }
         RefreshBindingSourceState();
     }
 
