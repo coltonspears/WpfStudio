@@ -7,8 +7,8 @@
  behaviors:DatabaseViewBehaviors.LoadedCommand="{Binding InitializeCommand}"
  MinWidth="320" MinHeight="240">
  <UserControl.InputBindings>
-  <KeyBinding Key="F5" Command="{Binding ExecuteCommand}"/>
-  <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewQueryCommand}"/>
+  <KeyBinding Key="F5" Command="{Binding Queries.ExecuteCommand}"/>
+  <KeyBinding Key="N" Modifiers="Control" Command="{Binding Queries.NewQueryCommand}"/>
  </UserControl.InputBindings>
  <UserControl.Resources>
   <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Margin" Value="2"/><Setter Property="Padding" Value="10,3"/></Style>
@@ -26,34 +26,34 @@
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Expander Header="SQL Server connections" IsExpanded="False">
    <StackPanel>
-    <DockPanel><Button DockPanel.Dock="Right" Content="New" Command="{Binding NewProfileCommand}"/><ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}" DisplayMemberPath="Name" ToolTip="Saved connections"/></DockPanel>
+    <DockPanel><Button DockPanel.Dock="Right" Content="New" Command="{Binding Connections.NewProfileCommand}"/><ComboBox ItemsSource="{Binding Connections.Profiles}" SelectedItem="{Binding Connections.SelectedProfile}" DisplayMemberPath="Name" ToolTip="Saved connections"/></DockPanel>
     <Grid>
      <Grid.ColumnDefinitions><ColumnDefinition Width="85"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
      <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-     <TextBlock Text="Name" VerticalAlignment="Center"/><TextBox Grid.Column="1" Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Connection name"/>
-     <TextBlock Grid.Row="1" Text="Server" VerticalAlignment="Center"/><TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Server, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SQL server"/>
-     <TextBlock Grid.Row="2" Text="Database" VerticalAlignment="Center"/><TextBox Grid.Row="2" Grid.Column="1" Text="{Binding DatabaseName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SQL database"/>
-     <CheckBox Grid.Row="3" Grid.ColumnSpan="2" Content="Windows authentication" IsChecked="{Binding WindowsAuthentication}" Margin="2,5"/>
-     <TextBlock Grid.Row="4" Text="SQL login" VerticalAlignment="Center"/><TextBox Grid.Row="4" Grid.Column="1" Text="{Binding UserName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SQL login"/>
-     <TextBlock Grid.Row="5" Text="Password" VerticalAlignment="Center"/><PasswordBox Grid.Row="5" Grid.Column="1" Margin="2" Padding="4" behaviors:DatabaseViewBehaviors.Password="{Binding Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SQL password"/>
+     <TextBlock Text="Name" VerticalAlignment="Center"/><TextBox Grid.Column="1" Text="{Binding Connections.ProfileName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Connection name"/>
+     <TextBlock Grid.Row="1" Text="Server" VerticalAlignment="Center"/><TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Connections.Server, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SQL server"/>
+     <TextBlock Grid.Row="2" Text="Database" VerticalAlignment="Center"/><TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Connections.DatabaseName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SQL database"/>
+     <CheckBox Grid.Row="3" Grid.ColumnSpan="2" Content="Windows authentication" IsChecked="{Binding Connections.WindowsAuthentication}" Margin="2,5"/>
+     <TextBlock Grid.Row="4" Text="SQL login" VerticalAlignment="Center"/><TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Connections.UserName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SQL login"/>
+     <TextBlock Grid.Row="5" Text="Password" VerticalAlignment="Center"/><PasswordBox Grid.Row="5" Grid.Column="1" Margin="2" Padding="4" behaviors:DatabaseViewBehaviors.Password="{Binding Connections.Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="SQL password"/>
     </Grid>
-    <CheckBox Content="Remember password for this Windows user" IsChecked="{Binding RememberPassword}" Margin="2,4"/>
-    <CheckBox Content="Trust server certificate (explicit override)" IsChecked="{Binding TrustServerCertificate}" Margin="2,4" ToolTip="Encryption remains enabled. Enable only for a server whose certificate you trust."/>
-    <WrapPanel><Button Content="Save connection" Command="{Binding SaveProfileCommand}"/><Button Content="Remove" Command="{Binding DeleteProfileCommand}"/><Button Content="Connect / refresh" Command="{Binding ConnectCommand}"/><Button Content="Cancel" Command="{Binding ConnectCancelCommand}"/></WrapPanel>
+    <CheckBox Content="Remember password for this Windows user" IsChecked="{Binding Connections.RememberPassword}" Margin="2,4"/>
+    <CheckBox Content="Trust server certificate (explicit override)" IsChecked="{Binding Connections.TrustServerCertificate}" Margin="2,4" ToolTip="Encryption remains enabled. Enable only for a server whose certificate you trust."/>
+    <WrapPanel><Button Content="Save connection" Command="{Binding Connections.SaveProfileCommand}"/><Button Content="Remove" Command="{Binding Connections.DeleteProfileCommand}"/><Button Content="Connect / refresh" Command="{Binding Explorer.ConnectCommand}"/><Button Content="Cancel" Command="{Binding Explorer.ConnectCancelCommand}"/></WrapPanel>
    </StackPanel>
   </Expander>
   <Border Grid.Row="1" Padding="10,6" Margin="0,4" BorderBrush="{DynamicResource StrongBorderBrush}" Background="{DynamicResource EditorBrush}" BorderThickness="1" CornerRadius="6">
-   <StackPanel><TextBlock Text="QUERY TARGET" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding ActiveTarget}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding ActiveTarget}"/></StackPanel>
+   <StackPanel><TextBlock Text="QUERY TARGET" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/><TextBlock Text="{Binding Connections.ActiveTarget}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Connections.ActiveTarget}"/></StackPanel>
   </Border>
   <Expander Grid.Row="2" Header="Database objects" IsExpanded="False">
    <DockPanel MaxHeight="250">
-    <WrapPanel DockPanel.Dock="Bottom"><Button Content="Use database" Command="{Binding UseDatabaseCommand}"/><Button Content="Open definition" Command="{Binding OpenDefinitionCommand}"/></WrapPanel>
-    <TreeView ItemsSource="{Binding Schema}" behaviors:DatabaseViewBehaviors.TrackSelection="True" behaviors:DatabaseViewBehaviors.SelectedNode="{Binding SelectedSchema, Mode=TwoWay}" MinHeight="70" AutomationProperties.Name="SQL schema"/>
+    <WrapPanel DockPanel.Dock="Bottom"><Button Content="Use database" Command="{Binding Explorer.UseDatabaseCommand}"/><Button Content="Open definition" Command="{Binding Explorer.OpenDefinitionCommand}"/></WrapPanel>
+    <TreeView ItemsSource="{Binding Explorer.Schema}" behaviors:DatabaseViewBehaviors.TrackSelection="True" behaviors:DatabaseViewBehaviors.SelectedNode="{Binding Explorer.SelectedSchema, Mode=TwoWay}" MinHeight="70" AutomationProperties.Name="SQL schema"/>
    </DockPanel>
   </Expander>
   <DockPanel Grid.Row="3">
-   <WrapPanel DockPanel.Dock="Top" Margin="0,4"><Button Content="New query" Command="{Binding NewQueryCommand}"/><Button Content="Open" Command="{Binding OpenScriptCommand}"/><Button Content="Save" Command="{Binding SaveScriptCommand}"/><Button Content="▶ Execute" Command="{Binding ExecuteCommand}" ToolTip="F5 — execute selection, or all SQL when nothing is selected"/><Button Content="■ Cancel" Command="{Binding ExecuteCancelCommand}"/><Button Content="Export CSV" Command="{Binding ExportCsvCommand}"/><Button Content="Close query" Command="{Binding CloseQueryCommand}"/></WrapPanel>
-   <TabControl ItemsSource="{Binding Documents}" SelectedItem="{Binding SelectedDocument}">
+   <WrapPanel DockPanel.Dock="Top" Margin="0,4"><Button Content="New query" Command="{Binding Queries.NewQueryCommand}"/><Button Content="Open" Command="{Binding Queries.OpenScriptCommand}"/><Button Content="Save" Command="{Binding Queries.SaveScriptCommand}"/><Button Content="▶ Execute" Command="{Binding Queries.ExecuteCommand}" ToolTip="F5 — execute selection, or all SQL when nothing is selected"/><Button Content="■ Cancel" Command="{Binding Queries.ExecuteCancelCommand}"/><Button Content="Export CSV" Command="{Binding Queries.ExportCsvCommand}"/><Button Content="Close query" Command="{Binding Queries.CloseQueryCommand}"/></WrapPanel>
+   <TabControl ItemsSource="{Binding Queries.Documents}" SelectedItem="{Binding Queries.SelectedDocument}">
     <TabControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding DisplayTitle}"/></DataTemplate></TabControl.ItemTemplate>
     <TabControl.ContentTemplate>
      <DataTemplate DataType="{x:Type vm:QueryDocumentViewModel}">
@@ -63,7 +63,7 @@
         behaviors:SqlEditorBehavior.Text="{Binding SqlText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
         behaviors:SqlEditorBehavior.Selection="{Binding SelectedText, Mode=TwoWay}"
         behaviors:SqlEditorBehavior.SelectionLine="{Binding SelectionStartLine, Mode=TwoWay}"
-        behaviors:SqlEditorBehavior.Completions="{Binding DataContext.CompletionItems, RelativeSource={RelativeSource AncestorType=UserControl}}"
+        behaviors:SqlEditorBehavior.Completions="{Binding DataContext.Explorer.CompletionItems, RelativeSource={RelativeSource AncestorType=UserControl}}"
         AutomationProperties.Name="SQL editor"/>
        <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"/>
        <TabControl Grid.Row="2">

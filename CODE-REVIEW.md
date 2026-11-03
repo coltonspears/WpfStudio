@@ -20,7 +20,7 @@ CommunityToolkit.Mvvm is used consistently for properties and commands; what is 
 
 ## Status
 
-Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the item ids below. "Done" means the change is committed with tests; "Partly" means the item's main risk is addressed but the proposal is not fully carried out; everything else is pending. The fix log at the end records each commit's changes in detail.
+Work landed in PRs coltonspears/WpfStudio#13 through #25 and is tracked here against the item ids below. "Done" means the change is committed with tests; "Partly" means the item's main risk is addressed but the proposal is not fully carried out; nothing is pending. The fix log at the end records each commit's changes in detail.
 
 ### Done
 
@@ -49,9 +49,10 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 | B13, B21, B22, B26–B43, B46–B48, B50, B52, B53, B56–B68 | Bug pass; see the fix log | 4bd49c9 … 3d21bb6 |
 | Performance table, all rows | Same pass | fb2831a, 835ae7c, 9c9bd99, b281b7c |
 | T1–T5, T8, T9, F1–F5 | Toolkit and `field` pass; see the fix log | 70ce80f … 61ad744 |
-| D1–D6, D9, C7, S16, S17 | DI pass; see the fix log | this step |
-| C3, C4, C5, C6, C8–C11, C14, C15 | Coupling pass; see the fix log | this step |
-| M1–M6, M9, M10 | MVVM pass; see the fix log | this step |
+| D1–D6, D9, C7, S16, S17 | DI pass; see the fix log | #18 |
+| C3, C4, C5, C6, C8–C11, C14, C15 | Coupling pass; see the fix log | #19 |
+| M1–M6, M9, M10 | MVVM pass; see the fix log | #20 |
+| S3–S10, S12, S14, S15, S18, T6, T7, B72–B74 | Large-class and design pass; see the fix log | #21–#25 |
 
 ### Partly done
 
@@ -59,25 +60,24 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 |------|------|---------------|
 | A15 | Tokens and deadlines passed through; a cancelled preview render stops between its steps | `PreviewEngine` holds `_requests` for the whole render, because renders yield to the dispatcher and must not interleave. Kept by design |
 | A16 | Installer, package fallback, SQL text and binary values, script saves and the profiler's dispose are asynchronous | SQL XML values stay synchronous because the bounded formatter is. Kept by design |
-| C1 | Dependencies are required, so a missing registration fails at startup; Git and the assistant go through `IStudioToolsHost` | The constructor grew from 18 to 22 parameters rather than shrinking, and notifications from `Designer`, `Debugger`, `WorkerExited` and per-editor events are still hand-wired |
+| C1 | Dependencies are required; Git, the assistant, designer selection, change review and the palette go through hosts, and debugger events through messages | The constructor is 12 parameters, but parameter objects only group them: it still has 26 dependencies. Per-editor events, shell-to-docking events, `Editor.PropertyChanged` and `WorkerExited` remain direct |
 | M7 | Confirmed fixed under B28 | The filtered `ICollectionView` is not small, because default views have thread affinity. Left |
 | M8 | One `FocusWhenTrue` property replaces two of the three focus events | `PropertyFilterChanged` stays: it requests a refresh, not focus |
 | C12 | `WpfStudio.Hosting` has one `WorkerProcessHost`, used by the preview, profiler and language clients, with `CurrentUserOnly` everywhere and each client's connect budget kept | `DebugSession` and `InspectionLaunch` share only the start info, `InspectionSession` only the PID lookup, and `PreviewHost` keeps its own, because their transports differ. The language worker skips the PID check, since it starts through whatever `dotnet` is on PATH |
 | C13 | Statics moved to instances and test knobs to constructors | `ToolchainResolver`'s static stays: it mirrors MSBuildLocator's one-per-process registration and is used before any container exists |
 | C16 | Reviewed and left | `TerminalSurface` is a WebView2 control created from XAML and already on the UI thread, so `IUiDispatcher` would buy nothing; a comment there says so |
 | D7 | The formatter, sampler and stores are registered; watchers come through factories | `NavigationHistory`, the issue tracker and the analysis scheduler stay as owned `new`, because they hold only their owner's state. Kept by design |
-| S2 | `ReviewAndApplyAsync` is the shared tail for the C# refactoring and code-action commands | The four verified pipelines (rename, XAML quick fix, designer edit, inspection source edit) keep separate staleness checks by design |
+| S2 | `VerifiedEditPipeline` holds the guard order, apply-and-open, buffer snapshots, target checks and snapshot release | Each pipeline keeps its own staleness guard, prepare step, refusal report and post-apply steps, because weakening any of them would be worse than the duplication |
+| S11 | Engine state moved into named classes in `WorkspaceEngine.State.cs`; `Debug.Assert(Monitor.IsEntered(_gate))` replaces the "gate held" comments; `_workspace` is under the lock. 39 fields became 14 plus 2 `field`-backed properties | Still one lock, by design: invariants cross every proposed group, for example `UpdateDocumentAsync` and `GetDocument` span versions, solutions and page state together |
+| S13 | `PreviewLease` owns the lease and its detach | Generation counters, focus state and `IsAttached` stay on the surface: no full state enum |
 
 ### Pending
 
-- **Coupling (1.1):** none. C12, C13 and C16 are partly done or left for the reasons above.
-- **Large classes (1.2):** S3–S15, S18 (`EditorSurface`, `DesignerViewModel`, `MemoryProfilerViewModel`, `GitViewModel`/`GitService`, `DebuggerViewModel`, `DatabasePaneViewModel`, `WorkspaceEngine`, `PreviewEngine`, `NativePreviewSurface`, `DiffView`, `ScaffoldingService`, `MainWindow.xaml`).
-- **DI registration (1.3):** none. D7 is partly done by design (above).
-- **Async (1.4):** none. A15 and A16 are partly done by design (above).
-- **Code-behind and MVVM (1.5):** none. M7 and M8 are done as far as they apply (above).
-- **CommunityToolkit.Mvvm (1.6):** T6, T7.
-- **`field` keyword (1.7):** none. F6 is a convention for new code.
-- **Bugs (Part 2):** none. B49, B51, B54 and B55 turned out not to need a change (see the fix log).
+Nothing. These known gaps were found along the way and left on purpose:
+
+- **Language worker:** overlapping publishes can leave `_solution` belonging to a disposed workspace, and a publish finishing after `Dispose` leaks its workspace. The client's `_lifecycle` normally serializes publishes, and the worker exits after `Dispose`.
+- **Debugger:** a `breakpoint` event sent just before a `setBreakpoints` answer also waits for it, so it is applied after the answer even though it is older; telling them apart needs wire order from the transport. A command that races a termination still shows its request error. A renderer crash after the terminal has started still ends the session.
+- **Portable installs:** debugger state, the WebView2 profile, the workspace cache and the symbol cache still use `%LocalAppData%`.
 
 ---
 
@@ -243,6 +243,9 @@ Ordered by impact. "Confirmed" means the code path was read end to end and the f
 | B69 | `ViewModels/EditorViewModel.cs:168`, `EditorViewModel.Git.cs:79,101` | Confirmed and reproduced. `Task.Run(…).ContinueWith(_ => { })` runs after a fault but never reads `task.Exception`, so a failed lens, blame or change-margin request stays unobserved until the finalizer publishes it. | Typing while a lens request runs ("Document version is stale"), or the worker exiting, leaves a faulted task; the next garbage collection raises `UnobservedTaskException`. |
 | B70 | `App.xaml.cs` `ReportUnhandled` | Confirmed. The handler added in the safety-net pass read `Application.MainWindow` and `DataContext` on the calling thread. `UnobservedTaskException` runs on the finalizer thread, where both throw "The calling thread cannot access this object". | B69's fault arrives on the finalizer thread, the handler throws there, and an exception on the finalizer thread ends the process: the last line of defence became the crash. |
 | B71 | `Core/Documents/WorkspaceEdits.cs` `UndoAsync` | Confirmed and reproduced. `ConfigureAwait(false)` on the recovery-gate await moved the rest of the loop off the caller's thread when the gate was contended, and the loop then wrote `document.Content`. | Undoing an edit that created one file and changed another while the recovery writer runs raises `ContentChanged` on a pool thread, which clears diagnostics bound to a collection view: "This type of CollectionView does not support changes to its SourceCollection from a thread different from the Dispatcher thread". |
+| B72 | `Runtime/Debugging/DebuggerViewModel.cs` | Confirmed against a scripted adapter. An adapter that terminates during attach or launch left `IsActive` true. | The debugger pane stays on "Running" with nothing running. |
+| B73 | `Runtime/Debugging/BreakpointStore.cs` | Confirmed against a scripted adapter. Overlapping saves could persist an older snapshot, and a save in progress during a workspace switch wrote the old workspace's breakpoints into the new workspace's file. | Rapid F9 toggles lose the newest breakpoint on disk. |
+| B74 | `Runtime/Debugging/DebuggerViewModel.cs` | Confirmed against a scripted adapter. A `breakpoint` event arriving before its `setBreakpoints` answer was overwritten by the answer. | A breakpoint shows the wrong bound state until the next change. |
 
 ### Wrong behaviour
 
@@ -323,10 +326,7 @@ Ordered by impact. "Confirmed" means the code path was read end to end and the f
 
 ## Suggested order of work
 
-1. **Safety net first** — done except A21 (half a day): global exception handlers (A1), guard the unguarded commands and `async void` (B1, B8), a `Forget()` helper for fire-and-forget (A3), catch `UnauthorizedAccessException` in the stores (B6), fix the log provider (B3). Add the threading analyzers (A21) so regressions fail the build.
-2. **Hang and data-integrity fixes** — done (one to two days): bounded RPCs and dispose timeout in `WorkspaceClient` (B4), `DeleteRecoveryAsync` (B5), preview cancellation path (B24, B25), typed RPC target in the profiling host (B10), ConPTY handle retention (B7), Git encoding and revision guard (B18, B20), SQL workbench profile/completion (B14, B15, B16), scaffolder casing (B17).
-3. **Structural work** — S1 and C2 done, the rest pending (ongoing, feature by feature): split `ShellViewModel` along the lines in S1/S2, replace `Func` plumbing and value-returning events with host interfaces (C1–C3), typed workbench ids (C4), DI extension methods and options (D1–D7), one process-host abstraction (C12), `DataTemplate`-based pane creation (M1).
-4. **Toolkit and language cleanup** — pending (mechanical, can ride along with any feature PR): T1–T5, T8 and F1–F5 are local edits with no behaviour change and can be done file by file as those files are touched. T6 (cancel commands instead of the hand-rolled `IsBusy`/`_operation` pairs) and T7 (messenger) are design changes and belong with the `ShellViewModel` split in step 3.
+All of it is done: the safety net, the hang and data-integrity fixes, the structural work, and the toolkit and language cleanup. See Status for what was deliberately left.
 
 ---
 
@@ -453,3 +453,10 @@ MVVM pass:
 - **M1** `ShellViewModel.RetainedPanes` lists the document panes and a `DataTemplate` per view-model type builds each view, instantiated once and kept as the layout content. The smoke test checks that retained panes, the native preview and WebView2 keep their instances through tab switch, close and reopen, restore and reset. **M2, M3** the view uses `EditorViewModel.IsReadOnly`, `ReportCaret` and `DiagnosticsAt`. **M4** the blame and change popups are `Resources/EditorPopups.xaml` over the records in `ViewModels/EditorGitCards.cs`; history headings now use the normal text colour instead of the lens hint colour.
 - **M5** Git pane handlers became attached behaviours; the double-click guard covers all list boxes and Enter works in Git lists. **M6** profiler views use bindings, `OpenedCommand`, `GroupBy` and a grouping enum; the browser column width stays in code. **M8** `FocusWhenTrue`.
 - **M9** `SelectionSource` plus `TrackSelection`. This fixed a real bug: the selection hook never installed while the source was null, so `Explorer.SelectedNode` stayed null, which hid the Solution Explorer's Build, Rebuild, Clean and Restore items. **M10** `SecureString` was not introduced, because the connection string needs the password anyway. Passwords now decrypt when a profile is selected, not all at load, and profiles nobody opened keep their stored blob, so B16 still holds.
+
+Large-class and design pass:
+
+- **S3** completion, the replay queue, hover, folding, the Git and lens annotations, typing and the renderers moved to `Controls/Editor`; `EditorSurface.cs` went from 842 to 260 lines and keeps thin forwarders so editor tests are unchanged. **S14** `DiffView` has a `Mode` dependency property and a read-only `EffectiveMode`, replacing the guard flag; `IsSideBySide` is gone. **S18** `MainWindow.xaml` went from 1,445 to 144 lines, with 15 user controls in `Views/Shell` plus `ShellDocuments.xaml`; dock layout, input bindings and the settings overlay stay inline, and `RegisterName` keeps `ExplorerTree`, `SearchBox` and `MaximizeButton` resolvable on the window.
+- **S4** `ScenarioCatalogViewModel`, `LayoutGestureController`, `PreviewCanvasViewModel`. **S5** `BindingDeclarationsViewModel`, `AppearanceReader` and `BindingExplanationViewModel`; the layout inspector was already shared, so its pass-throughs were deleted. Designer partials went from 1,955 to 1,461 lines and Inspection from 1,224 to 1,129. **S6** `ProcessMemoryTimeline`, `ObjectBrowserViewModel`, `RetentionViewModel` and `IMemorySessionHost`: 1,711 to 1,230 lines. **S7** `ConflictResolverViewModel`, `CommitHistoryViewModel` and `IGitOperationHost`: 810 to 554 lines. **S8** `Core.Git.GitOutput` holds the parsers, and the Git records moved to Core: 549 to 469 lines.
+- **S9** `DapClient`, `DapMessages`, `BreakpointStore` and `OutputBuffer`: `DebuggerViewModel` went from 464 to 312 lines. Mistyped or missing adapter fields now read as empty instead of throwing. **S10** connections, explorer and queries view models: the pane went from 409 to 62 lines. **S12** loader, scene, visual tree, inspector, layout editing, native surface and diagnostic log: the engine went from 1,559 lines in 9 files to 231, and the resolver has its own file. **S15** `ProjectFileEditor` and `ScaffoldTemplates`: 153 to 56 lines.
+- **T6** the shell and Git use cancel commands plus an `OperationGate`, and `IsBusy` is the gate's state. Reload now holds the gate, shows the progress bar and is disabled while busy; cancelling one leaves language services off, and the status says so. **T7** one `IMessenger` in the container carries `WorkspaceChangedMessage`, `ShowToolMessage`, `DocumentSavedMessage`, `ThemeChangedMessage`, `AssistantSettingsSavedMessage`, `DebuggerStateMessage` and `DebuggerSourceMessage`. Direct events remain for editor-to-shell pairs. **B72–B74** see Part 2.

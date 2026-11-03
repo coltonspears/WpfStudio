@@ -246,11 +246,11 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var database = manager.Layout.Descendents().OfType<LayoutAnchorable>().Single(t => t.ContentId == "Database");
             var databaseView = (DatabasePane)database.Content;
             Assert.Same(shell.Database, databaseView.DataContext);
-            Assert.Same(shell.Database.ExecuteCommand, databaseView.InputBindings.OfType<KeyBinding>().Single(k => k.Key == Key.F5).Command);
-            shell.Database.SelectedDocument!.SqlText = "";
+            Assert.Same(shell.Database.Queries.ExecuteCommand, databaseView.InputBindings.OfType<KeyBinding>().Single(k => k.Key == Key.F5).Command);
+            shell.Database.Queries.SelectedDocument!.SqlText = "";
             databaseView.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(databaseView), Environment.TickCount, Key.F5) { RoutedEvent = Keyboard.KeyDownEvent });
             await Idle();
-            Assert.Equal("Enter SQL to execute.", shell.Database.SelectedDocument.Status);
+            Assert.Equal("Enter SQL to execute.", shell.Database.Queries.SelectedDocument.Status);
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/sql.png"));
             Assert.False(shell.Debugger.IsActive);
             shell.ShowToolCommand.Execute("Output"); await Idle();

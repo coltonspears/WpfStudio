@@ -7,7 +7,7 @@ using WpfStudio.Contracts;
 
 namespace WpfStudio.PreviewHost;
 
-public sealed partial class PreviewEngine
+internal sealed partial class PreviewNativeSurface
 {
     private DispatcherTimer? _focusObserver;
     private WeakReference<IInputElement>? _observedFocus;
@@ -20,12 +20,12 @@ public sealed partial class PreviewEngine
     {
         StopFocusObservation();
         InputManager.Current.PostProcessInput += OnNativeFocusInput;
-        if (_viewport is not null) _viewport.LayoutUpdated += OnNativeFocusLayout;
+        if (scene.Viewport is not null) scene.Viewport.LayoutUpdated += OnNativeFocusLayout;
         // Sampling catches cached transform changes without invoking layout;
         // animated transforms themselves are withheld. This work is deliberately
         // separate from the heartbeat callback.
         _focusObserver = new DispatcherTimer(TimeSpan.FromMilliseconds(125), DispatcherPriority.Background,
-            (_, _) => CaptureNativeFocus(), _dispatcher);
+            (_, _) => CaptureNativeFocus(), dispatcher);
         _focusObserver.Start();
         CaptureNativeFocus();
     }
@@ -35,7 +35,7 @@ public sealed partial class PreviewEngine
         _focusObserver?.Stop();
         _focusObserver = null;
         InputManager.Current.PostProcessInput -= OnNativeFocusInput;
-        if (_viewport is not null) _viewport.LayoutUpdated -= OnNativeFocusLayout;
+        if (scene.Viewport is not null) scene.Viewport.LayoutUpdated -= OnNativeFocusLayout;
         _focusObservation = null;
         _focusCaptureQueued = false;
     }
@@ -58,7 +58,7 @@ public sealed partial class PreviewEngine
     {
         if (_focusCaptureQueued || _attachment is not { } attachment || _bridgeHandle == 0) return;
         _focusCaptureQueued = true;
-        _ = _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        _ = dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
             if (_attachment != attachment) return;
             _focusCaptureQueued = false;
@@ -85,14 +85,14 @@ public sealed partial class PreviewEngine
     {
         if (_attachment is not { } attachment || _bridgeHandle == 0 || !CurrentSurface(attachment.Surface)) return;
         var focused = ObserveFocusIdentity();
-        if (focused is not UIElement element || _surface!.RootVisual is not { } root ||
-            !ReferenceEquals(PresentationSource.FromVisual(element), _surface))
+        if (focused is not UIElement element || scene.Surface!.RootVisual is not { } root ||
+            !ReferenceEquals(PresentationSource.FromVisual(element), scene.Surface))
         {
             PublishNativeFocus(null, focused is null ? "No keyboard-focused element." :
                 "The focused object has no layout box in this native presentation root.");
             return;
         }
-        if (PreviewNativeMethods.GetFocus() != _surface.Handle)
+        if (PreviewNativeMethods.GetFocus() != scene.Surface.Handle)
         {
             PublishNativeFocus(null, "The native presentation root does not own keyboard focus.");
             return;
@@ -106,7 +106,7 @@ public sealed partial class PreviewEngine
     {
         if (_attachment is not { } attachment || _bridgeHandle == 0 || !CurrentSurface(attachment.Surface)) return;
         long nativeFocus = PreviewNativeMethods.GetFocus().ToInt64();
-        uint dpi = PreviewNativeMethods.GetDpiForWindow(_surface!.Handle);
+        uint dpi = PreviewNativeMethods.GetDpiForWindow(scene.Surface!.Handle);
         var sample = new PreviewSurfaceFocus(attachment.BridgeToken, attachment.Sequence, 0,
             _focusEpoch, _focusChangedAtTick, nativeFocus, dpi, bounds, status);
         if (_focusObservation is { } previous && (previous with { Sequence = 0 }) == sample) return;

@@ -11,7 +11,8 @@ using WpfStudio.Wpf.PropertyEditing;
 
 namespace WpfStudio.PreviewHost;
 
-public sealed partial class PreviewEngine
+/// <summary>Captures what source move and resize gestures need, with a fingerprint that later proves nothing moved underneath them.</summary>
+internal sealed class PreviewLayoutEditing(PreviewScene scene, PreviewVisualTree tree, PreviewNativeSurface native)
 {
     private const int LayoutObservationLimit = 64;
     private readonly Dictionary<string, LayoutObservation> _layoutObservations = new(StringComparer.Ordinal);
@@ -31,29 +32,29 @@ public sealed partial class PreviewEngine
     private static readonly DependencyProperty[] LayoutGridProperties =
         [Grid.RowProperty, Grid.ColumnProperty, Grid.RowSpanProperty, Grid.ColumnSpanProperty];
 
-    public Task<PreviewLayoutValidationResult> ValidateLayoutEditAsync(PreviewLayoutValidationRequest request, CancellationToken cancellationToken) =>
-        OnDispatcher(() =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (request.Version != _version || request.Surface != _surfaceIdentity || !CurrentSurface(request.Surface)
-                || !_layoutObservations.TryGetValue(request.NodeId, out var observed) || request.Token != observed.Context.Token)
-                return Reply("The preview or layout observation changed. Refresh the selection.");
-            if (!observed.Target.TryGetTarget(out var target) || !observed.Parent.TryGetTarget(out var parent)
-                || !_objects.TryGetValue(request.NodeId, out var current) || !ReferenceEquals(target, current))
-                return Reply("The selected preview object is no longer available.");
-            var captured = ReadLayoutEditing(target, out var locals);
-            if (!captured.Available || !ReferenceEquals(VisualTreeHelper.GetParent(target), parent)
-                || Fingerprint(captured) != observed.Fingerprint || !SameLocals(locals, observed.Locals)
-                || !ReferenceEquals(target.GetValue(FrameworkElement.StyleProperty), observed.Style)
-                || !ReferenceEquals(parent.GetValue(FrameworkElement.StyleProperty), observed.ParentStyle))
-                return Reply(captured.Status ?? "Layout or property provenance changed. Refresh the selection.");
-            string? error = ValidateLayoutValues(request.Values, captured);
-            return Reply(error);
+    public void Clear() => _layoutObservations.Clear();
 
-            Task<PreviewLayoutValidationResult> Reply(string? error) => Task.FromResult(new PreviewLayoutValidationResult(request, error is null, error));
-        }, cancellationToken);
+    public PreviewLayoutValidationResult Validate(PreviewLayoutValidationRequest request)
+    {
+        if (request.Version != scene.Version || request.Surface != native.Identity || !native.CurrentSurface(request.Surface)
+            || !_layoutObservations.TryGetValue(request.NodeId, out var observed) || request.Token != observed.Context.Token)
+            return Reply("The preview or layout observation changed. Refresh the selection.");
+        if (!observed.Target.TryGetTarget(out var target) || !observed.Parent.TryGetTarget(out var parent)
+            || !tree.TryGet(request.NodeId, out var current) || !ReferenceEquals(target, current))
+            return Reply("The selected preview object is no longer available.");
+        var captured = ReadLayoutEditing(target, out var locals);
+        if (!captured.Available || !ReferenceEquals(VisualTreeHelper.GetParent(target), parent)
+            || Fingerprint(captured) != observed.Fingerprint || !SameLocals(locals, observed.Locals)
+            || !ReferenceEquals(target.GetValue(FrameworkElement.StyleProperty), observed.Style)
+            || !ReferenceEquals(parent.GetValue(FrameworkElement.StyleProperty), observed.ParentStyle))
+            return Reply(captured.Status ?? "Layout or property provenance changed. Refresh the selection.");
+        string? error = ValidateLayoutValues(request.Values, captured);
+        return Reply(error);
 
-    private PreviewLayoutEditContext CaptureLayoutEditing(DependencyObject target)
+        PreviewLayoutValidationResult Reply(string? error) => new(request, error is null, error);
+    }
+
+    public PreviewLayoutEditContext Capture(DependencyObject target)
     {
         var context = ReadLayoutEditing(target, out var locals);
         if (!context.Available || target is not FrameworkElement element || VisualTreeHelper.GetParent(element) is not Panel parent)
@@ -78,16 +79,16 @@ public sealed partial class PreviewEngine
     private PreviewLayoutEditContext ReadLayoutEditing(DependencyObject target, out IReadOnlyList<object?> locals)
     {
         locals = [];
-        string nodeId = _ids.GetValueOrDefault(target) ?? "";
-        PreviewLayoutEditContext Unavailable(string reason) => new(false, _version, nodeId, Status: reason, Surface: _surfaceIdentity);
+        string nodeId = tree.IdOf(target) ?? "";
+        PreviewLayoutEditContext Unavailable(string reason) => new(false, scene.Version, nodeId, Status: reason, Surface: native.Identity);
         try
         {
-            if (_document is null) return Unavailable("Visual source editing requires the current source preview; compiled views are not source-editing evidence.");
-            if (_viewport is null || !CurrentSurface(_surfaceIdentity) || !IsInCurrentPreview(target))
+            if (scene.Document is null) return Unavailable("Visual source editing requires the current source preview; compiled views are not source-editing evidence.");
+            if (scene.Viewport is null || !native.CurrentSurface(native.Identity) || !tree.IsInCurrentPreview(target))
                 return Unavailable("The selected object is not attached to the current preview.");
-            if (target is not FrameworkElement element || ReferenceEquals(target, _root))
+            if (target is not FrameworkElement element || ReferenceEquals(target, scene.Root))
                 return Unavailable("Select an authored child element. Preview roots and generated placeholders cannot be moved or resized in source.");
-            var authored = _document.GetLayoutSource(target);
+            var authored = scene.Document.GetLayoutSource(target);
             if (authored is null || authored.Type != target.GetType() || authored.Parent is null)
                 return Unavailable("The runtime object does not have an exact authored object and parent identity.");
             if (authored.Unavailable is not null) return Unavailable(authored.Unavailable);
@@ -95,7 +96,7 @@ public sealed partial class PreviewEngine
                 return Unavailable("Visual source editing currently supports direct children of framework Canvas and Grid panels.");
             if (!ReferenceEquals(LogicalTreeHelper.GetParent(target), parent) || parent.IsItemsHost)
                 return Unavailable("Generated containers and nonmatching logical/layout parents cannot establish an authored child relationship.");
-            var parentSource = _document.GetLayoutSource(parent);
+            var parentSource = scene.Document.GetLayoutSource(parent);
             if (parentSource is null || parentSource.Unavailable is not null || parentSource.Type != parent.GetType()
                 || parentSource.Element != authored.Parent)
                 return Unavailable("The current layout parent differs from the authored parent, or belongs to a deferred declaration.");
@@ -123,7 +124,7 @@ public sealed partial class PreviewEngine
                 // expressions too. No binding-source lookup is needed here.
                 if (provenance.IsExpression || provenance.IsAnimated || provenance.IsCoerced)
                     return Unavailable($"{property.Name} uses an expression, animation, coercion, or temporary override. Edit its declaration directly.");
-                if (_document.IsDesignTimeProperty(element, property))
+                if (scene.Document.IsDesignTimeProperty(element, property))
                     return Unavailable($"{property.Name} is supplied by a design-time override; runtime source layout is not inferred from it.");
                 bool attached = property.OwnerType == typeof(Canvas) || property.OwnerType == typeof(Grid);
                 if (!attached && PropertyWrappers.Find(authored.Type, property.Name)?.DeclaringType != typeof(FrameworkElement))
@@ -144,9 +145,9 @@ public sealed partial class PreviewEngine
             {
                 if (ReferenceEquals(sibling, element) || sibling is not FrameworkElement frame || !Positive(frame.RenderSize)) continue;
                 if (TryLayoutOffset(frame, out var siblingOffset, out _) && siblings.Count < 128)
-                    siblings.Add(new(GetId(frame), Bounds(siblingOffset, frame.RenderSize)));
+                    siblings.Add(new(tree.GetId(frame), Bounds(siblingOffset, frame.RenderSize)));
             }
-            var context = new PreviewLayoutEditContext(true, _version, nodeId, Element: authored.Element, Parent: parentSource.Element,
+            var context = new PreviewLayoutEditContext(true, scene.Version, nodeId, Element: authored.Element, Parent: parentSource.Element,
                 ParentKind: canvas ? "Canvas" : "Grid", Bounds: Bounds(offset, element.RenderSize), ParentBounds: Bounds(parentOffset, parent.RenderSize),
                 SlotBounds: new(parentOffset.X + slot.X, parentOffset.Y + slot.Y, slot.Width, slot.Height),
                 Margin: new(margin.Left, margin.Top, margin.Right, margin.Bottom),
@@ -161,11 +162,11 @@ public sealed partial class PreviewEngine
                 CanvasBottom: canvas ? OptionalLayoutDouble(element, Canvas.BottomProperty) : null,
                 GridRow: canvas ? 0 : (int)element.GetValue(Grid.RowProperty), GridColumn: canvas ? 0 : (int)element.GetValue(Grid.ColumnProperty),
                 GridRowSpan: canvas ? 1 : (int)element.GetValue(Grid.RowSpanProperty), GridColumnSpan: canvas ? 1 : (int)element.GetValue(Grid.ColumnSpanProperty),
-                EditProperties: properties, Siblings: siblings, Surface: _surfaceIdentity, SourceHash: _document.LayoutSourceHash, SiblingsTruncated: truncated);
+                EditProperties: properties, Siblings: siblings, Surface: native.Identity, SourceHash: scene.Document.LayoutSourceHash, SiblingsTruncated: truncated);
             // Reading framework DPs may encounter WPF expressions internally. Do not
             // accept a capture if that work invalidated the parent/geometry meanwhile.
             if (!ReferenceEquals(VisualTreeHelper.GetParent(element), parent) || !element.IsMeasureValid || !element.IsArrangeValid
-                || !parent.IsMeasureValid || !parent.IsArrangeValid || !IsInCurrentPreview(element)
+                || !parent.IsMeasureValid || !parent.IsArrangeValid || !tree.IsInCurrentPreview(element)
                 || !TryLayoutOffset(element, out var finalOffset, out _) || finalOffset != offset
                 || !TryLayoutOffset(parent, out var finalParentOffset, out _) || finalParentOffset != parentOffset
                 || Bounds(offset, element.RenderSize) != context.Bounds || Bounds(parentOffset, parent.RenderSize) != context.ParentBounds
@@ -180,9 +181,9 @@ public sealed partial class PreviewEngine
 
     private bool UniqueLayoutSources(string selected, string parent)
     {
-        if (_viewport is null) return false;
+        if (scene.Viewport is null) return false;
         var pending = new Stack<DependencyObject>();
-        pending.Push(_viewport);
+        pending.Push(scene.Viewport);
         int remaining = 10_000, selectedCount = 0, parentCount = 0;
         while (pending.TryPop(out var current))
         {
@@ -208,7 +209,7 @@ public sealed partial class PreviewEngine
             { reason = "Right-to-left layout requires a separate editing policy and is unavailable for this gesture."; return false; }
             if (VisualTreeHelper.GetEffect(current) is not null)
             { reason = "Effects can change visible geometry; source layout gestures are unavailable for this frame."; return false; }
-            if (ReferenceEquals(current, _viewport)) return double.IsFinite(offset.X) && double.IsFinite(offset.Y);
+            if (ReferenceEquals(current, scene.Viewport)) return double.IsFinite(offset.X) && double.IsFinite(offset.Y);
             if (!TryTranslation(VisualTreeHelper.GetTransform(current), out var translation))
             { reason = "Source layout gestures require translation-only, 1:1 visual transforms."; return false; }
             var localOffset = VisualTreeHelper.GetOffset(current);

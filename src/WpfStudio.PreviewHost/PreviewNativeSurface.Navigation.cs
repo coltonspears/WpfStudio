@@ -3,7 +3,7 @@ using WpfStudio.Contracts;
 
 namespace WpfStudio.PreviewHost;
 
-public sealed partial class PreviewEngine
+internal sealed partial class PreviewNativeSurface
 {
     private static readonly uint NativeNavigationMessage = PreviewNativeMethods.RegisterWindowMessage(PreviewNativeNavigation.MessageName);
 
@@ -52,8 +52,8 @@ public sealed partial class PreviewEngine
         {
             // Only touch the same still-owned HWND. Destruction removes its
             // properties automatically; a recycled handle is never cleanup authority.
-            if (granted && CurrentSurface(attachment.Surface) && _surface!.Handle == hwnd &&
-                PreviewNativeMethods.OwnedWindow(hwnd, _session.ProcessId) &&
+            if (granted && CurrentSurface(attachment.Surface) && scene.Surface!.Handle == hwnd &&
+                PreviewNativeMethods.OwnedWindow(hwnd, session.ProcessId) &&
                 PreviewNativeMethods.GetProp(hwnd, property) == new nint(encoded))
                 PreviewNativeMethods.RemoveProp(hwnd, property);
             if (handoff is not null && ReferenceEquals(_nativeHandoff, handoff))
