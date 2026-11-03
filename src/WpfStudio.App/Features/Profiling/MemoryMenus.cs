@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using WpfStudio.App.Controls;
 using WpfStudio.Contracts.Profiling;
 
@@ -17,6 +16,12 @@ public static class MemoryMenus
         new PropertyMetadata(null, OnTargetChanged));
     public static object? GetTarget(DependencyObject element) => element.GetValue(TargetProperty);
     public static void SetTarget(DependencyObject element, object? value) => element.SetValue(TargetProperty, value);
+
+    /// <summary>The view model whose commands the menus run. Set once on the pane; every row below inherits it, including rows in item templates.</summary>
+    public static readonly DependencyProperty ModelProperty = DependencyProperty.RegisterAttached("Model", typeof(MemoryProfilerViewModel), typeof(MemoryMenus),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.Inherits));
+    public static MemoryProfilerViewModel? GetModel(DependencyObject element) => (MemoryProfilerViewModel?)element.GetValue(ModelProperty);
+    public static void SetModel(DependencyObject element, MemoryProfilerViewModel? value) => element.SetValue(ModelProperty, value);
 
     private sealed record MenuTarget(int? ObjectId, string? Address, string? TypeKey, string? TypeName, string? Value = null, string? Path = null);
 
@@ -40,8 +45,7 @@ public static class MemoryMenus
     {
         if (element.ContextMenu is not { } menu) return false;
         menu.Items.Clear();
-        var model = FindModel(element);
-        if (model is null || Resolve(GetTarget(element)) is not { } target) return false;
+        if (GetModel(element) is not { } model || Resolve(GetTarget(element)) is not { } target) return false;
         if (target.ObjectId is int id)
         {
             menu.Items.Add(Item("Inspect", "Search", model.ShowInBrowserCommand, id));
@@ -78,13 +82,6 @@ public static class MemoryMenus
         var item = new MenuItem { Header = header, Command = command, CommandParameter = parameter };
         Ui.SetIcon(item, icon);
         return item;
-    }
-
-    private static MemoryProfilerViewModel? FindModel(DependencyObject element)
-    {
-        for (DependencyObject? at = element; at is not null; at = at is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(at) : LogicalTreeHelper.GetParent(at))
-            if (at is FrameworkElement { DataContext: MemoryProfilerViewModel model }) return model;
-        return null;
     }
 
     private static MenuTarget? Resolve(object? item) => item switch
