@@ -50,7 +50,7 @@ public sealed class DebuggerInstaller(HttpMessageHandler? handler = null, string
                 var total = response.Content.Headers.ContentLength;
                 if (total > MaximumArchiveBytes) throw new InvalidDataException("The debugger download is larger than expected.");
                 await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-                await using var target = File.Create(archive);
+                await using var target = new FileStream(archive, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
                 var buffer = new byte[81920];
                 long received = 0, reported = 0;
                 int read;
@@ -64,13 +64,13 @@ public sealed class DebuggerInstaller(HttpMessageHandler? handler = null, string
             }
             progress?.Report("Verifying the download…");
             string actual;
-            await using (var stream = File.OpenRead(archive))
+            await using (var stream = new FileStream(archive, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
                 actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false));
             if (!actual.Equals(ExpectedSha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException($"The debugger download did not match its expected checksum ({actual}). Nothing was installed.");
 
             progress?.Report("Extracting…");
-            ZipFile.ExtractToDirectory(archive, staging); // Rejects entries that would escape the directory.
+            await ZipFile.ExtractToDirectoryAsync(archive, staging, cancellationToken).ConfigureAwait(false); // Rejects entries that would escape the directory.
             var executable = Directory.EnumerateFiles(staging, ExecutableName, SearchOption.AllDirectories).FirstOrDefault()
                 ?? throw new InvalidDataException("The debugger archive contains no " + ExecutableName + ".");
             var contents = Path.GetDirectoryName(executable)!;

@@ -8,6 +8,17 @@ namespace WpfStudio.Core.Tests;
 
 public class ScaffoldingTests
 {
+    [Fact]
+    public async Task ProjectEvaluationThatRunsOutOfTimeIsTreatedAsFailed()
+    {
+        var project = Path.Combine(NewDirectory(), "Slow.csproj");
+        File.WriteAllText(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        Assert.Null(await ScaffoldProjectContext.TryEvaluateAsync(project, CancellationToken.None, TimeSpan.FromMilliseconds(1)));
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ScaffoldProjectContext.TryEvaluateAsync(project, cancelled.Token));
+    }
+
     [Theory]
     [InlineData("net8.0-windows", "12.0", false)]
     [InlineData("net9.0-windows", "13.0", true)]

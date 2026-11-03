@@ -11,6 +11,8 @@ namespace WpfStudio.App.Features.Documents;
 public interface IAutoSaveHost
 {
     IReadOnlyList<EditorViewModel> Documents { get; }
+    /// <summary>Cancelled when the shell shuts down.</summary>
+    CancellationToken Lifetime { get; }
     /// <summary>A change review is open; saving now could write text the user is still deciding about.</summary>
     bool IsReviewOpen { get; }
     void ReportStatus(string status);
@@ -110,16 +112,18 @@ public sealed class AutoSaveCoordinator : IDisposable
         if (IsHeld) return;
         if (_host.IsReviewOpen) { Schedule(); return; }
         var saved = 0;
+        var lifetime = _host.Lifetime;
         foreach (var document in _host.Documents.Where(document => document.State.IsDirty && document.State.DiskHash is not null && !document.IsReadOnly
                      && !document.State.HasExternalChange && File.Exists(document.State.Path)).ToArray())
         {
             if (IsHeld || !_host.Documents.Contains(document)) break;
             try
             {
-                await _store.SaveAsync(document.State);
+                await _store.SaveAsync(document.State, cancellationToken: lifetime);
                 _host.DocumentAutoSaved(document);
                 saved++;
             }
+            catch (OperationCanceledException) { break; } // The write is atomic, so the file keeps its last saved content.
             catch (ExternalFileChangedException) { _host.ExternalChangeDetected(); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { _host.AppendOutput("Automatic save: " + exception.Message); }
         }

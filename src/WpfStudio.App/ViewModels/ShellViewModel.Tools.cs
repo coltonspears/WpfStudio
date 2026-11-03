@@ -84,8 +84,8 @@ public sealed partial class ShellViewModel
     [RelayCommand] private Task RefactorAsync(string? action) => GuardAsync(async () =>
     {
         if (ActiveDocument is not { IsReadOnly: false } document || document.State.Extension != ".cs" || action == null) { Status = "Open a C# source document to use this refactoring"; return; }
-        await document.SyncAsync(); var state = document.State;
-        var result = await _workspace.RefactorAsync(new(state.Path, state.CaretOffset, state.Version, action));
+        await document.SyncAsync(_lifetime.Token); var state = document.State;
+        var result = await _workspace.RefactorAsync(new(state.Path, state.CaretOffset, state.Version, action), _lifetime.Token);
         await ReviewAndApplyAsync("Review C# refactoring", result);
     });
     private async Task ApplyCSharpCodeActionAsync(EditorViewModel editor, WpfStudio.Contracts.CodeActionEntry action)

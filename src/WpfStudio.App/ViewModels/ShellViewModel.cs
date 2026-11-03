@@ -289,7 +289,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Workspace = snapshot;
             ApplyWorkspaceProjects(StartupProject?.ProjectPath);
             foreach (var issue in snapshot.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
-            foreach (var doc in Documents) await doc.SyncAsync();
+            foreach (var doc in Documents) await doc.SyncAsync(_lifetime.Token);
             await RefreshWpfAsync();
             if (Status.EndsWith("refreshing project model…", StringComparison.Ordinal)) Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}";
             XamlAnalysis.Request();
@@ -318,7 +318,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
                 if (Path.GetFileName(child) is not ("bin" or "obj" or ".git" or ".vs" or "node_modules" or "artifacts") && (File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) pending.Push(child);
         }
     }
-    [RelayCommand] private Task RestartWorkspaceAsync() => GuardAsync(async () => { Workspace = await _workspace.RestartAsync(); Status = "Language service restarted"; });
+    [RelayCommand] private Task RestartWorkspaceAsync() => GuardAsync(async () => { Workspace = await _workspace.RestartAsync(_lifetime.Token); Status = "Language service restarted"; });
     [RelayCommand] private Task ReloadWorkspaceAsync() => GuardAsync(async () =>
     {
         if (Workspace == null) return;
@@ -334,9 +334,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var requestedFramework = TargetFramework;
             Status = "Updating project context…";
             var startupPath = StartupProject?.ProjectPath;
-            Workspace = await _workspace.LoadAsync(new(Workspace.Path, requestedConfiguration, Path.GetExtension(Workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? requestedFramework : null));
+            Workspace = await _workspace.LoadAsync(new(Workspace.Path, requestedConfiguration, Path.GetExtension(Workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? requestedFramework : null), _lifetime.Token);
             ApplyWorkspaceProjects(startupPath);
-            foreach (var doc in Documents) await doc.SyncAsync();
+            foreach (var doc in Documents) await doc.SyncAsync(_lifetime.Token);
             await RefreshWpfAsync(); Status = "Workspace refreshed";
             if (requestedConfiguration != Configuration || requestedFramework != TargetFramework) _contextReloadPending = true;
           } while (_contextReloadPending && !_lifetime.IsCancellationRequested);
@@ -638,8 +638,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (declaration != null) await NavigateAsync(declaration.Path, declaration.Line, 1); else Status = "This XAML reference could not be resolved statically";
             return;
         }
-        await document.SyncAsync(); var state = document.State;
-        var results = await _workspace.GetDefinitionAsync(new(state.Path, state.CaretOffset, state.Version));
+        await document.SyncAsync(_lifetime.Token); var state = document.State;
+        var results = await _workspace.GetDefinitionAsync(new(state.Path, state.CaretOffset, state.Version), _lifetime.Token);
         if (results.Count > 0) await NavigateAsync(results[0].Path, results[0].Line, results[0].Column); else Status = "No source definition found";
     });
     [RelayCommand] private Task FindReferencesAsync() => GuardAsync(FindLanguageSymbolReferencesAsync);

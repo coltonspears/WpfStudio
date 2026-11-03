@@ -92,6 +92,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
 
     // ------------------------------------------------------------------ IAutoSaveHost
     IReadOnlyList<EditorViewModel> IAutoSaveHost.Documents => Documents;
+    CancellationToken IAutoSaveHost.Lifetime => _lifetime.Token;
     bool IAutoSaveHost.IsReviewOpen => IsPreviewOpen;
     void IAutoSaveHost.ReportStatus(string status) => Status = status;
     void IAutoSaveHost.AppendOutput(string line) => AppendOutput(line);

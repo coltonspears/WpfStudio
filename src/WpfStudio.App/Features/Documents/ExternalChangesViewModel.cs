@@ -99,6 +99,7 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
         var reloaded = new List<string>();
         try
         {
+            var lifetime = _host.Lifetime;
             do
             {
                 fromAppOperation |= _recheckFromApp;
@@ -106,7 +107,7 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
                 foreach (var doc in _host.Documents.ToArray())
                 {
                     if (doc.IsReadOnly) continue;
-                    var disk = await _store.ReadDiskAsync(doc.State);
+                    var disk = await _store.ReadDiskAsync(doc.State, lifetime);
                     var pending = Changes.FirstOrDefault(change => ReferenceEquals(change.Document, doc));
                     // The disk is back to what the editor last loaded or saved: nothing is left to decide.
                     if (disk?.Hash == doc.State.DiskHash) { if (pending is not null || doc.State.HasExternalChange) Forget(doc); continue; }
@@ -119,7 +120,7 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
                     }
                     if (disk is not null && !doc.State.IsDirty && (fromAppOperation || AutoReloadUnchangedFiles))
                     {
-                        await _store.ReloadAsync(doc.State);
+                        await _store.ReloadAsync(doc.State, lifetime);
                         reloaded.Add(doc.State.Name);
                         if (pending is not null) Changes.Remove(pending);
                         continue;
@@ -130,6 +131,7 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
                 }
             } while (_recheckFiles);
         }
+        catch (OperationCanceledException) { } // The shell is shutting down.
         catch (Exception ex) { _host.AppendOutput("Checking files changed outside WpfStudio: " + ex.Message); }
         finally
         {

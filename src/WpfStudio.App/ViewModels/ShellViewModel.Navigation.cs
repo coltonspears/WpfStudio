@@ -49,7 +49,7 @@ public sealed partial class ShellViewModel
     {
         if (ActiveDocument is not { IsCSharp: true } document) { Status = "Place the caret on a C# type or member to find its implementations"; return; }
         if (!_workspace.IsConnected) { Status = "Implementations are unavailable while the language worker is disconnected."; return; }
-        await document.SyncAsync(); var state = document.State;
+        await document.SyncAsync(_lifetime.Token); var state = document.State;
         var results = await _workspace.FindImplementationsAsync(new(state.Path, state.CaretOffset, state.Version), _lifetime.Token);
         if (results.Count == 0) { Status = "No implementations found"; return; }
         if (results.Count == 1) { await NavigateAsync(results[0].Path, results[0].Line, results[0].Column); return; }

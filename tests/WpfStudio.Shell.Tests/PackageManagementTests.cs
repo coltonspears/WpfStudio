@@ -64,7 +64,7 @@ public sealed class PackageManagementTests
     }
 
     [Fact]
-    public void DeclaredReferenceFallbackHandlesCentralVersionsAndOverrides()
+    public async Task DeclaredReferenceFallbackHandlesCentralVersionsAndOverrides()
     {
         using var fixture = new Fixture();
         File.WriteAllText(fixture.Project, """
@@ -74,7 +74,7 @@ public sealed class PackageManagementTests
         File.WriteAllText(central, """
         <Project><PropertyGroup><ExampleVersion>1.2.3</ExampleVersion></PropertyGroup><ItemGroup><PackageVersion Include="Example" Version="$(ExampleVersion)"/><PackageVersion Include="Override" Version="1.0.0"/></ItemGroup></Project>
         """);
-        var packages = NuGetPackageService.ReadProjectReferences(fixture.Project, central);
+        var packages = await NuGetPackageService.ReadProjectReferencesAsync(fixture.Project, central);
         Assert.Equal("1.2.3", packages.Single(x => x.Id == "Example").RequestedVersion);
         Assert.Equal("2.3.4", packages.Single(x => x.Id == "Override").RequestedVersion);
         Assert.All(packages, x => Assert.Equal("Not evaluated", x.ResolvedVersion));
