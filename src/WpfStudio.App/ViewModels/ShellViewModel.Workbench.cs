@@ -85,7 +85,7 @@ public sealed partial class ShellViewModel
     [RelayCommand] private void ShowAbout() { IsWhatsNewPage = false; OnPropertyChanged(nameof(AboutText)); IsAboutOpen = true; }
     [RelayCommand] private void ShowWhatsNew() { IsWhatsNewPage = true; IsAboutOpen = true; }
     [RelayCommand] private void CloseAbout() => IsAboutOpen = false;
-    [RelayCommand] private void CopyAboutText() { WpfStudio.App.Services.DesktopNavigation.Copy(AboutText); Status = "Version information copied"; }
+    [RelayCommand] private void CopyAboutText() => Status = _clipboard.TrySetText(AboutText) ? "Version information copied" : "Another application is using the clipboard. Try again.";
 
     private IEnumerable<PaletteEntry> WorkbenchCommands()
     {

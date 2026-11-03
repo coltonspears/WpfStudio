@@ -91,7 +91,7 @@ public sealed partial class GitViewModel
     partial void OnCommitDetailsChanged(GitCommitDetails? value) => OpenCommitOnRemoteCommand.NotifyCanExecuteChanged();
     private void Open(string url)
     {
-        try { DesktopNavigation.OpenUrl(url); AppendOutput("Opened " + url); }
+        try { _desktop.OpenUrl(url); AppendOutput("Opened " + url); }
         catch (Exception ex) { Error = ex.Message; }
     }
 

@@ -259,8 +259,7 @@ public sealed partial class MemoryProfilerViewModel
     private void CopyAddress()
     {
         if (Details is not { } d) return;
-        try { System.Windows.Clipboard.SetText(d.Object.Address); Status = $"Copied {d.Object.Address}."; }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException) { }
+        if (clipboard.TrySetText(d.Object.Address)) Status = $"Copied {d.Object.Address}.";
     }
 
 }

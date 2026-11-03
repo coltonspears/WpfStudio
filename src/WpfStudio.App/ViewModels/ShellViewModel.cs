@@ -34,6 +34,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly XamlResourceContext _xamlResources = new();
     private readonly IFileDialogService _files;
     private readonly IUserDialogService _dialogs;
+    private readonly IDesktopService _desktop;
+    private readonly IClipboardService _clipboard;
     private readonly IUiDispatcher _dispatcher;
     private readonly ILogger<ShellViewModel> _logger;
     private readonly CancellationTokenSource _lifetime = new();
@@ -48,11 +50,11 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null, Features.Profiling.MemoryProfilerViewModel? memoryProfiler = null)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IDesktopService desktop, IClipboardService clipboard, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null, Features.Profiling.MemoryProfilerViewModel? memoryProfiler = null)
     {
-        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger;
+        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _desktop = desktop; _clipboard = clipboard; _dispatcher = dispatcher; _logger = logger;
         Debugger = debugger; Terminal = terminal; Database = database;
-        MemoryProfiler = memoryProfiler ?? new(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(), files);
+        MemoryProfiler = memoryProfiler ?? new(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(), files, clipboard);
         Designer = designer ?? new(new WpfStudio.Runtime.Design.PreviewClient(), dispatcher);
         Designer.SourceRequested += source => _ = GuardAsync(() => NavigateAsync(source.Path, source.Line, source.Column));
         Designer.SourceEditRequested += PreviewDesignerEditAsync;
@@ -62,7 +64,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         TaskList = new(this); FileGroups = new(this); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
         Palette = new(this); ChangeReview = new(this, dispatcher);
         XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token);
-        Explorer = new(this, Projects); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
+        Explorer = new(this, Projects, desktop, clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
         ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) { OnPropertyChanged(nameof(IsPreviewOpen)); UpdateDesignerOverlay(); } };
         Palette.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Palette.IsOpen)) UpdateDesignerOverlay(); };

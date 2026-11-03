@@ -63,7 +63,7 @@ public sealed partial class ShellViewModel
         return null;
     }
     [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke(Workbenches.Search); SearchFocusRequested?.Invoke(); }
-    [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(AppPaths.DataDirectory); DesktopNavigation.Reveal(AppPaths.DataDirectory); return Task.CompletedTask; });
+    [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(AppPaths.DataDirectory); _desktop.Reveal(AppPaths.DataDirectory); return Task.CompletedTask; });
     /// <summary>Opens the command palette on the snippets for the active editor's language.</summary>
     [RelayCommand] private void InsertSnippet()
     {

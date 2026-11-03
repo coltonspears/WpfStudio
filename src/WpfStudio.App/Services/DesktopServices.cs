@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,6 +14,34 @@ public sealed class UiDispatcher(Dispatcher dispatcher) : IUiDispatcher
 {
     public void Post(Action action) => _ = dispatcher.BeginInvoke(action);
     public Task InvokeAsync(Action action, CancellationToken cancellationToken = default) => dispatcher.InvokeAsync(action, DispatcherPriority.Normal, cancellationToken).Task;
+}
+
+public sealed class DesktopService : IDesktopService
+{
+    public void Reveal(string path)
+    {
+        var start = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+        if (File.Exists(path)) { start.ArgumentList.Add("/select,"); start.ArgumentList.Add(path); }
+        else start.ArgumentList.Add(path);
+        Process.Start(start);
+    }
+    public void OpenUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")) throw new InvalidOperationException("Only web addresses can be opened.");
+        Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+    }
+}
+
+public sealed class ClipboardService : IClipboardService
+{
+    /// <summary>For views, which XAML creates out of the container's reach. It holds no state; view models take <see cref="IClipboardService"/>.</summary>
+    public static ClipboardService Shared { get; } = new();
+    public bool TrySetText(string text)
+    {
+        // Another application can hold the clipboard open at any moment.
+        try { Clipboard.SetText(text); return true; }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or InvalidOperationException) { return false; }
+    }
 }
 
 /// <summary>
