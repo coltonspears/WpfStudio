@@ -43,7 +43,7 @@ public sealed partial class InspectionViewModelTests
         session.ValidateSource = (request, _) => { validations.Add(request); return Task.FromResult(SourceValidated(request)); };
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         InspectionSourceEditRequest? captured = null;
-        model.SourceEditRequested += async (request, token) =>
+        model.StubHost().SourceEdit = async (request, token) =>
         {
             captured = request;
             Assert.True(request.IsCurrent());
@@ -88,7 +88,7 @@ public sealed partial class InspectionViewModelTests
         var validations = new List<InspectionSourcePropertyRequest>();
         session.ValidateSource = (request, _) => { validations.Add(request); return Task.FromResult(SourceValidated(request)); };
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
-        model.SourceEditRequested += async (request, token) =>
+        model.StubHost().SourceEdit = async (request, token) =>
         {
             Assert.Equal(remove, request.Remove);
             Assert.Equal(!remove, request.IsNull);
@@ -129,7 +129,7 @@ public sealed partial class InspectionViewModelTests
         if (problem == "no-source-validation") session.Hello = session.Hello with { Capabilities = ["modules"] };
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int reviews = 0;
-        if (problem != "no-review-handler") model.SourceEditRequested += (_, _) => { reviews++; return Task.FromResult(new InspectionSourceEditOutcome(true, "Unexpected")); };
+        if (problem != "no-review-handler") model.StubHost().SourceEdit = (_, _) => { reviews++; return Task.FromResult(new InspectionSourceEditOutcome(true, "Unexpected")); };
         await model.AttachAsync(session, debugging: true); SelectSourceProperty(model);
         if (problem == "outside-properties") model.SelectedProperty = property with { PropertyId = "unobserved" };
         if (problem == "paused") model.SetDebuggerState(true);
@@ -148,7 +148,7 @@ public sealed partial class InspectionViewModelTests
         int mutations = 0;
         session.Edit = request => { mutations++; return Task.FromResult(new InspectionPropertyEditResult(request.OperationId, "Unknown")); };
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
-        model.SourceEditRequested += (_, _) => review.Task;
+        model.StubHost().SourceEdit = (_, _) => review.Task;
         await model.AttachAsync(session); SelectSourceProperty(model);
         var pending = model.WritePropertyToSourceCommand.ExecuteAsync(null);
         Assert.True(model.IsSourceEditRunning);
@@ -171,7 +171,7 @@ public sealed partial class InspectionViewModelTests
         var completion = new TaskCompletionSource<InspectionSourceEditOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
         InspectionSourceEditRequest? captured = null;
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
-        model.SourceEditRequested += (request, _) => { captured = request; return completion.Task; };
+        model.StubHost().SourceEdit = (request, _) => { captured = request; return completion.Task; };
         await model.AttachAsync(session); SelectSourceProperty(model);
         model.Properties.CollectionChanged += (_, e) =>
         { if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset) model.SelectedProperty = null; };
@@ -203,7 +203,7 @@ public sealed partial class InspectionViewModelTests
         session.Modules = _ => modules.Task;
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int reviews = 0;
-        model.SourceEditRequested += (_, _) => { reviews++; return Task.FromResult(new InspectionSourceEditOutcome(true, "Stale source edit")); };
+        model.StubHost().SourceEdit = (_, _) => { reviews++; return Task.FromResult(new InspectionSourceEditOutcome(true, "Stale source edit")); };
         await model.AttachAsync(session, debugging: true); SelectSourceProperty(model);
         var pending = model.WritePropertyToSourceCommand.ExecuteAsync(null);
         await ChangeSourceEditContextAsync(model, change, () => property = property with { SourceEditToken = "source-v2" });
@@ -229,7 +229,7 @@ public sealed partial class InspectionViewModelTests
         var completion = new TaskCompletionSource<InspectionSourceEditOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
         InspectionSourceEditRequest? captured = null;
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
-        model.SourceEditRequested += (request, _) => { captured = request; return completion.Task; };
+        model.StubHost().SourceEdit = (request, _) => { captured = request; return completion.Task; };
         await model.AttachAsync(session, debugging: true); SelectSourceProperty(model);
         var pending = model.WritePropertyToSourceCommand.ExecuteAsync(null);
         await ChangeSourceEditContextAsync(model, change, () => property = property with { SourceEditToken = "source-v2" });
@@ -246,7 +246,7 @@ public sealed partial class InspectionViewModelTests
     {
         var property = SourceWritable(); var session = SourceEditingSession(() => property);
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
-        model.SourceEditRequested += (_, _) => Task.FromResult(new InspectionSourceEditOutcome(false, "Cancelled"));
+        model.StubHost().SourceEdit = (_, _) => Task.FromResult(new InspectionSourceEditOutcome(false, "Cancelled"));
         await model.AttachAsync(session); SelectSourceProperty(model); model.EditedValue = "draft";
         property = property with { SourceEditToken = "source-v2" };
         await model.RefreshCommand.ExecuteAsync(null);
@@ -269,7 +269,7 @@ public sealed partial class InspectionViewModelTests
         session.ValidateSource = (request, _) => { validationRequest = request; return validation.Task; };
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         bool reachedReview = false;
-        model.SourceEditRequested += async (request, token) =>
+        model.StubHost().SourceEdit = async (request, token) =>
         {
             if (phase == "modules")
             {
@@ -299,7 +299,7 @@ public sealed partial class InspectionViewModelTests
         var current = new TaskCompletionSource<InspectionSourceEditOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int calls = 0;
-        model.SourceEditRequested += (_, _) => ++calls == 1 ? old.Task : current.Task;
+        model.StubHost().SourceEdit = (_, _) => ++calls == 1 ? old.Task : current.Task;
         await model.AttachAsync(SourceEditingSession()); SelectSourceProperty(model);
         var first = model.WritePropertyToSourceCommand.ExecuteAsync(null);
         await model.AttachAsync(SourceEditingSession()); SelectSourceProperty(model);
@@ -332,7 +332,7 @@ public sealed partial class InspectionViewModelTests
         });
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         bool accepted = false;
-        model.SourceEditRequested += async (request, token) =>
+        model.StubHost().SourceEdit = async (request, token) =>
         { await request.ValidateAsync(false, token); accepted = true; return new(true, "Should not apply"); };
         await model.AttachAsync(session); SelectSourceProperty(model);
         await model.WritePropertyToSourceCommand.ExecuteAsync(null);

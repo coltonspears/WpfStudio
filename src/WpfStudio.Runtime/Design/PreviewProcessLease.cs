@@ -1,5 +1,4 @@
-using System.ComponentModel;
-using System.Diagnostics;
+using WpfStudio.Hosting;
 
 namespace WpfStudio.Runtime.Design;
 
@@ -7,17 +6,15 @@ namespace WpfStudio.Runtime.Design;
 internal sealed class PreviewProcessLease : IDisposable
 {
     private readonly object _ownership = new();
-    private readonly Process _process;
+    private readonly WorkerProcessHost _worker;
     private bool _revoked;
     private bool _disposed;
     private string? _reason;
 
-    public PreviewProcessLease(Process process, string sessionId)
+    public PreviewProcessLease(WorkerProcessHost worker, string sessionId)
     {
-        // Accessing Handle retains the launch's original OS object even after its PID is reusable.
-        _ = process.Handle;
-        _process = process;
-        ProcessId = process.Id;
+        _worker = worker;
+        ProcessId = worker.ProcessId;
         SessionId = sessionId;
     }
 
@@ -29,10 +26,10 @@ internal sealed class PreviewProcessLease : IDisposable
         get
         {
             lock (_ownership)
-                return !_disposed && !_revoked && !_process.HasExited;
+                return !_disposed && !_revoked && !_worker.HasExited;
         }
     }
-    public bool HasExited { get { lock (_ownership) return _disposed || _process.HasExited; } }
+    public bool HasExited { get { lock (_ownership) return _disposed || _worker.HasExited; } }
 
     /// <summary>Revokes the lease and ends the process. Never throws: callers run this inside their own cleanup, which must finish.</summary>
     public void Terminate(string reason)
@@ -50,11 +47,9 @@ internal sealed class PreviewProcessLease : IDisposable
     {
         _revoked = true;
         _reason ??= reason;
-        try { if (!_process.HasExited) _process.Kill(); }
-        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception) { /* Already gone, or exiting on its own. */ }
         // A process that ignores Kill for five seconds is left to the OS. Throwing here would abandon the caller's
         // cleanup half way through, which costs more than a stray process the OS reaps later.
-        _process.WaitForExit(5000);
+        _worker.Kill(TimeSpan.FromSeconds(5));
     }
 
     public void Dispose()
@@ -63,7 +58,7 @@ internal sealed class PreviewProcessLease : IDisposable
         {
             if (_disposed) return;
             try { TerminateCore("Preview process disposed."); }
-            finally { _disposed = true; _process.Dispose(); }
+            finally { _disposed = true; _worker.Dispose(); }
         }
     }
 }

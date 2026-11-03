@@ -10,7 +10,7 @@ namespace WpfStudio.App.Features.Profiling;
 
 /// <summary>Memory investigations are snapshot based. The target is never mutated by an estimate or field inspection.
 /// This file owns capture lifetime; the Overview, Types, Retention, Graph and Browser partials own their views.</summary>
-public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IFileDialogService files, IProcessMemorySampler sampler) : ObservableObject, IAsyncDisposable
+public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IFileDialogService files, IClipboardService clipboard, IProcessMemorySampler sampler) : ObservableObject, IAsyncDisposable
 {
     private readonly IProcessMemorySampler _sampler = sampler;
     public const int OverviewView = 0, TypesView = 1, RetentionView = 2, GraphView = 3;

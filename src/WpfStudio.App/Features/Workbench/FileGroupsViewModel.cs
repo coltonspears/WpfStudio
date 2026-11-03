@@ -32,7 +32,6 @@ public sealed record FileGroupEntry(FileGroupViewModel Group, string Path)
 /// <summary>Pinned file groups: open the files of a feature together instead of finding each one.</summary>
 public sealed partial class FileGroupsViewModel : ObservableObject
 {
-    public const string ToolId = "FileGroups";
     private readonly IWorkbenchHost _host;
     private readonly WorkspaceStateStore<FileGroup> _store;
     private string _lastGroupName = "";
@@ -74,7 +73,7 @@ public sealed partial class FileGroupsViewModel : ObservableObject
         foreach (var path in paths) group.Add(path);
         await SaveAsync();
         _host.ReportStatus($"{group.Name}: {group.Summary}");
-        _host.ShowTool(ToolId);
+        _host.ShowTool(Workbenches.FileGroups);
     }
     [RelayCommand] private Task AddActiveAsync() => _host.GuardAsync(() => AddToGroupAsync("Add file to group", _host.ActiveLocation is { } active ? [active.Path] : []));
     [RelayCommand] private Task AddOpenTabsAsync() => _host.GuardAsync(() => AddToGroupAsync("Pin open tabs as a group", _host.OpenDocumentPaths));

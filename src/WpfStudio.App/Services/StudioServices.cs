@@ -38,6 +38,9 @@ public static class StudioServices
         services.AddSingleton<DesktopDialogs>();
         services.AddSingleton<IFileDialogService>(sp => sp.GetRequiredService<DesktopDialogs>());
         services.AddSingleton<IUserDialogService>(sp => sp.GetRequiredService<DesktopDialogs>());
+        services.AddSingleton<IThemeService, ThemeService>();
+        services.AddSingleton<IDesktopService, DesktopService>();
+        services.AddSingleton<IClipboardService>(ClipboardService.Shared);
         services.AddSingleton(sp => new DocumentStore(DataDirectory(sp)));
         services.AddSingleton(sp => new SettingsStore(DataDirectory(sp)));
         services.AddSingleton<WorkspaceEditTransaction>();

@@ -12,10 +12,32 @@ namespace WpfStudio.Runtime.Terminal;
 /// <summary>
 /// Reusable presentation adapter: owns browser events, resize and render acknowledgements.
 /// A renderer lives as long as its session, so WPF reparenting and tab virtualization retain scrollback.
+/// It marshals through its own <c>Dispatcher</c> rather than <see cref="IUiDispatcher"/>: XAML creates
+/// it out of the container's reach, and a control hosting WebView2 cannot run without WPF, so the abstraction would buy nothing.
 /// </summary>
 public sealed partial class TerminalSurface : ContentControl
 {
+    // One renderer per session across every surface that shows it. A session can end on any thread, and each surface belongs to the dispatcher that created it.
+    private static readonly Lock RenderersGate = new();
     private static readonly Dictionary<ConPtySession, Renderer> Renderers = [];
+    private static Renderer RendererFor(ConPtySession session, System.Windows.Threading.Dispatcher dispatcher)
+    {
+        lock (RenderersGate)
+        {
+            if (!Renderers.TryGetValue(session, out var renderer)) Renderers.Add(session, renderer = new Renderer(session, dispatcher));
+            return renderer;
+        }
+    }
+    /// <summary>Forgets the session's renderer, or only <paramref name="expected"/> when given, and returns it for disposal.</summary>
+    private static Renderer? ForgetRenderer(ConPtySession session, Renderer? expected = null)
+    {
+        lock (RenderersGate)
+        {
+            if (!Renderers.TryGetValue(session, out var current) || expected is not null && !ReferenceEquals(current, expected)) return null;
+            Renderers.Remove(session);
+            return current;
+        }
+    }
     public static readonly DependencyProperty SessionProperty = DependencyProperty.Register(nameof(Session), typeof(ConPtySession), typeof(TerminalSurface), new PropertyMetadata(null, Changed));
     public ConPtySession? Session { get => (ConPtySession?)GetValue(SessionProperty); set => SetValue(SessionProperty, value); }
     public TerminalSurface() { Loaded += (_, _) => Attach(); Unloaded += (_, _) => Content = null; }
@@ -28,11 +50,7 @@ public sealed partial class TerminalSurface : ContentControl
         Renderer? renderer = null;
         try
         {
-            if (!Renderers.TryGetValue(session, out renderer))
-            {
-                renderer = new Renderer(session, Dispatcher);
-                Renderers.Add(session, renderer);
-            }
+            renderer = RendererFor(session, Dispatcher);
             if (renderer.Owner is { } previous && previous != this) previous.Content = null;
             renderer.Owner = this;
             Content = renderer.Browser;
@@ -44,7 +62,7 @@ public sealed partial class TerminalSurface : ContentControl
             // The renderer is only a view of the session. The shell keeps running and its output waits in the session's bounded channel for the next renderer.
             if (renderer is not null)
             {
-                if (Renderers.TryGetValue(session, out var current) && ReferenceEquals(current, renderer)) Renderers.Remove(session);
+                ForgetRenderer(session, renderer);
                 renderer.Dispose();
             }
             if (ReferenceEquals(Session, session)) Content = RendererFailure(ex.Message);
@@ -75,7 +93,7 @@ public sealed partial class TerminalSurface : ContentControl
         public TerminalSurface? Owner { get; set; }
         public WebView2 Browser { get; } = new();
         public Renderer(ConPtySession session, System.Windows.Threading.Dispatcher dispatcher) { this.session = session; this.dispatcher = dispatcher; session.Closed += OnSessionClosed; }
-        private void OnSessionClosed() => _ = dispatcher.BeginInvoke(() => { if (Renderers.Remove(session, out var removed)) removed.Dispose(); });
+        private void OnSessionClosed() => _ = dispatcher.BeginInvoke(() => ForgetRenderer(session)?.Dispose());
         public Task InitializeAsync() => initialization ??= InitializeCoreAsync();
         private async Task InitializeCoreAsync()
         {
@@ -147,7 +165,7 @@ public sealed partial class TerminalSurface : ContentControl
             {
                 await dispatcher.InvokeAsync(() =>
                 {
-                    if (Renderers.Remove(session, out var renderer)) renderer.Dispose();
+                    ForgetRenderer(session)?.Dispose();
                     if (owner is not null && ReferenceEquals(owner.Session, session))
                         owner.Content = new TextBlock { Text = message + "\nClose this terminal and create a new session.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) };
                 });

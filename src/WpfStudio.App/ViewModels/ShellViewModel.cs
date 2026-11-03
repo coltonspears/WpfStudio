@@ -10,6 +10,7 @@ using WpfStudio.App.Features.Review;
 using WpfStudio.App.Features.WpfExplorer;
 using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.App.Services;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
 using WpfStudio.Core.Documents;
@@ -35,6 +36,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly XamlResourceContext _xamlResources = new();
     private readonly IFileDialogService _files;
     private readonly IUserDialogService _dialogs;
+    private readonly IDesktopService _desktop;
+    private readonly IClipboardService _clipboard;
     private readonly IUiDispatcher _dispatcher;
     private readonly ILogger<ShellViewModel> _logger;
     private readonly StudioPaths _paths;
@@ -50,25 +53,23 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler, EditorPreferences editor, WpfStudio.Workspace.Xaml.XamlFormattingService xamlFormatter, ShellToolServices tools)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IDesktopService desktop, IClipboardService clipboard, IThemeService theme, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler, EditorPreferences editor, WpfStudio.Workspace.Xaml.XamlFormattingService xamlFormatter, ShellToolServices tools)
     {
-        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value; _xamlFormatter = xamlFormatter;
+        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _desktop = desktop; _clipboard = clipboard; Theme = theme; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value; _xamlFormatter = xamlFormatter;
         Debugger = debugger; Terminal = terminal; Database = database; Features = features; MemoryProfiler = memoryProfiler; Designer = designer; Editor = editor;
-        Designer.SourceEditRequested += PreviewDesignerEditAsync;
-        Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
-        Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
+        // System colours and syntax highlighting are not set until a theme is applied.
+        theme.Apply(ThemeName);
+        Designer.AttachSourceHost(this);
         Designer.SelectionSourceChanged += RevealDesignerSelection;
         TaskList = new(this, tools.Tasks); FileGroups = new(this, tools.FileGroups); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher, tools.WatchOpenDocuments);
         Palette = new(this); ChangeReview = new(this, dispatcher);
         XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
-        Explorer = new(this, Projects); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
+        Explorer = new(this, Projects, desktop, clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
-        ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) OnPropertyChanged(nameof(IsPreviewOpen)); };
+        ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) { OnPropertyChanged(nameof(IsPreviewOpen)); UpdateDesignerOverlay(); } };
+        Palette.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Palette.IsOpen)) UpdateDesignerOverlay(); };
         LiveInspection = new(dispatcher);
-        LiveInspection.LaunchRequested += debug => LaunchWithInspectionAsync(debug);
-        LiveInspection.SourceRequested += NavigateInspectionSourceAsync;
-        LiveInspection.BindingSourceRequested += NavigateInspectionBindingSourceAsync;
-        LiveInspection.SourceEditRequested += EditInspectionSourceAsync;
+        LiveInspection.AttachHost(this);
         features.Attach(this);
         InitializeExperience();
         InitializeWorkbench();
@@ -82,6 +83,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         };
         workspace.WorkerExited += (_, reason) => dispatcher.Post(() => { Status = "Language worker stopped. Use Restart language service to reconnect."; AppendOutput(reason); });
     }
+    public IThemeService Theme { get; }
     public DebuggerViewModel Debugger { get; }
     public TerminalViewModel Terminal { get; }
     public DatabasePaneViewModel Database { get; }
@@ -101,7 +103,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public event Action? LayoutResetRequested;
     public event Action? LayoutSaveRequested;
     public event Action? LayoutRestoreRequested;
-    public event Action<string>? ThemeChanged;
 
     [ObservableProperty, NotifyPropertyChangedFor(nameof(WindowTitle), nameof(HasWorkspace))] public partial WorkspaceSnapshot? Workspace { get; set; }
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SaveCommand))] public partial EditorViewModel? ActiveDocument { get; set; }
@@ -116,6 +117,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial string? LaunchProfile { get; set; }
     [ObservableProperty] public partial string SearchQuery { get; set; } = "";
     [ObservableProperty] public partial bool IsScaffoldOpen { get; set; }
+    partial void OnIsScaffoldOpenChanged(bool value) => UpdateDesignerOverlay();
+    private void UpdateDesignerOverlay() => Designer.IsOverlayOpen = Palette.IsOpen || IsScaffoldOpen || IsPreviewOpen || IsSettingsOpen;
     [ObservableProperty] public partial ScaffoldKind SelectedScaffoldKind { get; set; } = ScaffoldKind.ViewAndViewModel;
     [ObservableProperty] public partial string ScaffoldName { get; set; } = "CustomerView";
     [ObservableProperty] public partial bool AddDataTemplate { get; set; }
@@ -154,7 +157,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var assistant = Features.Assistant.InitializeAsync();
         var settings = await _settings.LoadAsync();
         await assistant;
-        ThemeName = settings.Theme; ThemeChanged?.Invoke(ThemeName);
+        ThemeName = settings.Theme;
         ShowInlayHints = settings.ShowInlayHints;
         ShowInlineBlame = settings.ShowInlineBlame;
         ShowCodeLens = settings.ShowCodeLens;
@@ -244,11 +247,19 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await RefreshWpfAsync();
             await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync();
             _ = TaskList.RefreshCommand.ExecuteAsync(null);
-            Status = $"{Projects.Count} projects · SDK {Workspace.SdkVersion}" + (Workspace.Cached ? " · refreshing project model…" : "");
+            ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
             await SaveSettingsAsync();
         }
         finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; XamlAnalysis.Request(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
         if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
+    }
+    // Any other status written meanwhile is newer than the refresh's result and stays.
+    private bool _statusShowsModelRefresh;
+    partial void OnStatusChanged(string value) => _statusShowsModelRefresh = false;
+    private void ShowWorkspaceStatus(WorkspaceSnapshot snapshot, bool refreshingModel)
+    {
+        Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}" + (refreshingModel ? " · refreshing project model…" : "");
+        _statusShowsModelRefresh = refreshingModel;
     }
     /// <summary>
     /// Closes every tab before the workspace changes, asking about each unsaved document first. Nothing is closed when any
@@ -291,7 +302,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             foreach (var issue in snapshot.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
             foreach (var doc in Documents) await doc.SyncAsync(_lifetime.Token);
             await RefreshWpfAsync();
-            if (Status.EndsWith("refreshing project model…", StringComparison.Ordinal)) Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}";
+            if (_statusShowsModelRefresh) ShowWorkspaceStatus(snapshot, refreshingModel: false);
             XamlAnalysis.Request();
         }
         catch (OperationCanceledException) { }
@@ -397,6 +408,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             Preferences = Editor,
             DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
+            XamlCodeActionApplier = ApplyXamlCodeActionAsync,
+            CSharpCodeActionApplier = (editor, action) => GuardAsync(() => ApplyCSharpCodeActionAsync(editor, action)),
             ShowInlayHints = ShowInlayHints,
             ShowInlineBlame = ShowInlineBlame,
             ShowCodeLens = ShowCodeLens,
@@ -414,8 +427,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
         vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
-        vm.CodeActionRequested += action => ApplyXamlCodeActionAsync(vm, action);
-        vm.CSharpCodeActionRequested += action => GuardAsync(() => ApplyCSharpCodeActionAsync(vm, action));
         vm.ContextChanged += () =>
         {
             if (ReferenceEquals(vm, ActiveDocument))
@@ -515,7 +526,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private Task RunBuildAsync(BuildOperation operation, string? target = null) => GuardAsync(async () =>
     {
         if (Workspace == null || IsBusy || _loading) return;
-        IsBusy = true; _operation = new(); ToolRequested?.Invoke("Output"); Output = "";
+        IsBusy = true; _operation = new(); ToolRequested?.Invoke(Workbenches.Output); Output = "";
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
@@ -548,7 +559,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
         if (!await EnsureDebuggerAsync()) return;
         if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
-        IsBusy = true; _operation = new(); ToolRequested?.Invoke("Debugger");
+        IsBusy = true; _operation = new(); ToolRequested?.Invoke(Workbenches.Debugger);
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
@@ -571,7 +582,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private async Task<bool> EnsureDebuggerAsync()
     {
         if (!Debugger.IsAdapterMissing) return true;
-        ToolRequested?.Invoke("Debugger");
+        ToolRequested?.Invoke(Workbenches.Debugger);
         Status = "Installing the debugger…";
         var ready = await Debugger.EnsureAdapterAsync(() => _dialogs.ConfirmAsync("Install the debugger",
             $"Debugging needs {Debugger.AdapterDescription}, which isn't installed. Download it now (about 5 MB from GitHub), verify its checksum and install it in your WpfStudio profile?"));
@@ -682,7 +693,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         await GuardAsync(async () =>
         {
             var query = SearchQuery; if (string.IsNullOrWhiteSpace(query)) return;
-            SearchResults.Clear(); ToolRequested?.Invoke("Search");
+            SearchResults.Clear(); ToolRequested?.Invoke(Workbenches.Search);
             var results = await Task.Run(async () =>
             {
                 var found = new List<NavigationResult>();
@@ -816,7 +827,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task ShowPackUriAsync() => GuardAsync(() =>
     {
         var path = WpfExplorer.SelectedItem?.Path ?? Explorer.SelectedNode?.Path;
-        if (path != null) { var owner = ResolveAssetOwner(path); var logicalPath = owner.Files.First(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).LogicalPath; var uri = ScaffoldingService.PackUri(owner.ProjectPath, path, owner.AssemblyName, logicalPath); AppendOutput(uri); ToolRequested?.Invoke("Output"); Status = uri; }
+        if (path != null) { var owner = ResolveAssetOwner(path); var logicalPath = owner.Files.First(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).LogicalPath; var uri = ScaffoldingService.PackUri(owner.ProjectPath, path, owner.AssemblyName, logicalPath); AppendOutput(uri); ToolRequested?.Invoke(Workbenches.Output); Status = uri; }
         return Task.CompletedTask;
     });
     private Task<bool> PreviewAsync(string title, IReadOnlyList<FileChange> changes, string warnings) => ChangeReview.ShowAsync(title, changes, warnings);
@@ -831,13 +842,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
     [RelayCommand] private void QuickOpen() => Palette.OpenFiles();
     [RelayCommand] private void CommandPalette() => Palette.OpenCommands();
-    [RelayCommand] private void ToggleTheme() { ThemeName = ThemeName == "Dark" ? "Light" : "Dark"; ThemeChanged?.Invoke(ThemeName); }
+    [RelayCommand] private void ToggleTheme() => ThemeName = ThemeName == "Dark" ? "Light" : "Dark";
     [RelayCommand] private void ShowTool(string? name)
     {
-        if (name == "Packages") _ = OpenPackagesCommand.ExecuteAsync(null);
-        else if (name == "Git") _ = OpenGitCommand.ExecuteAsync(null);
-        else if (name == "ColtonGPT") _ = OpenAssistantCommand.ExecuteAsync(null);
-        else if (name == "Designer") _ = OpenDesignerCommand.ExecuteAsync(null);
+        if (name == Workbenches.Packages) _ = OpenPackagesCommand.ExecuteAsync(null);
+        else if (name == Workbenches.Git) _ = OpenGitCommand.ExecuteAsync(null);
+        else if (name == Workbenches.Assistant) _ = OpenAssistantCommand.ExecuteAsync(null);
+        else if (name == Workbenches.Designer) _ = OpenDesignerCommand.ExecuteAsync(null);
         else if (name != null) ToolRequested?.Invoke(name);
     }
     [RelayCommand] private void SaveLayout() { LayoutSaveRequested?.Invoke(); Status = "Layout saved"; }

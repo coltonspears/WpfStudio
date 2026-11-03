@@ -38,7 +38,6 @@ public partial class App : Application
             var shell = _host.Services.GetRequiredService<ShellViewModel>();
             var window = _host.Services.GetRequiredService<MainWindow>();
             window.DataContext = shell; MainWindow = window;
-            shell.ThemeChanged += ThemeService.Apply;
 #pragma warning disable VSTHRD101 // A WPF event handler; the awaits below are guarded.
             window.Closed += async (_, _) =>
             {

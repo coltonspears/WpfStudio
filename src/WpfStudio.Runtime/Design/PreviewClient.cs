@@ -1,11 +1,8 @@
-using System.Diagnostics;
 using System.IO;
-using System.IO.Pipes;
 using System.Reflection;
-using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
 using StreamJsonRpc;
 using WpfStudio.Contracts;
+using WpfStudio.Hosting;
 using WpfStudio.Inspection.Protocol;
 using WpfStudio.PreviewDependencies;
 
@@ -19,7 +16,7 @@ public interface IPreviewClient : IPreviewRpc, IAsyncDisposable
 }
 
 /// <summary>Owns one isolated WPF process, with bounded requests and an independent native-interaction watchdog.</summary>
-public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? requestTimeout = null) : IPreviewClient
+public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? requestTimeout = null, TimeSpan? supersededRequestGrace = null) : IPreviewClient
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _lifecycle = new();
@@ -27,9 +24,10 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
     private CancellationTokenSource _requestEpoch = new();
     private Task _stopBarrier = Task.CompletedTask;
     private readonly TimeSpan _timeout = requestTimeout ?? TimeSpan.FromSeconds(30);
+    /// <summary>How long a superseded render may keep the host busy before it is treated as hung.</summary>
+    private readonly TimeSpan _supersededRequestGrace = supersededRequestGrace ?? TimeSpan.FromSeconds(3);
     private PreviewProcessLease? _lease;
     private PreviewShadowDirectory? _shadowDirectory;
-    private NamedPipeClientStream? _pipe;
     private JsonRpc? _rpc;
     private IPreviewRpc? _proxy;
     private string? _assembly;
@@ -165,14 +163,11 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         finally { if (releaseGate) _gate.Release(); }
     }
 
-    /// <summary>How long a superseded render may keep the host busy before it is treated as hung.</summary>
-    internal static TimeSpan SupersededRequestGrace { get; set; } = TimeSpan.FromSeconds(3);
-
     private async Task DrainSupersededAsync(Task call)
     {
         try
         {
-            try { await call.WaitAsync(SupersededRequestGrace, _shutdown.Token).ConfigureAwait(false); }
+            try { await call.WaitAsync(_supersededRequestGrace, _shutdown.Token).ConfigureAwait(false); }
             // The host acknowledged the cancellation before starting the work.
             catch (OperationCanceledException) when (!_shutdown.IsCancellationRequested) { }
             // A host that is still busy after the grace period, disconnected, or failed
@@ -189,30 +184,17 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
     {
         var host = hostPath ?? FindHost();
         if (!File.Exists(host)) throw new FileNotFoundException("Build WpfStudio.PreviewHost before opening the designer.", host);
-        var pipeName = "WpfStudio.Preview." + Guid.NewGuid().ToString("N");
         string sessionId = Guid.NewGuid().ToString("N");
-        var start = new ProcessStartInfo(host.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? "dotnet" : host)
-        {
-            WorkingDirectory = Path.GetDirectoryName(host)!, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardError = true, RedirectStandardOutput = true
-        };
-        start.Environment["ENABLE_XAML_DIAGNOSTICS_SOURCE_INFO"] = "1";
-        if (host.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) start.ArgumentList.Add(host);
-        start.ArgumentList.Add("--pipe"); start.ArgumentList.Add(pipeName);
-        start.ArgumentList.Add("--session"); start.ArgumentList.Add(sessionId);
-        start.ArgumentList.Add("--parent-process"); start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         var shadow = PreviewShadowDirectory.Create();
         _shadowDirectory = shadow;
-        start.ArgumentList.Add("--shadow-directory"); start.ArgumentList.Add(shadow.Path);
-        start.ArgumentList.Add("--shadow-token"); start.ArgumentList.Add(shadow.Token);
-        // Output arriving from an older process must never replace the current
-        // host's disconnect or connection-failure explanation.
-        string error = "";
-        var process = new Process { StartInfo = start, EnableRaisingEvents = true };
+        var worker = new WorkerProcessHost(new(host, "WpfStudio.Preview." + Guid.NewGuid().ToString("N"), TimeSpan.FromSeconds(15))
+        {
+            Arguments = ["--session", sessionId, "--parent-process", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--shadow-directory", shadow.Path, "--shadow-token", shadow.Token],
+            ConfigureStart = start => start.Environment["ENABLE_XAML_DIAGNOSTICS_SOURCE_INFO"] = "1"
+        });
         PreviewProcessLease? lease = null;
-        process.ErrorDataReceived += (_, args) => { if (args.Data != null) Volatile.Write(ref error, args.Data); };
-        process.OutputDataReceived += (_, _) => { };
-        process.Exited += (_, _) =>
+        worker.Exited += () =>
         {
             // HasExited can raise this event synchronously while the process lease
             // holds its ownership lock. Never invoke subscribers under that lock.
@@ -221,62 +203,30 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
                 shadow.CleanupAsync().Forget();
                 if (lease is not null && ReferenceEquals(Volatile.Read(ref _lease), lease) && _proxy is not null && !_disposed)
                 {
-                    string reason = lease.Reason ?? Volatile.Read(ref error);
+                    string reason = lease.Reason ?? worker.ErrorTail;
                     Disconnected?.Invoke(this, string.IsNullOrEmpty(reason) ? "Preview process exited. Refresh to reconnect." : reason);
                 }
             });
         };
-        try
-        {
-            process.Start();
-            lease = new PreviewProcessLease(process, sessionId);
-            Volatile.Write(ref _lease, lease);
-        }
-        catch
-        {
-            try { if (!process.HasExited) { process.Kill(); process.WaitForExit(5000); } }
-            catch (InvalidOperationException) { }
-            finally { process.Dispose(); }
-            throw;
-        }
-        process.BeginErrorReadLine(); process.BeginOutputReadLine();
-        _pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        try { await _pipe.ConnectAsync(15_000, token).ConfigureAwait(false); }
-        catch (TimeoutException ex) { throw new InvalidOperationException("Preview process could not connect. " + Volatile.Read(ref error), ex); }
-        if (!GetNamedPipeServerProcessId(_pipe.SafePipeHandle, out uint serverPid) || serverPid != lease.ProcessId)
-            throw new InvalidDataException("The preview pipe server is not the process launched for this session.");
-        _rpc = new JsonRpc(_pipe);
+        worker.Start();
+        lease = new PreviewProcessLease(worker, sessionId);
+        Volatile.Write(ref _lease, lease);
+        try { await worker.ConnectAsync(token).ConfigureAwait(false); }
+        catch (WorkerConnectionException ex) { throw new InvalidOperationException("Preview process could not connect. " + ex.ErrorTail, ex); }
+        _rpc = new JsonRpc(worker.Pipe);
         _proxy = _rpc.Attach<IPreviewRpc>();
         _rpc.StartListening();
         await ValidateSessionAsync(lease, token).ConfigureAwait(false);
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint processId);
-
     private static string FindHost()
     {
         var configuration = typeof(PreviewClient).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
-        var folders = new List<string> { Path.Combine(AppContext.BaseDirectory, "PreviewHost"), AppContext.BaseDirectory };
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory != null; directory = directory.Parent)
-            folders.Add(Path.Combine(directory.FullName, "src", "WpfStudio.PreviewHost", "bin", configuration, "net10.0-windows"));
-        foreach (var folder in folders)
-            foreach (var extension in new[] { ".exe", ".dll" })
-            {
-                var candidate = Path.Combine(folder, "WpfStudio.PreviewHost" + extension);
-                // Transitive project references can copy an apphost executable
-                // without its managed entry point. Skip those incomplete outputs
-                // and continue to the packaged or development host directory.
-                if (File.Exists(candidate) &&
-                    File.Exists(Path.Combine(folder, "WpfStudio.PreviewHost.dll")) &&
-                    File.Exists(Path.Combine(folder, "WpfStudio.PreviewHost.runtimeconfig.json")) &&
-                    File.Exists(Path.Combine(folder, "WpfStudio.Wpf.PropertyEditing.dll")) &&
-                    File.Exists(Path.Combine(folder, "WpfStudio.Wpf.Diagnostics.dll")) &&
-                    File.Exists(Path.Combine(folder, "WpfStudio.Inspection.Protocol.dll")) &&
-                    File.Exists(Path.Combine(folder, "WpfStudio.PreviewHost.deps.json"))) return candidate;
-            }
-        return Path.Combine(AppContext.BaseDirectory, "PreviewHost", "WpfStudio.PreviewHost.exe");
+        // Transitive project references can copy an apphost executable without its managed entry point. Skip those
+        // incomplete outputs and continue to the packaged or development host directory.
+        return WorkerHostLocator.Find("WpfStudio.PreviewHost", "PreviewHost", "net10.0-windows", [configuration], [".exe", ".dll"],
+            ["WpfStudio.PreviewHost.dll", "WpfStudio.PreviewHost.runtimeconfig.json", "WpfStudio.Wpf.PropertyEditing.dll", "WpfStudio.Wpf.Diagnostics.dll",
+             "WpfStudio.Inspection.Protocol.dll", "WpfStudio.PreviewHost.deps.json"]);
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default)
@@ -317,7 +267,7 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
     {
         var lease = Volatile.Read(ref _lease);
         var shadow = _shadowDirectory; _shadowDirectory = null;
-        _proxy = null; _rpc?.Dispose(); _rpc = null; _pipe?.Dispose(); _pipe = null;
+        _proxy = null; _rpc?.Dispose(); _rpc = null;
         if (lease is not null)
         {
             // Run independently of the editor dispatcher. Native parenting can couple

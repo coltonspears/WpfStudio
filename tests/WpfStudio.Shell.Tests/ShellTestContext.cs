@@ -19,12 +19,15 @@ internal sealed class ShellTestContext : IAsyncDisposable
     public XamlCompletionService Xaml { get; }
     public ShellViewModel Shell { get; }
     private readonly ServiceProvider _services;
+    internal FakeDesktop Desktop { get; } = new();
+    internal FakeTheme Theme { get; } = new();
     public ShellTestContext(WpfStudio.Runtime.Design.IPreviewClient? previewClient = null, Action<IServiceCollection>? configure = null)
     {
         Directory.CreateDirectory(Root);
         var services = new ServiceCollection().AddWpfStudio(Dispatcher);
         services.Configure<StudioPaths>(paths => paths.DataDirectory = Path.Combine(Root, "state"));
         services.AddSingleton<IFileDialogService>(Dialogs); services.AddSingleton<IUserDialogService>(Dialogs);
+        services.AddSingleton<IDesktopService>(Desktop); services.AddSingleton<IClipboardService>(Desktop); services.AddSingleton<IThemeService>(Theme);
         if (previewClient != null) services.AddSingleton(previewClient);
         configure?.Invoke(services);
         _services = services.BuildServiceProvider();

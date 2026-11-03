@@ -88,7 +88,7 @@ public sealed partial class GitViewModel
     private void OpenCommitOnRemote() => Open(Remote!.CommitUrl(CommitDetails!.Id));
     private void Open(string url)
     {
-        try { DesktopNavigation.OpenUrl(url); AppendOutput("Opened " + url); }
+        try { _desktop.OpenUrl(url); AppendOutput("Opened " + url); }
         catch (Exception ex) { Error = ex.Message; }
     }
 

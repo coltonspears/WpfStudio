@@ -12,6 +12,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     public const int ChangesTab = 0, HistoryTab = 1, OutputTab = 2;
 
     private readonly GitService _service;
+    private readonly IDesktopService _desktop;
     private readonly Func<CancellationToken, Task<bool>>? _saveBeforeOperation;
     private string? _workspacePath;
     private CancellationTokenSource? _operation;
@@ -24,9 +25,10 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     private Task _diffTask = Task.CompletedTask, _commitTask = Task.CompletedTask, _commitFileTask = Task.CompletedTask;
     private bool _quietSelection;
 
-    public GitViewModel(GitService service, Func<CancellationToken, Task<bool>>? saveBeforeOperation = null)
+    public GitViewModel(GitService service, IDesktopService desktop, Func<CancellationToken, Task<bool>>? saveBeforeOperation = null)
     {
         _service = service;
+        _desktop = desktop;
         _saveBeforeOperation = saveBeforeOperation;
     }
 

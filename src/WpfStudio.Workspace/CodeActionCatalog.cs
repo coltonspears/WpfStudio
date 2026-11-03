@@ -24,8 +24,7 @@ public sealed record CodeActionFileChange(string Path, SourceText? Before, Sourc
 public static class CodeActionCatalog
 {
     private static readonly Lazy<Providers> Loaded = new(Load);
-    /// <summary>Per-request budget. Slow providers are abandoned, not awaited.</summary>
-    public static TimeSpan Budget { get; set; } = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan DefaultBudget = TimeSpan.FromSeconds(8);
     public const int MaximumActions = 80;
 
     private sealed record Providers(ImmutableArray<CodeFixProvider> Fixes, ImmutableArray<CodeRefactoringProvider> Refactorings,
@@ -77,11 +76,13 @@ public static class CodeActionCatalog
         catch (Exception exception) when (exception is TargetInvocationException or MemberAccessException or TypeLoadException) { return null; }
     }
 
-    public static async Task<IReadOnlyList<CodeActionCandidate>> GetAsync(Document document, TextSpan span, CancellationToken cancellationToken)
+    /// <param name="timeLimit">Budget for diagnostics and fixes, and again for refactorings. Slow providers are abandoned, not awaited.</param>
+    public static async Task<IReadOnlyList<CodeActionCandidate>> GetAsync(Document document, TextSpan span, CancellationToken cancellationToken, TimeSpan? timeLimit = null)
     {
         var providers = Loaded.Value;
+        var limit = timeLimit ?? DefaultBudget;
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        budget.CancelAfter(Budget);
+        budget.CancelAfter(limit);
         var token = budget.Token;
         var results = new ConcurrentBag<CodeActionCandidate>();
         ImmutableArray<Diagnostic> diagnostics;
@@ -103,7 +104,7 @@ public static class CodeActionCatalog
 
         // Refactorings get their own budget, so slow diagnostics do not hide them.
         using var refactoringBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        refactoringBudget.CancelAfter(Budget);
+        refactoringBudget.CancelAfter(limit);
         token = refactoringBudget.Token;
         await IgnoreBudget(Parallel.ForEachAsync(providers.Refactorings, new ParallelOptions { CancellationToken = token, MaxDegreeOfParallelism = Environment.ProcessorCount }, async (provider, ct) =>
         {

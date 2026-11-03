@@ -166,7 +166,7 @@ public sealed partial class EditorSurface
                 var show = new Button { Content = "Show change", ToolTip = "Open this commit in Git history with this file's diff selected", Margin = new Thickness(0, 0, 4, 0) };
                 show.Click += (_, _) => { _historyPopup.IsOpen = false; vm.RequestBlameCommit(commit); };
                 var copy = new Button { Content = "Copy ID", ToolTip = commit.Commit };
-                copy.Click += (_, _) => { try { Clipboard.SetText(commit.Commit); } catch (System.Runtime.InteropServices.ExternalException) { } };
+                copy.Click += (_, _) => Services.ClipboardService.Shared.TrySetText(commit.Commit);
                 actions.Children.Add(show); actions.Children.Add(copy);
                 DockPanel.SetDock(actions, Dock.Right);
                 content.Children.Add(actions);

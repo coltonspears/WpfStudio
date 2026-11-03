@@ -25,7 +25,13 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
     private long _generation, _selection, _revision;
     private bool _refreshing, _rebuilding, _preservingTreeSelection, _debugging, _disposed;
     private readonly Dictionary<string, RuntimeNodeViewModel> _nodes = new(StringComparer.Ordinal);
-    public event Func<bool, Task>? LaunchRequested;
+    private IInspectionRequestHost? _host;
+    /// <summary>Connects the one owner that answers inspection's requests. A second owner is refused rather than replacing the first's answers.</summary>
+    public void AttachHost(IInspectionRequestHost host)
+    {
+        if (_host is not null) throw new InvalidOperationException("Live inspection already has a host.");
+        _host = host;
+    }
     public ObservableCollection<RuntimeNodeViewModel> Tree { get; } = [];
     public ObservableCollection<InspectionProperty> Properties { get; } = [];
     public ObservableCollection<InspectionProperty> Bindings { get; } = [];
@@ -117,8 +123,8 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
         }
         catch (OperationCanceledException) { }
     }
-    [RelayCommand] private Task RunAsync() => LaunchRequested?.Invoke(false) ?? Task.CompletedTask;
-    [RelayCommand] private Task DebugAsync() => LaunchRequested?.Invoke(true) ?? Task.CompletedTask;
+    [RelayCommand] private Task RunAsync() => _host?.LaunchAsync(false) ?? Task.CompletedTask;
+    [RelayCommand] private Task DebugAsync() => _host?.LaunchAsync(true) ?? Task.CompletedTask;
     [RelayCommand] private async Task RefreshAsync()
     {
         if (_disposed || _refreshing || IsPropertyOperationRunning || _session is not { IsConnected: true, IsDebuggerPaused: false } session) return;
@@ -252,7 +258,7 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
         ++_bindingSourceEpoch;
         RefreshBindingDeclarations(available: false);
         ClearAppearance("Inspector disconnected. Connect and refresh to inspect appearance.", invalidateElement: true);
-        _sourceStatus = null;
+        SourceStatus = null;
         IsPropertyOperationRunning = false;
         _poll?.Cancel(); _poll?.Dispose(); _poll = null;
         var session = _session; _session = null;

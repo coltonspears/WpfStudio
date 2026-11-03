@@ -10,6 +10,7 @@ using AvalonDock.Core;
 using AvalonDock.Layout;
 using AvalonDock.Serializer.Xml;
 using AvalonDock.Themes;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 
@@ -53,7 +54,7 @@ public static class DockingBehavior
             shell.LayoutSaveRequested += Save;
             shell.LayoutRestoreRequested += Restore;
             shell.LayoutResetRequested += Reset;
-            shell.ThemeChanged += ApplyTheme;
+            shell.Theme.Applied += ApplyTheme;
             if (manager.IsLoaded) Capture();
         }
         private void Loaded(object sender, RoutedEventArgs args) => Capture();
@@ -62,31 +63,29 @@ public static class DockingBehavior
             if (defaultLayout is not null) return;
             // Package and Git workbenches need document-sized space. Retain their
             // views here so closing/reopening tabs preserves feature state.
-            staticContent["Packages"] = new Features.Packages.PackagesPane { DataContext = shell.Features.Packages };
-            staticContent["Git"] = new Features.Git.GitPane { DataContext = shell.Features.Git };
-            staticContent["Profiler"] = new Features.Profiling.MemoryProfilerPane { DataContext = shell.MemoryProfiler };
-            staticTitles["Profiler"] = "Memory profiler";
-            staticContent["Designer"] = new Features.Designer.DesignerPane { DataContext = shell.Designer };
-            staticTitles["Designer"] = "XAML Designer";
-            staticContent["LiveInspection"] = new Features.Inspection.InspectionPane { DataContext = shell.LiveInspection };
-            staticTitles["LiveInspection"] = "Live XAML";
-            staticTitles["Packages"] = "NuGet packages"; staticTitles["Git"] = "Git changes";
+            staticContent[Workbenches.Packages] = new Features.Packages.PackagesPane { DataContext = shell.Features.Packages };
+            staticContent[Workbenches.Git] = new Features.Git.GitPane { DataContext = shell.Features.Git };
+            staticContent[Workbenches.Profiler] = new Features.Profiling.MemoryProfilerPane { DataContext = shell.MemoryProfiler };
+            staticTitles[Workbenches.Profiler] = "Memory profiler";
+            staticContent[Workbenches.Designer] = new Features.Designer.DesignerPane { DataContext = shell.Designer };
+            staticTitles[Workbenches.Designer] = "XAML Designer";
+            staticContent[Workbenches.LiveInspection] = new Features.Inspection.InspectionPane { DataContext = shell.LiveInspection };
+            staticTitles[Workbenches.LiveInspection] = "Live XAML";
+            staticTitles[Workbenches.Packages] = "NuGet packages"; staticTitles[Workbenches.Git] = "Git changes";
             foreach (var content in manager.Layout.Descendents().OfType<LayoutContent>().Where(x => x.Content is not EditorViewModel && !string.IsNullOrEmpty(x.ContentId)))
             {
                 if (content.Content is null) continue;
                 staticContent[content.ContentId] = content.Content;
                 staticTitles[content.ContentId] = content.Title;
-                if (content.ContentId == "Welcome") welcomeContent = content.Content;
+                if (content.ContentId == Workbenches.Welcome) welcomeContent = content.Content;
             }
             using var stream = new MemoryStream(); new XmlLayoutSerializer(manager).Serialize(stream); defaultLayout = stream.ToArray();
-            ApplyTheme(shell.ThemeName);
+            ApplyTheme(shell.Theme.Palette);
             SynchronizeDocuments();
         }
-        private void ApplyTheme(string name)
+        private void ApplyTheme(Palette palette)
         {
-            ThemeService.Apply(name);
-            var light = name.Equals("Light", StringComparison.OrdinalIgnoreCase);
-            if (manager.Theme is not Controls.StudioDockTheme current || current.IsLight != light) manager.Theme = new Controls.StudioDockTheme(light);
+            if (manager.Theme is not Controls.StudioDockTheme current || current.Palette != palette) manager.Theme = new Controls.StudioDockTheme(palette);
         }
         private void PropertyChanged(object? sender, PropertyChangedEventArgs args)
         {
@@ -100,7 +99,7 @@ public static class DockingBehavior
                 if (!ReferenceEquals(shell.ActiveDocument, editor)) shell.ActiveDocument = editor;
             }
             else if (manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => ReferenceEquals(d.Content, manager.ActiveContent)) is { } document)
-                shell.ActivateWorkbench(document.ContentId is "Packages" or "Git" or "Profiler" ? document.ContentId : null);
+                shell.ActivateWorkbench(Workbenches.IsDocument(document.ContentId) ? document.ContentId : null);
         }
         private void DocumentsChanged(object? sender, NotifyCollectionChangedEventArgs args) => _ = manager.Dispatcher.BeginInvoke(SynchronizeDocuments);
         private void SynchronizeDocuments()
@@ -123,9 +122,9 @@ public static class DockingBehavior
                 pane.Children.Add(new LayoutDocument { Content = editor, ContentId = editor.ContentId, Title = editor.Title });
                 activateNewEditor |= ReferenceEquals(requestedEditor, editor);
             }
-            var welcome = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(x => x.ContentId == "Welcome");
+            var welcome = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(x => x.ContentId == Workbenches.Welcome);
             if (shell.Documents.Count > 0 && welcome is not null) welcome.Parent?.RemoveChild(welcome);
-            else if (shell.Documents.Count == 0 && welcome is null && welcomeContent is not null) pane.Children.Add(new LayoutDocument { Content = welcomeContent, ContentId = "Welcome", Title = "Start", CanClose = false });
+            else if (shell.Documents.Count == 0 && welcome is null && welcomeContent is not null) pane.Children.Add(new LayoutDocument { Content = welcomeContent, ContentId = Workbenches.Welcome, Title = "Start", CanClose = false });
             if (requestedEditor is not null && (activateNewEditor || manager.ActiveContent is null)) manager.ActiveContent = requestedEditor;
         }
 #pragma warning disable VSTHRD100 // A WPF event must cancel synchronously; the awaits below are guarded.
@@ -134,7 +133,7 @@ public static class DockingBehavior
         {
             if (args.Document.Content is not EditorViewModel document)
             {
-                if (args.Document.ContentId is "Packages" or "Git" or "Profiler")
+                if (Workbenches.IsDocument(args.Document.ContentId))
                 {
                     var workbench = args.Document;
                     var pane = workbench.Parent as LayoutDocumentPane;
@@ -164,40 +163,40 @@ public static class DockingBehavior
             var selected = pane?.Children.FirstOrDefault(d => d.IsSelected)
                 ?? manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.IsSelected);
             if (selected?.Content is EditorViewModel editor) shell.ActiveDocument = editor;
-            else shell.ActivateWorkbench(selected?.ContentId is "Packages" or "Git" or "Profiler" ? selected.ContentId : null);
+            else shell.ActivateWorkbench(Workbenches.IsDocument(selected?.ContentId) ? selected!.ContentId : null);
         }
         private void ShowTool(string name)
         {
-            var aliases = name is "WPF" or "Resources" ? "WpfTools" : name is "Database" or "SQL Server" ? "Database" : name;
-            if (aliases is "Packages" or "Git" or "Profiler")
+            var id = Workbenches.Canonical(name);
+            if (Workbenches.IsDocument(id))
             {
                 Capture();
-                var document = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.ContentId == aliases);
+                var document = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.ContentId == id);
                 if (document == null && manager.Layout.Descendents().OfType<LayoutDocumentPane>().FirstOrDefault() is { } pane)
                 {
-                    document = new LayoutDocument { ContentId = aliases, Title = staticTitles[aliases], Content = staticContent[aliases], CanClose = true };
+                    document = new LayoutDocument { ContentId = id, Title = staticTitles[id], Content = staticContent[id], CanClose = true };
                     pane.Children.Add(document);
                 }
                 if (document != null) { document.IsSelected = true; document.IsActive = true; }
                 return;
             }
-            var tool = manager.Layout.Descendents().OfType<LayoutAnchorable>().Concat(manager.Layout.Hidden).FirstOrDefault(x => x.ContentId == aliases);
-            if (tool is null && staticContent.TryGetValue(aliases, out var content))
+            var tool = manager.Layout.Descendents().OfType<LayoutAnchorable>().Concat(manager.Layout.Hidden).FirstOrDefault(x => x.ContentId == id);
+            if (tool is null && staticContent.TryGetValue(id, out var content))
             {
-                tool = new LayoutAnchorable { ContentId = aliases, Content = content, Title = staticTitles[aliases], CanClose = false };
-                if (aliases is "Designer" or "LiveInspection" && manager.Layout.Descendents().OfType<LayoutAnchorable>()
-                    .FirstOrDefault(candidate => candidate.ContentId == "Output")?.Parent is LayoutAnchorablePane bottomPane)
+                tool = new LayoutAnchorable { ContentId = id, Content = content, Title = staticTitles[id], CanClose = false };
+                if (id is Workbenches.Designer or Workbenches.LiveInspection && manager.Layout.Descendents().OfType<LayoutAnchorable>()
+                    .FirstOrDefault(candidate => candidate.ContentId == Workbenches.Output)?.Parent is LayoutAnchorablePane bottomPane)
                     bottomPane.Children.Add(tool);
                 else tool.AddToLayout(manager, AnchorableShowStrategy.Bottom | AnchorableShowStrategy.Most);
             }
             if (tool is null) return;
             if (tool.IsHidden) tool.Show();
             if (tool.IsAutoHidden) tool.ToggleAutoHide();
-            if (aliases == "Debugger" && tool.Parent is LayoutAnchorablePane debugPane && debugPane.DockHeight.IsAbsolute && debugPane.DockHeight.Value < 320)
+            if (id == Workbenches.Debugger && tool.Parent is LayoutAnchorablePane debugPane && debugPane.DockHeight.IsAbsolute && debugPane.DockHeight.Value < 320)
                 debugPane.DockHeight = new GridLength(320);
-            if (aliases == "Designer" && tool.Parent is LayoutAnchorablePane designerPane && (!designerPane.DockHeight.IsAbsolute || designerPane.DockHeight.Value < 500))
+            if (id == Workbenches.Designer && tool.Parent is LayoutAnchorablePane designerPane && (!designerPane.DockHeight.IsAbsolute || designerPane.DockHeight.Value < 500))
                 designerPane.DockHeight = new GridLength(500);
-            if (aliases == "LiveInspection" && tool.Parent is LayoutAnchorablePane inspectionPane && (!inspectionPane.DockHeight.IsAbsolute || inspectionPane.DockHeight.Value < 420))
+            if (id == Workbenches.LiveInspection && tool.Parent is LayoutAnchorablePane inspectionPane && (!inspectionPane.DockHeight.IsAbsolute || inspectionPane.DockHeight.Value < 420))
                 inspectionPane.DockHeight = new GridLength(420);
             tool.IsSelected = true; tool.IsActive = true;
         }
@@ -235,7 +234,7 @@ public static class DockingBehavior
                 serializer.LayoutSerializationCallback += (_, args) =>
                 {
                     var id = args.Model.ContentId;
-                    if (id == "Welcome" && shell.Documents.Count > 0) { args.Cancel = true; return; }
+                    if (id == Workbenches.Welcome && shell.Documents.Count > 0) { args.Cancel = true; return; }
                     var editor = shell.Documents.FirstOrDefault(x => string.Equals(x.ContentId, id, StringComparison.OrdinalIgnoreCase));
                     if (editor is not null) args.Content = editor;
                     else if (id is not null && staticContent.TryGetValue(id, out var content)) args.Content = content;
@@ -251,7 +250,7 @@ public static class DockingBehavior
         {
             manager.Loaded -= Loaded; manager.DocumentClosing -= DocumentClosing; manager.ActiveContentChanged -= ActiveChanged;
             shell.PropertyChanged -= PropertyChanged; shell.Documents.CollectionChanged -= DocumentsChanged;
-            shell.ToolRequested -= ShowTool; shell.WorkbenchCloseRequested -= CloseWorkbench; shell.LayoutSaveRequested -= Save; shell.LayoutRestoreRequested -= Restore; shell.LayoutResetRequested -= Reset; shell.ThemeChanged -= ApplyTheme;
+            shell.ToolRequested -= ShowTool; shell.WorkbenchCloseRequested -= CloseWorkbench; shell.LayoutSaveRequested -= Save; shell.LayoutRestoreRequested -= Restore; shell.LayoutResetRequested -= Reset; shell.Theme.Applied -= ApplyTheme;
         }
     }
 }

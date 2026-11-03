@@ -13,7 +13,7 @@ using WpfStudio.Contracts;
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -130,6 +130,17 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
 
     WorkspaceSnapshot? IInspectionSourceHost.Workspace => Workspace;
 
+    // ------------------------------------------------------------------ IDesignerSourceHost
+    Task<bool> IDesignerSourceHost.ReviewPropertyEditAsync(XamlPropertyEditResult proposal) => PreviewDesignerEditAsync(proposal);
+    Task<bool> IDesignerSourceHost.ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit) => PreviewDesignerLayoutEditAsync(edit);
+    Task<string> IDesignerSourceHost.NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigatePreviewBindingSourceAsync(navigation, cancellationToken);
+
+    // ------------------------------------------------------------------ IInspectionRequestHost
+    Task IInspectionRequestHost.LaunchAsync(bool debug) => LaunchWithInspectionAsync(debug);
+    Task<string> IInspectionRequestHost.NavigateSourceAsync(InspectionSourceRequest request, CancellationToken cancellationToken) => NavigateInspectionSourceAsync(request, cancellationToken);
+    Task<string> IInspectionRequestHost.NavigateBindingSourceAsync(InspectionBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigateInspectionBindingSourceAsync(navigation, cancellationToken);
+    Task<InspectionSourceEditOutcome> IInspectionRequestHost.EditSourceAsync(InspectionSourceEditRequest request, CancellationToken cancellationToken) => EditInspectionSourceAsync(request, cancellationToken);
+
     // ------------------------------------------------------------------ WPF Explorer
     /// <summary>The resource declared at, or referenced from, the active caret; null (with a status) when the index no longer matches the buffer.</summary>
     private ResourceDeclaration? ResourceAtCaret()
@@ -146,7 +157,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
 
     private IEnumerable<PaletteEntry> FileGroupCommands()
     {
-        yield return Command("View", "File groups", ShowToolCommand, FileGroupsViewModel.ToolId, icon: "Pin", detail: "Pinned sets of files for a feature");
+        yield return Command("View", "File groups", ShowToolCommand, Workbenches.FileGroups, icon: "Pin", detail: "Pinned sets of files for a feature");
         yield return Command("Window", "Pin open tabs as a file group…", FileGroups.AddOpenTabsCommand, icon: "Pin");
         yield return Command("Window", "Add file to a file group…", FileGroups.AddActiveCommand, icon: "Pin");
         foreach (var group in FileGroups.Groups)

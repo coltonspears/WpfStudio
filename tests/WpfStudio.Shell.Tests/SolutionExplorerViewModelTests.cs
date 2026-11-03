@@ -18,7 +18,7 @@ public sealed class SolutionExplorerViewModelTests
     {
         var host = new Host { WorkspacePath = Path.Combine(Root, "Shop.sln") };
         var projects = new ObservableCollection<WorkspaceProject> { Project("Shop", @"Views\CustomerView.xaml", @"Models\Order.cs"), Project("Shop.Tests", "OrderTests.cs") };
-        var explorer = new SolutionExplorerViewModel(host, projects);
+        var explorer = new SolutionExplorerViewModel(host, projects, new FakeDesktop(), new FakeDesktop());
         Assert.True(explorer.ShowPlaceholder);
 
         explorer.Rebuild(keepState: false);
@@ -50,7 +50,7 @@ public sealed class SolutionExplorerViewModelTests
     {
         var host = new Host { WorkspacePath = Path.Combine(Root, "Shop", "Shop.csproj") };
         var projects = new ObservableCollection<WorkspaceProject> { Project("Shop", "MainWindow.xaml", "MainWindow.xaml.cs") };
-        var explorer = new SolutionExplorerViewModel(host, projects);
+        var explorer = new SolutionExplorerViewModel(host, projects, new FakeDesktop(), new FakeDesktop());
         explorer.Rebuild(keepState: false);
         var project = Assert.Single(explorer.Nodes);
         Assert.Equal(ExplorerNodeKind.Project, project.Kind);
@@ -69,7 +69,7 @@ public sealed class SolutionExplorerViewModelTests
     {
         var host = new Host { WorkspacePath = Path.Combine(Root, "Shop.sln") };
         var projects = new ObservableCollection<WorkspaceProject> { Project("Shop", "Program.cs"), Project("Shop.Tests", "Tests.cs") };
-        var explorer = new SolutionExplorerViewModel(host, projects);
+        var explorer = new SolutionExplorerViewModel(host, projects, new FakeDesktop(), new FakeDesktop());
         explorer.Rebuild(keepState: false);
         explorer.SelectedNode = explorer.Nodes[0].Children[1];
         explorer.SetStartupProjectCommand.Execute(null);
@@ -109,6 +109,23 @@ public sealed class SolutionExplorerViewModelTests
         Assert.Equal("Shop", RelatedFileLocator.LocationFor(Path.Combine(Root, "Program.cs"), Root));
         Assert.Equal("…  ›  c  ›  d  ›  e", RelatedFileLocator.LocationFor(Path.Combine(Root, "a", "b", "c", "d", "e", "Deep.cs"), Root));
         Assert.Equal(Path.Combine(Path.GetTempPath(), "Elsewhere").TrimEnd(Path.DirectorySeparatorChar), RelatedFileLocator.RelativeDirectory(Path.Combine(Path.GetTempPath(), "Elsewhere", "File.cs"), Root));
+    }
+
+    [Fact]
+    public void RevealAndCopyGoThroughTheDesktopServices()
+    {
+        var host = new Host();
+        var desktop = new FakeDesktop();
+        var explorer = new SolutionExplorerViewModel(host, [], desktop, desktop) { SelectedNode = new ExplorerNode("View.xaml", Path.Combine(Root, "View.xaml"), ExplorerNodeKind.File) };
+        explorer.RevealSelectedCommand.Execute(null);
+        explorer.CopySelectedPathCommand.Execute(null);
+        Assert.Equal([explorer.SelectedNode.Path], desktop.Revealed);
+        Assert.Equal([explorer.SelectedNode.Path], desktop.Copied);
+        Assert.Equal("", host.Status);
+
+        desktop.ClipboardBusy = true;
+        explorer.CopySelectedPathCommand.Execute(null);
+        Assert.Contains("clipboard", host.Status);
     }
 
     private sealed class Host : ISolutionExplorerHost

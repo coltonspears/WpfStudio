@@ -66,7 +66,7 @@ public partial class GitPane : UserControl
     }
 
     /// <summary>Copies its string parameter. A command rather than Click handlers, which WPF cannot connect inside style-defined context menus.</summary>
-    public static ICommand CopyCommand { get; } = new CommunityToolkit.Mvvm.Input.RelayCommand<string>(Copy, text => !string.IsNullOrEmpty(text));
+    public static ICommand CopyCommand { get; } = new CommunityToolkit.Mvvm.Input.RelayCommand<string>(text => Services.ClipboardService.Shared.TrySetText(text!), text => !string.IsNullOrEmpty(text));
 
     /// <summary>A double-click on the list's empty area or scroll bar must not act on the selected row.</summary>
     private static T? ItemUnderMouse<T>(MouseButtonEventArgs args) where T : class =>
@@ -79,12 +79,5 @@ public partial class GitPane : UserControl
                 ? System.Windows.Media.VisualTreeHelper.GetParent(element)
                 : LogicalTreeHelper.GetParent(element);
         return element as ListBoxItem;
-    }
-
-    private static void Copy(string? text)
-    {
-        if (string.IsNullOrEmpty(text)) return;
-        try { Clipboard.SetText(text); }
-        catch (System.Runtime.InteropServices.ExternalException) { }
     }
 }

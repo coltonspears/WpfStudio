@@ -65,15 +65,13 @@ public sealed class ShellExperienceTests
     public async Task ThemeCanBeChosenDirectlyAndReportsItsState()
     {
         await using var test = new ShellTestContext();
-        string? applied = null;
-        test.Shell.ThemeChanged += name => applied = name;
         Assert.True(test.Shell.IsDarkTheme);
         test.Shell.SetThemeCommand.Execute("Light");
-        Assert.Equal("Light", applied);
+        Assert.Equal("Light", test.Theme.Applications[^1]);
         Assert.True(test.Shell.IsLightTheme);
         Assert.False(test.Shell.IsDarkTheme);
-        applied = null;
+        var applications = test.Theme.Applications.Count;
         test.Shell.SetThemeCommand.Execute("Light");
-        Assert.Null(applied);
+        Assert.Equal(applications, test.Theme.Applications.Count);
     }
 }

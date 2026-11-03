@@ -28,8 +28,7 @@ public sealed partial class MemoryProfilerViewModel
     private void CopyText(string? text)
     {
         if (string.IsNullOrEmpty(text)) return;
-        try { System.Windows.Clipboard.SetText(text); Status = text.Length <= 80 ? $"Copied {text}." : "Copied to the clipboard."; }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException) { }
+        if (clipboard.TrySetText(text)) Status = text.Length <= 80 ? $"Copied {text}." : "Copied to the clipboard.";
     }
 
     /// <summary>True when the type exists in the current snapshot (types that only exist in the baseline cannot be opened).</summary>

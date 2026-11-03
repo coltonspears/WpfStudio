@@ -16,7 +16,6 @@ public sealed partial class DesignerViewModel
     private long _layoutGestureEpoch;
     private bool _layoutReviewPending;
 
-    public event Func<DesignerLayoutSourceEdit, Task<bool>>? LayoutEditRequested;
     [ObservableProperty] public partial bool IsLayoutEditingEnabled { get; set; }
     [ObservableProperty] public partial bool SnapToLayout { get; set; } = true;
     [ObservableProperty] public partial PreviewLayoutEditContext? LayoutEditing { get; set; }
@@ -70,7 +69,7 @@ public sealed partial class DesignerViewModel
         && _appearancePropertyOperations == 0 && _document?.Version == _sourceVersion && _sourceHash is not null
         && LayoutEditing is { Available: true, Token.Length: > 0, Element: not null, Parent: not null, Bounds: not null } context
         && context.Version == _revision && context.NodeId == SelectedNode?.Node.Id && context.NodeId == _inspectedNodeId
-        && context.SourceHash == _sourceHash && context.Surface == _snapshot?.Surface && LayoutEditRequested is not null
+        && context.SourceHash == _sourceHash && context.Surface == _snapshot?.Surface && _sourceHost is not null
         && IsScenarioConfigurationCurrent();
 
     [RelayCommand]
@@ -131,8 +130,8 @@ public sealed partial class DesignerViewModel
                 documentForEdit.Version, sourceVersionForEdit, sourceHashForEdit, captured, bounds, request.Handle,
                 SourceAssembly: _sourceAssembly));
             if (!proposal.Success) { Status = proposal.Error ?? proposal.Explanation; return; }
-            if (!StillCurrent() || LayoutEditRequested is not { } apply) return;
-            bool applied = await apply(new(proposal, StillCurrent, Validate));
+            if (!StillCurrent() || _sourceHost is not { } host) return;
+            bool applied = await host.ReviewLayoutEditAsync(new(proposal, StillCurrent, Validate));
             if (!_disposed && ReferenceEquals(documentForEdit, _document))
                 Status = applied ? "Layout updated in XAML. Save writes the file; Undo workspace edit restores the whole gesture."
                     : "Layout edit cancelled.";

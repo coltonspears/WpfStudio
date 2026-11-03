@@ -133,7 +133,7 @@ public sealed partial class DesignerViewModel
     }
 
     partial void OnDisplayImageChanged(byte[]? value) => NotifyCanvasState();
-    partial void OnStatusChanged(string value) { if (DisplayImage is null) OnPropertyChanged(nameof(EmptyCanvasText)); }
+    partial void OnStatusChanged(string value) { _statusShowsSnapshotUpdate = false; if (DisplayImage is null) OnPropertyChanged(nameof(EmptyCanvasText)); }
 
     // ------------------------------------------------------------------ Zoom
 

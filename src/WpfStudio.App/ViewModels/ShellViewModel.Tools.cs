@@ -2,6 +2,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.Runtime.Debugging;
 using WpfStudio.Contracts;
 
@@ -14,6 +15,7 @@ public sealed partial class ShellViewModel
     private EditorViewModel? _assistantContextDocument;
     public StudioFeatures Features { get; }
     [ObservableProperty] public partial bool IsSettingsOpen { get; set; }
+    partial void OnIsSettingsOpenChanged(bool value) => UpdateDesignerOverlay();
     partial void OnActiveDocumentChanged(EditorViewModel? value)
     {
         if (value != null) { ActiveWorkbench = null; _assistantContextDocument = value; }
@@ -30,12 +32,12 @@ public sealed partial class ShellViewModel
         ActiveWorkbench = name;
         ActiveDocument = null;
         // Restored tabs get the same lazy initialization as a menu-opened tab.
-        if (name == "Git" && !_gitToolOpened)
+        if (name == Workbenches.Git && !_gitToolOpened)
         {
             _gitToolOpened = true;
             _ = GuardAsync(() => Features.Git.SetWorkspaceAsync(Workspace?.Path));
         }
-        else if (name == "Packages" && !_packagesToolOpened)
+        else if (name == Workbenches.Packages && !_packagesToolOpened)
         {
             _packagesToolOpened = true;
             Features.Packages.SetWorkspace(Workspace);
@@ -52,20 +54,20 @@ public sealed partial class ShellViewModel
     [RelayCommand] private Task OpenPackagesAsync() => GuardAsync(async () =>
     {
         _packagesToolOpened = true;
-        ToolRequested?.Invoke("Packages"); Features.Packages.SetWorkspace(Workspace);
+        ToolRequested?.Invoke(Workbenches.Packages); Features.Packages.SetWorkspace(Workspace);
         await Features.Packages.ActivateAsync();
     });
     [RelayCommand] private Task OpenSelectedProjectPackagesAsync() => OpenProjectPackagesAsync(Explorer.SelectedNode?.ProjectPath);
     private Task OpenProjectPackagesAsync(string? projectPath) => GuardAsync(async () =>
     {
         _packagesToolOpened = true;
-        ToolRequested?.Invoke("Packages"); Features.Packages.SetWorkspace(Workspace);
+        ToolRequested?.Invoke(Workbenches.Packages); Features.Packages.SetWorkspace(Workspace);
         if (Features.Packages.Projects.FirstOrDefault(project => project.ProjectPath.Equals(projectPath, StringComparison.OrdinalIgnoreCase)) is { } selected)
             Features.Packages.SelectedProject = selected;
         await Features.Packages.ActivateAsync();
     });
-    [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { _gitToolOpened = true; ToolRequested?.Invoke("Git"); await Features.Git.SetWorkspaceAsync(Workspace?.Path); });
-    [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { UpdateAssistantContext(); ToolRequested?.Invoke("ColtonGPT"); await Features.Assistant.InitializeAsync(); });
+    [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { _gitToolOpened = true; ToolRequested?.Invoke(Workbenches.Git); await Features.Git.SetWorkspaceAsync(Workspace?.Path); });
+    [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { UpdateAssistantContext(); ToolRequested?.Invoke(Workbenches.Assistant); await Features.Assistant.InitializeAsync(); });
     [RelayCommand] private Task RefactorAsync(string? action) => GuardAsync(async () =>
     {
         if (ActiveDocument is not { IsReadOnly: false } document || document.State.Extension != ".cs" || action == null) { Status = "Open a C# source document to use this refactoring"; return; }

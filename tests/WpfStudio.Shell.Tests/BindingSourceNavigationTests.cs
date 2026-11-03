@@ -131,7 +131,7 @@ public sealed partial class DesignerTests
         client.BindingSource = request => Task.FromResult(new BindingSourceResponse(request, false, Status: "Template clone origin is unavailable."));
         await using var model = new DesignerViewModel(client, new InlineDispatcher());
         int navigations = 0;
-        model.BindingSourceRequested += (_, _) => { navigations++; return Task.FromResult("Unexpected navigation"); };
+        model.StubHost().BindingSource = (_, _) => { navigations++; return Task.FromResult("Unexpected navigation"); };
         await model.OpenAsync(Document("Binding.xaml")); model.SelectedNode = model.Tree[0];
         Assert.Contains("omitted", model.BindingDeclarationCoverage);
         await model.ShowBindingSourceCommand.ExecuteAsync(model.SelectedBindingDeclaration);
@@ -168,7 +168,7 @@ public sealed partial class InspectionViewModelTests
         var session = BindingSourceSession(truncated: true);
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int navigations = 0;
-        model.BindingSourceRequested += async (request, token) =>
+        model.StubHost().BindingSource = async (request, token) =>
         {
             Assert.Equal("second-expression", request.Declaration.ExpressionId);
             await model.RefreshCommand.ExecuteAsync(null);
@@ -204,7 +204,7 @@ public sealed partial class InspectionViewModelTests
         var respond = session.BindingSource; session.BindingSource = _ => reply.Task;
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int navigations = 0;
-        model.BindingSourceRequested += (_, _) => { navigations++; return Task.FromResult("Unexpected navigation"); };
+        model.StubHost().BindingSource = (_, _) => { navigations++; return Task.FromResult("Unexpected navigation"); };
         await model.AttachAsync(session, debugging: true); model.SelectedNode = model.Tree[0]; model.SelectedProperty = model.Properties[0];
         var selected = model.SelectedBindingDeclaration;
         var pending = model.ShowBindingSourceCommand.ExecuteAsync(selected);
@@ -233,7 +233,7 @@ public sealed partial class InspectionViewModelTests
                 new("Nmae", "PathError", "MissingProperty", "Missing Nmae"))], ScannedBindingNodes: ["first"]);
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int navigations = 0;
-        model.BindingSourceRequested += async (request, token) =>
+        model.StubHost().BindingSource = async (request, token) =>
         { Assert.True((await request.RevalidateAsync(token)).Available); navigations++; return "Opened current binding declaration"; };
         await model.AttachAsync(session);
         var issue = Assert.Single(Assert.Single(model.IssueGroups).Instances);
@@ -254,7 +254,7 @@ public sealed partial class InspectionViewModelTests
         session.BindingSource = async request => (await respond(request)) with { Request = request with { DeclarationId = "other" } };
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int navigations = 0;
-        model.BindingSourceRequested += (_, _) => { navigations++; return Task.FromResult("Unexpected"); };
+        model.StubHost().BindingSource = (_, _) => { navigations++; return Task.FromResult("Unexpected"); };
         await model.AttachAsync(session); model.SelectedNode = model.Tree[0];
         await model.ShowBindingSourceCommand.ExecuteAsync(model.SelectedBindingDeclaration);
         Assert.Equal(0, navigations);
@@ -270,7 +270,7 @@ public sealed partial class InspectionViewModelTests
                 new("Nmae", "PathError", "MissingProperty", "Missing Nmae"))], ScannedBindingNodes: ["first"]);
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         int navigations = 0;
-        model.BindingSourceRequested += (_, _) => { navigations++; return Task.FromResult("Unexpected"); };
+        model.StubHost().BindingSource = (_, _) => { navigations++; return Task.FromResult("Unexpected"); };
         await model.AttachAsync(session); model.SelectedNode = model.Tree[0];
         var read = new TaskCompletionSource<InspectionElement>();
         var inspect = session.Inspect;

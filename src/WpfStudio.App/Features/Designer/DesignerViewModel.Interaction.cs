@@ -11,6 +11,8 @@ public sealed partial class DesignerViewModel
 
     [ObservableProperty] public partial IPreviewInteractionSession? InteractionSession { get; set; }
     [ObservableProperty] public partial bool IsInteracting { get; set; }
+    /// <summary>An IDE overlay covers the window. The shell sets this; the native preview hides meanwhile because it would draw over the overlay.</summary>
+    [ObservableProperty] public partial bool IsOverlayOpen { get; set; }
     public double InteractionWidth => _snapshot?.PixelWidth ?? 0;
     public double InteractionHeight => _snapshot?.PixelHeight ?? 0;
     public bool CanInteract => !_disposed && IsCurrent && !IsBusy && _snapshot?.Surface is not null

@@ -5,6 +5,7 @@ namespace WpfStudio.App.Features.Designer;
 
 public sealed partial class DesignerViewModel
 {
+    private bool _statusShowsSnapshotUpdate;
     private bool CanUpdateSnapshot() => !_disposed && IsCurrent && !IsBusy;
 
     [RelayCommand(CanExecute = nameof(CanUpdateSnapshot))]
@@ -32,6 +33,7 @@ public sealed partial class DesignerViewModel
         LayoutDetails.Clear("Updating the preview observation…");
         IsBusy = true;
         Status = "Updating snapshot without recreating the view…";
+        _statusShowsSnapshotUpdate = true;
         try
         {
             var snapshot = await _client.CaptureAsync(new(revision), _lifetime.Token);
@@ -83,8 +85,7 @@ public sealed partial class DesignerViewModel
             if (Current(revision))
             {
                 IsBusy = false;
-                if (Status == "Updating snapshot without recreating the view…")
-                    Status = "The preview selection changed during capture. Update the snapshot again.";
+                if (_statusShowsSnapshotUpdate) Status = "The preview selection changed during capture. Update the snapshot again.";
             }
             NotifySourceCommands();
             RefreshAppearanceSelection();

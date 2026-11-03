@@ -187,6 +187,7 @@ Settings, layouts, recovery data, and SQL connection profiles live under `%LOCAL
 | `WpfStudio.App` | WPF shell, docking, editor, package/Git/ColtonGPT tools, application composition |
 | `WpfStudio.Contracts` | Versioned documents, diagnostics, workspace edits, process-neutral interfaces |
 | `WpfStudio.Core` | Document recovery/edit transactions, settings, WPF indexing and generation |
+| `WpfStudio.Hosting` | Worker process lifetime: launch, named pipe, connect budget, server identity check, stderr tail, kill |
 | `WpfStudio.Workspace` / `WorkspaceHost` | Named-pipe JSON-RPC, SDK/MSBuild discovery, Roslyn, build execution |
 | `WpfStudio.Runtime` | Debug Adapter Protocol/netcoredbg and ConPTY/WebView2 terminal |
 | `WpfStudio.Database` | SQL profiles, schema browsing, batch execution, bounded results, SQL pane |
