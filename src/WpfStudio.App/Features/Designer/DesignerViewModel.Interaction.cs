@@ -112,8 +112,8 @@ public sealed partial class DesignerViewModel
 
     partial void OnIsInteractingChanged(bool value)
     {
-        if (value) ClearLayoutEditing();
-        NotifyLayoutEditingState();
+        if (value) LayoutGesture.Clear();
+        LayoutGesture.NotifyStatus();
         NotifyInteractionState();
     }
     private void NotifyInteractionState()

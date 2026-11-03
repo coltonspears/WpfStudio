@@ -10,42 +10,28 @@ public sealed partial class WorkspaceEngine
 {
     private const int DiskDocumentCharacters = 2_000_000;
     private const int DiskRefreshCharacters = 16_000_000;
-    private long _semanticRevision;
-    private readonly Dictionary<ProjectId, string[]> _xamlInventory = [];
-    private readonly HashSet<ProjectId> _xamlInventoryUnavailable = [];
-    private readonly Dictionary<string, DocumentId[]> _diskDocuments = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string> _diskUnavailable = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _diskPending = new(StringComparer.OrdinalIgnoreCase);
-    private readonly SemaphoreSlim _diskRefreshGate = new(1, 1);
-    private string? _diskCursor;
-    private readonly Dictionary<BatchCacheKey, BatchAnalysis> _xamlBatchCache = [];
 
     private sealed record BatchCacheKey(ProjectId Project, string Path, string Hash, string Resources);
     private sealed record BatchAnalysis(WorkspaceDiagnostic[] Diagnostics, bool Complete, string? Status);
     private sealed record DiskText(string? Text, string State, string? Status = null);
 
-    // Called with _gate held. Neither replayed open buffers nor fallback directory listings
-    // define project ownership: these inventories come from the evaluated workspace only.
     private void ResetProjectAnalysis()
     {
-        _xamlInventory.Clear();
-        _xamlResourceInventory.Clear();
-        _xamlInventoryUnavailable.Clear();
-        _diskDocuments.Clear();
-        _diskUnavailable.Clear();
-        _diskPending.Clear();
-        _diskCursor = null;
-        _xamlBatchCache.Clear();
-        ResetProjectDiagnostics();
+        AssertGateHeld();
+        _ownership.Reset();
+        _disk.Reset();
+        _batchCache.Clear();
+        _projectDiagnostics.Reset();
     }
 
     private void CaptureDiskDocuments(IEnumerable<Project> projects)
     {
+        AssertGateHeld();
         foreach (var group in projects.SelectMany(project => project.Documents)
                      .Where(document => document.FilePath is { } path && !IsGenerated(path)
                          && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
                      .GroupBy(document => Path.GetFullPath(document.FilePath!), StringComparer.OrdinalIgnoreCase))
-            _diskDocuments[group.Key] = group.Select(document => document.Id).ToArray();
+            _disk.Documents[group.Key] = group.Select(document => document.Id).ToArray();
     }
 
     /// <summary>
@@ -60,7 +46,7 @@ public sealed partial class WorkspaceEngine
         int maximum = Math.Clamp(request.MaximumFiles, 1, 2048);
         if (request.Paths is { Count: > 16384 }) return new(false, false, 0, true, "Too many model paths were requested for one refresh.");
         var requested = request.Paths?.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        await _diskRefreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _disk.RefreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             Solution solution;
@@ -70,20 +56,20 @@ public sealed partial class WorkspaceEngine
             string[] selected;
             lock (_gate)
             {
-                if (_solution is null) return new(false, false, 0, false, "The language workspace is unavailable.");
-                solution = _authoredSolution ?? _solution;
-                revision = _semanticRevision;
-                documents = new(_diskDocuments, StringComparer.OrdinalIgnoreCase);
-                pending = new(_diskPending.Where(path => !_syncedTexts.ContainsKey(path)), StringComparer.OrdinalIgnoreCase);
+                if (CurrentSolution is null) return new(false, false, 0, false, "The language workspace is unavailable.");
+                solution = _pages.Authored ?? CurrentSolution;
+                revision = SemanticRevision;
+                documents = new(_disk.Documents, StringComparer.OrdinalIgnoreCase);
+                pending = new(_disk.Pending.Where(path => !_documents.IsOpen(path)), StringComparer.OrdinalIgnoreCase);
                 if (requested is not null)
-                    pending.UnionWith(requested.Where(path => documents.ContainsKey(path) && !_syncedTexts.ContainsKey(path)));
+                    pending.UnionWith(requested.Where(path => documents.ContainsKey(path) && !_documents.IsOpen(path)));
                 else if (pending.Count == 0)
-                    pending.UnionWith(documents.Keys.Where(path => !_syncedTexts.ContainsKey(path)));
+                    pending.UnionWith(documents.Keys.Where(path => !_documents.IsOpen(path)));
                 // Rotate even targeted requests, so a repeated over-budget request cannot
                 // permanently starve later paths in a large project.
                 var priority = requested?.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 selected = pending.OrderBy(path => priority?.Contains(path) == true ? 0 : 1)
-                    .ThenBy(path => _diskCursor is null || StringComparer.OrdinalIgnoreCase.Compare(path, _diskCursor) > 0 ? 0 : 1)
+                    .ThenBy(path => _disk.Cursor is null || StringComparer.OrdinalIgnoreCase.Compare(path, _disk.Cursor) > 0 ? 0 : 1)
                     .ThenBy(path => path, StringComparer.OrdinalIgnoreCase).Take(maximum).ToArray();
             }
 
@@ -123,40 +109,38 @@ public sealed partial class WorkspaceEngine
             RefreshDiskDocumentsResult result;
             lock (_gate)
             {
-                if (!ReferenceEquals(solution, _authoredSolution) || revision != _semanticRevision)
+                if (!ReferenceEquals(solution, _pages.Authored) || revision != SemanticRevision)
                     return new(false, false, 0, false, "Project types changed during disk refresh; retry with the current buffers.");
-                bool changed = !ReferenceEquals(solution, updated) || !_diskPending.SetEquals(pending);
+                bool changed = !ReferenceEquals(solution, updated) || !_disk.Pending.SetEquals(pending);
                 foreach (var (path, read) in reads)
                 {
-                    if (read.Text is not null) changed |= _diskUnavailable.Remove(path);
+                    if (read.Text is not null) changed |= _disk.Unavailable.Remove(path);
                     else
                     {
                         string reason = read.Status ?? "A model source file is unavailable.";
-                        changed |= !_diskUnavailable.TryGetValue(path, out var old) || old != reason;
-                        _diskUnavailable[path] = reason;
+                        changed |= !_disk.Unavailable.TryGetValue(path, out var old) || old != reason;
+                        _disk.Unavailable[path] = reason;
                     }
                 }
-                _diskPending.Clear();
-                _diskPending.UnionWith(pending);
-                if (reads.Count > 0) _diskCursor = reads.Keys.Last();
+                _disk.Pending.Clear();
+                _disk.Pending.UnionWith(pending);
+                if (reads.Count > 0) _disk.Cursor = reads.Keys.Last();
                 if (changed)
                 {
                     SetAuthoredSolution(updated);
-                    _semanticRevision++;
-                    _xamlBatchCache.Clear();
-                    _completions.Clear();
+                    SemanticsChanged();
                 }
-                bool incomplete = pending.Count > 0 || _diskUnavailable.Count > 0;
+                bool incomplete = pending.Count > 0 || _disk.Unavailable.Count > 0;
                 result = new(true, changed, reads.Count, incomplete, pending.Count > 0
                     ? $"Model refresh is incomplete; {pending.Count} known files remain in this sweep. A subsequent refresh continues it."
-                    : _diskUnavailable.Count > 0 ? $"{_diskUnavailable.Count} model source files are missing, unreadable, or exceed the read budget; affected XAML contexts are unavailable." : null,
+                    : _disk.Unavailable.Count > 0 ? $"{_disk.Unavailable.Count} model source files are missing, unreadable, or exceed the read budget; affected XAML contexts are unavailable." : null,
                     PendingFiles: pending.Count);
             }
             bool pagesChanged = await RefreshPageProjectionSourcesAsync(request.Paths, cancellationToken).ConfigureAwait(false);
             await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
             return result with { Changed = result.Changed || pagesChanged };
         }
-        finally { _diskRefreshGate.Release(); }
+        finally { _disk.RefreshGate.Release(); }
     }
 
     public async Task<XamlProjectAnalysisResult> AnalyzeXamlProjectAsync(XamlProjectAnalysisRequest request,
@@ -176,19 +160,19 @@ public sealed partial class WorkspaceEngine
         HashSet<string> ambiguous;
         lock (_gate)
         {
-            revision = _semanticRevision;
-            if (_solution is null) return new(request.Generation, revision, false, [], 0, Status: "The language workspace is unavailable.");
-            if (_pageProjectionPending) return new(request.Generation, revision, false, [], 0, Status: "Current XAML fields are being synchronized.");
-            solution = _solution;
+            revision = SemanticRevision;
+            if (CurrentSolution is null) return new(request.Generation, revision, false, [], 0, Status: "The language workspace is unavailable.");
+            if (_pages.Pending) return new(request.Generation, revision, false, [], 0, Status: "Current XAML fields are being synchronized.");
+            solution = CurrentSolution;
             var projects = solution.Projects.Where(project => project.FilePath is not null
                 && (projectPath is null || string.Equals(project.FilePath, projectPath, StringComparison.OrdinalIgnoreCase))).ToArray();
             if (projects.Length == 0) return new(request.Generation, revision, false, [], 0, Status: "The requested project context is unavailable.");
-            if (projects.Any(project => _xamlInventoryUnavailable.Contains(project.Id) || !_xamlInventory.ContainsKey(project.Id)))
+            if (projects.Any(project => !_ownership.IsEvaluated(project.Id)))
                 return new(request.Generation, revision, false, [], 0, Status: "Evaluated XAML ownership is unavailable; reload the workspace before project analysis.");
             unavailable = UnavailableModelProjects(solution);
             ambiguous = projects.GroupBy(project => project.FilePath!, StringComparer.OrdinalIgnoreCase).Where(group => group.Count() > 1)
                 .Select(group => group.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            inventory = projects.SelectMany(project => _xamlInventory[project.Id].Select(path => (project, path)))
+            inventory = projects.SelectMany(project => _ownership.Files[project.Id].Select(path => (project, path)))
                 .OrderBy(item => item.project.FilePath, StringComparer.OrdinalIgnoreCase).ThenBy(item => item.path, StringComparer.OrdinalIgnoreCase)
                 .GroupBy(item => item.project.FilePath!, StringComparer.OrdinalIgnoreCase)
                 .SelectMany(group => group.GroupBy(item => item.path, StringComparer.OrdinalIgnoreCase).Select(files => files.First()))
@@ -258,7 +242,7 @@ public sealed partial class WorkspaceEngine
             }
             var key = new BatchCacheKey(project.Id, path, hash, resources.Fingerprint(project));
             BatchAnalysis? analysis;
-            lock (_gate) _xamlBatchCache.TryGetValue(key, out analysis);
+            lock (_gate) analysis = _batchCache.Find(key);
             try
             {
                 if (analysis is null)
@@ -283,21 +267,15 @@ public sealed partial class WorkspaceEngine
                     string? pageReadStatus;
                     lock (_gate)
                     {
-                        page = _pageProjection?.Pages.FirstOrDefault(item => item.Input.ProjectId == project.Id
+                        page = _pages.Result?.Pages.FirstOrDefault(item => item.Input.ProjectId == project.Id
                             && item.Input.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
-                        pageReadStatus = _pageProjectionReadStatuses.GetValueOrDefault(path);
+                        pageReadStatus = _pages.ReadStatuses.GetValueOrDefault(path);
                     }
                     analysis = new(diagnostics, events.IsComplete && names.IsComplete && page?.IsComplete != false && pageReadStatus is null,
                         JoinResourceStatus(JoinResourceStatus(JoinResourceStatus(events.Status, names.Status), resources.Status),
                             JoinResourceStatus(page?.Status, pageReadStatus)));
                     lock (_gate)
-                        if (ReferenceEquals(solution, _solution) && revision == _semanticRevision)
-                        {
-                            while (_xamlBatchCache.Count > 0 && (_xamlBatchCache.Count >= 128
-                                || _xamlBatchCache.Values.Sum(value => value.Diagnostics.Length) + diagnostics.Length > 8192))
-                                _xamlBatchCache.Remove(_xamlBatchCache.Keys.First());
-                            _xamlBatchCache[key] = analysis;
-                        }
+                        if (ReferenceEquals(solution, CurrentSolution) && revision == SemanticRevision) _batchCache.Add(key, analysis);
                 }
                 int room = maximumDiagnostics - diagnosticCount;
                 var included = analysis.Diagnostics.Take(room).ToArray();
@@ -316,22 +294,23 @@ public sealed partial class WorkspaceEngine
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            if (_pageProjectionPending || !ReferenceEquals(solution, _solution) || revision != _semanticRevision)
-                return new(request.Generation, _semanticRevision, false, [], inventory.Length, Status: "Project types changed during XAML analysis; retry with the current buffers.");
+            if (_pages.Pending || !ReferenceEquals(solution, CurrentSolution) || revision != SemanticRevision)
+                return new(request.Generation, SemanticRevision, false, [], inventory.Length, Status: "Project types changed during XAML analysis; retry with the current buffers.");
             return new(request.Generation, revision, true, files, inventory.Length, truncated, truncated
                 ? "Project XAML analysis has incomplete coverage; see each file's status for analysis limits or unsupported contexts."
                 : incomplete ? "Some XAML files or project type contexts are unavailable; see each file's status." : null);
         }
     }
 
-    // Call with _gate held. An unread model also invalidates projects that consume its symbols.
+    // An unread model also invalidates projects that consume its symbols.
     private HashSet<ProjectId> UnavailableModelProjects(Solution solution)
     {
+        AssertGateHeld();
         var result = new HashSet<ProjectId>();
         var graph = solution.GetProjectDependencyGraph();
-        foreach (var path in _diskUnavailable.Keys.Concat(_diskPending).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var path in _disk.Unavailable.Keys.Concat(_disk.Pending).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (_syncedTexts.ContainsKey(path) || !_diskDocuments.TryGetValue(path, out var documents)) continue;
+            if (_documents.IsOpen(path) || !_disk.Documents.TryGetValue(path, out var documents)) continue;
             foreach (var projectId in documents.Select(document => document.ProjectId).Distinct())
             {
                 if (solution.GetProject(projectId) is null) continue;

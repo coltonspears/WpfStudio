@@ -4,12 +4,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
+using WpfStudio.Core.Git;
 
 namespace WpfStudio.App.Features.Git;
 
-public sealed partial class GitViewModel : ObservableObject, IDisposable
+public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOperationHost
 {
-    public const int HistoryPageSize = 50;
     public const int ChangesTab = 0, HistoryTab = 1, OutputTab = 2;
 
     private readonly GitService _service;
@@ -21,9 +21,9 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     private int _workspaceVersion;
     private bool _switchingWorkspace;
     private bool _disposed;
-    // Diffs and commit details load beside Git actions (they only read), each cancelling its own previous request.
-    private CancellationTokenSource? _diffLoad, _commitLoad, _commitFileLoad;
-    private Task _diffTask = Task.CompletedTask, _commitTask = Task.CompletedTask, _commitFileTask = Task.CompletedTask;
+    // Diffs load beside Git actions (they only read), each cancelling its own previous request.
+    private CancellationTokenSource? _diffLoad;
+    private Task _diffTask = Task.CompletedTask;
     private bool _quietSelection;
 
     public GitViewModel(GitService service, IDesktopService desktop, Func<CancellationToken, Task<bool>>? saveBeforeOperation = null)
@@ -32,7 +32,12 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         _desktop = desktop;
         _saveBeforeOperation = saveBeforeOperation;
         _operations = new(busy => IsBusy = busy);
+        CommitHistory = new(service, this);
+        Resolver = new(service, this);
     }
+
+    public CommitHistoryViewModel CommitHistory { get; }
+    public ConflictResolverViewModel Resolver { get; }
 
     /// <summary>Raised when a View diff command has loaded the diff it asked for.</summary>
     public event Action<GitDiff>? DiffRequested;
@@ -42,11 +47,6 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     public ObservableCollection<GitChange> Staged { get; } = [];
     public ObservableCollection<GitChange> Unstaged { get; } = [];
     public ObservableCollection<string> Branches { get; } = [];
-    /// <summary>Every commit loaded so far, newest first.</summary>
-    public ObservableCollection<GitCommit> History { get; } = [];
-    /// <summary>The loaded commits that match <see cref="HistoryFilter"/>.</summary>
-    public ObservableCollection<GitCommit> VisibleHistory { get; } = [];
-    public ObservableCollection<GitCommitFile> CommitFiles { get; } = [];
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasRepository))] public partial string? RepositoryRoot { get; set; }
     [ObservableProperty] public partial string Branch { get; set; } = "No repository";
     [ObservableProperty] public partial string Tracking { get; set; } = "";
@@ -58,21 +58,11 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SwitchBranchCommand))] public partial string? SelectedBranch { get; set; }
     [ObservableProperty] public partial GitChange? SelectedStaged { get; set; }
     [ObservableProperty] public partial GitChange? SelectedUnstaged { get; set; }
-    [ObservableProperty] public partial GitCommit? SelectedCommit { get; set; }
     [ObservableProperty] public partial bool IsBusy { get; private set; }
     [ObservableProperty] public partial int SelectedTab { get; set; }
     /// <summary>The selected working or staged file's diff.</summary>
     [ObservableProperty] public partial GitDiff? CurrentDiff { get; set; }
     [ObservableProperty] public partial bool IsDiffLoading { get; set; }
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsHistoryFiltered))] public partial string HistoryFilter { get; set; } = "";
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HistoryHeading)), NotifyCanExecuteChangedFor(nameof(LoadMoreHistoryCommand))] public partial bool HasMoreHistory { get; set; }
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(OpenCommitOnRemoteCommand))] public partial GitCommitDetails? CommitDetails { get; set; }
-    [ObservableProperty] public partial bool IsCommitLoading { get; set; }
-    [ObservableProperty] public partial GitCommitFile? SelectedCommitFile { get; set; }
-    // Set by editor history so the commit opens on the file it was opened from.
-    private string? _preferredCommitFile;
-    /// <summary>The selected commit file's diff against the commit's first parent.</summary>
-    [ObservableProperty] public partial GitDiff? CommitDiff { get; set; }
 
     /// <summary>
     /// When the pane is on screen the first change and the newest commit are selected automatically, so the
@@ -88,18 +78,12 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     public bool SelectedChangeIsStaged => SelectedUnstaged is null && SelectedStaged is not null;
     public string CommitButtonText => Staged.Count == 0 ? "Commit" : $"Commit {Staged.Count} staged file{(Staged.Count == 1 ? "" : "s")}";
     public string ChangesPlaceholder => !HasRepository ? Status : ChangeCount == 0 ? "Nothing to commit. The working tree is clean." : "Select a file to see its changes.";
-    public bool IsHistoryFiltered => HistoryFilter.Trim().Length > 0;
-    public bool HistoryFilterHasNoMatches => IsHistoryFiltered && VisibleHistory.Count == 0 && History.Count > 0;
-    public string HistoryHeading => IsHistoryFiltered
-        ? $"{VisibleHistory.Count} of {History.Count} loaded commits match"
-        : $"{History.Count}{(HasMoreHistory ? "+" : "")} commit{(History.Count == 1 ? "" : "s")} on {Branch}";
 
     /// <summary>The branch popup; the actions in it close it as they start.</summary>
     [ObservableProperty] public partial bool IsBranchPickerOpen { get; set; }
 
     partial void OnIsBusyChanged(bool value) => NotifyCommands();
     partial void OnRepositoryRootChanged(string? value) => NotifyCommands();
-    partial void OnHistoryFilterChanged(string value) => ApplyHistoryFilter();
     partial void OnSelectedTabChanged(int value) => EnsureSelection();
 
     partial void OnSelectedUnstagedChanged(GitChange? value)
@@ -116,9 +100,6 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         if (value is not null) Quietly(() => SelectedUnstaged = null);
         LoadSelectedDiff().Forget();
     }
-
-    partial void OnSelectedCommitChanged(GitCommit? value) { if (!_quietSelection) LoadCommit(value).Forget(); }
-    partial void OnSelectedCommitFileChanged(GitCommitFile? value) { if (!_quietSelection) LoadCommitFile(value).Forget(); }
 
     public async Task SetWorkspaceAsync(string? workspacePath, CancellationToken cancellationToken = default)
     {
@@ -139,16 +120,12 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             {
                 Staged.Clear();
                 Unstaged.Clear();
-                History.Clear();
-                VisibleHistory.Clear();
                 Branches.Clear();
                 SelectedBranch = null;
                 SelectedStaged = null;
                 SelectedUnstaged = null;
-                SelectedCommit = null;
             });
-            HasMoreHistory = false;
-            ClearCommit();
+            CommitHistory.Clear();
             CurrentDiff = null;
             NotifyLists();
         }
@@ -165,8 +142,6 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     private bool CanCommit() => CanUnstageAll() && !Staged.Any(x => x.IsConflict) && !Unstaged.Any(x => x.IsConflict) && !string.IsNullOrWhiteSpace(CommitMessage);
     private bool CanSwitch() => CanOperate() && !string.IsNullOrWhiteSpace(SelectedBranch) && SelectedBranch != Branch;
     private bool CanCreateBranch() => CanOperate() && !string.IsNullOrWhiteSpace(NewBranchName);
-    private bool CanLoadMoreHistory() => CanOperate() && HasMoreHistory;
-    private bool CanOpenCommitFile(GitCommitFile? file) => HasRepository && file is not null && file.Status != 'D';
 
     [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRefresh))]
     private Task RefreshAsync(CancellationToken cancel) => RunAsync("Refresh", RefreshCoreAsync, cancel);
@@ -240,30 +215,6 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         else Error = "This file has been deleted. Its last version is shown in the diff.";
     }
 
-    [RelayCommand(CanExecute = nameof(CanOpenCommitFile))]
-    private void OpenCommitFile(GitCommitFile? file)
-    {
-        if (file is null || RepositoryRoot is null) return;
-        var path = System.IO.Path.GetFullPath(System.IO.Path.Combine(RepositoryRoot, file.Path));
-        if (File.Exists(path)) OpenFileRequested?.Invoke(path);
-        else Error = "This file no longer exists in the working tree.";
-    }
-
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanLoadMoreHistory))]
-    private Task LoadMoreHistoryAsync(CancellationToken cancel) => RunAsync("Load more history", async token =>
-    {
-        var version = _workspaceVersion;
-        var more = await _service.LoadHistoryAsync(RepositoryRoot!, History.Count, HistoryPageSize + 1, token);
-        if (version != _workspaceVersion) return;
-        foreach (var commit in more.Take(HistoryPageSize).Where(commit => !History.Any(existing => existing.Id == commit.Id))) History.Add(commit);
-        HasMoreHistory = more.Count > HistoryPageSize;
-        ApplyHistoryFilter();
-        Status = $"{History.Count} commits loaded";
-    }, cancel);
-
-    [RelayCommand]
-    private void ClearHistoryFilter() => HistoryFilter = "";
-
     private async Task ShowChangeAsync(GitChange? change, bool staged)
     {
         if (change is null) return;
@@ -281,8 +232,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     public async Task WhenLoadedAsync()
     {
         await _diffTask;
-        await _commitTask;
-        await _commitFileTask;
+        await CommitHistory.WhenLoadedAsync();
     }
 
     private Task LoadSelectedDiff()
@@ -322,109 +272,10 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>The file editor history asked for, once; null when none was asked for or the commit did not change it.</summary>
-    private GitCommitFile? TakePreferredFile(IReadOnlyList<GitCommitFile> files)
-    {
-        var preferred = _preferredCommitFile;
-        _preferredCommitFile = null;
-        return preferred is null ? null : files.FirstOrDefault(file => string.Equals(file.Path.Replace('\\', '/'), preferred, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(file.OriginalPath?.Replace('\\', '/'), preferred, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private Task LoadCommit(GitCommit? commit)
-    {
-        _commitLoad?.Cancel();
-        _commitLoad = null;
-        IsCommitLoading = false;
-        if (commit is not null && CommitDetails?.Id == commit.Id) return _commitTask = Task.CompletedTask;
-        if (commit is null || RepositoryRoot is not { } root)
-        {
-            ClearCommit();
-            return _commitTask = Task.CompletedTask;
-        }
-        var load = _commitLoad = new CancellationTokenSource();
-        return _commitTask = LoadCommitCoreAsync(root, commit, load);
-    }
-
-    private async Task LoadCommitCoreAsync(string root, GitCommit commit, CancellationTokenSource load)
-    {
-        IsCommitLoading = true;
-        try
-        {
-            var details = await _service.GetCommitDetailsAsync(root, commit.Id, load.Token);
-            if (load.IsCancellationRequested) return;
-            CommitDetails = details;
-            Quietly(() =>
-            {
-                Replace(CommitFiles, details.Files);
-                SelectedCommitFile = TakePreferredFile(details.Files) ?? details.Files.FirstOrDefault();
-            });
-            await LoadCommitFile(SelectedCommitFile);
-        }
-        catch (Exception exception)
-        {
-            if (!load.IsCancellationRequested && exception is not OperationCanceledException)
-            {
-                ClearCommit();
-                Error = GitDiagnosticSanitizer.Redact(exception.Message);
-            }
-        }
-        finally
-        {
-            if (ReferenceEquals(_commitLoad, load)) { _commitLoad = null; IsCommitLoading = false; }
-            load.Dispose();
-        }
-    }
-
-    private Task LoadCommitFile(GitCommitFile? file)
-    {
-        _commitFileLoad?.Cancel();
-        _commitFileLoad = null;
-        OpenCommitFileCommand.NotifyCanExecuteChanged();
-        if (file is null || CommitDetails is not { } details || RepositoryRoot is not { } root)
-        {
-            CommitDiff = null;
-            return _commitFileTask = Task.CompletedTask;
-        }
-        var load = _commitFileLoad = new CancellationTokenSource();
-        return _commitFileTask = LoadCommitFileCoreAsync(root, details, file, load);
-    }
-
-    private async Task LoadCommitFileCoreAsync(string root, GitCommitDetails details, GitCommitFile file, CancellationTokenSource load)
-    {
-        try
-        {
-            var diff = await _service.GetCommitFileDiffAsync(root, details, file, load.Token);
-            if (!load.IsCancellationRequested) CommitDiff = diff;
-        }
-        catch (Exception exception)
-        {
-            if (!load.IsCancellationRequested && exception is not OperationCanceledException)
-                CommitDiff = new(file.Path, System.IO.Path.Combine(root, file.Path), "", Message: GitDiagnosticSanitizer.Redact(exception.Message));
-        }
-        finally
-        {
-            if (ReferenceEquals(_commitFileLoad, load)) _commitFileLoad = null;
-            load.Dispose();
-        }
-    }
-
-    private void ClearCommit()
-    {
-        _commitFileLoad?.Cancel();
-        _commitFileLoad = null;
-        CommitDetails = null;
-        Quietly(() =>
-        {
-            CommitFiles.Clear();
-            SelectedCommitFile = null;
-        });
-        CommitDiff = null;
-    }
-
     private async Task CancelLoadsAsync()
     {
-        foreach (var load in new[] { _diffLoad, _commitLoad, _commitFileLoad }) load?.Cancel();
+        _diffLoad?.Cancel();
+        CommitHistory.CancelLoads();
         // Awaiting lets cancelled Git processes exit before the caller replaces or deletes the repository.
         await WhenLoadedAsync();
     }
@@ -438,33 +289,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             if (Unstaged.FirstOrDefault() is { } working) SelectedUnstaged = working;
             else if (Staged.FirstOrDefault() is { } staged) SelectedStaged = staged;
         }
-        if (SelectedTab == HistoryTab && SelectedCommit is null && VisibleHistory.FirstOrDefault() is { } newest) SelectedCommit = newest;
-    }
-
-    /// <summary>Keeps the visible list in history order while changing it in place, so the selection survives filtering.</summary>
-    private void ApplyHistoryFilter()
-    {
-        var filter = HistoryFilter.Trim();
-        bool Matches(GitCommit commit) => filter.Length == 0
-            || commit.Subject.Contains(filter, StringComparison.CurrentCultureIgnoreCase)
-            || commit.Author.Contains(filter, StringComparison.CurrentCultureIgnoreCase)
-            || commit.Refs.Contains(filter, StringComparison.OrdinalIgnoreCase)
-            || commit.Id.StartsWith(filter, StringComparison.OrdinalIgnoreCase);
-        var visible = 0;
-        foreach (var commit in History)
-        {
-            if (!Matches(commit)) continue;
-            var existing = -1;
-            for (var index = visible; index < VisibleHistory.Count; index++)
-                if (VisibleHistory[index] == commit) { existing = index; break; }
-            if (existing < 0) VisibleHistory.Insert(visible, commit);
-            else
-                for (var index = existing - 1; index >= visible; index--) VisibleHistory.RemoveAt(index);
-            visible++;
-        }
-        while (VisibleHistory.Count > visible) VisibleHistory.RemoveAt(VisibleHistory.Count - 1);
-        OnPropertyChanged(nameof(HistoryHeading));
-        OnPropertyChanged(nameof(HistoryFilterHasNoMatches));
+        if (SelectedTab == HistoryTab && CommitHistory.SelectedCommit is null && CommitHistory.VisibleHistory.FirstOrDefault() is { } newest) CommitHistory.SelectedCommit = newest;
     }
 
     private Task MutateAsync(string label, Func<CancellationToken, Task<string>> action, CancellationToken cancel, bool save = false, bool changesWorkspaceFiles = false) => RunAsync(label, async token =>
@@ -517,7 +342,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     {
         var version = _workspaceVersion;
         // Keep as many commits as the reader has paged in; one extra tells whether older ones exist.
-        var historyLimit = Math.Max(HistoryPageSize, History.Count);
+        var historyLimit = CommitHistory.RefreshLimit;
         var snapshot = await _service.LoadAsync(_workspacePath, cancellationToken, historyLimit + 1);
         if (version != _workspaceVersion) return;
         var rootChanged = !string.Equals(RepositoryRoot, snapshot.Root, StringComparison.OrdinalIgnoreCase);
@@ -528,16 +353,11 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         // Rebuilding the lists would clear their selection; keep the reader on the same file and commit instead.
         var selected = SelectedChange;
         var selectedWasStaged = SelectedChangeIsStaged;
-        var selectedCommit = SelectedCommit;
-        // Editor blame can select a commit outside the loaded list. It stays selected, unlike one that left the list.
-        var keepUnlistedCommit = !rootChanged && selectedCommit is not null && !VisibleHistory.Any(x => x.Id == selectedCommit.Id);
         Quietly(() =>
         {
             Replace(Staged, snapshot.Changes.Where(x => x.IsStaged));
             Replace(Unstaged, snapshot.Changes.Where(x => x.IsUnstaged));
             Replace(Branches, snapshot.Branches);
-            Replace(History, snapshot.History.Take(historyLimit));
-            ApplyHistoryFilter();
             SelectedBranch = snapshot.Branches.Contains(Branch) ? Branch : null;
             var (preferred, other) = selectedWasStaged ? (Staged, Unstaged) : (Unstaged, Staged);
             var match = selected is null ? null : preferred.FirstOrDefault(x => x.Path == selected.Path);
@@ -549,15 +369,13 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
             }
             SelectedUnstaged = match is not null && !matchIsStaged ? match : null;
             SelectedStaged = match is not null && matchIsStaged ? match : null;
-            SelectedCommit = selectedCommit is null ? null : VisibleHistory.FirstOrDefault(x => x.Id == selectedCommit.Id) ?? (keepUnlistedCommit ? selectedCommit : null);
         });
-        HasMoreHistory = snapshot.History.Count > historyLimit;
         ApplyCollaboration(snapshot);
         NotifyLists();
         NotifyCommands();
         // Git may have changed the file (stage, commit, pull), so reload its diff even when the selection is unchanged.
         LoadSelectedDiff().Forget();
-        if (rootChanged || SelectedCommit is null) LoadCommit(SelectedCommit).Forget();
+        CommitHistory.ApplyRefresh(snapshot.History, historyLimit, rootChanged);
         EnsureSelection();
     }
 
@@ -581,7 +399,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(StagedHeading));
         OnPropertyChanged(nameof(UnstagedHeading));
         OnPropertyChanged(nameof(ChangeCount));
-        OnPropertyChanged(nameof(HistoryHeading));
+        CommitHistory.NotifyHeading();
         OnPropertyChanged(nameof(CommitButtonText));
         OnPropertyChanged(nameof(ChangesPlaceholder));
     }
@@ -590,12 +408,13 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     {
         foreach (var command in new IRelayCommand[] { RefreshCommand, StageFileCommand, StageAllCommand, UnstageFileCommand,
             UnstageAllCommand, CommitCommand, FetchCommand, PullCommand, PushCommand, SwitchBranchCommand, CreateBranchCommand,
-            ViewWorkingDiffCommand, ViewStagedDiffCommand, OpenFileCommand, OpenCommitFileCommand, LoadMoreHistoryCommand })
+            ViewWorkingDiffCommand, ViewStagedDiffCommand, OpenFileCommand })
             command.NotifyCanExecuteChanged();
+        CommitHistory.NotifyCommands();
         NotifyCollaborationCommands();
     }
 
-    private static void Replace<T>(ObservableCollection<T> collection, IEnumerable<T> items)
+    internal static void Replace<T>(ObservableCollection<T> collection, IEnumerable<T> items)
     {
         collection.Clear();
         foreach (var item in items) collection.Add(item);
@@ -605,7 +424,21 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     {
         _disposed = true;
         _operations.Cancel();
-        foreach (var load in new[] { _diffLoad, _commitLoad, _commitFileLoad }) load?.Cancel();
+        _diffLoad?.Cancel();
+        CommitHistory.CancelLoads();
         NotifyCommands();
     }
+
+    bool IGitOperationHost.CanOperate => CanOperate();
+    int IGitOperationHost.WorkspaceVersion => _workspaceVersion;
+    void IGitOperationHost.ReportStatus(string status) => Status = status;
+    void IGitOperationHost.ReportError(string error) => Error = error;
+    Task IGitOperationHost.RunAsync(string label, Func<CancellationToken, Task> action, CancellationToken cancel) => RunAsync(label, action, cancel);
+    Task IGitOperationHost.MutateAsync(string label, Func<CancellationToken, Task<string>> action, CancellationToken cancel, bool changesWorkspaceFiles) =>
+        MutateAsync(label, action, cancel, changesWorkspaceFiles: changesWorkspaceFiles);
+    Task<bool> IGitOperationHost.SaveOpenDocumentsAsync(CancellationToken cancellationToken) =>
+        _saveBeforeOperation is null ? Task.FromResult(true) : _saveBeforeOperation(cancellationToken);
+    void IGitOperationHost.OpenFile(string path) => OpenFileRequested?.Invoke(path);
+    void IGitOperationHost.OpenUrl(string url) => Open(url);
+    void IGitOperationHost.ShowHistoryTab() => SelectedTab = HistoryTab;
 }

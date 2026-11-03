@@ -11,7 +11,6 @@ public sealed partial class DesignerViewModel
     [ObservableProperty] public partial int SelectedTabIndex { get; set; }
     private bool _bindingObservationReady, _updatingBindingProperties;
     private string? _bindingObservedNodeId;
-    private long _bindingDiagnosticSelection;
     private long _bindingOperationEpoch;
     private int _bindingOperations;
 
@@ -27,15 +26,9 @@ public sealed partial class DesignerViewModel
         { BindingExplanation.Clear("Refresh the preview to observe its bindings."); return; }
         if (_appearancePropertyOperations != 0 || !_bindingObservationReady || _inspectedNodeId != SelectedNode?.Node.Id)
         { BindingExplanation.Clear("Refresh or finish inspecting the selected element to observe its bindings."); return; }
-        if (BindingDeclarations.Count == 0 && Bindings.Count > 0)
-        { BindingExplanation.Clear("This host did not supply binding expression identities. A selected-binding explanation is unavailable."); return; }
-        if (SelectedBindingDeclaration is not { } item || !BindingDeclarations.Any(current => current.SameIdentity(item)))
-        { BindingExplanation.Clear("Select a binding declaration. A removed or replaced expression is not the previous binding."); return; }
-        var property = Bindings.FirstOrDefault(value => value.BindingSources?.BindingId == item.BindingId
-            && value.Name == item.Property && value.OwnerType == item.OwnerType && value.OwnerAssembly == item.OwnerAssembly);
-        if (property is null) { BindingExplanation.Clear("The selected binding is no longer in this observation."); return; }
-        var observation = item.Declaration.Observation ?? (item.Declaration.ParentExpressionId is null ? property.Binding : null);
-        BindingExplanation.Apply(item, observation, property.Value, property.ValueSource);
+        BindingExplanation.ExplainSelected(BindingDeclarations, Bindings.Count > 0, "This host did not supply binding expression identities. A selected-binding explanation is unavailable.",
+            item => Bindings.FirstOrDefault(value => value.BindingSources?.BindingId == item.BindingId && value.Name == item.Property
+                && value.OwnerType == item.OwnerType && value.OwnerAssembly == item.OwnerAssembly) is { } property ? (property.Binding, property.Value, property.ValueSource) : null);
     }
 
     private bool CanShowBindingDiagnostic(PreviewDiagnostic? diagnostic) => !_disposed && IsCurrent && !IsBusy
@@ -53,18 +46,18 @@ public sealed partial class DesignerViewModel
         _picking = true;
         try { SelectedNode = node; SelectedTabIndex = 1; }
         finally { _picking = false; }
-        var selection = _bindingDiagnosticSelection;
+        var selection = BindingDeclarations.UserSelection;
         await InspectAsync(node.Node.Id);
-        if (!Current(revision) || !ReferenceEquals(snapshot, _snapshot) || selection != _bindingDiagnosticSelection
+        if (!Current(revision) || !ReferenceEquals(snapshot, _snapshot) || selection != BindingDeclarations.UserSelection
             || SelectedNode?.Node.Id != node.Node.Id || _inspectedNodeId != node.Node.Id) return;
-        var matches = BindingDeclarations.Where(item => item.BindingId == diagnostic.BindingId && item.Declaration.ParentExpressionId is null).ToArray();
-        if (matches.Length == 1) SelectedBindingDeclaration = matches[0];
+        var matches = BindingDeclarations.Items.Where(item => item.BindingId == diagnostic.BindingId && item.Declaration.ParentExpressionId is null).ToArray();
+        if (matches.Length == 1) BindingDeclarations.Selected = matches[0];
         else
         {
-            SelectedBindingDeclaration = null;
-            _bindingSelectionRemoved = true;
+            BindingDeclarations.Selected = null;
+            BindingDeclarations.MarkSelectionRemoved();
             BindingExplanation.Clear("That diagnostic's binding was removed or replaced. The replacement is a different expression.");
-            BindingSourceStatus = BindingExplanation.Status;
+            BindingDeclarations.Status = BindingExplanation.Status;
         }
     }
 }

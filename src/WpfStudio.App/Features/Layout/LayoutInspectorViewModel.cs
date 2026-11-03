@@ -5,7 +5,7 @@ using WpfStudio.Inspection.Protocol;
 namespace WpfStudio.App.Features.Layout;
 
 /// <summary>Presentation of a single current observation; clearing never preserves stale geometry.</summary>
-public sealed partial class LayoutInspectorViewModel(Action changed, Action? overlayChanged = null) : ObservableObject
+public sealed partial class LayoutInspectorViewModel(Action? overlayChanged = null) : ObservableObject
 {
     public ObservableCollection<LayoutFact> Facts { get; } = [];
     public ObservableCollection<LayoutFact> KeyFacts { get; } = [];
@@ -50,6 +50,5 @@ public sealed partial class LayoutInspectorViewModel(Action changed, Action? ove
     {
         OnPropertyChanged(nameof(Snapshot));
         OnPropertyChanged(nameof(VisibleOverlays));
-        changed();
     }
 }

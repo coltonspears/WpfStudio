@@ -1,13 +1,17 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
 using ICSharpCode.AvalonEdit.Folding;
 using ICSharpCode.AvalonEdit.Rendering;
+using WpfStudio.Core.Documents;
+using WpfStudio.Core.Text;
 
-namespace WpfStudio.App.Controls;
+namespace WpfStudio.App.Controls.Editor;
 
 /// <summary>
 /// The look of collapsible regions: chevrons in the gutter that brighten on hover, a tinted band and bracket over
@@ -15,31 +19,90 @@ namespace WpfStudio.App.Controls;
 /// AvalonEdit's FoldingManager still owns the regions and its element generator stays registered, because it is
 /// what connects the text view to the manager for redraws; the pill generator runs ahead of it.
 /// </summary>
-public sealed partial class EditorSurface
+internal sealed class EditorFolding
 {
-    /// <summary>Marks editor adornments (folded pills, lens rows) so hovering them does not ask for Quick Info.</summary>
-    internal static readonly object AdornmentTag = new();
+    /// <summary>Folded regions survive switching tabs, which detaches the editor from its buffer.</summary>
+    private static readonly ConditionalWeakTable<DocumentState, List<(int Start, int End)>> FoldedRegions = new();
+    /// <summary>Files larger than this keep syntax colouring but no folding.</summary>
+    private const int MaximumFoldingCharacters = 2_000_000;
+    private readonly EditorSurface _owner;
+    private readonly DispatcherTimer _timer;
+    private readonly XmlFoldingStrategy _xmlFolding = new() { ShowAttributesWhenFolded = true };
+    private FoldingManager? _manager;
     private FoldingGutter? _foldingGutter;
     private FoldedBlockGenerator? _foldedBlocks;
     private FoldRangeRenderer? _foldRange;
     private FoldingSection? _hoveredFold;
 
-    private void InstallFoldingVisuals(FoldingManager manager)
+    public EditorFolding(EditorSurface owner)
     {
-        foreach (var margin in TextArea.LeftMargins.OfType<FoldingMargin>().ToArray()) TextArea.LeftMargins.Remove(margin);
-        _foldingGutter = new FoldingGutter(this, manager);
-        TextArea.LeftMargins.Add(_foldingGutter);
-        _foldedBlocks = new FoldedBlockGenerator(this, manager);
-        TextArea.TextView.ElementGenerators.Insert(0, _foldedBlocks);
-        _foldRange = new FoldRangeRenderer(this);
-        TextArea.TextView.BackgroundRenderers.Add(_foldRange);
+        _owner = owner;
+        _timer = new(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) => Update(), owner.Dispatcher) { IsEnabled = false };
     }
 
-    private void UninstallFoldingVisuals()
+    public bool IsInstalled => _manager is not null;
+
+    public void Install()
     {
-        if (_foldingGutter is not null) TextArea.LeftMargins.Remove(_foldingGutter);
-        if (_foldedBlocks is not null) TextArea.TextView.ElementGenerators.Remove(_foldedBlocks);
-        if (_foldRange is not null) TextArea.TextView.BackgroundRenderers.Remove(_foldRange);
+        if (_owner.ViewModel?.Preferences is { ShowFolding: false } || _manager is not null) return;
+        if (_owner.ViewModel is not { } vm || vm.State.Extension is not (".cs" or ".xaml" or ".xml" or ".csproj" or ".props" or ".targets" or ".resx")) return;
+        _manager = FoldingManager.Install(_owner.TextArea);
+        InstallVisuals(_manager);
+        Update();
+        if (FoldedRegions.TryGetValue(vm.State, out var folded))
+            foreach (var section in _manager.AllFoldings.Where(section => folded.Contains((section.StartOffset, section.EndOffset))))
+                section.IsFolded = true;
+    }
+
+    public void Uninstall(DocumentState state)
+    {
+        _timer.Stop();
+        if (_manager is null) return;
+        FoldedRegions.AddOrUpdate(state, _manager.AllFoldings.Where(section => section.IsFolded).Select(section => (section.StartOffset, section.EndOffset)).ToList());
+        UninstallVisuals();
+        FoldingManager.Uninstall(_manager);
+        _manager = null;
+    }
+
+    public void ScheduleUpdate()
+    {
+        if (_manager != null) { _timer.Stop(); _timer.Start(); }
+    }
+
+    private void Update()
+    {
+        _timer.Stop();
+        if (_manager is null || _owner.ViewModel is not { } vm) return;
+        if (_owner.Document.TextLength > MaximumFoldingCharacters) { _manager.Clear(); return; }
+        if (vm.State.Extension == ".cs")
+            _manager.UpdateFoldings(CSharpFolding.Find(_owner.Text).Select(region => new NewFolding(region.Start, region.End) { Name = region.Title }), -1);
+        else _xmlFolding.UpdateFoldings(_manager, _owner.Document); // Keeps the previous foldings while XML is malformed.
+    }
+
+    public void SetAllFolded(bool folded)
+    {
+        if (_manager is null) return;
+        Update();
+        foreach (var section in _manager.AllFoldings) section.IsFolded = folded;
+        if (folded) _owner.TextArea.Caret.BringCaretToView();
+    }
+
+    private void InstallVisuals(FoldingManager manager)
+    {
+        foreach (var margin in _owner.TextArea.LeftMargins.OfType<FoldingMargin>().ToArray()) _owner.TextArea.LeftMargins.Remove(margin);
+        _foldingGutter = new FoldingGutter(_owner, this, manager);
+        _owner.TextArea.LeftMargins.Add(_foldingGutter);
+        _foldedBlocks = new FoldedBlockGenerator(_owner, manager);
+        _owner.TextArea.TextView.ElementGenerators.Insert(0, _foldedBlocks);
+        _foldRange = new FoldRangeRenderer(_owner, this);
+        _owner.TextArea.TextView.BackgroundRenderers.Add(_foldRange);
+    }
+
+    private void UninstallVisuals()
+    {
+        if (_foldingGutter is not null) _owner.TextArea.LeftMargins.Remove(_foldingGutter);
+        if (_foldedBlocks is not null) _owner.TextArea.TextView.ElementGenerators.Remove(_foldedBlocks);
+        if (_foldRange is not null) _owner.TextArea.TextView.BackgroundRenderers.Remove(_foldRange);
         _foldingGutter = null; _foldedBlocks = null; _foldRange = null; _hoveredFold = null;
     }
 
@@ -48,25 +111,18 @@ public sealed partial class EditorSurface
         if (ReferenceEquals(section, _hoveredFold)) return;
         _hoveredFold = section;
         _foldingGutter?.InvalidateVisual();
-        TextArea.TextView.InvalidateLayer(KnownLayer.Background);
+        _owner.TextArea.TextView.InvalidateLayer(KnownLayer.Background);
     }
 
     private static Brush ThemeBrush(FrameworkElement owner, string key, Brush fallback) => owner.TryFindResource(key) as Brush ?? fallback;
 
-    private static bool IsOverAdornment(object? source)
-    {
-        for (var node = source as DependencyObject; node is not null and not TextView; node = VisualTreeHelper.GetParent(node) ?? LogicalTreeHelper.GetParent(node))
-            if (node is FrameworkElement { Tag: var tag } && ReferenceEquals(tag, AdornmentTag)) return true;
-        return false;
-    }
-
     /// <summary>Chevrons beside the line numbers: down for an open region, right (in the accent colour) for a folded one.</summary>
-    private sealed class FoldingGutter(EditorSurface owner, FoldingManager manager) : AbstractMargin
+    private sealed class FoldingGutter(EditorSurface owner, EditorFolding folding, FoldingManager manager) : AbstractMargin
     {
-        private const double Width = 16;
+        private const double GutterWidth = 16;
         private bool _pointerInside;
 
-        protected override Size MeasureOverride(Size availableSize) => new(Width, 0);
+        protected override Size MeasureOverride(Size availableSize) => new(GutterWidth, 0);
 
         private IEnumerable<(VisualLine Line, FoldingSection Section, double Middle)> Markers()
         {
@@ -87,14 +143,14 @@ public sealed partial class EditorSurface
             var quiet = ThemeBrush(owner, _pointerInside ? "FoldMarkerHotBrush" : "FoldMarkerBrush", Brushes.Gray);
             var hot = ThemeBrush(owner, "TextBrush", Brushes.White);
             var folded = ThemeBrush(owner, "AccentBrush", Brushes.SlateBlue);
-            var hovered = owner._hoveredFold;
+            var hovered = folding._hoveredFold;
             if (hovered is not null) DrawBracket(context, view, hovered, ThemeBrush(owner, "AccentBrush", Brushes.SlateBlue));
             foreach (var (_, section, middle) in Markers())
             {
                 var brush = section.IsFolded ? folded : ReferenceEquals(section, hovered) ? hot : quiet;
                 var pen = new Pen(brush, 1.4) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
                 pen.Freeze();
-                var x = Width / 2;
+                var x = GutterWidth / 2;
                 var geometry = new StreamGeometry();
                 using (var g = geometry.Open())
                 {
@@ -128,8 +184,8 @@ public sealed partial class EditorSurface
             faded.Opacity = 0.75;
             var pen = new Pen(faded, 1);
             pen.Freeze();
-            context.DrawLine(pen, new Point(Width / 2, top.Value + 1), new Point(Width / 2, bottom.Value));
-            context.DrawLine(pen, new Point(Width / 2, bottom.Value), new Point(Width - 2, bottom.Value));
+            context.DrawLine(pen, new Point(GutterWidth / 2, top.Value + 1), new Point(GutterWidth / 2, bottom.Value));
+            context.DrawLine(pen, new Point(GutterWidth / 2, bottom.Value), new Point(GutterWidth - 2, bottom.Value));
         }
 
         private FoldingSection? SectionAt(MouseEventArgs e)
@@ -149,7 +205,7 @@ public sealed partial class EditorSurface
             var section = SectionAt(e);
             Cursor = section is null ? null : Cursors.Hand;
             ToolTip = section is null ? null : section.IsFolded ? "Expand" : "Collapse";
-            owner.SetHoveredFold(section);
+            folding.SetHoveredFold(section);
         }
 
         protected override void OnMouseEnter(MouseEventArgs e) { base.OnMouseEnter(e); _pointerInside = true; InvalidateVisual(); }
@@ -158,7 +214,7 @@ public sealed partial class EditorSurface
         {
             base.OnMouseLeave(e);
             _pointerInside = false;
-            owner.SetHoveredFold(null);
+            folding.SetHoveredFold(null);
             InvalidateVisual();
         }
 
@@ -181,13 +237,13 @@ public sealed partial class EditorSurface
     }
 
     /// <summary>Tints the lines of the region under the gutter pointer, so a click's effect is visible before it happens.</summary>
-    private sealed class FoldRangeRenderer(EditorSurface owner) : IBackgroundRenderer
+    private sealed class FoldRangeRenderer(EditorSurface owner, EditorFolding folding) : IBackgroundRenderer
     {
         public KnownLayer Layer => KnownLayer.Background;
 
         public void Draw(TextView textView, DrawingContext drawingContext)
         {
-            if (owner._hoveredFold is not { IsFolded: false } section || textView.Document is not { } document || !textView.VisualLinesValid) return;
+            if (folding._hoveredFold is not { IsFolded: false } section || textView.Document is not { } document || !textView.VisualLinesValid) return;
             var first = document.GetLineByOffset(section.StartOffset).LineNumber;
             var last = document.GetLineByOffset(Math.Min(section.EndOffset, document.TextLength)).LineNumber;
             var brush = ThemeBrush(owner, "FoldRegionBrush", Brushes.Transparent);
@@ -246,7 +302,7 @@ public sealed partial class EditorSurface
             var pill = new Border
             {
                 Child = content, Padding = padding, CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1),
-                Margin = new Thickness(2, 0, 2, 0), Cursor = Cursors.Hand, Tag = AdornmentTag
+                Margin = new Thickness(2, 0, 2, 0), Cursor = Cursors.Hand, Tag = EditorAdornment.Tag
             };
             pill.SetResourceReference(Border.BackgroundProperty, "FoldPlaceholderBackgroundBrush");
             pill.SetResourceReference(Border.BorderBrushProperty, "FoldPlaceholderBorderBrush");

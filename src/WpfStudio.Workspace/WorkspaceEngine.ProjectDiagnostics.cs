@@ -10,8 +10,6 @@ public sealed partial class WorkspaceEngine
 {
     // Long enough that a pause between words does not start compiling a project the next keystroke abandons.
     private static readonly TimeSpan ProjectDiagnosticsDelay = TimeSpan.FromMilliseconds(500);
-    private readonly Dictionary<ProjectId, ProjectDiagnosticsPass> _projectDiagnostics = [];
-    private readonly Dictionary<string, ReportedDiagnostics> _reportedDiagnostics = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>A whole-project compilation contradicted an analysis reply. Nothing semantic changed: only diagnostics need requesting again.</summary>
     public event EventHandler? ProjectDiagnosticsChanged;
@@ -38,22 +36,22 @@ public sealed partial class WorkspaceEngine
         lock (_gate)
         {
             // UpdateDocumentAsync discards a reply for a superseded solution, and it must not displace the current pass.
-            if (!ReferenceEquals(document.Project.Solution, _solution)) return [];
+            if (!ReferenceEquals(document.Project.Solution, CurrentSolution)) return [];
             var project = document.Project.Id;
-            _projectDiagnostics.TryGetValue(project, out var pass);
+            _projectDiagnostics.Passes.TryGetValue(project, out var pass);
             if (pass is null || !ReferenceEquals(pass.Compilation, compilation) || pass.Cancellation.IsCancellationRequested)
             {
                 pass?.Cancellation.Cancel();
-                _projectDiagnostics[project] = pass = new(compilation);
+                _projectDiagnostics.Passes[project] = pass = new(compilation);
                 RunProjectDiagnosticsAsync(project, pass).Forget(exception => Console.Error.WriteLine("Project diagnostics: " + exception.Message));
             }
             var path = document.FilePath!;
             var file = fileDiagnostics.Where(diagnostic => AppliesTo(diagnostic, path)).Select(ToDiagnostic).Distinct().ToArray();
             IEnumerable<WorkspaceDiagnostic> whole = pass.Diagnostics is { } known ? known.Where(diagnostic => AppliesTo(diagnostic, path)).Select(ToDiagnostic)
-                : _reportedDiagnostics.TryGetValue(path, out var previous) ? ThroughEdit(previous.CompileOnly, path, previous.Text, text) : [];
+                : _projectDiagnostics.Reported.TryGetValue(path, out var previous) ? ThroughEdit(previous.CompileOnly, path, previous.Text, text) : [];
             var compileOnly = whole.Except(file).ToArray();
             WorkspaceDiagnostic[] all = [.. file, .. compileOnly];
-            _reportedDiagnostics[path] = new(project, text, all, compileOnly);
+            _projectDiagnostics.Reported[path] = new(project, text, all, compileOnly);
             return all;
         }
     }
@@ -86,10 +84,10 @@ public sealed partial class WorkspaceEngine
         bool contradicted;
         lock (_gate)
         {
-            if (!ReferenceEquals(_projectDiagnostics.GetValueOrDefault(project), pass) || token.IsCancellationRequested) return;
+            if (!ReferenceEquals(_projectDiagnostics.Passes.GetValueOrDefault(project), pass) || token.IsCancellationRequested) return;
             var visible = diagnostics.Where(diagnostic => diagnostic.Severity != DiagnosticSeverity.Hidden).ToImmutableArray();
             pass.Diagnostics = visible;
-            contradicted = _reportedDiagnostics.Any(reported => reported.Value.Project == project && Contradicts(visible, reported.Key, reported.Value));
+            contradicted = _projectDiagnostics.Reported.Any(reported => reported.Value.Project == project && Contradicts(visible, reported.Key, reported.Value));
         }
         if (contradicted) ProjectDiagnosticsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -102,19 +100,4 @@ public sealed partial class WorkspaceEngine
 
     private static bool AppliesTo(Diagnostic diagnostic, string path) => diagnostic.Severity != DiagnosticSeverity.Hidden
         && (!diagnostic.Location.IsInSource || string.Equals(diagnostic.Location.SourceTree?.FilePath, path, StringComparison.OrdinalIgnoreCase));
-
-    // Called with _gate held. A pass that finished stays valid for its compilation; one still running would only be discarded.
-    private void CancelProjectDiagnostics()
-    {
-        foreach (var pass in _projectDiagnostics.Values)
-            if (pass.Diagnostics is null) pass.Cancellation.Cancel();
-    }
-
-    // Called with _gate held.
-    private void ResetProjectDiagnostics()
-    {
-        CancelProjectDiagnostics();
-        _projectDiagnostics.Clear();
-        _reportedDiagnostics.Clear();
-    }
 }

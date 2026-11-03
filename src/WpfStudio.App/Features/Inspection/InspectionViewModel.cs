@@ -255,7 +255,7 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
     [RelayCommand] private async Task DisconnectAsync()
     {
         ++_generation; ++_selection;
-        ++_bindingSourceEpoch;
+        BindingDeclarations.AdvanceEpoch();
         RefreshBindingDeclarations(available: false);
         ClearAppearance("Inspector disconnected. Connect and refresh to inspect appearance.", invalidateElement: true);
         SourceStatus = null;

@@ -47,8 +47,8 @@ public sealed partial class EditorSurface
         Options.HideCursorWhileTyping = preferences.HideCursorWhileTyping;
         if (ViewModel is { } vm && ReferenceEquals(_attached, vm))
         {
-            if (preferences.ShowFolding && _folding is null) InstallFolding();
-            else if (!preferences.ShowFolding && _folding is not null) UninstallFolding(vm.State);
+            if (preferences.ShowFolding && !_folding.IsInstalled) _folding.Install();
+            else if (!preferences.ShowFolding && _folding.IsInstalled) _folding.Uninstall(vm.State);
         }
     }
 

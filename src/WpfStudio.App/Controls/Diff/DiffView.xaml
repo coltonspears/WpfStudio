@@ -41,8 +41,10 @@
                    ToolTip="Show the whole file instead of changes with 3 lines of context" AutomationProperties.Name="Show whole file"/>
      <Border Background="{DynamicResource EditorBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Margin="6,0,0,0">
       <StackPanel Orientation="Horizontal">
-       <RadioButton x:Name="SideBySideOption" Content="Split" c:Ui.Icon="SplitView" Style="{StaticResource SegmentLeft}" ToolTip="Side by side" AutomationProperties.Name="Side by side diff"/>
-       <RadioButton x:Name="InlineOption" Content="Inline" c:Ui.Icon="InlineView" Style="{StaticResource SegmentLeft}" ToolTip="Inline (unified)" AutomationProperties.Name="Inline diff"/>
+       <RadioButton x:Name="SideBySideOption" Content="Split" c:Ui.Icon="SplitView" Style="{StaticResource SegmentLeft}" ToolTip="Side by side" AutomationProperties.Name="Side by side diff"
+                    IsChecked="{Binding EffectiveMode, ElementName=Root, Converter={StaticResource EqualsText}, ConverterParameter=SideBySide, Mode=OneWay}"/>
+       <RadioButton x:Name="InlineOption" Content="Inline" c:Ui.Icon="InlineView" Style="{StaticResource SegmentLeft}" ToolTip="Inline (unified)" AutomationProperties.Name="Inline diff"
+                    IsChecked="{Binding EffectiveMode, ElementName=Root, Converter={StaticResource EqualsText}, ConverterParameter=Inline, Mode=OneWay}"/>
       </StackPanel>
      </Border>
     </StackPanel>

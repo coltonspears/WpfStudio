@@ -16,24 +16,24 @@ public sealed partial class DesignerViewModel
     [ObservableProperty] public partial string ApplicationResourcePath { get; set; } = "App.xaml";
     public bool IsCompiledPreview => Mode == PreviewMode.Compiled;
     public bool SupportsLivePreview => !IsCompiledPreview;
-    public bool UsesApplicationResources => IsCompiledPreview || SelectedScenario?.Configuration is not null || !string.IsNullOrWhiteSpace(AssemblyPath);
+    public bool UsesApplicationResources => IsCompiledPreview || Scenarios.Selected?.Configuration is not null || !string.IsNullOrWhiteSpace(AssemblyPath);
     public string BuildDescription => _snapshot?.Build is { } build
         ? $"{build.ViewTypeName} · {Path.GetFileName(build.AssemblyPath)} · SHA-256 {build.AssemblySha256[..Math.Min(12, build.AssemblySha256.Length)]} · module {build.ModuleVersionId}"
         : IsCompiledPreview ? "Build the project before loading a compiled view. Unsaved source changes are not in that build." : "";
 
     partial void OnModeChanged(PreviewMode value)
     {
-        _scenarioSelectionPending = true;
+        Scenarios.SelectionPending = true;
         Invalidate();
         Status = "Refresh to load the selected preview mode.";
     }
     partial void OnViewTypeNameChanged(string value)
     {
-        if (IsCompiledPreview) { _scenarioSelectionPending = true; Invalidate(); Status = "Refresh to load the selected compiled view."; }
+        if (IsCompiledPreview) { Scenarios.SelectionPending = true; Invalidate(); Status = "Refresh to load the selected compiled view."; }
     }
     partial void OnApplicationResourcePathChanged(string value)
     {
-        if (UsesApplicationResources) { _scenarioSelectionPending = true; Invalidate(); Status = "Refresh to load the selected application resources."; }
+        if (UsesApplicationResources) { Scenarios.SelectionPending = true; Invalidate(); Status = "Refresh to load the selected application resources."; }
     }
     private static string ReadViewType(string text)
     {

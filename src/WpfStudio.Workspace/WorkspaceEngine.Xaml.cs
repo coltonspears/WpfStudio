@@ -6,7 +6,6 @@ namespace WpfStudio.Workspace;
 
 public sealed partial class WorkspaceEngine
 {
-    private readonly Dictionary<string, HashSet<ProjectId>> _xamlProjects = new(StringComparer.OrdinalIgnoreCase);
     private readonly XamlLanguageService _xamlLanguage = new();
     private readonly XamlSchemaService _xamlSchema = new();
     private readonly XamlEventService _xamlEvents = new();
@@ -32,7 +31,7 @@ public sealed partial class WorkspaceEngine
         lock (_gate)
             return IsCurrentXamlProject(project)
                 ? new(request.Version, true, diagnostics, JoinResourceStatus(JoinResourceStatus(JoinResourceStatus(events.Status, names.Status), resources.Status),
-                    _nameProjectionStatuses.GetValueOrDefault(Path.GetFullPath(request.Path))))
+                    _pages.NameStatuses.GetValueOrDefault(Path.GetFullPath(request.Path))))
                 : new(request.Version, false, [], "Project types changed; refreshing XAML analysis.");
     }
 
@@ -129,13 +128,13 @@ public sealed partial class WorkspaceEngine
         projectPath = projectPath is null ? null : Path.GetFullPath(projectPath);
         lock (_gate)
         {
-            if (_solution is null) return (null, "XAML type analysis is unavailable. Check workspace loading diagnostics.");
-            if (_pageProjectionPending) return (null, "Current XAML fields are being synchronized; retry with current buffers.");
-            if (!_xamlProjects.TryGetValue(path, out var owners))
+            if (CurrentSolution is null) return (null, "XAML type analysis is unavailable. Check workspace loading diagnostics.");
+            if (_pages.Pending) return (null, "Current XAML fields are being synchronized; retry with current buffers.");
+            if (!_ownership.Owners.TryGetValue(path, out var owners))
                 return (null, "Open or reload the owning project to enable XAML binding analysis.");
-            var projects = owners.Select(_solution.GetProject).OfType<Project>()
+            var projects = owners.Select(CurrentSolution.GetProject).OfType<Project>()
                 .Where(p => projectPath is null || string.Equals(p.FilePath, projectPath, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (projects.Length == 1 && UnavailableModelProjects(_solution).Contains(projects[0].Id))
+            if (projects.Length == 1 && UnavailableModelProjects(CurrentSolution).Contains(projects[0].Id))
                 return (null, "Model source refresh is incomplete for this project or a referenced project; XAML type analysis is temporarily unavailable.");
             return projects.Length switch
             {
@@ -146,7 +145,7 @@ public sealed partial class WorkspaceEngine
         }
     }
 
-    private bool IsCurrentXamlProject(Project project) => !_pageProjectionPending && ReferenceEquals(project.Solution, _solution)
+    private bool IsCurrentXamlProject(Project project) => !_pages.Pending && ReferenceEquals(project.Solution, CurrentSolution)
         && !UnavailableModelProjects(project.Solution).Contains(project.Id);
 
     private static string? JoinResourceStatus(string? first, string? second) => first is null ? second : second is null ? first : first + " " + second;

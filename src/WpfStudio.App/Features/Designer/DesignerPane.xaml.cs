@@ -53,20 +53,20 @@ public partial class DesignerPane : UserControl
     private void PushViewport()
     {
         if (_model is null || !CanvasScroller.IsLoaded) return;
-        _model.CanvasViewportWidth = CanvasScroller.ActualWidth;
-        _model.CanvasViewportHeight = CanvasScroller.ActualHeight;
+        _model.Canvas.ViewportWidth = CanvasScroller.ActualWidth;
+        _model.Canvas.ViewportHeight = CanvasScroller.ActualHeight;
     }
 
     private void CanvasWheel(object sender, MouseWheelEventArgs args)
     {
         if (_model is not { } model || Keyboard.Modifiers != ModifierKeys.Control || args.Delta == 0) return;
         args.Handled = true;
-        double previous = model.Zoom, next = DesignerViewModel.StepZoom(previous, args.Delta > 0 ? 1 : -1);
+        double previous = model.Canvas.Zoom, next = PreviewCanvasViewModel.StepZoom(previous, args.Delta > 0 ? 1 : -1);
         if (Math.Abs(next - previous) < 0.0001) return;
         // Keep the artboard point under the pointer in place.
         var pointer = args.GetPosition(CanvasScroller);
         double x = CanvasScroller.HorizontalOffset + pointer.X, y = CanvasScroller.VerticalOffset + pointer.Y;
-        model.Zoom = next;
+        model.Canvas.Zoom = next;
         CanvasScroller.UpdateLayout();
         CanvasScroller.ScrollToHorizontalOffset(Math.Max(0, x * next / previous - pointer.X));
         CanvasScroller.ScrollToVerticalOffset(Math.Max(0, y * next / previous - pointer.Y));

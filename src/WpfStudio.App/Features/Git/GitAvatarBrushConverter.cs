@@ -4,7 +4,7 @@ using System.Windows.Media;
 
 namespace WpfStudio.App.Features.Git;
 
-/// <summary>Maps a Git record's <see cref="GitCommit.AvatarIndex"/> to its brush, so the records stay free of WPF.</summary>
+/// <summary>Maps a Git record's <see cref="WpfStudio.Core.Git.GitCommit.AvatarIndex"/> to its brush, so the records stay free of WPF.</summary>
 public sealed class GitAvatarBrushConverter : IValueConverter
 {
     // Mid-tone avatar colours that keep white initials readable in both themes.

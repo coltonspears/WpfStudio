@@ -24,16 +24,16 @@
      <ToggleButton Style="{StaticResource IconButton}" c:Ui.Icon="Expand" IsChecked="{Binding FocusGraph, Mode=OneWay}" Command="{Binding ToggleGraphFocusCommand}" ToolTip="{Binding GraphFocusLabel}" AutomationProperties.Name="Focus graph" Margin="2,0,0,0"/>
     </StackPanel>
     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowLeft" Command="{Binding BackCommand}" IsEnabled="{Binding CanGoBack}" ToolTip="Back" AutomationProperties.Name="Back"/>
-     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowRight" Command="{Binding ForwardCommand}" IsEnabled="{Binding CanGoForward}" ToolTip="Forward" AutomationProperties.Name="Forward"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowLeft" Command="{Binding Browser.BackCommand}" IsEnabled="{Binding Browser.CanGoBack}" ToolTip="Back" AutomationProperties.Name="Back"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowRight" Command="{Binding Browser.ForwardCommand}" IsEnabled="{Binding Browser.CanGoForward}" ToolTip="Forward" AutomationProperties.Name="Forward"/>
      <TextBlock VerticalAlignment="Center" Margin="8,0,0,0" TextTrimming="CharacterEllipsis">
-      <Run Text="{Binding ObjectTitle, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding GraphSummary, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+      <Run Text="{Binding Browser.ObjectTitle, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  "/><Run Text="{Binding GraphSummary, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
      </TextBlock>
     </StackPanel>
    </DockPanel>
   </Border>
-  <p:MemoryGraphSurface x:Name="ObjectGraph" Grid.Row="1" Graph="{Binding Graph}" FocusMode="{Binding FocusGraph}" InspectObjectCommand="{Binding InspectObjectCommand}"
-   ExpandCommand="{Binding ExpandGraphCommand}" SelectedReference="{Binding SelectedReference}" ReleasedObjects="{Binding ReleasedObjects}"
+  <p:MemoryGraphSurface x:Name="ObjectGraph" Grid.Row="1" Graph="{Binding Graph}" FocusMode="{Binding FocusGraph}" InspectObjectCommand="{Binding Browser.InspectObjectCommand}"
+   ExpandCommand="{Binding ExpandGraphCommand}" SelectedReference="{Binding Browser.SelectedReference}" ReleasedObjects="{Binding Browser.ReleasedObjects}"
    SelectedObjectId="{Binding GraphSelectedObjectId}" ShowMinimap="{Binding ShowMinimap}"/>
   <Border Grid.Row="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" Padding="10,6" CornerRadius="6" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Opacity="0.94" IsHitTestVisible="False">
    <StackPanel>

@@ -10,30 +10,10 @@ namespace WpfStudio.App.Features.Designer;
 public sealed partial class NativePreviewSurface
 {
     private static readonly int NavigationMessage = unchecked((int)NavigationNative.RegisterWindowMessage(PreviewNativeNavigation.MessageName));
-    private string? _navigationToken;
-    private nint _nativeHandle;
-    private long _attachmentSequence, _boundarySequence, _focusObservationSequence;
-    private bool _attaching, _inNativeNavigation;
-    private PreviewSurfaceFocus? _pendingFocusObservation;
+    private bool _inNativeNavigation;
 
     /// <summary>Verified root-DIP geometry for view-only viewport scrolling.</summary>
     public event EventHandler<PreviewSurfaceFocus>? FocusObserved;
-
-    private void ResetAttachment()
-    {
-        _navigationToken = null;
-        _nativeHandle = 0;
-        _attachmentSequence = _boundarySequence = _focusObservationSequence = 0;
-        _attaching = false;
-        _pendingFocusObservation = null;
-    }
-
-    private void BeginAttachment()
-    {
-        ResetAttachment();
-        _navigationToken = Guid.NewGuid().ToString("N");
-        _attaching = true;
-    }
 
     private void AcceptAttachment(PreviewSurfaceResponse response, IPreviewInteractionSession session)
     {
@@ -41,9 +21,7 @@ public sealed partial class NativePreviewSurface
         if (session.NativeProcessId != 0 && (!OwnedNativeWindow(handle, session.NativeProcessId)
             || NavigationNative.GetParent(handle) != _bridge))
             throw new InvalidOperationException("The preview's native window does not belong to the attached process and container.");
-        _nativeHandle = handle;
-        _attachmentSequence = response.Request.Sequence;
-        _attaching = false;
+        _lease.AcceptAttachment(handle, response.Request.Sequence);
     }
 
     private nint ReceiveNativeNavigation(nint sender, nint encoded)
@@ -51,17 +29,17 @@ public sealed partial class NativePreviewSurface
         long value = encoded.ToInt64(), sequence = value / 4, direction = value & 3;
         var session = _session;
         long bridgeGeneration = _bridgeGeneration, stateGeneration = _stateGeneration;
-        if (NavigationMessage == 0 || _inNativeNavigation || value <= 0 || sequence <= _boundarySequence
-            || direction is not (1 or 2) || !WantsAttachment || !IsAttached || _attaching
-            || session is null || !ReferenceEquals(session, _leasedSession) || session.NativeProcessId <= 0
-            || _nativeHandle == 0 || sender != _nativeHandle || _navigationToken is null
+        if (NavigationMessage == 0 || _inNativeNavigation || value <= 0 || sequence <= _lease.BoundarySequence
+            || direction is not (1 or 2) || !WantsAttachment || !IsAttached || _lease.IsAttaching
+            || session is null || !ReferenceEquals(session, _lease.Session) || session.NativeProcessId <= 0
+            || _lease.NativeHandle == 0 || sender != _lease.NativeHandle || _lease.NavigationToken is null
             || !OwnedNativeWindow(sender, session.NativeProcessId) || NavigationNative.GetParent(sender) != _bridge
-            || Native.GetProp(sender, PreviewNativeNavigation.PropertyPrefix + _navigationToken) != encoded
+            || Native.GetProp(sender, PreviewNativeNavigation.PropertyPrefix + _lease.NavigationToken) != encoded
             || !((IKeyboardInputSink)this).HasFocusWithin()) return PreviewNativeNavigation.Rejected;
 
         // Consume the sequence before invoking framework traversal: focus events
         // can reenter WndProc. Never await, pump, or make RPC calls in this scope.
-        _boundarySequence = sequence;
+        _lease.BoundarySequence = sequence;
         _inNativeNavigation = true;
         RevokeFocus();
         try
@@ -91,16 +69,16 @@ public sealed partial class NativePreviewSurface
     {
         if (observation is null || !WantsAttachment || observation.BridgeToken != _bridgeToken
             || observation.Sequence <= 0 || observation.AttachmentSequence <= 0) return;
-        if (_attaching)
+        if (_lease.IsAttaching)
         {
-            if (_pendingFocusObservation is null || observation.AttachmentSequence > _pendingFocusObservation.AttachmentSequence
-                || observation.AttachmentSequence == _pendingFocusObservation.AttachmentSequence && observation.Sequence > _pendingFocusObservation.Sequence)
-                _pendingFocusObservation = observation;
+            if (_lease.PendingFocusObservation is not { } pending || observation.AttachmentSequence > pending.AttachmentSequence
+                || observation.AttachmentSequence == pending.AttachmentSequence && observation.Sequence > pending.Sequence)
+                _lease.PendingFocusObservation = observation;
             return;
         }
-        if (!IsAttached || observation.AttachmentSequence != _attachmentSequence
-            || observation.Sequence <= _focusObservationSequence) return;
-        _focusObservationSequence = observation.Sequence;
+        if (!IsAttached || observation.AttachmentSequence != _lease.AttachmentSequence
+            || observation.Sequence <= _lease.FocusObservationSequence) return;
+        _lease.FocusObservationSequence = observation.Sequence;
         if (observation.Bounds is not { } bounds || observation.FocusEpoch <= 0 || observation.FocusChangedAtTick < 0
             || observation.FocusChangedAtTick > Environment.TickCount64 || observation.Dpi != Native.GetDpiForWindow(_bridge)
             || observation.NativeFocusHandle == 0 || new nint(observation.NativeFocusHandle) != Native.GetFocus()

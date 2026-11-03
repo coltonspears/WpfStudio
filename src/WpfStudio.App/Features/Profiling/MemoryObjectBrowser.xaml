@@ -20,7 +20,7 @@
    </Style>
   </ResourceDictionary>
  </UserControl.Resources>
- <Grid Background="{DynamicResource SurfaceBrush}">
+ <Grid DataContext="{Binding Browser}" Background="{DynamicResource SurfaceBrush}">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 
   <!-- History: back, forward and a breadcrumb of recently visited objects -->
@@ -30,7 +30,7 @@
      <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowLeft" Command="{Binding BackCommand}" IsEnabled="{Binding CanGoBack}" ToolTip="Back (Alt+Left)" AutomationProperties.Name="Browser back"/>
      <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowRight" Command="{Binding ForwardCommand}" IsEnabled="{Binding CanGoForward}" ToolTip="Forward (Alt+Right)" AutomationProperties.Name="Browser forward"/>
     </StackPanel>
-    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Nodes" Command="{Binding ShowViewCommand}" CommandParameter="3" ToolTip="Show this object in the retention graph"/>
+    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Nodes" Command="{Binding DataContext.ShowViewCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="3" ToolTip="Show this object in the retention graph"/>
     <ItemsControl ItemsSource="{Binding Trail}" Focusable="False" VerticalAlignment="Center" Margin="4,0" ClipToBounds="True">
      <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
      <ItemsControl.ItemTemplate>
@@ -38,7 +38,7 @@
        <StackPanel Orientation="Horizontal">
         <c:Glyph x:Name="Sep" Kind="ChevronRight" Width="11" Height="11" Foreground="{DynamicResource SubtleBrush}" VerticalAlignment="Center"/>
         <Button x:Name="Crumb" Content="{Binding Label}" Style="{StaticResource LinkButton}" Foreground="{DynamicResource MutedBrush}" Padding="4,2" MaxWidth="110"
-         Command="{Binding DataContext.NavigateTrailCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Label}"/>
+         Command="{Binding DataContext.Browser.NavigateTrailCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Label}"/>
        </StackPanel>
        <DataTemplate.Triggers>
         <DataTrigger Binding="{Binding IsCurrent}" Value="True"><Setter TargetName="Crumb" Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter TargetName="Crumb" Property="FontWeight" Value="SemiBold"/></DataTrigger>
@@ -116,9 +116,9 @@
         <TextBlock x:Name="Loading" Text="Loading…" FontSize="11.5" Foreground="{DynamicResource SubtleBrush}" Visibility="Collapsed"/>
         <TextBlock Grid.Column="1" Text="{Binding RetainedText}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
         <Button Grid.Column="2" x:Name="Go" Style="{StaticResource IconButton}" Width="20" Height="20" c:Ui.Icon="ArrowRight" Margin="4,0,0,0" Visibility="Collapsed"
-         Command="{Binding DataContext.OpenNodeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="Open this object"/>
+         Command="{Binding DataContext.Browser.OpenNodeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="Open this object"/>
         <Button Grid.ColumnSpan="3" x:Name="More" Style="{StaticResource LinkButton}" Content="{Binding Name}" Visibility="Collapsed" Padding="0,2"
-         Command="{Binding DataContext.LoadMoreCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+         Command="{Binding DataContext.Browser.LoadMoreCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
        </Grid>
        <HierarchicalDataTemplate.Triggers>
         <DataTrigger Binding="{Binding IsReference}" Value="True"><Setter TargetName="Go" Property="Visibility" Value="Visible"/></DataTrigger>
@@ -158,7 +158,7 @@
                <StackPanel Grid.Column="1" Margin="6,0,0,0">
                 <TextBlock x:Name="Via" Text="{Binding Via}" FontSize="10.5" Foreground="{DynamicResource WarningBrush}" Margin="4,2,0,0" TextTrimming="CharacterEllipsis"/>
                 <Button x:Name="Target" Content="{Binding TargetShort}" Style="{StaticResource RowButton}" Padding="4,2" HorizontalContentAlignment="Left" p:MemoryMenus.Target="{Binding}"
-                 Command="{Binding DataContext.OpenPathStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Target}"/>
+                 Command="{Binding DataContext.Browser.OpenPathStepCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Target}"/>
                </StackPanel>
               </Grid>
               <DataTemplate.Triggers>
@@ -179,7 +179,7 @@
       <ItemsControl ItemsSource="{Binding Details.Dominators}" Focusable="False">
        <ItemsControl.ItemTemplate>
         <DataTemplate>
-         <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,0,0" Command="{Binding DataContext.InspectObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Id}" ToolTip="{Binding Type}">
+         <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,0,0" Command="{Binding DataContext.Browser.InspectObjectCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Id}" ToolTip="{Binding Type}">
           <DockPanel>
            <TextBlock DockPanel.Dock="Right" Text="{Binding RetainedBytes, Converter={StaticResource Bytes}}" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"/>
            <TextBlock Text="{Binding Type}" TextTrimming="CharacterEllipsis"/>
@@ -212,7 +212,7 @@
       <ItemsControl ItemsSource="{Binding RetainedTypes}" Focusable="False">
        <ItemsControl.ItemTemplate>
         <DataTemplate>
-         <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,-6,0" Command="{Binding DataContext.OpenRetainedTypeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Type.Type}" p:MemoryMenus.Target="{Binding}">
+         <Button Style="{StaticResource RowButton}" Padding="6,4" Margin="-6,0,-6,0" Command="{Binding DataContext.Browser.OpenRetainedTypeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="{Binding Type.Type}" p:MemoryMenus.Target="{Binding}">
           <Grid>
            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -285,7 +285,7 @@
       <DataGrid.Columns>
        <DataGridTextColumn Header="Slot" Binding="{Binding Label}" Width="*"/>
        <DataGridTextColumn Header="Owner" Binding="{Binding Owner}" Width="150"/>
-       <DataGridTemplateColumn Header="" Width="34"><DataGridTemplateColumn.CellTemplate><DataTemplate><Button Style="{StaticResource IconButton}" Width="22" Height="22" c:Ui.Icon="ArrowRight" ToolTip="Open owner" Command="{Binding DataContext.OpenReferenceOwnerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+       <DataGridTemplateColumn Header="" Width="34"><DataGridTemplateColumn.CellTemplate><DataTemplate><Button Style="{StaticResource IconButton}" Width="22" Height="22" c:Ui.Icon="ArrowRight" ToolTip="Open owner" Command="{Binding DataContext.Browser.OpenReferenceOwnerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
        <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="100"/>
       </DataGrid.Columns>
      </DataGrid>
@@ -294,7 +294,7 @@
       <DataGrid.Columns>
        <DataGridTextColumn Header="Slot" Binding="{Binding Label}" Width="*"/>
        <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="150"/>
-       <DataGridTemplateColumn Header="" Width="34"><DataGridTemplateColumn.CellTemplate><DataTemplate><Button Style="{StaticResource IconButton}" Width="22" Height="22" c:Ui.Icon="ArrowRight" ToolTip="Open target" Command="{Binding DataContext.OpenReferenceTargetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+       <DataGridTemplateColumn Header="" Width="34"><DataGridTemplateColumn.CellTemplate><DataTemplate><Button Style="{StaticResource IconButton}" Width="22" Height="22" c:Ui.Icon="ArrowRight" ToolTip="Open target" Command="{Binding DataContext.Browser.OpenReferenceTargetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
       </DataGrid.Columns>
      </DataGrid>
     </Grid>

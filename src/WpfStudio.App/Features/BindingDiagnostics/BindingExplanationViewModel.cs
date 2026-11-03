@@ -30,6 +30,20 @@ public sealed partial class BindingExplanationViewModel : ObservableObject
     public ObservableCollection<InspectionBindingValidation> ValidationErrors { get; } = [];
     public ObservableCollection<InspectionBindingEvidence> Evidence { get; } = [];
 
+    /// <summary>Explains the selected declaration from the current observation, or names why it cannot.</summary>
+    /// <param name="noIdentities">What to say when bindings were observed without expression identities.</param>
+    /// <param name="locate">The observed property holding a declaration; null once it has left the observation.</param>
+    public void ExplainSelected(BindingDeclarationsViewModel declarations, bool hasBindings, string noIdentities,
+        Func<BindingDeclarationItem, (InspectionBinding? Binding, string Value, string ValueSource)?> locate)
+    {
+        if (declarations.Items.Count == 0 && hasBindings) { Clear(noIdentities); return; }
+        if (declarations.Selected is not { } item || !declarations.Items.Any(current => current.SameIdentity(item)))
+        { Clear("Select a binding declaration. A removed or replaced expression is not the previous binding."); return; }
+        if (locate(item) is not { } property) { Clear("The selected binding is no longer in this observation."); return; }
+        var observation = item.Declaration.Observation ?? (item.Declaration.ParentExpressionId is null ? property.Binding : null);
+        Apply(item, observation, property.Value, property.ValueSource);
+    }
+
     public void Apply(BindingDeclarationItem item, InspectionBinding? observation, string targetValue, string valueSource)
     {
         Clear(observation is null ? "This host did not provide an explanation for the selected expression. Refresh with a compatible host."

@@ -146,6 +146,59 @@ public sealed partial class ShellSmokeTests
         Assert.Null(secondView.Filter);
     }
 
+    /// <summary>The mode asked for survives a view too narrow to honour it, and the options never overwrite it.</summary>
+    private static async Task VerifyDiffModeAsync()
+    {
+        var view = new DiffView { Before = "first\nsame", After = "second\nsame" };
+        var host = new Window { Width = 1100, Height = 500, Content = view, ShowInTaskbar = false, ShowActivated = false, Opacity = 0 };
+        host.Show();
+        try
+        {
+            await Idle();
+            var split = (System.Windows.Controls.RadioButton)view.FindName("SideBySideOption");
+            var inline = (System.Windows.Controls.RadioButton)view.FindName("InlineOption");
+            Assert.Equal(DiffViewMode.SideBySide, view.EffectiveMode);
+            Assert.True(view.ShowsSplit);
+            Assert.True(split.IsChecked);
+
+            inline.SetCurrentValue(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, true);
+            await Idle();
+            Assert.Equal(DiffViewMode.Inline, view.Mode);
+            Assert.False(view.ShowsSplit);
+            split.SetCurrentValue(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, true);
+            await Idle();
+            Assert.Equal(DiffViewMode.SideBySide, view.Mode);
+            Assert.True(view.ShowsSplit);
+
+            host.Width = 600;
+            await Idle();
+            Assert.Equal(DiffViewMode.SideBySide, view.Mode);
+            Assert.Equal(DiffViewMode.Inline, view.EffectiveMode);
+            Assert.False(view.ShowsSplit);
+            Assert.True(inline.IsChecked);
+            Assert.False(split.IsChecked);
+            Assert.False(split.IsEnabled);
+
+            host.Width = 1100;
+            await Idle();
+            Assert.Equal(DiffViewMode.SideBySide, view.EffectiveMode);
+            Assert.True(view.ShowsSplit);
+            Assert.True(split.IsChecked);
+            Assert.False(inline.IsChecked);
+            Assert.True(split.IsEnabled);
+
+            view.Mode = DiffViewMode.Inline;
+            await Idle();
+            Assert.True(inline.IsChecked);
+            Assert.False(view.ShowsSplit);
+            view.Mode = DiffViewMode.SideBySide;
+            await Idle();
+            Assert.True(split.IsChecked);
+            Assert.True(view.ShowsSplit);
+        }
+        finally { host.Close(); }
+    }
+
     private static async Task VerifyLargeDiffsAsync()
     {
         static string Lines(string text) => string.Join('\n', Enumerable.Range(0, 30_000).Select(index => $"{text} {index}"));

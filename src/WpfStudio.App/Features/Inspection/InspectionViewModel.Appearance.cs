@@ -8,10 +8,9 @@ namespace WpfStudio.App.Features.Inspection;
 
 public sealed partial class InspectionViewModel
 {
-    private CancellationTokenSource? _appearanceRead;
-    private long _appearanceSequence;
     private bool _appearanceElementAvailable;
-    public AppearanceInspectorViewModel AppearanceDetails { get; } = new();
+    private AppearanceReader Appearance => field ??= new(RefreshAppearanceCommand.NotifyCanExecuteChanged);
+    public AppearanceInspectorViewModel AppearanceDetails => Appearance.Details;
     [ObservableProperty] public partial bool AppearanceTabIsActive { get; set; }
 
     partial void OnAppearanceTabIsActiveChanged(bool value)
@@ -30,11 +29,8 @@ public sealed partial class InspectionViewModel
         && SelectedNode is not null && SelectedProperty is { PropertyId: not null } property && Properties.Contains(property);
     private void ClearAppearance(string status, bool invalidateElement = false)
     {
-        ++_appearanceSequence;
-        _appearanceRead?.Cancel(); _appearanceRead?.Dispose(); _appearanceRead = null;
         if (invalidateElement) _appearanceElementAvailable = false;
-        AppearanceDetails.Clear(status);
-        RefreshAppearanceCommand.NotifyCanExecuteChanged();
+        Appearance.Clear(status);
     }
     private void UpdateAppearanceState()
     {
@@ -53,30 +49,18 @@ public sealed partial class InspectionViewModel
         RefreshAppearanceCommand.NotifyCanExecuteChanged();
     }
     [RelayCommand(CanExecute = nameof(CanRefreshAppearance))]
-    private async Task RefreshAppearanceAsync()
+    private Task RefreshAppearanceAsync()
     {
-        if (!CanRefreshAppearance() || _session is not { } session) return;
-        ClearAppearance("Reading appearance…");
+        if (!CanRefreshAppearance() || _session is not { } session) return Task.CompletedTask;
         var property = SelectedProperty!;
-        var generation = _generation; var revision = _revision; var selection = _selection; var sequence = _appearanceSequence;
+        var generation = _generation; var revision = _revision; var selection = _selection;
         var request = new AppearanceRequest(revision, SelectedNode!.Node.Id, property.Name, property.OwnerType, property.OwnerAssembly, property.PropertyId);
-        _appearanceRead = CancellationTokenSource.CreateLinkedTokenSource(_poll?.Token ?? default);
-        var token = _appearanceRead.Token;
-        AppearanceDetails.Begin(property.ValueSource, property.IsOverridden);
-        bool CurrentAppearance() => !token.IsCancellationRequested && !_disposed && generation == _generation && revision == _revision
-            && selection == _selection && sequence == _appearanceSequence && ReferenceEquals(session, _session) && session.IsConnected
-            && !session.IsDebuggerPaused && IsConnected && !IsPaused && _appearanceElementAvailable
-            && !IsPropertyOperationRunning && !IsSourceEditRunning && SelectedNode?.Node.Id == request.NodeId
-            && ReferenceEquals(SelectedProperty, property) && Properties.Contains(property);
-        try
-        {
-            var response = await session.GetAppearanceAsync(request, token);
-            if (!CurrentAppearance()) return;
-            if (response.Request != request) { AppearanceDetails.Clear("Appearance response did not match the selected property. Refresh to try again."); return; }
-            AppearanceDetails.Apply(response.Snapshot);
-        }
-        catch (OperationCanceledException) { if (CurrentAppearance()) AppearanceDetails.Clear("Appearance request cancelled. Refresh to try again."); }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        { if (CurrentAppearance()) AppearanceDetails.Clear("Appearance unavailable: " + exception.Message); }
+        return Appearance.ReadAsync(request, property.ValueSource, property.IsOverridden, _poll?.Token ?? default,
+            () => !_disposed && generation == _generation && revision == _revision
+                && selection == _selection && ReferenceEquals(session, _session) && session.IsConnected
+                && !session.IsDebuggerPaused && IsConnected && !IsPaused && _appearanceElementAvailable
+                && !IsPropertyOperationRunning && !IsSourceEditRunning && SelectedNode?.Node.Id == request.NodeId
+                && ReferenceEquals(SelectedProperty, property) && Properties.Contains(property),
+            session.GetAppearanceAsync);
     }
 }
