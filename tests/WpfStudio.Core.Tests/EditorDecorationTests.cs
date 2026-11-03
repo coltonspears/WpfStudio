@@ -97,6 +97,24 @@ public sealed class WhitespaceCleanupTests
     }
 
     [Fact]
+    public void ApplyHandlesEditsInAnyOrderAndAtBothEndsOfTheText()
+    {
+        Assert.Equal("text", WhitespaceCleanup.Apply("text", []));
+        Assert.Equal("", WhitespaceCleanup.Apply("  ", [new(0, 2, "")]));
+        Assert.Equal("Xa-Y-c\n", WhitespaceCleanup.Apply("  abc", [new(5, 0, "\n"), new(3, 1, "-Y-"), new(0, 2, "X")]));
+    }
+
+    [Fact]
+    public void ApplyMatchesReplacingEachEditFromTheEnd()
+    {
+        var text = string.Concat(Enumerable.Range(0, 2000).Select(line => "line " + line + new string(' ', line % 4) + (line % 3 == 0 ? "\r\n" : "\n"))) + "last  ";
+        var edits = WhitespaceCleanup.Edits(text, ".cs", trimTrailingWhitespace: true, ensureFinalNewline: true);
+        Assert.NotEmpty(edits);
+        var expected = edits.OrderByDescending(edit => edit.Start).Aggregate(text, (current, edit) => current.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.Text));
+        Assert.Equal(expected, WhitespaceCleanup.Apply(text, edits));
+    }
+
+    [Fact]
     public void MarkdownKeepsTrailingSpacesAndEachOptionIsIndependent()
     {
         Assert.Empty(WhitespaceCleanup.Edits("line  \nnext", ".md", trimTrailingWhitespace: true, ensureFinalNewline: false));

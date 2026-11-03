@@ -66,6 +66,132 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
         Assert.Null(await engine.GetQuickInfoAsync(new(Source, text.IndexOf("    public decimal Total", StringComparison.Ordinal) + 1, 1)));
     }
 
+    [Fact]
+    public async Task CompletionCommitAcceptsEveryPathSpellingTheWorkerAccepts()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "namespace Shop;\npublic class Lookup { public int Total; public int Read() => To; }\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        var position = text.IndexOf("=> To;", StringComparison.Ordinal) + "=> To".Length;
+        var forwardSlashes = Source.Replace('\\', '/');
+        var completions = await engine.GetCompletionsAsync(new DocumentPositionRequest(forwardSlashes, position, 1));
+        var total = Assert.Single(completions.Items, item => item.DisplayText == "Total");
+        var edit = await engine.GetCompletionEditAsync(new CompletionEditRequest(forwardSlashes, 1, total.Id));
+        Assert.NotNull(edit);
+        Assert.Equal("Total", edit.NewText);
+    }
+
+    [Fact]
+    public async Task DefinitionMappedByLineDirectiveFallsBackWhenItsFileCannotBeRead()
+    {
+        var mapped = Path.Combine(_directory, "Mapped.xaml");
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = $"namespace Shop;\npublic class Page\n{{\n#line 1 \"{mapped}\"\n    public int Field;\n#line default\n    public int Read() => Field;\n}}\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        var usage = new DocumentPositionRequest(Source, text.LastIndexOf("Field", StringComparison.Ordinal) + 1, 1);
+
+        // Readable: the directive's target, with an offset in that file rather than the C#.
+        await File.WriteAllTextAsync(mapped, "<Grid />\n");
+        var target = Assert.Single(await engine.GetDefinitionAsync(usage));
+        Assert.Equal(mapped, target.Path, ignoreCase: true);
+        Assert.Equal(1, target.Line);
+        Assert.InRange(target.Start, 0, "<Grid />".Length);
+
+        // Renamed after the last build.
+        File.Delete(mapped);
+        AssertFallsBackToDeclaration(Assert.Single(await engine.GetDefinitionAsync(usage)));
+
+        // Exists but cannot be read: the worker must still answer, with the C# holding the declaration.
+        await File.WriteAllTextAsync(mapped, "<Grid />\n");
+        using var locked = new FileStream(mapped, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        AssertFallsBackToDeclaration(Assert.Single(await engine.GetDefinitionAsync(usage)));
+
+        void AssertFallsBackToDeclaration(SourceLocation location)
+        {
+            Assert.NotEqual(mapped, location.Path, StringComparer.OrdinalIgnoreCase);
+            Assert.True(File.Exists(location.Path));
+            Assert.Equal(text.IndexOf("Field;", StringComparison.Ordinal), location.Start);
+        }
+    }
+
+    [Fact]
+    public async Task EditsReportFileDiagnosticsAtOnceAndProjectWideOnesWhenTheCompilationIsDone()
+    {
+        await File.WriteAllTextAsync(Project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><OutputType>Exe</OutputType></PropertyGroup></Project>");
+        var other = Path.Combine(_directory, "Other.cs");
+        await File.WriteAllTextAsync(other, "namespace Shop;\npublic class Other { public int Broken() => \"elsewhere\"; }\n");
+        var text = "namespace Shop;\npublic class Report\n{\n    private int _unused;\n    private int _assigned = 1;\n    public int Bad() => \"text\";\n}\n";
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        using var pushes = new SemaphoreSlim(0);
+        var pushed = 0;
+        engine.ProjectDiagnosticsChanged += (_, _) => { Interlocked.Increment(ref pushed); pushes.Release(); };
+        var invalidations = 0;
+        engine.SemanticStateChanged += (_, _) => Interlocked.Increment(ref invalidations);
+        engine.NameProjectionChanged += (_, _) => Interlocked.Increment(ref invalidations);
+        async Task<IReadOnlyList<WorkspaceDiagnostic>> SettledAsync(string current, long version)
+        {
+            Assert.True(await pushes.WaitAsync(TimeSpan.FromMinutes(3)));
+            return (await engine.UpdateDocumentAsync(new(Source, current, version))).Diagnostics;
+        }
+
+        // Only this file was bound, so what needs every method body or has no file is not known yet.
+        var first = (await engine.UpdateDocumentAsync(new(Source, text, 1))).Diagnostics;
+        Assert.Contains(first, diagnostic => diagnostic.Id == "CS0029" && diagnostic.Severity == "Error");
+        Assert.DoesNotContain(first, diagnostic => diagnostic.Id is "CS0169" or "CS0414" or "CS5001");
+
+        var settled = await SettledAsync(text, 1);
+        Assert.Contains(settled, diagnostic => diagnostic.Id == "CS0029");
+        var unused = Assert.Single(settled, diagnostic => diagnostic.Id == "CS0169");
+        Assert.Equal(Source, unused.Path, ignoreCase: true);
+        Assert.Equal(4, unused.Line);
+        Assert.Equal(text.IndexOf("_unused", StringComparison.Ordinal), unused.Start);
+        Assert.Single(settled, diagnostic => diagnostic.Id == "CS0414");
+        Assert.Null(Assert.Single(settled, diagnostic => diagnostic.Id == "CS5001").Path);
+        // Other files' diagnostics stay out, as they always have.
+        Assert.DoesNotContain(settled, diagnostic => diagnostic.Message.Contains("elsewhere") || (diagnostic.Path?.EndsWith("Other.cs", StringComparison.OrdinalIgnoreCase) ?? false));
+        Assert.Equal(settled.Count, settled.Distinct().Count());
+        // The push is not a semantic change, and the complete reply must not start another pass.
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        Assert.Equal(0, Volatile.Read(ref invalidations));
+        Assert.Equal(1, Volatile.Read(ref pushed));
+        Assert.Equal(settled, (await engine.UpdateDocumentAsync(new(Source, text, 1))).Diagnostics);
+
+        // An edit elsewhere in the file moves them at once, and a pass that agrees has nothing to push.
+        var moved = text.Replace("    private int _unused;", "    // A note.\n    private int _unused;", StringComparison.Ordinal);
+        var carried = (await engine.UpdateDocumentAsync(new(Source, moved, 2))).Diagnostics;
+        var carriedUnused = Assert.Single(carried, diagnostic => diagnostic.Id == "CS0169");
+        Assert.Equal(5, carriedUnused.Line);
+        Assert.Equal(17, carriedUnused.Column);
+        Assert.Equal(moved.IndexOf("_unused", StringComparison.Ordinal), carriedUnused.Start);
+        Assert.Contains(carried, diagnostic => diagnostic.Id == "CS0414" && diagnostic.Start == moved.IndexOf("_assigned", StringComparison.Ordinal));
+        Assert.Contains(carried, diagnostic => diagnostic.Id == "CS5001");
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Assert.Equal(1, Volatile.Read(ref pushed));
+        Assert.True(carried.ToHashSet().SetEquals((await engine.UpdateDocumentAsync(new(Source, moved, 2))).Diagnostics));
+
+        // An edit touching one drops it until the pass has the new wording.
+        var renamed = moved.Replace("_unused;", "_unusedNow;", StringComparison.Ordinal);
+        var touched = (await engine.UpdateDocumentAsync(new(Source, renamed, 3))).Diagnostics;
+        Assert.DoesNotContain(touched, diagnostic => diagnostic.Id == "CS0169");
+        Assert.Contains(touched, diagnostic => diagnostic.Id == "CS0414");
+        Assert.Contains("_unusedNow", Assert.Single(await SettledAsync(renamed, 3), diagnostic => diagnostic.Id == "CS0169").Message);
+
+        // An edit that makes one wrong keeps it only until the pass disagrees.
+        var used = renamed.Replace("    public int Bad()", "    public int Use() => _unusedNow;\n    public int Bad()", StringComparison.Ordinal);
+        Assert.Contains((await engine.UpdateDocumentAsync(new(Source, used, 4))).Diagnostics, diagnostic => diagnostic.Id == "CS0169");
+        Assert.DoesNotContain(await SettledAsync(used, 4), diagnostic => diagnostic.Id == "CS0169");
+
+        // Rewriting the class leaves nothing stale; a diagnostic with no position stays.
+        var fixedText = "namespace Shop;\npublic class Report\n{\n    public int Good() => 1;\n}\n";
+        var edited = (await engine.UpdateDocumentAsync(new(Source, fixedText, 5))).Diagnostics;
+        Assert.DoesNotContain(edited, diagnostic => diagnostic.Id is "CS0029" or "CS0169" or "CS0414");
+        Assert.Contains(edited, diagnostic => diagnostic.Id == "CS5001");
+    }
+
     private static string Apply(string text, IReadOnlyList<TextEdit> edits) =>
         edits.OrderByDescending(edit => edit.Start).Aggregate(text, (current, edit) => current.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.NewText));
 

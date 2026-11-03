@@ -22,6 +22,7 @@ public sealed class WorkspaceStateStore<T>(string folder, string? directory = nu
         catch (JsonException) { return []; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
     }
+    private readonly object _snapshotGate = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly Dictionary<string, long> _written = new(StringComparer.OrdinalIgnoreCase);
     private long _sequence;
@@ -32,8 +33,14 @@ public sealed class WorkspaceStateStore<T>(string folder, string? directory = nu
     public async Task SaveAsync(string workspacePath, IEnumerable<T> items, CancellationToken token = default)
     {
         var path = PathFor(workspacePath);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(items.ToList(), new JsonSerializerOptions { WriteIndented = true });
-        var sequence = Interlocked.Increment(ref _sequence);
+        byte[] bytes;
+        long sequence;
+        // Taken together, so the newest sequence number always belongs to the newest snapshot.
+        lock (_snapshotGate)
+        {
+            bytes = JsonSerializer.SerializeToUtf8Bytes(items.ToList(), new JsonSerializerOptions { WriteIndented = true });
+            sequence = ++_sequence;
+        }
         await _writeGate.WaitAsync(token).ConfigureAwait(false);
         try
         {

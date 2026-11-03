@@ -50,6 +50,47 @@ public class BuildServiceTests
     }
 
     [Fact]
+    public void LaunchProfilesTolerateValuesOfAnyJsonType()
+    {
+        var project = WriteLaunchSettings("""
+            {
+              "profiles": {
+                "Mixed": { "commandName": "Project", "commandLineArgs": 42, "workingDirectory": true, "executablePath": null, "environmentVariables": { "PORT": 5000 } },
+                "Shapes": { "commandName": ["Project"], "commandLineArgs": { "a": 1 }, "environmentVariables": null },
+                "Scalar": 7,
+                "Plain": { "commandName": "Project", "commandLineArgs": "--name two", "environmentVariables": { "MODE": "dev" } }
+              }
+            }
+            """);
+        var profiles = BuildService.ReadLaunchProfiles(project);
+        Assert.Equal(["Mixed", "Shapes", "Plain"], profiles.Select(profile => profile.Name));
+        var mixed = profiles[0];
+        Assert.Equal("42", mixed.CommandLineArgs);
+        Assert.Equal("True", mixed.WorkingDirectory);
+        Assert.Null(mixed.ExecutablePath);
+        Assert.Equal("5000", mixed.EnvironmentVariables["PORT"]);
+        Assert.Null(profiles[1].CommandName);
+        Assert.Null(profiles[1].CommandLineArgs);
+        Assert.Empty(profiles[1].EnvironmentVariables);
+        Assert.Equal("--name two", profiles[2].CommandLineArgs);
+        Assert.Equal("dev", profiles[2].EnvironmentVariables["MODE"]);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("{ \"profiles\": 3 }")]
+    [InlineData("{ }")]
+    public void LaunchSettingsWithoutAProfilesObjectHaveNoProfiles(string json) => Assert.Empty(BuildService.ReadLaunchProfiles(WriteLaunchSettings(json)));
+
+    private static string WriteLaunchSettings(string json)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WpfStudio.Workspace.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(directory, "Properties"));
+        File.WriteAllText(Path.Combine(directory, "Properties", "launchSettings.json"), json);
+        return Path.Combine(directory, "App.csproj");
+    }
+
+    [Fact]
     public void VisualStudioMSBuildRestoresPackagesConfigAndReceivesTheSolutionFolder()
     {
         var solution = Path.Combine(Path.GetTempPath(), "Shop", "Shop.sln");

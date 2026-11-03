@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.Core.Documents;
 
@@ -48,6 +49,9 @@ public sealed class DocumentStore
         await _saveGate.WaitAsync(cancellationToken);
         try
         {
+            // The lease denies replacement on purpose, and the operating system would only report "Access to the path is denied."
+            if (XamlBuildSourceLease.IsHeld(document.Path))
+                throw new IOException($"{document.Name} is locked while the inspection build reads it. Your edits are kept; save again when the build finishes.");
             if (File.Exists(document.Path))
             {
                 var current = Hash(await File.ReadAllBytesAsync(document.Path, cancellationToken));
@@ -55,7 +59,7 @@ public sealed class DocumentStore
             }
             else if (document.DiskHash != null && !overwriteExternal) throw new ExternalFileChangedException(document.Path);
             var content = document.Content;
-            var bytes = document.Encoding.GetPreamble().Concat(document.Encoding.GetBytes(content)).ToArray();
+            byte[] bytes = [.. document.Encoding.GetPreamble(), .. document.Encoding.GetBytes(content)];
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(document.Path)!);
             await AtomicWriteAsync(document.Path, bytes, cancellationToken);
             document.MarkSavedSnapshot(content, Hash(bytes));

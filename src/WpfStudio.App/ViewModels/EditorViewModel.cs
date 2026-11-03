@@ -61,6 +61,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         {
             _workspace.NameProjectionChanged += SemanticStateChanged;
             _workspace.CSharpModelChanged += CSharpModelChanged;
+            _workspace.ProjectDiagnosticsChanged += ProjectDiagnosticsChanged;
         }
         ContentChanged(this, EventArgs.Empty);
     }
@@ -148,6 +149,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         CodeLensChanged?.Invoke();
     }
     private CancellationTokenSource? _codeLens;
+    // Set by an analysis that may change the counts and cleared by the first to finish, so one cancelled by a diagnostics-only analysis still counts.
+    private bool _codeLensDue;
     private void ScheduleCodeLens(long version)
     {
         _codeLens?.Cancel(); _codeLens?.Dispose(); _codeLens = null;
@@ -225,10 +228,14 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             }
         });
     }
+    // Nothing semantic changed, so results replace in place and same-version observations stay valid.
+    private void ProjectDiagnosticsChanged(object? sender, EventArgs e) =>
+        _dispatcher.Post(() => { if (!_disposed) _ = StartAnalysisAsync(debounce: false, countsChanged: false); });
     public Task RefreshAnalysisAsync(CancellationToken token = default) => StartAnalysisAsync(debounce: false, token);
-    private Task StartAnalysisAsync(bool debounce, CancellationToken token = default)
+    private Task StartAnalysisAsync(bool debounce, CancellationToken token = default, bool countsChanged = true)
     {
         if (_disposed) return Task.CompletedTask;
+        if (countsChanged) _codeLensDue = true;
         _analysis?.Cancel();
         _analysis?.Dispose();
         _analysis = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -286,7 +293,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                     SemanticSpans = current.Spans; InlayHints = current.Hints; DecorationsVersion = version;
                     DecorationsChanged?.Invoke();
                 }
-                if (IsCSharp) ScheduleCodeLens(version);
+                if (IsCSharp && _codeLensDue) { _codeLensDue = false; ScheduleCodeLens(version); }
             }, token);
         }
         catch (OperationCanceledException) { }
@@ -502,6 +509,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _workspace.SemanticStateChanged -= SemanticStateChanged;
         _workspace.NameProjectionChanged -= SemanticStateChanged;
         _workspace.CSharpModelChanged -= CSharpModelChanged;
+        _workspace.ProjectDiagnosticsChanged -= ProjectDiagnosticsChanged;
         if (_resources is not null) _resources.Changed -= SemanticStateChanged;
         ClearQuickFixes();
         DisposeGit();

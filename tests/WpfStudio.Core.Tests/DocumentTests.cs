@@ -13,6 +13,25 @@ public class DocumentTests
         return path;
     }
 
+    [Theory]
+    [InlineData("utf-16", "\ufeffcaf\u00e9")]
+    [InlineData("utf-8", "\ufeffcaf\u00e9")]
+    [InlineData("utf-8", "caf\u00e9")]
+    public async Task SaveWritesThePreambleFollowedByTheEncodedText(string encodingName, string initial)
+    {
+        var directory = DirectoryPath();
+        var path = Path.Combine(directory, "View.cs");
+        await File.WriteAllBytesAsync(path, Encoding.GetEncoding(encodingName).GetBytes(initial));
+        var store = new DocumentStore(directory);
+        var document = await store.OpenAsync(path);
+        document.Content = "na\u00efve";
+        await store.SaveAsync(document);
+        byte[] expected = [.. document.Encoding.GetPreamble(), .. document.Encoding.GetBytes("na\u00efve")];
+        Assert.Equal(initial.StartsWith('\ufeff'), document.Encoding.GetPreamble().Length > 0);
+        Assert.Equal(expected, await File.ReadAllBytesAsync(path));
+        Assert.Equal(DocumentStore.Hash(expected), document.DiskHash);
+    }
+
     [Fact]
     public async Task SavePreservesUtf16BomAndLineEndingsAndDetectsExternalChanges()
     {

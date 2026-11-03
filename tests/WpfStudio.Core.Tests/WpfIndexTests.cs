@@ -100,6 +100,30 @@ public class WpfIndexTests
         Assert.Equal(2, index.Diagnostics.Count(d => d.Id == "XAML001"));
     }
 
+    [Theory]
+    [InlineData("\r")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public async Task RenameEditsTheKeyWhateverLineBreakTheFileUses(string lineBreak)
+    {
+        var text = string.Join(lineBreak, $"<UserControl {Namespaces}>", "  <UserControl.Resources>", "    <SolidColorBrush x:Key=\"Decoy\" Color=\"Red\" />",
+            "    <SolidColorBrush x:Key=\"Accent\" Color=\"Blue\" />", "  </UserControl.Resources>", "  <Border Background=\"{StaticResource Accent}\" Tag=\"x\" />", "</UserControl>", "");
+        await AssertRenamesAccentAsync(text);
+    }
+
+    [Fact]
+    public Task RenameEditsTheKeyWhenLineBreakStylesAreMixed() => AssertRenamesAccentAsync(
+        $"<UserControl {Namespaces}>\r  <UserControl.Resources>\r\n    <SolidColorBrush x:Key=\"Decoy\" Color=\"Red\" />\n\r    <SolidColorBrush x:Key=\"Accent\" Color=\"Blue\" />\r  </UserControl.Resources>\n  <Border Background=\"{{StaticResource Accent}}\" />\r\n</UserControl>");
+
+    private static async Task AssertRenamesAccentAsync(string text)
+    {
+        var fixture = await CreateAsync(new Dictionary<string, string> { ["View.xaml"] = text });
+        var service = new WpfIndexService();
+        var index = await service.IndexAsync(fixture);
+        var change = Assert.Single(service.RenameResource(index, Assert.Single(index.Resources, resource => resource.Key == "Accent"), "Renamed"));
+        Assert.Equal(text.Replace("x:Key=\"Accent\"", "x:Key=\"Renamed\"").Replace("{StaticResource Accent}", "{StaticResource Renamed}"), change.After);
+    }
+
     private static async Task<WorkspaceSnapshot> CreateAsync(Dictionary<string, string> files)
     {
         var directory = Path.Combine(Path.GetTempPath(), "WpfStudio.Core.Tests", Guid.NewGuid().ToString("N"));
