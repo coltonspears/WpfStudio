@@ -288,6 +288,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.Same(shell.Theme.Palette, reviewDiff.TryFindResource(Palette.ResourceKey));
             shell.Theme.Apply("Light"); Assert.Same(Palette.Light, reviewDiff.TryFindResource(Palette.ResourceKey));
             shell.Theme.Apply(shell.ThemeName); await Idle();
+            Assert.NotNull(shell.ChangeReview.SelectedChange);
             Assert.Equal(shell.ChangeReview.SelectedChange.After, reviewDiff.After);
             Assert.True(reviewDiff.ShowsSplit);
             Assert.Contains(reviewDiff.Layout!.Right, line => line.Kind == WpfStudio.App.Controls.Diff.DiffLineKind.Added && line.Text.Contains("Hello"));

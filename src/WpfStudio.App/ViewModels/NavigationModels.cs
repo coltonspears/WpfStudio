@@ -143,14 +143,14 @@ public sealed partial class ExplorerNode : ObservableObject
     public static IEnumerable<ExplorerNode> FromFiles(string root, IEnumerable<string> paths, string? projectPath = null, bool nestRelated = true)
     {
         var files = paths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var groups = files.GroupBy(path => { var relative = System.IO.Path.GetRelativePath(root, path); var split = relative.IndexOf(System.IO.Path.DirectorySeparatorChar); return split < 0 ? "" : relative[..split]; });
+        var groups = files.GroupBy(path => { var relative = System.IO.Path.GetRelativePath(root, path); var split = relative.IndexOf(System.IO.Path.DirectorySeparatorChar); return split < 0 ? "" : relative[..split]; }).ToArray();
         foreach (var group in groups.Where(g => g.Key != "").OrderBy(g => g.Key))
         {
             var subRoot = System.IO.Path.Combine(root, group.Key); var subFiles = group.ToArray();
             yield return new ExplorerNode(group.Key, subRoot, true, () => FromFiles(subRoot, subFiles, projectPath, nestRelated), projectPath);
         }
         var level = groups.Where(g => g.Key == "").SelectMany(g => g).OrderBy(System.IO.Path.GetFileName, StringComparer.OrdinalIgnoreCase).ToArray();
-        var nodes = level.ToDictionary(System.IO.Path.GetFileName, path => new ExplorerNode(System.IO.Path.GetFileName(path), path, false, projectPath: projectPath), StringComparer.OrdinalIgnoreCase);
+        var nodes = level.ToDictionary(path => System.IO.Path.GetFileName(path), path => new ExplorerNode(System.IO.Path.GetFileName(path), path, false, projectPath: projectPath), StringComparer.OrdinalIgnoreCase);
         var names = new HashSet<string>(nodes.Keys, StringComparer.OrdinalIgnoreCase);
         foreach (var path in level)
         {
