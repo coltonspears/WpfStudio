@@ -44,8 +44,8 @@ public sealed partial class WorkspaceEngine
         lock (_gate)
         {
             if (!IsCurrentXamlProject(project)) return null;
-            long version = _versions.GetValueOrDefault(proposal.Path);
-            if (version > 0 && (!_syncedTexts.TryGetValue(proposal.Path, out var current) || current != proposal.OriginalText)) return null;
+            long version = _documents.Version(proposal.Path);
+            if (version > 0 && _documents.Text(proposal.Path) != proposal.OriginalText) return null;
             return new($"Create event handler '{target.HandlerName}'",
                 new DocumentEdits(request.Path, request.Version, xamlEdits, TextHash(request.Text)),
                 [new DocumentEdits(proposal.Path, version, [proposal.Edit], TextHash(proposal.OriginalText))]);
