@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using WpfStudio.Contracts;
+using WpfStudio.Wpf.PropertyEditing;
 
 namespace WpfStudio.PreviewHost;
 
@@ -125,7 +126,7 @@ public sealed partial class PreviewEngine
                 if (_document.IsDesignTimeProperty(element, property))
                     return Unavailable($"{property.Name} is supplied by a design-time override; runtime source layout is not inferred from it.");
                 bool attached = property.OwnerType == typeof(Canvas) || property.OwnerType == typeof(Grid);
-                if (!attached && PreviewDocument.Wrapper(authored.Type, property.Name)?.DeclaringType != typeof(FrameworkElement))
+                if (!attached && PropertyWrappers.Find(authored.Type, property.Name)?.DeclaringType != typeof(FrameworkElement))
                     return Unavailable($"The authored type hides the framework {property.Name} wrapper; its source assignment is ambiguous.");
                 object value = element.GetValue(property);
                 localValues.Add(element.ReadLocalValue(property));

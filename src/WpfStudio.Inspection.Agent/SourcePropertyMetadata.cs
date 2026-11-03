@@ -66,7 +66,7 @@ internal static class SourcePropertyMetadata
 
     private static PropertyInfo? Wrapper(Type target, DependencyProperty property)
     {
-        var wrapper = target.GetProperty(property.Name, BindingFlags.Public | BindingFlags.Instance);
+        var wrapper = PropertyWrappers.Find(target, property.Name);
         if (wrapper?.DeclaringType is not { } declaring || wrapper.GetMethod?.IsPublic != true || wrapper.SetMethod?.IsPublic != true
             || wrapper.GetIndexParameters().Length != 0 || wrapper.PropertyType != property.PropertyType || !PublicType(declaring)
             || !SafeConverterAttributes(wrapper.CustomAttributes)) return null;

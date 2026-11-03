@@ -470,7 +470,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
 
     private static bool IsAttached(DependencyProperty property, DependencyObject target)
     {
-        var wrapper = PreviewDocument.Wrapper(target.GetType(), property.Name);
+        var wrapper = PropertyWrappers.Find(target.GetType(), property.Name);
         if (wrapper?.SetMethod?.IsPublic != true || wrapper.PropertyType != property.PropertyType) return true;
         var descriptor = TypeDescriptor.GetProperties(target)[property.Name];
         return descriptor is null || DependencyPropertyDescriptor.FromProperty(descriptor)?.DependencyProperty != property;

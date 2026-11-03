@@ -6,6 +6,7 @@ using System.Windows;
 using System.Xml;
 using System.Xml.Linq;
 using WpfStudio.Contracts;
+using WpfStudio.Wpf.PropertyEditing;
 
 namespace WpfStudio.PreviewHost;
 
@@ -162,20 +163,12 @@ internal sealed partial class PreviewDocument
     public SourceLocation? FindSource(DependencyObject target, bool isRoot) =>
         PreviewSource.GetId(target) is { } sourceId && _sources.TryGetValue(sourceId, out var source) ? source : isRoot ? RootSource : null;
 
-    /// <summary>The wrapper XAML and C# resolve for this name. <c>Type.GetProperty</c> throws instead when a <c>new</c> wrapper changes the property's type.</summary>
-    internal static PropertyInfo? Wrapper(Type type, string name)
-    {
-        for (Type? current = type; current is not null; current = current.BaseType)
-            if (current.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly, null, null, Type.EmptyTypes, null) is { } wrapper) return wrapper;
-        return null;
-    }
-
     public bool CanWriteProperty(DependencyObject target, DependencyProperty property, bool attached)
     {
         if (PreviewSource.GetId(target) is not { } sourceId || !_sourceTypes.TryGetValue(sourceId, out var type)) return false;
         if (!attached)
         {
-            var wrapper = Wrapper(type, property.Name);
+            var wrapper = PropertyWrappers.Find(type, property.Name);
             return wrapper?.SetMethod?.IsPublic == true && wrapper.PropertyType == property.PropertyType;
         }
         return property.OwnerType.GetMethods(BindingFlags.Public | BindingFlags.Static).Any(m =>
