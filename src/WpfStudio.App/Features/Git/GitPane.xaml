@@ -53,7 +53,7 @@
             Command="{Binding DataContext.StageFileCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"/>
     <Button DockPanel.Dock="Right" Style="{StaticResource RowAction}" c:Ui.Icon="Swap" ToolTip="Resolve conflicts" AutomationProperties.Name="Resolve conflicts"
             Visibility="{Binding IsConflict, Converter={StaticResource BooleanToVisibility}}"
-            Command="{Binding DataContext.ResolveConflictsCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"/>
+            Command="{Binding DataContext.Resolver.ResolveConflictsCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}"/>
     <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center"/>
     <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center"><Run Text="{Binding Name, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Folder, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="11"/></TextBlock>
    </DockPanel>
@@ -326,7 +326,7 @@
          <Button Style="{StaticResource IconButton}" c:Ui.Icon="Minus" Command="{Binding UnstageFileCommand}" CommandParameter="{Binding SelectedStaged}"
                  Visibility="{Binding SelectedStaged, Converter={StaticResource Presence}}" ToolTip="Unstage this file" AutomationProperties.Name="Unstage this file"/>
          <Button Style="{StaticResource IconButton}" c:Ui.Icon="File" Command="{Binding OpenFileCommand}" CommandParameter="{Binding SelectedChange}" ToolTip="Open file" AutomationProperties.Name="Open file"/>
-         <Button Content="Resolve conflicts" c:Ui.Icon="Swap" Style="{StaticResource AccentButton}" Command="{Binding ResolveConflictsCommand}" CommandParameter="{Binding SelectedChange}" Margin="6,0,0,0"
+         <Button Content="Resolve conflicts" c:Ui.Icon="Swap" Style="{StaticResource AccentButton}" Command="{Binding Resolver.ResolveConflictsCommand}" CommandParameter="{Binding SelectedChange}" Margin="6,0,0,0"
                  Visibility="{Binding SelectedChange.IsConflict, Converter={StaticResource BooleanToVisibility}, FallbackValue=Collapsed}"/>
         </StackPanel>
         <TextBlock DockPanel.Dock="Left" DataContext="{Binding SelectedChange}" Style="{StaticResource StatusLetter}" Margin="0,0,6,0" ToolTip="{Binding Status}"/>
@@ -337,7 +337,7 @@
       </diff:DiffView.Header>
      </diff:DiffView>
      <!-- Conflict resolver: replaces the diff while a conflicted file is open. -->
-     <DockPanel Grid.Column="2" Background="{DynamicResource SurfaceBrush}" Visibility="{Binding IsResolving, Converter={StaticResource BooleanToVisibility}}">
+     <DockPanel Grid.Column="2" DataContext="{Binding Resolver}" Background="{DynamicResource SurfaceBrush}" Visibility="{Binding IsResolving, Converter={StaticResource BooleanToVisibility}}">
       <Border DockPanel.Dock="Top" Padding="12,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
        <DockPanel>
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
@@ -404,7 +404,7 @@
    </TabItem>
 
    <TabItem Header="History" AutomationProperties.Name="History">
-    <Grid>
+    <Grid DataContext="{Binding CommitHistory}">
      <Grid.ColumnDefinitions><ColumnDefinition Width="340" MinWidth="260"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*" MinWidth="360"/></Grid.ColumnDefinitions>
      <DockPanel Margin="10,10,8,8">
       <Grid DockPanel.Dock="Top">
@@ -455,7 +455,7 @@
            <TextBlock Text="{Binding ParentText}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" FontFamily="{StaticResource CodeFont}" VerticalAlignment="Center" Margin="6,0,0,0"/>
            <Button Style="{StaticResource QuietButton}" Padding="6,1" Margin="6,0,0,0" VerticalAlignment="Center" c:Ui.Icon="Link"
                    Content="{Binding DataContext.RemoteText, RelativeSource={RelativeSource AncestorType=local:GitPane}}"
-                   Command="{Binding DataContext.OpenCommitOnRemoteCommand, RelativeSource={RelativeSource AncestorType=local:GitPane}}"
+                   Command="{Binding DataContext.CommitHistory.OpenCommitOnRemoteCommand, RelativeSource={RelativeSource AncestorType=local:GitPane}}"
                    Visibility="{Binding DataContext.HasRemote, RelativeSource={RelativeSource AncestorType=local:GitPane}, Converter={StaticResource BooleanToVisibility}}"/>
           </WrapPanel>
           <!-- A long message starts at three lines so the files and diff keep the space; the toggle reveals the rest. -->
@@ -490,7 +490,7 @@
         </Grid>
        </Border>
        <!-- Files beside the diff when there is room, above it otherwise (GitPane.LayoutCommitBody). -->
-       <Grid x:Name="CommitBody" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=local:GitPane}}" SizeChanged="LayoutCommitBody">
+       <Grid x:Name="CommitBody" DataContext="{Binding DataContext.CommitHistory, RelativeSource={RelativeSource AncestorType=local:GitPane}}" SizeChanged="LayoutCommitBody">
         <Grid.ColumnDefinitions><ColumnDefinition Width="280"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="0"/><RowDefinition Height="0"/></Grid.RowDefinitions>
         <DockPanel x:Name="CommitFilesPanel" Margin="8,8,4,8">

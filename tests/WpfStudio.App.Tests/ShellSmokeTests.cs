@@ -428,9 +428,9 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         Assert.Equal("Git", shell.ActiveWorkbench);
         foreach (var tab in new[] { 2, 1 }) { shell.Features.Git.SelectedTab = tab; await Idle(); }
         await shell.Features.Git.WhenLoadedAsync(); await Idle();
-        Assert.NotEmpty(shell.Features.Git.VisibleHistory);
-        Assert.Equal(shell.Features.Git.VisibleHistory[0], shell.Features.Git.SelectedCommit);
-        Assert.Equal(shell.Features.Git.SelectedCommit!.Id, shell.Features.Git.CommitDetails?.Id);
+        Assert.NotEmpty(shell.Features.Git.CommitHistory.VisibleHistory);
+        Assert.Equal(shell.Features.Git.CommitHistory.VisibleHistory[0], shell.Features.Git.CommitHistory.SelectedCommit);
+        Assert.Equal(shell.Features.Git.CommitHistory.SelectedCommit!.Id, shell.Features.Git.CommitHistory.CommitDetails?.Id);
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git-history.png"));
         shell.ToggleThemeCommand.Execute(null); await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/git-history-light.png"));
