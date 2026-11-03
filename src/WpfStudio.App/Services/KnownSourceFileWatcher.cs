@@ -5,8 +5,17 @@ namespace WpfStudio.App.Services;
 
 public sealed record KnownSourceChange(string? Path, bool RequiresReload = false);
 
+/// <summary>A workspace's source watcher; <see cref="Status"/> describes what it could not watch.</summary>
+public interface IKnownSourceWatcher : IDisposable
+{
+    string? Status { get; }
+}
+
+/// <summary>Creates the watcher for one workspace's source files. It holds that workspace's paths, so each load gets its own.</summary>
+public delegate IKnownSourceWatcher KnownSourceWatcherFactory(IEnumerable<string> paths, Action<KnownSourceChange> changed, Action? reconcile, IEnumerable<string>? contextFiles, Action<Exception>? failed);
+
 /// <summary>Watches evaluated source paths, including linked files outside the workspace.</summary>
-public sealed class KnownSourceFileWatcher : IDisposable
+public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
 {
     public const int MaximumFiles = 10000;
     public const int MaximumDirectories = 128;

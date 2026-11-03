@@ -11,7 +11,7 @@ public sealed class WorkbenchRegressionTests
     [Fact]
     public async Task SavingTheConnectedProfileKeepsTheSchemaTree()
     {
-        var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs());
+        var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs(), new NoAnswers(), new NoRecovery());
         await model.ConnectCommand.ExecuteAsync(null);
         Assert.True(model.IsConnected);
         Assert.Single(model.Schema);
@@ -28,7 +28,7 @@ public sealed class WorkbenchRegressionTests
     [Fact]
     public async Task SelectingAProfileForAnotherServerClearsTheSchemaTree()
     {
-        var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs());
+        var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs(), new NoAnswers(), new NoRecovery());
         await model.ConnectCommand.ExecuteAsync(null);
         model.SelectedProfile = new ConnectionProfile { Name = "Other", Server = "other-host" };
         Assert.False(model.IsConnected);
@@ -80,7 +80,7 @@ public sealed class WorkbenchRegressionTests
             await writer.SaveAsync([Sql("first"), Sql("second")]);
 
             var store = new CountingStore(new ConnectionProfileStore(path));
-            await using var model = new DatabasePaneViewModel(new OneDatabase(), store, new NoDialogs());
+            await using var model = new DatabasePaneViewModel(new OneDatabase(), store, new NoDialogs(), new NoAnswers(), new NoRecovery());
             await model.InitializeCommand.ExecuteAsync(null);
             Assert.Equal(["first"], store.Unlocked);
             Assert.Equal("first-secret", model.Password);

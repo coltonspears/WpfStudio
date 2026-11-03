@@ -128,9 +128,9 @@ public sealed partial class BuildService
         }
     }
 
-    private static string? _frameworkMSBuild;
+    private string? _frameworkMSBuild;
     /// <summary>MSBuild from Visual Studio or Build Tools for Visual Studio, located through the vswhere tool both installers include.</summary>
-    private static async Task<string?> FindFrameworkMSBuildAsync(CancellationToken cancellationToken)
+    private async Task<string?> FindFrameworkMSBuildAsync(CancellationToken cancellationToken)
     {
         if (_frameworkMSBuild is { } known && File.Exists(known)) return known;
         if (!OperatingSystem.IsWindows()) return null;

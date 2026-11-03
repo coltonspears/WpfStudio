@@ -2,6 +2,7 @@
 using System.IO;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Designer;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Wpf;
 
@@ -78,7 +79,7 @@ public sealed partial class ShellViewModel
     {
         await DesignerContext.PendingClose;
         var document = ActiveDocument ?? Documents.FirstOrDefault(d => d.State.Path == Designer.SourcePath);
-        ToolRequested?.Invoke("Designer");
+        ToolRequested?.Invoke(Workbenches.Designer);
         if (document?.State.Extension != ".xaml") { Status = "Open a XAML document to preview it"; return; }
         var owners = Projects.Where(p => p.Files.Any(f => f.Path.Equals(document.State.Path, StringComparison.OrdinalIgnoreCase))).ToArray();
         var selectedOwners = owners.Where(owner => owner.ProjectPath.Equals(document.XamlProjectPath, StringComparison.OrdinalIgnoreCase)

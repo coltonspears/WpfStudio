@@ -20,7 +20,7 @@ public sealed partial class MemoryProfilerViewModel
     [ObservableProperty] public partial bool IsLoadingDominators { get; set; }
     public IReadOnlyList<string> RetentionCharts { get; } = ["Treemap", "Sunburst"];
     /// <summary>Treemap shows one level of owners; the sunburst shows several levels around the focused owner.</summary>
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsSunburst))] public partial string RetentionChart { get; set; } = "Treemap";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsSunburst), nameof(RetentionMapDetail))] public partial string RetentionChart { get; set; } = "Treemap";
     [ObservableProperty] public partial MemorySunburst? Sunburst { get; set; }
     [ObservableProperty] public partial bool IsLoadingSunburst { get; set; }
     public bool IsSunburst => RetentionChart == "Sunburst";
@@ -29,11 +29,7 @@ public sealed partial class MemoryProfilerViewModel
     public string RetentionMapDetail => RetentionFocus is { } focus ? $"{focus.RetainedText} · {focus.PercentText} of the heap · double-click {(IsSunburst ? "a segment" : "a rectangle")} to drill in"
         : Summary is { } s ? $"{MemorySize.Format(s.ReachableBytes)} reachable · " + (IsSunburst ? "rings show what each owner keeps alive, several levels deep" : "each rectangle is memory owned exclusively by one object or group") : "";
 
-    partial void OnRetentionChartChanged(string value)
-    {
-        OnPropertyChanged(nameof(RetentionMapDetail));
-        if (value == "Sunburst") LoadSunburstAsync(_lifetime.Token).Forget(ReportFault);
-    }
+    partial void OnRetentionChartChanged(string value) { if (value == "Sunburst") LoadSunburstAsync(_lifetime.Token).Forget(ReportFault); }
 
     /// <summary>Loads the nested dominator slice around the current focus for the sunburst.</summary>
     private async Task LoadSunburstAsync(CancellationToken token)

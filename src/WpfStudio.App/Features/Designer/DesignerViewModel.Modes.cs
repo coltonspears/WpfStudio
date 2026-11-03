@@ -9,7 +9,9 @@ namespace WpfStudio.App.Features.Designer;
 public sealed partial class DesignerViewModel
 {
     public IReadOnlyList<PreviewMode> PreviewModes { get; } = [PreviewMode.Source, PreviewMode.Compiled];
-    [ObservableProperty] public partial PreviewMode Mode { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsCompiledPreview), nameof(SupportsLivePreview), nameof(UsesApplicationResources),
+        nameof(SessionDescription), nameof(BuildDescription), nameof(ScenarioDescription))]
+    public partial PreviewMode Mode { get; set; }
     [ObservableProperty] public partial string ViewTypeName { get; set; } = "";
     [ObservableProperty] public partial string ApplicationResourcePath { get; set; } = "App.xaml";
     public bool IsCompiledPreview => Mode == PreviewMode.Compiled;
@@ -23,12 +25,6 @@ public sealed partial class DesignerViewModel
     {
         _scenarioSelectionPending = true;
         Invalidate();
-        OnPropertyChanged(nameof(IsCompiledPreview));
-        OnPropertyChanged(nameof(SupportsLivePreview));
-        OnPropertyChanged(nameof(UsesApplicationResources));
-        OnPropertyChanged(nameof(SessionDescription));
-        OnPropertyChanged(nameof(BuildDescription));
-        OnPropertyChanged(nameof(ScenarioDescription));
         Status = "Refresh to load the selected preview mode.";
     }
     partial void OnViewTypeNameChanged(string value)

@@ -1,13 +1,14 @@
 using System.ComponentModel;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.ViewModels;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Designer;
 
 /// <summary>
 /// Ties the open designer to the editor it previews. When that editor's XAML project context changes (another
 /// project or framework is chosen), the preview is closed rather than left showing a stale context; when the
-/// designer moves to another file, the old editor is released.
+/// designer moves to another file, the old editor is released. It also opens the source locations the designer asks for.
 /// </summary>
 public sealed class DesignerSourceTracker : IAsyncDisposable
 {
@@ -22,6 +23,7 @@ public sealed class DesignerSourceTracker : IAsyncDisposable
     {
         _designer = designer; _host = host;
         _designer.PropertyChanged += DesignerSourceChanged;
+        _designer.SourceRequested += SourceRequested;
     }
 
     /// <summary>The close started when the project context changed; opening the designer again waits for it.</summary>
@@ -45,6 +47,8 @@ public sealed class DesignerSourceTracker : IAsyncDisposable
         if (_editor is { } editor) editor.PropertyChanged -= EditorChanged;
         _editor = null; _identity = null;
     }
+
+    private void SourceRequested(SourceLocation source) => _host.GuardAsync(() => _host.NavigateAsync(source.Path, source.Line, source.Column)).Forget();
 
     private void DesignerSourceChanged(object? sender, PropertyChangedEventArgs args)
     {
@@ -74,6 +78,7 @@ public sealed class DesignerSourceTracker : IAsyncDisposable
         _disposed = true;
         Detach();
         _designer.PropertyChanged -= DesignerSourceChanged;
+        _designer.SourceRequested -= SourceRequested;
         await PendingClose;
     }
 }

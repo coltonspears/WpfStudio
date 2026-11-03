@@ -66,13 +66,7 @@ public static class Interaction
     }
     private static void TreeSelection(object sender, RoutedPropertyChangedEventArgs<object> args) => ((TreeView)sender).SetCurrentValue(SelectionSourceProperty, args.NewValue);
     /// <summary>Copies its string parameter. A command rather than Click handlers, which WPF cannot connect inside style-defined context menus.</summary>
-    public static ICommand CopyCommand { get; } = new CommunityToolkit.Mvvm.Input.RelayCommand<string>(Copy, text => !string.IsNullOrEmpty(text));
-    private static void Copy(string? text)
-    {
-        if (string.IsNullOrEmpty(text)) return;
-        try { Clipboard.SetText(text); }
-        catch (System.Runtime.InteropServices.ExternalException) { }
-    }
+    public static ICommand CopyCommand { get; } = new CommunityToolkit.Mvvm.Input.RelayCommand<string>(text => Services.ClipboardService.Shared.TrySetText(text!), text => !string.IsNullOrEmpty(text));
     public static readonly DependencyProperty CloseGuardProperty = DependencyProperty.RegisterAttached("CloseGuard", typeof(ShellViewModel), typeof(Interaction), new PropertyMetadata(null, CloseGuardChanged));
     public static void SetCloseGuard(DependencyObject target, ShellViewModel value) => target.SetValue(CloseGuardProperty, value);
     public static ShellViewModel? GetCloseGuard(DependencyObject target) => (ShellViewModel?)target.GetValue(CloseGuardProperty);

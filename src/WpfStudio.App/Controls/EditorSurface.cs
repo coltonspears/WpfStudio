@@ -118,7 +118,12 @@ public sealed partial class EditorSurface : TextEditor
         ContextMenuOpening += (_, _) => { if (ViewModel is { } vm) vm.RefreshQuickFixesAsync(CaretOffset).Forget(vm.ReportFault); };
     }
     public EditorViewModel? ViewModel { get => (EditorViewModel?)GetValue(ViewModelProperty); set => SetValue(ViewModelProperty, value); }
-    private static void Changed(DependencyObject owner, DependencyPropertyChangedEventArgs args) => ((EditorSurface)owner).Attach();
+    private static void Changed(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        var surface = (EditorSurface)owner;
+        surface.Attach();
+        if (surface.IsLoaded) surface.ObservePreferences(true);
+    }
     private void Attach()
     {
         if (ReferenceEquals(_attached, ViewModel)) return;
@@ -511,7 +516,7 @@ public sealed partial class EditorSurface : TextEditor
     }
     private void InstallFolding()
     {
-        if (!Services.EditorPreferences.Current.ShowFolding || _folding is not null) return;
+        if (ViewModel?.Preferences is { ShowFolding: false } || _folding is not null) return;
         if (ViewModel is not { } vm || vm.State.Extension is not (".cs" or ".xaml" or ".xml" or ".csproj" or ".props" or ".targets" or ".resx")) return;
         _folding = FoldingManager.Install(TextArea);
         InstallFoldingVisuals(_folding);

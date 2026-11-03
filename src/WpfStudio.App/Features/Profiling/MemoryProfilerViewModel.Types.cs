@@ -13,7 +13,7 @@ public sealed partial class MemoryProfilerViewModel
     private long _queryRevision, _flowRevision;
     private int _skip;
     public BulkObservableCollection<MemoryTypeRow> Types { get; } = [];
-    private RefreshThrottle? _typeFilterThrottle;
+    private RefreshThrottle TypeFilterThrottle => field ??= new(RefreshTypes);
     public BulkObservableCollection<MemoryObjectInfo> Objects { get; } = [];
     public IReadOnlyList<string> TypeSortOptions { get; } = ["Total managed bytes", "Retained bytes", "Largest retained object", "Object count", "Growth since baseline"];
     public IReadOnlyList<MemoryTypeGroupingOption> TypeGroupings { get; } = [new(MemoryTypeGrouping.None, "No grouping"), new(MemoryTypeGrouping.Namespace, "Namespace"), new(MemoryTypeGrouping.Assembly, "Assembly")];
@@ -49,7 +49,7 @@ public sealed partial class MemoryProfilerViewModel
         if (IsGrouped) LoadGroupsAsync(_lifetime.Token).Forget(ReportFault);
     }
     partial void OnObjectFilterChanged(string value) { if (!_updating) { _skip = 0; QueueQuery(); } }
-    partial void OnTypeFilterChanged(string value) => (_typeFilterThrottle ??= new(RefreshTypes)).Request();
+    partial void OnTypeFilterChanged(string value) => TypeFilterThrottle.Request();
     partial void OnTypeSortChanged(string value) => RefreshTypes();
     partial void OnTypeGroupingChanged(MemoryTypeGrouping value) => RefreshTypes();
     partial void OnOnlyApplicationTypesChanged(bool value) => RefreshTypes();

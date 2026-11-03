@@ -3,6 +3,7 @@
  xmlns:local="clr-namespace:WpfStudio.App.Features.Git" xmlns:c="clr-namespace:WpfStudio.App.Controls"
  xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff" xmlns:git="clr-namespace:WpfStudio.Core.Git;assembly=WpfStudio.Core" xmlns:b="clr-namespace:WpfStudio.App.Behaviors" x:Name="Pane" MinWidth="420">
  <UserControl.Resources>
+  <local:GitAvatarBrushConverter x:Key="AvatarBrush"/>
   <!-- One-letter status coloured by kind: added/new green, deleted/conflict red, renamed accent, modified amber. -->
   <Style x:Key="StatusLetter" TargetType="TextBlock">
    <Setter Property="Text" Value="{Binding Letter}"/>
@@ -98,7 +99,7 @@
   <DataTemplate x:Key="CommitTemplate" DataType="{x:Type local:GitCommit}">
    <Grid Margin="0,3" ToolTip="{Binding DisplayDate}">
     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-    <Border Width="26" Height="26" CornerRadius="13" Background="{Binding AvatarBrush}" VerticalAlignment="Top" Margin="0,1,10,0" ToolTip="{Binding Author}">
+    <Border Width="26" Height="26" CornerRadius="13" Background="{Binding AvatarIndex, Converter={StaticResource AvatarBrush}}" VerticalAlignment="Top" Margin="0,1,10,0" ToolTip="{Binding Author}">
      <TextBlock Text="{Binding Initials}" Foreground="White" FontSize="10.5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
     </Border>
     <StackPanel Grid.Column="1">
@@ -435,7 +436,7 @@
        <Border DockPanel.Dock="Top" Padding="18,14,16,12" Background="{DynamicResource EditorBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
         <Grid>
          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-         <Border Width="36" Height="36" CornerRadius="18" Background="{Binding AvatarBrush}" VerticalAlignment="Top" Margin="0,2,14,0">
+         <Border Width="36" Height="36" CornerRadius="18" Background="{Binding AvatarIndex, Converter={StaticResource AvatarBrush}}" VerticalAlignment="Top" Margin="0,2,14,0">
           <TextBlock Text="{Binding Initials}" Foreground="White" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
          </Border>
          <StackPanel Grid.Column="1">

@@ -108,7 +108,7 @@ public sealed class WorkbenchToolTests
             var group = Assert.Single(groups.Groups);
             Assert.Equal("Invoices", group.Name);
             Assert.Equal("2 files", group.Summary);
-            Assert.Equal(FileGroupsViewModel.ToolId, host.ShownTool);
+            Assert.Equal(Workbenches.FileGroups, host.ShownTool);
 
             host.OpenPaths = [other];
             await groups.SwitchToGroupCommand.ExecuteAsync(group);

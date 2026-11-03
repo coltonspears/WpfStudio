@@ -1,3 +1,4 @@
+using WpfStudio.App.Features.Workbench;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -25,7 +26,6 @@ public interface IBreakpointEditingHost
 /// </summary>
 public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisposable
 {
-    public const string DebuggerToolId = "Debugger";
     private const int BreakpointsTab = 2, WatchesTab = 1;
     private readonly IBreakpointEditingHost _host;
     private readonly DebuggerViewModel _debugger;
@@ -61,7 +61,7 @@ public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisp
         }
     }
 
-    [RelayCommand] private void Show() { _debugger.SelectedTab = BreakpointsTab; _host.ShowTool(DebuggerToolId); }
+    [RelayCommand] private void Show() { _debugger.SelectedTab = BreakpointsTab; _host.ShowTool(Workbenches.Debugger); }
 
     [RelayCommand] private Task ToggleAsync() => _host.ActiveDocument is not { State.Extension: ".cs" } doc ? Task.CompletedTask
         : _host.GuardAsync(() => _debugger.ToggleBreakpointAsync(doc.State.Path, doc.State.CaretLine));
@@ -110,7 +110,7 @@ public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisp
         if (_host.ActiveDocument is not { IsCSharp: true } doc || doc.DebugExpressionAt(doc.State.CaretOffset) is not { } expression)
         { _host.ReportStatus("Place the caret on a variable or member, or select an expression, to add a watch"); return; }
         await _debugger.AddWatchAsync(expression);
-        _debugger.SelectedTab = WatchesTab; _host.ShowTool(DebuggerToolId);
+        _debugger.SelectedTab = WatchesTab; _host.ShowTool(Workbenches.Debugger);
     });
 
     [RelayCommand] private Task DisableAsync() => _host.GuardAsync(async () =>

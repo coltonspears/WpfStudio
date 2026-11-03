@@ -30,6 +30,14 @@ public sealed class CodeActionCatalogTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task ASpentBudgetAbandonsProvidersInsteadOfFailing()
+    {
+        using var fixture = RoslynFixture.Create("class C { void M(bool ready) { i$$f (ready) { A(); } else { B(); } } void A() { } void B() { } }");
+        var candidates = await CodeActionCatalog.GetAsync(fixture.Document, new TextSpan(fixture.Position, 0), CancellationToken.None, TimeSpan.Zero);
+        Assert.DoesNotContain(candidates, candidate => candidate.Title == "Invert if");
+    }
+
+    [Fact]
     public async Task IfStatementCanBeInverted()
     {
         using var fixture = RoslynFixture.Create("class C { void M(bool ready) { i$$f (ready) { A(); } else { B(); } } void A() { } void B() { } }");

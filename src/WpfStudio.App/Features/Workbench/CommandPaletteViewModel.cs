@@ -35,11 +35,10 @@ public sealed partial class CommandPaletteViewModel : ObservableObject, IDisposa
     public ObservableCollection<PaletteEntry> Results { get; } = [];
     [ObservableProperty] public partial string Query { get; set; } = "";
     [ObservableProperty] public partial bool IsOpen { get; set; }
-    [ObservableProperty] public partial bool IsCommandMode { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(Placeholder))] public partial bool IsCommandMode { get; set; }
     [ObservableProperty] public partial PaletteEntry? Selected { get; set; }
     public string Placeholder => IsCommandMode ? "Type a command name" : "Go to file by name — # for a type or member, > to run a command";
     partial void OnQueryChanged(string value) => Refresh();
-    partial void OnIsCommandModeChanged(bool value) => OnPropertyChanged(nameof(Placeholder));
 
     public void OpenFiles() => Open(commandMode: false, "");
     /// <summary>Opens on the command list; a query such as <c>"&gt; Snippet: "</c> narrows it at once.</summary>

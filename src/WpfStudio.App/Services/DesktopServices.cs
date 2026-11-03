@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,12 +16,40 @@ public sealed class UiDispatcher(Dispatcher dispatcher) : IUiDispatcher
     public Task InvokeAsync(Action action, CancellationToken cancellationToken = default) => dispatcher.InvokeAsync(action, DispatcherPriority.Normal, cancellationToken).Task;
 }
 
+public sealed class DesktopService : IDesktopService
+{
+    public void Reveal(string path)
+    {
+        var start = new ProcessStartInfo("explorer.exe") { UseShellExecute = true };
+        if (File.Exists(path)) { start.ArgumentList.Add("/select,"); start.ArgumentList.Add(path); }
+        else start.ArgumentList.Add(path);
+        Process.Start(start);
+    }
+    public void OpenUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("https" or "http")) throw new InvalidOperationException("Only web addresses can be opened.");
+        Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+    }
+}
+
+public sealed class ClipboardService : IClipboardService
+{
+    /// <summary>For views, which XAML creates out of the container's reach. It holds no state; view models take <see cref="IClipboardService"/>.</summary>
+    public static ClipboardService Shared { get; } = new();
+    public bool TrySetText(string text)
+    {
+        // Another application can hold the clipboard open at any moment.
+        try { Clipboard.SetText(text); return true; }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or InvalidOperationException) { return false; }
+    }
+}
+
 /// <summary>
 /// Synchronous by design: every dialog is modal and returns only once the user has answered, on the UI thread, which is
 /// where callers must be. The tasks exist for the shared contract. Callers such as the close-and-save flow check state
 /// right after the answer, so deferring through the dispatcher would let other queued work run between the two.
 /// </summary>
-public sealed class DesktopDialogs(Func<Window?>? owner = null) : IFileDialogService, IUserDialogService
+public sealed class DesktopDialogs(Func<Window?>? owner = null, IThemeService? theme = null) : IFileDialogService, IUserDialogService
 {
     private readonly Func<Window?> _owner = owner ?? ShownMainWindow;
     // Before the window is shown, or after it closed, WPF rejects it as an owner.
@@ -58,7 +87,7 @@ public sealed class DesktopDialogs(Func<Window?>? owner = null) : IFileDialogSer
         stack.Children.Add(input); stack.Children.Add(buttons);
         var window = new Window { Title = title, Content = stack, SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = _owner(), Background = Application.Current?.TryFindResource("SurfaceBrush") as Brush ?? SystemColors.WindowBrush, Foreground = Application.Current?.TryFindResource("TextBrush") as Brush ?? SystemColors.WindowTextBrush };
         ok.Click += (_, _) => window.DialogResult = true;
-        WindowChromeService.Track(window);
+        theme?.Track(window);
         window.ContentRendered += (_, _) => { input.Focus(); input.SelectAll(); };
         return Task.FromResult(window.ShowDialog() == true ? input.Text : null);
     }

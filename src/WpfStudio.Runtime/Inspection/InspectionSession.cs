@@ -7,8 +7,8 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Win32.SafeHandles;
 using WpfStudio.Inspection.Protocol;
+using WpfStudio.Hosting;
 
 namespace WpfStudio.Runtime.Inspection;
 
@@ -266,9 +266,9 @@ public sealed class InspectionSession : IInspectionSession
                 || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(hello.Token), Encoding.UTF8.GetBytes(Token)))
                 throw new InvalidDataException("The inspection agent could not authenticate this session.");
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Running WPF application inspection requires Windows.");
-            if (!GetNamedPipeClientProcessId(_pipe.SafePipeHandle, out var actualProcessId))
+            if (!NamedPipeIdentity.TryGetClientProcessId(_pipe, out var actualProcessId))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "The inspection pipe client process could not be verified.");
-            if (hello.ProcessId <= 0 || actualProcessId != (uint)hello.ProcessId)
+            if (hello.ProcessId <= 0 || actualProcessId != hello.ProcessId)
                 throw new InvalidDataException("The inspection handshake does not match the operating system's pipe client process.");
             if (string.IsNullOrWhiteSpace(hello.RuntimeVersion) || hello.RuntimeVersion.Length > 128
                 || string.IsNullOrWhiteSpace(hello.AgentVersion) || hello.AgentVersion.Length > 128
@@ -504,8 +504,4 @@ public sealed class InspectionSession : IInspectionSession
             _source.Dispose();
         }
     }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out uint clientProcessId);
 }

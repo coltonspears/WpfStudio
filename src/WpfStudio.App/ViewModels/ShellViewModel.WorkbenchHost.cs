@@ -13,7 +13,7 @@ using WpfStudio.Contracts;
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IWorkspaceMutationHost, IInspectionSourceHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -73,7 +73,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     {
         XamlAnalysis.Request();
         // A commit or checkout in the terminal changes what change margins and blame compare with.
-        if (Features?.GitService is { } git) foreach (var document in Documents) document.RefreshGitAsync(git, _lifetime.Token).Forget(document.ReportFault);
+        RefreshEditorGit();
     }
     void IExternalChangesHost.SettingChanged() { if (_initialized) SaveSettingsAsync().Forget(ReportBackgroundFault); }
 
@@ -108,7 +108,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     void IBreakpointEditingHost.ReportStatus(string status) => Status = status;
     void IBreakpointEditingHost.ShowTool(string toolId) => ShowToolCommand.Execute(toolId);
 
-    // ------------------------------------------------------------------ ISolutionExplorerHost / IWorkspaceMutationHost
+    // ------------------------------------------------------------------ ISolutionExplorerHost / IStudioToolsHost
     string? ISolutionExplorerHost.StartupProjectPath => StartupProject?.ProjectPath;
     void ISolutionExplorerHost.SetStartupProject(WorkspaceProject project) { StartupProject = project; Status = project.Name + " is the startup project"; }
     async Task<bool> IWorkspaceMutationHost.SaveBeforeMutationAsync()
@@ -119,8 +119,27 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     Task IWorkspaceMutationHost.WorkspaceChangedAsync() => WorkspaceMutatedAsync();
     /// <summary>After a tool changed workspace files: re-check open files against disk, then reload the project model.</summary>
     private async Task WorkspaceMutatedAsync() { await CheckExternalChangesAsync(fromAppOperation: true); await ReloadWorkspaceAsync(); }
+    void IStudioToolsHost.OpenFile(string path) => GuardAsync(() => OpenDocumentAsync(path)).Forget(ReportBackgroundFault);
+    // Commits, checkouts and merges change what each editor's change margin and blame compare with.
+    void IStudioToolsHost.GitRepositoryChanged() => RefreshEditorGit();
+    void IStudioToolsHost.GitWorkspaceFilesChanged() => GuardAsync(WorkspaceMutatedAsync).Forget(ReportBackgroundFault);
+    void IStudioToolsHost.OpenAssistantSettings() => OpenSettingsCommand.ExecuteAsync(AssistantPage).Forget(ReportBackgroundFault);
+    void IStudioToolsHost.RefreshAssistantContext() => UpdateAssistantContext();
+    void IStudioToolsHost.AssistantReadinessChanged() => OnPropertyChanged(nameof(IsColtonGptReady));
+    private void RefreshEditorGit() { foreach (var document in Documents) document.RefreshGitAsync(Features.GitService, _lifetime.Token).Forget(document.ReportFault); }
 
     WorkspaceSnapshot? IInspectionSourceHost.Workspace => Workspace;
+
+    // ------------------------------------------------------------------ IDesignerSourceHost
+    Task<bool> IDesignerSourceHost.ReviewPropertyEditAsync(XamlPropertyEditResult proposal) => PreviewDesignerEditAsync(proposal);
+    Task<bool> IDesignerSourceHost.ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit) => PreviewDesignerLayoutEditAsync(edit);
+    Task<string> IDesignerSourceHost.NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigatePreviewBindingSourceAsync(navigation, cancellationToken);
+
+    // ------------------------------------------------------------------ IInspectionRequestHost
+    Task IInspectionRequestHost.LaunchAsync(bool debug) => LaunchWithInspectionAsync(debug);
+    Task<string> IInspectionRequestHost.NavigateSourceAsync(InspectionSourceRequest request, CancellationToken cancellationToken) => NavigateInspectionSourceAsync(request, cancellationToken);
+    Task<string> IInspectionRequestHost.NavigateBindingSourceAsync(InspectionBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigateInspectionBindingSourceAsync(navigation, cancellationToken);
+    Task<InspectionSourceEditOutcome> IInspectionRequestHost.EditSourceAsync(InspectionSourceEditRequest request, CancellationToken cancellationToken) => EditInspectionSourceAsync(request, cancellationToken);
 
     // ------------------------------------------------------------------ WPF Explorer
     /// <summary>The resource declared at, or referenced from, the active caret; null (with a status) when the index no longer matches the buffer.</summary>
@@ -138,7 +157,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
 
     private IEnumerable<PaletteEntry> FileGroupCommands()
     {
-        yield return Command("View", "File groups", ShowToolCommand, FileGroupsViewModel.ToolId, icon: "Pin", detail: "Pinned sets of files for a feature");
+        yield return Command("View", "File groups", ShowToolCommand, Workbenches.FileGroups, icon: "Pin", detail: "Pinned sets of files for a feature");
         yield return Command("Window", "Pin open tabs as a file group…", FileGroups.AddOpenTabsCommand, icon: "Pin");
         yield return Command("Window", "Add file to a file group…", FileGroups.AddActiveCommand, icon: "Pin");
         foreach (var group in FileGroups.Groups)

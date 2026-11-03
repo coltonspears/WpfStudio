@@ -7,12 +7,26 @@ namespace WpfStudio.Shell.Tests;
 public sealed class MemoryProfilerViewModelTests
 {
     [Fact]
+    public async Task CopyingReportsOnlyWhatReachedTheClipboard()
+    {
+        var clipboard = new FakeDesktop();
+        await using var model = new MemoryProfilerViewModel(new Profiler(), new Files(), clipboard, new ProcessMemorySampler());
+        model.CopyTextCommand.Execute("0x1000");
+        Assert.Equal(["0x1000"], clipboard.Copied);
+        Assert.Equal("Copied 0x1000.", model.Status);
+        clipboard.ClipboardBusy = true;
+        model.CopyTextCommand.Execute("0x2000");
+        Assert.Equal(["0x1000"], clipboard.Copied);
+        Assert.Equal("Copied 0x1000.", model.Status);
+    }
+
+    [Fact]
     public async Task CaptureLoadsObjectGraphAndEstimateWithBaselineIncludingDisappearedTypes()
     {
         var first = new Session(Summary([Type("Page", 2, 20), Type("Removed", 3, 60)]));
         var second = new Session(Summary([Type("Page", 4, 40)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(first); profiler.Sessions.Enqueue(second);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         Assert.True(model.HasCapture); Assert.False(model.IsBusy);
         Assert.NotNull(model.Details); Assert.NotNull(model.Graph);
@@ -40,7 +54,7 @@ public sealed class MemoryProfilerViewModelTests
     {
         var first = new Session(Summary([Type("Page", 1, 10)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(first);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null); model.SetBaselineCommand.Execute(null);
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         profiler.Open = async token => { started.SetResult(); await Task.Delay(Timeout.Infinite, token); throw new InvalidOperationException(); };
@@ -60,7 +74,7 @@ public sealed class MemoryProfilerViewModelTests
     {
         var session = new Session(Summary([Type("Page", 2, 20)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         var pending = new TaskCompletionSource<MemoryObjectDetails>(TaskCreationOptions.RunContinuationsAsynchronously);
         session.Inspection = id => id == 1 ? pending.Task : Task.FromResult(session.Detail(id));
@@ -76,7 +90,7 @@ public sealed class MemoryProfilerViewModelTests
     {
         var session = new Session(Summary([Type("Page", 1, 10)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         model.SelectedIncomingReference = session.Reference;
         await model.EstimateObjectCommand.ExecuteAsync(null);
@@ -95,7 +109,7 @@ public sealed class MemoryProfilerViewModelTests
     {
         var session = new Session(Summary([Type("Page", 1, 10)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.RefreshProcessesCommand.ExecuteAsync(null);
         model.MaxObjects = 250_000; model.MaxReferences = 2_000_000; model.RuntimeIndex = 1; model.DacPath = "C:\\runtime\\mscordacwks.dll";
         await model.CaptureCommand.ExecuteAsync(null);
@@ -109,7 +123,7 @@ public sealed class MemoryProfilerViewModelTests
     {
         var session = new Session(Summary([Type("Page", 1, 10)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         Assert.Equal(0, model.Details!.Object.Id);
         Assert.Equal(2, model.FieldNodes.Count);
@@ -142,7 +156,7 @@ public sealed class MemoryProfilerViewModelTests
         var first = new Session(Summary([Type("Page", 2, 20)]) with { Insights = [insight], Generations = [new("Generation2", 2, 20)] });
         var second = new Session(Summary([Type("Page", 6, 60)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(first); profiler.Sessions.Enqueue(second);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         Assert.Equal(5, model.Kpis.Count);
         Assert.Single(model.GenerationSegments);
@@ -175,7 +189,7 @@ public sealed class MemoryProfilerViewModelTests
         foreach (var count in new[] { 2, 4, 7 }) profiler.Sessions.Enqueue(new Session(Summary([Type("Page", count, count * 10L), Type("Stable", 5, 50)])));
         profiler.Sessions.Enqueue(new Session(Summary([Type("Page", 9, 90), Type("Fresh", 1, 8)])));
         var files = new Files();
-        await using var model = new MemoryProfilerViewModel(profiler, files, new Sampler());
+        await using var model = new MemoryProfilerViewModel(profiler, files, new FakeDesktop(), new Sampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         Assert.Single(model.Snapshots); Assert.False(model.HasComparison); Assert.False(model.HasBaseline);
         Assert.True(model.LeakSteps[1].IsNext);
@@ -222,7 +236,7 @@ public sealed class MemoryProfilerViewModelTests
         var session = new Session(Summary([Type("Page", 3, 30)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
         var sampler = new Sampler();
-        await using var model = new MemoryProfilerViewModel(profiler, new Files(), sampler);
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), sampler);
         await model.OpenDumpCommand.ExecuteAsync(null);
         model.InstanceGrouping = "Retention";
         while (model.GroupRows.Count == 0) await Task.Delay(5);
@@ -257,7 +271,7 @@ public sealed class MemoryProfilerViewModelTests
     public async Task GroupingTypesAssignsEachRowItsGroupAndNamesTheGroupingProperty()
     {
         var profiler = new Profiler(); profiler.Sessions.Enqueue(new Session(Summary([Type("Small", 1, 10), Type("Large", 1, 90)])));
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         Assert.Equal(MemoryTypeGrouping.None, model.TypeGrouping);
         Assert.Null(model.TypeGroupProperty);
@@ -281,7 +295,7 @@ public sealed class MemoryProfilerViewModelTests
     public async Task AComparisonRowOpensItsTypeUnlessTheTypeIsGoneOrACaptureIsLoading()
     {
         var profiler = new Profiler(); profiler.Sessions.Enqueue(new Session(Summary([Type("Page", 1, 10)])));
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         static ComparisonRow Row(string key, bool gone) => new(key, key, "app", 0, 1, 0, 10, !gone, gone, false, []);
         Assert.False(model.OpenComparisonRowCommand.CanExecute(null));
@@ -303,7 +317,7 @@ public sealed class MemoryProfilerViewModelTests
     public async Task OpeningATypeIsUnavailableWhileACaptureLoads()
     {
         var profiler = new Profiler(); profiler.Sessions.Enqueue(new Session(Summary([Type("Page", 1, 10)])));
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         Assert.True(model.OpenTypeCommand.CanExecute("Page"));
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -319,7 +333,7 @@ public sealed class MemoryProfilerViewModelTests
     {
         var session = new Session(Summary([Type("Page", 1, 10)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         session.GraphLoad = _ => Task.FromException<MemoryGraph>(new InvalidOperationException("graph unavailable"));
         await model.InspectObjectCommand.ExecuteAsync(7);
@@ -336,7 +350,7 @@ public sealed class MemoryProfilerViewModelTests
     {
         var session = new Session(Summary([Type("Page", 1, 10)]));
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.OpenDumpCommand.ExecuteAsync(null);
         session.Inspection = _ => Task.FromException<MemoryObjectDetails>(new InvalidOperationException("details unavailable"));
         session.ChildrenLoad = _ => Task.FromException<MemoryObjectChildren>(new InvalidOperationException("fields unavailable"));
@@ -361,7 +375,7 @@ public sealed class MemoryProfilerViewModelTests
             throw new InvalidOperationException();
         };
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
-        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.RefreshProcessesCommand.ExecuteAsync(null);
         Assert.True(model.CaptureCommand.CanExecute(null));
         var opening = model.OpenDumpCommand.ExecuteAsync(null);

@@ -22,20 +22,22 @@ public interface ISolutionExplorerHost : IWorkbenchHost
 public sealed partial class SolutionExplorerViewModel : ObservableObject
 {
     private readonly ISolutionExplorerHost _host;
+    private readonly IDesktopService _desktop;
+    private readonly IClipboardService _clipboard;
     private readonly ObservableCollection<WorkspaceProject> _projects;
     private (HashSet<string> Expanded, string? Selected)? _stateBeforeFilter;
 
     /// <param name="projects">The loaded projects, owned by the shell; the tree is rebuilt from them on request.</param>
-    public SolutionExplorerViewModel(ISolutionExplorerHost host, ObservableCollection<WorkspaceProject> projects)
+    public SolutionExplorerViewModel(ISolutionExplorerHost host, ObservableCollection<WorkspaceProject> projects, IDesktopService desktop, IClipboardService clipboard)
     {
-        _host = host; _projects = projects;
+        _host = host; _projects = projects; _desktop = desktop; _clipboard = clipboard;
         Nodes.CollectionChanged += (_, _) => NotifyPlaceholders();
     }
 
     public ObservableCollection<ExplorerNode> Nodes { get; } = [];
     [ObservableProperty] public partial ExplorerNode? SelectedNode { get; set; }
     /// <summary>Shows only files whose name contains this text, with their folders expanded.</summary>
-    [ObservableProperty] public partial string Filter { get; set; } = "";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsFiltered))] public partial string Filter { get; set; } = "";
     /// <summary>Nests code-behind under its XAML (MainWindow.xaml.cs under MainWindow.xaml) and partial files under their main file.</summary>
     [ObservableProperty] public partial bool NestRelatedFiles { get; set; } = true;
     public bool IsFiltered => Filter.Trim().Length > 0;
@@ -48,7 +50,7 @@ public sealed partial class SolutionExplorerViewModel : ObservableObject
     {
         var filtering = value.Trim().Length > 0;
         if (filtering && _stateBeforeFilter == null) _stateBeforeFilter = ExplorerNode.CaptureState(Nodes);
-        OnPropertyChanged(nameof(IsFiltered)); NotifyPlaceholders();
+        NotifyPlaceholders();
         if (_host.WorkspacePath == null) return;
         if (filtering) { Rebuild(keepState: false); return; }
         var state = _stateBeforeFilter; _stateBeforeFilter = null;
@@ -64,8 +66,8 @@ public sealed partial class SolutionExplorerViewModel : ObservableObject
     }
 
     // ------------------------------------------------------------------ Context menu
-    [RelayCommand] private Task RevealSelectedAsync() => _host.GuardAsync(() => { if (SelectedNode is { Path.Length: > 0 } node) DesktopNavigation.Reveal(node.Path); return Task.CompletedTask; });
-    [RelayCommand] private Task CopySelectedPathAsync() => _host.GuardAsync(() => { if (SelectedNode is { Path.Length: > 0 } node) DesktopNavigation.Copy(node.Path); return Task.CompletedTask; });
+    [RelayCommand] private Task RevealSelectedAsync() => _host.GuardAsync(() => { if (SelectedNode is { Path.Length: > 0 } node) _desktop.Reveal(node.Path); return Task.CompletedTask; });
+    [RelayCommand] private void CopySelectedPath() { if (SelectedNode is { Path.Length: > 0 } node && !_clipboard.TrySetText(node.Path)) _host.ReportStatus("Another application is using the clipboard. Try again."); }
     /// <summary>Opens the selected node's project file, or the startup project's when nothing is selected.</summary>
     [RelayCommand] private Task EditProjectAsync() => _host.GuardAsync(async () => { var path = SelectedNode?.ProjectPath ?? _host.StartupProjectPath; if (path != null) await _host.OpenDocumentAsync(path); });
     [RelayCommand] private void SetStartupProject()

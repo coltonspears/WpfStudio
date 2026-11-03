@@ -16,7 +16,7 @@ public static class XamlRuntimeSourceLocator
         if (string.IsNullOrWhiteSpace(path) || text is null || string.IsNullOrWhiteSpace(runtimeType))
             return Fail("The source path, exact source text, and runtime type are required.");
         if (text.Length > 8 * 1024 * 1024) return Fail("The source exceeds the navigation parsing limit.");
-        if (!TryOffset(text, line, column, out int offset)) return Fail("The runtime source position is outside the current document.");
+        if (!XamlPropertySourceDocument.TryOffset(text, line, column, out int offset)) return Fail("The runtime source position is outside the current document.");
         try
         {
             var document = XamlPropertySourceDocument.Parse(text);
@@ -47,29 +47,6 @@ public static class XamlRuntimeSourceLocator
             return Fail("The current XAML cannot be mapped to an exact authored element: " +
                 (exception.Message.Length <= 250 ? exception.Message : exception.Message[..250]));
         }
-    }
-
-    private static bool TryOffset(string text, int line, int column, out int offset)
-    {
-        offset = 0;
-        if (line < 1 || column < 1) return false;
-        int currentLine = 1;
-        while (offset < text.Length && currentLine < line)
-        {
-            char character = text[offset++];
-            if (character == '\r')
-            {
-                if (offset < text.Length && text[offset] == '\n') offset++;
-                currentLine++;
-            }
-            else if (character == '\n') currentLine++;
-        }
-        if (currentLine != line) return false;
-        int end = offset;
-        while (end < text.Length && text[end] is not ('\r' or '\n')) end++;
-        if (column > end - offset) return false;
-        offset += column - 1;
-        return true;
     }
 
     private static XamlRuntimeSourceResult Fail(string status) => new(null, status);

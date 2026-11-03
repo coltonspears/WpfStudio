@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using WpfStudio.App.Services;
 using WpfStudio.Core.Git;
 
 namespace WpfStudio.App.ViewModels;
@@ -32,6 +33,8 @@ public sealed record BlameHistoryCard(string Name, string Scope, IReadOnlyList<B
 /// <summary>A changed block from the Git margin with its committed text. Lines that are simply new have none to compare.</summary>
 public sealed record LineChangeCard(string Heading, string? CommittedText, string RevertLabel, bool CanRevert, ICommand RevertCommand, ICommand CloseCommand)
 {
+    /// <summary>The committed text is shown in the editor's font.</summary>
+    public EditorPreferences? Preferences { get; init; }
     public static LineChangeCard Create(LineChange change, bool canRevert, ICommand revert, ICommand close) => new(
         change.Kind switch { LineChangeKind.Added => "Added since the last commit", LineChangeKind.Deleted => "Deleted since the last commit", _ => "Changed since the last commit" },
         change.OriginalText.Length > 0 ? change.OriginalText : change.Kind != LineChangeKind.Added ? "(empty line)" : null,

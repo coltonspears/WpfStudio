@@ -169,7 +169,7 @@ public sealed class GitIntegrationTests
         using var fixture = await Fixture.CreateAsync();
         await fixture.InitialCommitAsync();
         await File.WriteAllTextAsync(fixture.File("file.cs"), "pending changes\n");
-        using var model = new GitViewModel(fixture.Service, _ => Task.FromResult(false));
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop(), _ => Task.FromResult(false));
         await model.SetWorkspaceAsync(fixture.Root);
         await model.StageAllCommand.ExecuteAsync(null);
         Assert.Contains("could not be saved", model.Error);
@@ -293,7 +293,7 @@ public sealed class GitIntegrationTests
         await File.WriteAllTextAsync(fixture.File("file.cs"), "changed\n");
         await File.WriteAllTextAsync(fixture.File("staged.cs"), "staged\n");
         await fixture.RunAsync("add", "staged.cs");
-        using var model = new GitViewModel(fixture.Service);
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop());
         await model.SetWorkspaceAsync(fixture.Root);
         Assert.Equal(GitViewModel.HistoryPageSize, model.History.Count);
         Assert.True(model.HasMoreHistory);
@@ -339,7 +339,7 @@ public sealed class GitIntegrationTests
         var initial = (await fixture.RunAsync("rev-parse", "HEAD")).Trim();
         for (var index = 1; index <= GitViewModel.HistoryPageSize + 2; index++)
             await fixture.RunAsync("commit", "--allow-empty", "--quiet", "-m", $"Empty commit {index}");
-        using var model = new GitViewModel(fixture.Service);
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop());
         await model.SetWorkspaceAsync(fixture.Root);
         Assert.DoesNotContain(model.History, commit => commit.Id == initial);
 
@@ -377,7 +377,7 @@ public sealed class GitIntegrationTests
         await fixture.RunAsync("config", "core.sshCommand", "echo 'Permission denied (publickey)' >&2; exit 255 #");
         await fixture.RunAsync("remote", "set-url", "origin", rejecting);
         var saves = 0;
-        using var model = new GitViewModel(fixture.Service, _ => { saves++; return Task.FromResult(true); });
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop(), _ => { saves++; return Task.FromResult(true); });
         var reloads = 0;
         model.WorkspaceFilesChanged += () => reloads++;
         await model.SetWorkspaceAsync(fixture.Root);
@@ -437,7 +437,7 @@ public sealed class GitIntegrationTests
     {
         using var fixture = await Fixture.CreateAsync();
         await fixture.InitialCommitAsync();
-        using var model = new GitViewModel(fixture.Service);
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop());
         await model.SetWorkspaceAsync(fixture.Root);
         var changed = 0;
         model.WorkspaceFilesChanged += () => changed++;
@@ -510,7 +510,7 @@ public sealed class GitIntegrationTests
     {
         using var fixture = await Fixture.CreateAsync();
         await fixture.InitialCommitAsync();
-        using var model = new GitViewModel(fixture.Service);
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop());
         await model.SetWorkspaceAsync(fixture.Root);
 
         model.IsBranchPickerOpen = true;
@@ -538,7 +538,7 @@ public sealed class GitIntegrationTests
         await second.InitialCommitAsync();
         await File.WriteAllTextAsync(first.File("file.cs"), "keep first workspace intact\n");
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var model = new GitViewModel(first.Service, async token =>
+        using var model = new GitViewModel(first.Service, new FakeDesktop(), async token =>
         {
             started.TrySetResult();
             await Task.Delay(Timeout.Infinite, token);
@@ -563,7 +563,7 @@ public sealed class GitIntegrationTests
     {
         using var fixture = await Fixture.CreateAsync();
         await fixture.InitialCommitAsync();
-        using var model = new GitViewModel(fixture.Service);
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop());
         await model.SetWorkspaceAsync(fixture.Root);
         Assert.True(model.RefreshCommand.CanExecute(null));
         var fail = true;

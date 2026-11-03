@@ -1,5 +1,6 @@
 using System.IO;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 
@@ -56,7 +57,7 @@ public sealed partial class ShellViewModel
         SearchResults.Clear();
         foreach (var location in results)
             SearchResults.Add(new NavigationResult(location.Path, location.Line, location.Column, location.DisplayText ?? "Implementation"));
-        ToolRequested?.Invoke("Search");
+        ToolRequested?.Invoke(Workbenches.Search);
         Status = $"{results.Count} implementation(s)";
     });
 }

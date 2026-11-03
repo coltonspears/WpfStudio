@@ -39,11 +39,11 @@ public sealed partial class DesignerViewModel
 
     /// <summary>The last successfully rendered frame, retained while a newer render is pending or failed.</summary>
     [ObservableProperty] public partial byte[]? DisplayImage { get; set; }
-    [ObservableProperty] public partial string? RenderError { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasRenderError))] public partial string? RenderError { get; set; }
     [ObservableProperty] public partial int? RenderErrorLine { get; set; }
     [ObservableProperty] public partial int? RenderErrorColumn { get; set; }
     /// <summary>Uses the root element's own size for the artboard when it declares one.</summary>
-    [ObservableProperty] public partial bool AutoSize { get; set; } = true;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(ArtboardTitle))] public partial bool AutoSize { get; set; } = true;
     [ObservableProperty] public partial DesignerSizePreset? SelectedSizePreset { get; set; } = AutoSizePreset;
     [ObservableProperty] public partial bool IsZoomToFit { get; set; } = true;
     [ObservableProperty] public partial double CanvasViewportWidth { get; set; }
@@ -133,17 +133,11 @@ public sealed partial class DesignerViewModel
     }
 
     partial void OnDisplayImageChanged(byte[]? value) => NotifyCanvasState();
-    partial void OnRenderErrorChanged(string? value) => OnPropertyChanged(nameof(HasRenderError));
-    partial void OnStatusChanged(string value) { if (DisplayImage is null) OnPropertyChanged(nameof(EmptyCanvasText)); }
-    partial void OnDocumentNameChanged(string value) => OnPropertyChanged(nameof(ArtboardTitle));
+    partial void OnStatusChanged(string value) { _statusShowsSnapshotUpdate = false; if (DisplayImage is null) OnPropertyChanged(nameof(EmptyCanvasText)); }
 
     // ------------------------------------------------------------------ Zoom
 
-    partial void OnZoomChanged(double value)
-    {
-        OnPropertyChanged(nameof(ZoomText));
-        if (!_applyingFitZoom) IsZoomToFit = false;
-    }
+    partial void OnZoomChanged(double value) { if (!_applyingFitZoom) IsZoomToFit = false; }
     partial void OnIsZoomToFitChanged(bool value) { if (value) ApplyFitZoom(); }
     partial void OnCanvasViewportWidthChanged(double value) { if (IsZoomToFit) ApplyFitZoom(); }
     partial void OnCanvasViewportHeightChanged(double value) { if (IsZoomToFit) ApplyFitZoom(); }
@@ -186,7 +180,6 @@ public sealed partial class DesignerViewModel
 
     partial void OnAutoSizeChanged(bool value)
     {
-        OnPropertyChanged(nameof(ArtboardTitle));
         if (_applyingSizePreset) return;
         _applyingSizePreset = true;
         try { SelectedSizePreset = value ? AutoSizePreset : MatchingPreset(); }

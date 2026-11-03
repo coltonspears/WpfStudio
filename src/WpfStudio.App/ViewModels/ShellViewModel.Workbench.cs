@@ -4,8 +4,8 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
-using WpfStudio.Core;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -28,7 +28,7 @@ public sealed partial class ShellViewModel
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before closing the solution"; return false; }
         if (!await CloseAllDocumentsForWorkspaceAsync()) return false;
         if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
-        if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(null);
+        if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(null);
         var name = Workspace == null ? "" : Path.GetFileName(Workspace.Path);
         _history.Clear();
         _allFiles = [];
@@ -77,14 +77,14 @@ public sealed partial class ShellViewModel
     public string BuildCommit { get; } = typeof(ShellViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+') is [_, var commit, ..] ? commit[..Math.Min(commit.Length, 10)] : "";
     public string RuntimeDescription { get; } = $"{RuntimeInformation.FrameworkDescription} · {RuntimeInformation.ProcessArchitecture}";
     public string OperatingSystemDescription { get; } = RuntimeInformation.OSDescription;
-    public string DataFolder => AppPaths.DataDirectory;
+    public string DataFolder => _paths.DataDirectory;
     public IReadOnlyList<ReleaseNote> ReleaseNotes => ReleaseNoteCatalog.All;
     /// <summary>Version, runtime and OS in one block for bug reports.</summary>
     public string AboutText => $"WpfStudio {ProductVersion}{(BuildCommit.Length > 0 ? " (" + BuildCommit + ")" : "")}\n{RuntimeDescription}\n{OperatingSystemDescription}\nSDK: {Workspace?.SdkVersion ?? "no workspace open"}";
     [RelayCommand] private void ShowAbout() { IsWhatsNewPage = false; OnPropertyChanged(nameof(AboutText)); IsAboutOpen = true; }
     [RelayCommand] private void ShowWhatsNew() { IsWhatsNewPage = true; IsAboutOpen = true; }
     [RelayCommand] private void CloseAbout() => IsAboutOpen = false;
-    [RelayCommand] private void CopyAboutText() { WpfStudio.App.Services.DesktopNavigation.Copy(AboutText); Status = "Version information copied"; }
+    [RelayCommand] private void CopyAboutText() => Status = _clipboard.TrySetText(AboutText) ? "Version information copied" : "Another application is using the clipboard. Try again.";
 
     private IEnumerable<PaletteEntry> WorkbenchCommands()
     {
@@ -94,7 +94,7 @@ public sealed partial class ShellViewModel
         yield return Command("Window", "Close saved tabs", CloseSavedDocumentsCommand, icon: "Close", detail: "Keep tabs with unsaved edits");
         yield return Command("Window", "Close tabs to the right", CloseDocumentsToRightCommand, icon: "Close");
         yield return Command("View", Explorer.NestRelatedFiles ? "Stop nesting related files in Solution Explorer" : "Nest related files in Solution Explorer", Explorer.ToggleNestingCommand, icon: "Tree", detail: "Code-behind under XAML, partial files under their main file");
-        yield return Command("View", "Task List", ShowToolCommand, "TaskList", icon: "Check", detail: "TODO, HACK and FIXME comments, and your own to-do items");
+        yield return Command("View", "Task List", ShowToolCommand, Workbenches.TaskList, icon: "Check", detail: "TODO, HACK and FIXME comments, and your own to-do items");
         yield return Command("View", "Refresh Task List", TaskList.RefreshCommand, icon: "Refresh");
         foreach (var entry in FileGroupCommands()) yield return entry;
         yield return Command("Help", "About WpfStudio", ShowAboutCommand, icon: "Info", detail: "Version, runtime and data folder");

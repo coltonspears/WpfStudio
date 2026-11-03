@@ -12,6 +12,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     public const int ChangesTab = 0, HistoryTab = 1, OutputTab = 2;
 
     private readonly GitService _service;
+    private readonly IDesktopService _desktop;
     private readonly Func<CancellationToken, Task<bool>>? _saveBeforeOperation;
     private string? _workspacePath;
     private CancellationTokenSource? _operation;
@@ -24,9 +25,10 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     private Task _diffTask = Task.CompletedTask, _commitTask = Task.CompletedTask, _commitFileTask = Task.CompletedTask;
     private bool _quietSelection;
 
-    public GitViewModel(GitService service, Func<CancellationToken, Task<bool>>? saveBeforeOperation = null)
+    public GitViewModel(GitService service, IDesktopService desktop, Func<CancellationToken, Task<bool>>? saveBeforeOperation = null)
     {
         _service = service;
+        _desktop = desktop;
         _saveBeforeOperation = saveBeforeOperation;
     }
 
@@ -43,15 +45,15 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     /// <summary>The loaded commits that match <see cref="HistoryFilter"/>.</summary>
     public ObservableCollection<GitCommit> VisibleHistory { get; } = [];
     public ObservableCollection<GitCommitFile> CommitFiles { get; } = [];
-    [ObservableProperty] public partial string? RepositoryRoot { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasRepository))] public partial string? RepositoryRoot { get; set; }
     [ObservableProperty] public partial string Branch { get; set; } = "No repository";
     [ObservableProperty] public partial string Tracking { get; set; } = "";
     [ObservableProperty] public partial string Status { get; set; } = "Open a solution or project to see its Git repository.";
-    [ObservableProperty] public partial string Error { get; set; } = "";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasError))] public partial string Error { get; set; } = "";
     [ObservableProperty] public partial string Output { get; set; } = "Git actions run only when you request them. Credentials use your existing Git configuration.\n";
-    [ObservableProperty] public partial string CommitMessage { get; set; } = "";
-    [ObservableProperty] public partial string NewBranchName { get; set; } = "";
-    [ObservableProperty] public partial string? SelectedBranch { get; set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CommitCommand))] public partial string CommitMessage { get; set; } = "";
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CreateBranchCommand))] public partial string NewBranchName { get; set; } = "";
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SwitchBranchCommand))] public partial string? SelectedBranch { get; set; }
     [ObservableProperty] public partial GitChange? SelectedStaged { get; set; }
     [ObservableProperty] public partial GitChange? SelectedUnstaged { get; set; }
     [ObservableProperty] public partial GitCommit? SelectedCommit { get; set; }
@@ -60,9 +62,9 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     /// <summary>The selected working or staged file's diff.</summary>
     [ObservableProperty] public partial GitDiff? CurrentDiff { get; set; }
     [ObservableProperty] public partial bool IsDiffLoading { get; set; }
-    [ObservableProperty] public partial string HistoryFilter { get; set; } = "";
-    [ObservableProperty] public partial bool HasMoreHistory { get; set; }
-    [ObservableProperty] public partial GitCommitDetails? CommitDetails { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsHistoryFiltered))] public partial string HistoryFilter { get; set; } = "";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HistoryHeading)), NotifyCanExecuteChangedFor(nameof(LoadMoreHistoryCommand))] public partial bool HasMoreHistory { get; set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(OpenCommitOnRemoteCommand))] public partial GitCommitDetails? CommitDetails { get; set; }
     [ObservableProperty] public partial bool IsCommitLoading { get; set; }
     [ObservableProperty] public partial GitCommitFile? SelectedCommitFile { get; set; }
     // Set by editor history so the commit opens on the file it was opened from.
@@ -94,13 +96,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial bool IsBranchPickerOpen { get; set; }
 
     partial void OnIsBusyChanged(bool value) => NotifyCommands();
-    partial void OnRepositoryRootChanged(string? value) { OnPropertyChanged(nameof(HasRepository)); NotifyCommands(); }
-    partial void OnErrorChanged(string value) => OnPropertyChanged(nameof(HasError));
-    partial void OnCommitMessageChanged(string value) => CommitCommand.NotifyCanExecuteChanged();
-    partial void OnNewBranchNameChanged(string value) => CreateBranchCommand.NotifyCanExecuteChanged();
-    partial void OnSelectedBranchChanged(string? value) => SwitchBranchCommand.NotifyCanExecuteChanged();
-    partial void OnHasMoreHistoryChanged(bool value) { LoadMoreHistoryCommand.NotifyCanExecuteChanged(); OnPropertyChanged(nameof(HistoryHeading)); }
-    partial void OnHistoryFilterChanged(string value) { ApplyHistoryFilter(); OnPropertyChanged(nameof(IsHistoryFiltered)); }
+    partial void OnRepositoryRootChanged(string? value) => NotifyCommands();
+    partial void OnHistoryFilterChanged(string value) => ApplyHistoryFilter();
     partial void OnSelectedTabChanged(int value) => EnsureSelection();
 
     partial void OnSelectedUnstagedChanged(GitChange? value)

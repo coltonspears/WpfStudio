@@ -10,7 +10,7 @@ public sealed class DatabaseViewModelTests
     public async Task DisposalCancelsAndAwaitsOwnedQueriesConnectionsAndSchemaLoads()
     {
         var service = new BlockingDatabase();
-        var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs());
+        var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
         Task execute = model.ExecuteCommand.ExecuteAsync(null);
         Task connect = model.ConnectCommand.ExecuteAsync(null);
         bool schemaCancelled = false;
@@ -41,7 +41,7 @@ public sealed class DatabaseViewModelTests
         try
         {
             var dialogs = new SaveDialogs(path);
-            var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), dialogs, dialogs);
+            var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), dialogs, dialogs, new NoRecovery());
             var document = model.SelectedDocument!;
             document.SqlText = "SELECT 1;";
             dialogs.BeforeSavePath = () => document.SqlText = "SELECT 2;";
@@ -63,7 +63,7 @@ public sealed class DatabaseViewModelTests
         {
             await File.WriteAllTextAsync(path, "SELECT 'external';");
             var dialogs = new SaveDialogs(path);
-            var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), dialogs, dialogs);
+            var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), dialogs, dialogs, new NoRecovery());
             var document = new QueryDocumentViewModel("script.sql", "SELECT 'original';") { FilePath = path };
             document.SqlText = "SELECT 'editor';";
             model.Documents.Add(document); model.SelectedDocument = document;
@@ -79,7 +79,7 @@ public sealed class DatabaseViewModelTests
     [Fact]
     public async Task ClosingModifiedQueryWithoutDialogCannotDiscardWork()
     {
-        var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), new FakeDialogs());
+        var model = new DatabasePaneViewModel(new FakeDatabase(), new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
         QueryDocumentViewModel document = model.SelectedDocument!;
         document.SqlText += "\nSELECT 42";
         await model.CloseQueryCommand.ExecuteAsync(null);
@@ -92,7 +92,7 @@ public sealed class DatabaseViewModelTests
     public async Task InitializationDoesNotConnectOrExecuteSql()
     {
         var service = new FakeDatabase();
-        var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs());
+        var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
         await model.InitializeCommand.ExecuteAsync(null);
         Assert.Equal(0, service.Executions);
         Assert.Equal(0, service.Connections);
@@ -103,7 +103,7 @@ public sealed class DatabaseViewModelTests
     public async Task ExecuteUsesSelectionAndItsOriginalLine()
     {
         var service = new FakeDatabase();
-        var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs());
+        var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
         model.SelectedDocument!.SqlText = "SELECT 1;\nSELECT 2;";
         model.SelectedDocument.SelectedText = "SELECT 2;";
         model.SelectedDocument.SelectionStartLine = 2;
@@ -117,7 +117,7 @@ public sealed class DatabaseViewModelTests
     public async Task FailureIsVisibleAndResetsBusyState()
     {
         var service = new FakeDatabase { Fail = true };
-        var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs());
+        var model = new DatabasePaneViewModel(service, new FakeStore(), new FakeDialogs(), new NoAnswers(), new NoRecovery());
         await model.ExecuteCommand.ExecuteAsync(null);
         Assert.Equal("Failed", model.SelectedDocument!.Status);
         Assert.Contains("test failure", model.SelectedDocument.Messages);

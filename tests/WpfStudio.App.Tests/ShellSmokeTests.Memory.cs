@@ -145,13 +145,13 @@ public sealed partial class ShellSmokeTests
             await model.EstimateObjectCommand.ExecuteAsync(null); await Idle();
             Assert.True(model.ReleaseEstimate.ReclaimableBytes >= 65_536); Assert.False(model.ReleaseEstimate.SelectedObjectRemainsReachable);
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-release.png"));
-            ThemeService.Apply("Light"); await Idle();
+            shell.Theme.Apply("Light"); await Idle();
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-release-light.png"));
             model.SelectedView = MemoryProfilerViewModel.OverviewView; await Idle();
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-overview-light.png"));
             model.SelectedView = MemoryProfilerViewModel.GraphView; await Idle();
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-graph-light.png"));
-            ThemeService.Apply(shell.ThemeName);
+            shell.Theme.Apply(shell.ThemeName);
 
             // Baseline comparison: growth shows up as a finding and in the Overview.
             model.SetBaselineCommand.Execute(null);
@@ -180,9 +180,9 @@ public sealed partial class ShellSmokeTests
             Assert.Contains(model.Findings, f => f.Insight.Id == "steady-growth");
             Assert.Equal(3, model.TimelineMarkers.Count);
             await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-snapshots-steady.png"));
-            ThemeService.Apply("Light"); await Idle();
+            shell.Theme.Apply("Light"); await Idle();
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-snapshots-light.png"));
-            ThemeService.Apply(shell.ThemeName); await Idle();
+            shell.Theme.Apply(shell.ThemeName); await Idle();
             // A short docked workbench still leaves room for the views and the browser.
             if (focused) { pane.Height = 460; await Idle(); Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-short.png")); pane.Height = double.NaN; await Idle(); }
             await model.CloseCaptureCommand.ExecuteAsync(null);

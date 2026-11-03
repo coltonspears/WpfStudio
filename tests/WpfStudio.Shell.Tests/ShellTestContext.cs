@@ -1,14 +1,10 @@
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
 using WpfStudio.Core.Documents;
 using WpfStudio.Core.Wpf;
-using WpfStudio.Database.Services;
-using WpfStudio.Database.ViewModels;
-using WpfStudio.Runtime.Debugging;
-using WpfStudio.Runtime.Terminal;
 using WpfStudio.Workspace;
 
 namespace WpfStudio.Shell.Tests;
@@ -19,21 +15,26 @@ internal sealed class ShellTestContext : IAsyncDisposable
     public FakeDialogs Dialogs { get; } = new();
     public InlineDispatcher Dispatcher { get; } = new();
     public DocumentStore Store { get; }
-    public WorkspaceClient Workspace { get; } = new();
-    public XamlCompletionService Xaml { get; } = new();
+    public WorkspaceClient Workspace { get; }
+    public XamlCompletionService Xaml { get; }
     public ShellViewModel Shell { get; }
-    private readonly DebuggerViewModel _debugger;
-    private readonly TerminalViewModel _terminal;
-    public ShellTestContext(WpfStudio.Runtime.Design.IPreviewClient? previewClient = null)
+    private readonly ServiceProvider _services;
+    internal FakeDesktop Desktop { get; } = new();
+    internal FakeTheme Theme { get; } = new();
+    public ShellTestContext(WpfStudio.Runtime.Design.IPreviewClient? previewClient = null, Action<IServiceCollection>? configure = null)
     {
         Directory.CreateDirectory(Root);
-        Store = new DocumentStore(Path.Combine(Root, "state"));
-        var settings = new SettingsStore(Path.Combine(Root, "state"));
-        var database = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Root, "sql.json")), Dialogs, Dialogs);
-        _debugger = new DebuggerViewModel(new DebugSession(), Dispatcher);
-        _terminal = new TerminalViewModel(Dispatcher);
-        Shell = new ShellViewModel(Store, settings, Workspace, new BuildService(), new WpfIndexService(), new ScaffoldingService(), new WorkspaceEditTransaction(Store), Xaml, Dialogs, Dialogs, Dispatcher, _debugger, _terminal, database, NullLogger<ShellViewModel>.Instance,
-            designer: previewClient == null ? null : new WpfStudio.App.Features.Designer.DesignerViewModel(previewClient, Dispatcher));
+        var services = new ServiceCollection().AddWpfStudio(Dispatcher);
+        services.Configure<StudioPaths>(paths => paths.DataDirectory = Path.Combine(Root, "state"));
+        services.AddSingleton<IFileDialogService>(Dialogs); services.AddSingleton<IUserDialogService>(Dialogs);
+        services.AddSingleton<IDesktopService>(Desktop); services.AddSingleton<IClipboardService>(Desktop); services.AddSingleton<IThemeService>(Theme);
+        if (previewClient != null) services.AddSingleton(previewClient);
+        configure?.Invoke(services);
+        _services = services.BuildServiceProvider();
+        Shell = _services.GetRequiredService<ShellViewModel>();
+        Store = _services.GetRequiredService<DocumentStore>();
+        Workspace = _services.GetRequiredService<WorkspaceClient>();
+        Xaml = _services.GetRequiredService<XamlCompletionService>();
     }
     public async Task<string> CreateFileAsync(string name, string content)
     {
@@ -45,9 +46,7 @@ internal sealed class ShellTestContext : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (Shell.IsPreviewOpen) Shell.ChangeReview.CancelCommand.Execute(null);
-        await Shell.DisposeAsync();
-        await _debugger.DisposeAsync();
-        await _terminal.DisposeAsync();
+        await _services.DisposeAsync();
         await DeleteRootAsync();
     }
     private async Task DeleteRootAsync()

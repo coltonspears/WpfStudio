@@ -1,20 +1,21 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
-using System.IO.Pipes;
 using StreamJsonRpc;
 using WpfStudio.Contracts;
 using WpfStudio.Contracts.Profiling;
+using WpfStudio.Hosting;
 
 namespace WpfStudio.Runtime.Profiling;
 
 /// <summary>Starts owned, isolated workers. Replacing/cancelling a capture never kills the target application.</summary>
 public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfiler
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, long> OwnedWorkers = new();
+    private readonly ConcurrentDictionary<int, long> _ownedWorkers = new();
     public async Task<IMemorySession> OpenAsync(HeapCaptureRequest request, CancellationToken cancellationToken = default)
     {
         var path = hostPath ?? Path.Combine(AppContext.BaseDirectory, "ProfilingHost", "WpfStudio.ProfilingHost.dll");
-        var session = await WorkerSession.StartAsync(path, null, cancellationToken).ConfigureAwait(false);
+        var session = await WorkerSession.StartAsync(path, null, _ownedWorkers, cancellationToken).ConfigureAwait(false);
         try
         {
             var architecture = await session.CallAsync(p => p.GetArchitectureAsync(request, cancellationToken), cancellationToken).ConfigureAwait(false);
@@ -23,8 +24,8 @@ public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfi
                 await session.DisposeAsync().ConfigureAwait(false);
                 var packaged = Path.Combine(Path.GetDirectoryName(path)!, "x86", "WpfStudio.ProfilingHost.exe");
                 var x86Dotnet = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "dotnet", "dotnet.exe");
-                if (File.Exists(packaged)) session = await WorkerSession.StartAsync(packaged, null, cancellationToken).ConfigureAwait(false);
-                else if (File.Exists(x86Dotnet)) session = await WorkerSession.StartAsync(path, x86Dotnet, cancellationToken).ConfigureAwait(false);
+                if (File.Exists(packaged)) session = await WorkerSession.StartAsync(packaged, null, _ownedWorkers, cancellationToken).ConfigureAwait(false);
+                else if (File.Exists(x86Dotnet)) session = await WorkerSession.StartAsync(path, x86Dotnet, _ownedWorkers, cancellationToken).ConfigureAwait(false);
                 else throw new InvalidOperationException("This is a 32-bit capture. Install the .NET 10 x86 runtime for the profiling worker, or use a portable build containing ProfilingHost/x86. The target's .NET Framework version does not need to change.");
             }
             else if (architecture != "X64") throw new PlatformNotSupportedException($"Memory analysis currently supports X64 and X86 captures; this capture is {architecture}.");
@@ -46,7 +47,7 @@ public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfi
                 try
                 {
                     if (process.Id == Environment.ProcessId || process.ProcessName.Contains("WpfStudio.ProfilingHost", StringComparison.OrdinalIgnoreCase) ||
-                        OwnedWorkers.TryGetValue(process.Id, out var workerStart) && process.StartTime.ToUniversalTime().Ticks == workerStart) continue;
+                        _ownedWorkers.TryGetValue(process.Id, out var workerStart) && process.StartTime.ToUniversalTime().Ticks == workerStart) continue;
                     var modules = process.Modules.Cast<ProcessModule>().Select(m => m.ModuleName).ToArray();
                     var runtime = modules.Any(m => m.Equals("coreclr.dll", StringComparison.OrdinalIgnoreCase)) ? ".NET"
                         : modules.Any(m => m.Equals("clr.dll", StringComparison.OrdinalIgnoreCase) || m.Equals("mscorwks.dll", StringComparison.OrdinalIgnoreCase)) ? ".NET Framework" : null;
@@ -61,60 +62,41 @@ public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfi
 
     private sealed class WorkerSession : IMemorySession
     {
-        private readonly Process _process;
-        private readonly NamedPipeClientStream _pipe;
+        private readonly WorkerProcessHost _worker;
+        private readonly ConcurrentDictionary<int, long> _owned;
         private readonly JsonRpc _rpc;
         private readonly IMemoryProfilerRpc _proxy;
         private readonly object _lifetime = new();
         private bool _disposed;
         private Task? _disposeTask;
         public HeapSummary Summary { get; internal set; } = null!;
-        private WorkerSession(Process process, NamedPipeClientStream pipe, JsonRpc rpc, IMemoryProfilerRpc proxy)
-        { _process = process; _pipe = pipe; _rpc = rpc; _proxy = proxy; }
+        private WorkerSession(WorkerProcessHost worker, ConcurrentDictionary<int, long> owned, JsonRpc rpc, IMemoryProfilerRpc proxy)
+        { _worker = worker; _owned = owned; _rpc = rpc; _proxy = proxy; }
 
-        internal static async Task<WorkerSession> StartAsync(string path, string? dotnetPath, CancellationToken token)
+        internal static async Task<WorkerSession> StartAsync(string path, string? dotnetPath, ConcurrentDictionary<int, long> owned, CancellationToken token)
         {
             if (!File.Exists(path)) throw new FileNotFoundException("The profiling worker is missing. Build WpfStudio or reinstall the portable package.", path);
-            var pipeName = "WpfStudio-Profiling-" + Guid.NewGuid().ToString("N");
             // Prefer the apphost so a self-contained portable worker does not depend on dotnet on PATH.
             // An explicit x86 dotnet host must still launch the AnyCPU DLL in source builds.
             if (dotnetPath is null && path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.ChangeExtension(path, ".exe")))
                 path = Path.ChangeExtension(path, ".exe");
-            var start = new ProcessStartInfo(path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? dotnetPath ?? "dotnet" : path)
-            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, WorkingDirectory = Path.GetDirectoryName(path)! };
-            if (path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) start.ArgumentList.Add(path);
-            start.ArgumentList.Add("--pipe"); start.ArgumentList.Add(pipeName);
-            var process = Process.Start(start) ?? throw new InvalidOperationException("The profiling worker could not start.");
-            var error = "";
-            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) error = (error + e.Data + Environment.NewLine)[^Math.Min(4000, error.Length + e.Data.Length + Environment.NewLine.Length)..]; };
-            process.BeginErrorReadLine();
-            var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            var worker = new WorkerProcessHost(new(path, "WpfStudio-Profiling-" + Guid.NewGuid().ToString("N"), TimeSpan.FromSeconds(20)) { DotNetPath = dotnetPath });
+            worker.Start();
             try
             {
-                _ = process.Handle;
-                OwnedWorkers[process.Id] = process.StartTime.ToUniversalTime().Ticks;
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-                timeout.CancelAfter(TimeSpan.FromSeconds(20));
-                var connected = pipe.ConnectAsync(timeout.Token);
-                // A worker that exits, on a missing runtime say, can never connect: report that now rather than after the timeout.
-                var exited = process.WaitForExitAsync(timeout.Token);
-                await Task.WhenAny(connected, exited).ConfigureAwait(false);
-                var gone = exited.IsCompletedSuccessfully && !connected.IsCompletedSuccessfully;
-                await timeout.CancelAsync().ConfigureAwait(false);
-                if (gone)
-                {
-                    connected.Forget();
-                    throw new InvalidOperationException($"The profiling worker exited with code {process.ExitCode} before connecting. {error}");
-                }
-                await connected.ConfigureAwait(false);
+                owned[worker.ProcessId] = worker.StartTimeUtc.Ticks;
+                await worker.ConnectAsync(token).ConfigureAwait(false);
                 // Must match the worker's formatter (WpfStudio.ProfilingHost).
-                var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(pipe, pipe, new SystemTextJsonFormatter()));
+                var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(worker.Pipe, worker.Pipe, new SystemTextJsonFormatter()));
                 var proxy = rpc.Attach<IMemoryProfilerRpc>(); rpc.StartListening();
-                return new(process, pipe, rpc, proxy);
+                return new(worker, owned, rpc, proxy);
             }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested)
-            { pipe.Dispose(); await TerminateAsync(process).ConfigureAwait(false); throw new InvalidOperationException("The profiling worker did not connect. " + error); }
-            catch { pipe.Dispose(); await TerminateAsync(process).ConfigureAwait(false); throw; }
+            catch (WorkerConnectionException ex)
+            {
+                await StopAsync(worker, owned, TimeSpan.Zero).ConfigureAwait(false);
+                throw new InvalidOperationException(ex.ExitCode is { } code ? $"The profiling worker exited with code {code} before connecting. {ex.ErrorTail}" : "The profiling worker did not connect. " + ex.ErrorTail, ex);
+            }
+            catch { await StopAsync(worker, owned, TimeSpan.Zero).ConfigureAwait(false); throw; }
         }
 
         internal async Task<T> CallAsync<T>(Func<IMemoryProfilerRpc, Task<T>> call, CancellationToken token, TimeSpan? timeout = null)
@@ -142,30 +124,20 @@ public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfi
             {
                 if (_disposeTask is null)
                 {
-                    _disposed = true; _rpc.Dispose(); _pipe.Dispose();
-                    _disposeTask = TerminateAsync(_process, graceful: true);
+                    _disposed = true; _rpc.Dispose();
+                    // Disconnecting lets the worker dispose its DAC and PSS snapshot, including the VA clone.
+                    // Killing first can strand a clone with open handles to the target's assemblies.
+                    _disposeTask = StopAsync(_worker, _owned, TimeSpan.FromSeconds(5));
                 }
                 return new(_disposeTask);
             }
         }
-        private static async Task TerminateAsync(Process process, bool graceful = false)
+        // Do not return while the worker still owns the dump file or snapshot.
+        private static async Task StopAsync(WorkerProcessHost worker, ConcurrentDictionary<int, long> owned, TimeSpan grace)
         {
-            var id = process.Id;
-            try
-            {
-                // Disconnect lets the worker dispose its DAC and PSS snapshot, including the VA clone.
-                // Killing first can strand a clone with open handles to the target's assemblies.
-                if (graceful)
-                {
-                    try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); return; }
-                    catch (TimeoutException) { }
-                }
-                if (!process.HasExited) process.Kill();
-                // Kill is asynchronous. Do not return while the worker still owns the dump file/snapshot.
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-            }
-            catch (InvalidOperationException) { }
-            finally { OwnedWorkers.TryRemove(id, out _); process.Dispose(); }
+            var id = worker.ProcessId;
+            try { await worker.StopAsync(grace).ConfigureAwait(false); }
+            finally { owned.TryRemove(id, out _); }
         }
     }
 }

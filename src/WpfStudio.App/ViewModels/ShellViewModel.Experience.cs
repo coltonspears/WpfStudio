@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.IO;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -6,7 +5,6 @@ using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Controls;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
-using WpfStudio.Core;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -23,19 +21,17 @@ public sealed partial class ShellViewModel
     private void InitializeExperience()
     {
         Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
-        if (Features?.Assistant.Settings is INotifyPropertyChanged settings) settings.PropertyChanged += AssistantSettingsChanged;
     }
-    private void AssistantSettingsChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == "HasApiKey") OnPropertyChanged(nameof(IsColtonGptReady)); }
 
     // ------------------------------------------------------------------ Theme
     public bool IsLightTheme => ThemeName.Equals("Light", IgnoreCase);
     public bool IsDarkTheme => !IsLightTheme;
-    partial void OnThemeNameChanged(string value) { OnPropertyChanged(nameof(IsLightTheme)); OnPropertyChanged(nameof(IsDarkTheme)); }
+    partial void OnThemeNameChanged(string value) => Theme.Apply(value);
     [RelayCommand]
     private void SetTheme(string? name)
     {
         if (name is not ("Dark" or "Light") || name.Equals(ThemeName, IgnoreCase)) return;
-        ThemeName = name; ThemeChanged?.Invoke(ThemeName);
+        ThemeName = name;
     }
 
     // ------------------------------------------------------------------ Workspace summary
@@ -43,7 +39,7 @@ public sealed partial class ShellViewModel
     public string WorkspaceSummary => Workspace == null ? "" : $"{Workspace.Projects.Count} project{(Workspace.Projects.Count == 1 ? "" : "s")} · .NET SDK {Workspace.SdkVersion}";
     public string CommandCenterText => Workspace == null ? "Search files and commands" : WorkspaceName;
     public bool HasDocuments => Documents.Count > 0;
-    public bool IsColtonGptReady => Features?.Assistant.Settings.HasApiKey == true;
+    public bool IsColtonGptReady => Features.Assistant.Settings.HasApiKey;
     private void NotifyWorkspaceSummary()
     {
         OnPropertyChanged(nameof(WorkspaceName)); OnPropertyChanged(nameof(WorkspaceSummary)); OnPropertyChanged(nameof(CommandCenterText));
@@ -63,8 +59,8 @@ public sealed partial class ShellViewModel
         }
         return null;
     }
-    [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke("Search"); IsSearchFocusRequested = true; }
-    [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(AppPaths.DataDirectory); DesktopNavigation.Reveal(AppPaths.DataDirectory); return Task.CompletedTask; });
+    [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke(Workbenches.Search); IsSearchFocusRequested = true; }
+    [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(DataFolder); _desktop.Reveal(DataFolder); return Task.CompletedTask; });
     /// <summary>Opens the command palette on the snippets for the active editor's language.</summary>
     [RelayCommand] private void InsertSnippet()
     {
@@ -108,7 +104,7 @@ public sealed partial class ShellViewModel
     private PaletteEntry MemoryCommand(string label, ICommand command, object? parameter = null, string icon = "", string detail = "")
         => new(label, detail, async () =>
         {
-            ShowToolCommand.Execute("Profiler");
+            ShowToolCommand.Execute(Workbenches.Profiler);
             if (!command.CanExecute(parameter)) { Status = label + " isn't available right now"; return; }
             if (command is IAsyncRelayCommand asyncCommand) await asyncCommand.ExecuteAsync(parameter);
             else command.Execute(parameter);
@@ -165,21 +161,21 @@ public sealed partial class ShellViewModel
         yield return Command("Debug", "Add watch", Breakpoints.AddWatchCommand, icon: "Eye", detail: "Watch the expression at the caret or the selection");
         yield return Command("Debug", "Show breakpoints", Breakpoints.ShowCommand, icon: "Bug", detail: "Conditions, enabled state and binding status");
         yield return Command("Debug", "Install or reinstall the debugger", Debugger.InstallAdapterCommand, icon: "Bug", detail: "Download netcoredbg into your WpfStudio profile");
-        yield return Command("Debug", "Attach to process…", ShowToolCommand, "Debugger", icon: "Plug");
-        yield return Command("View", "Solution Explorer", ShowToolCommand, "Explorer", icon: "Folder");
-        yield return Command("View", "WPF Explorer", ShowToolCommand, "WpfTools", icon: "Layers");
+        yield return Command("Debug", "Attach to process…", ShowToolCommand, Workbenches.Debugger, icon: "Plug");
+        yield return Command("View", "Solution Explorer", ShowToolCommand, Workbenches.Explorer, icon: "Folder");
+        yield return Command("View", "WPF Explorer", ShowToolCommand, Workbenches.WpfTools, icon: "Layers");
         yield return Command("View", "XAML Designer", OpenDesignerCommand, icon: "Layers");
-        yield return Command("View", "Live XAML", ShowToolCommand, "LiveInspection", icon: "Layers");
+        yield return Command("View", "Live XAML", ShowToolCommand, Workbenches.LiveInspection, icon: "Layers");
         yield return Command("Debug", "Run with XAML inspection", RunWithInspectionCommand, icon: "PlayOutline");
         yield return Command("Debug", "Debug with XAML inspection", DebugWithInspectionCommand, icon: "Play");
         yield return Command("View", "ColtonGPT", OpenAssistantCommand, icon: "Chat", detail: "Ask about code with optional editor context");
-        yield return Command("View", "Output", ShowToolCommand, "Output", icon: "Output");
-        yield return Command("View", "Problems", ShowToolCommand, "Problems", icon: "Warning");
-        yield return Command("View", "Search results", ShowToolCommand, "Search", icon: "Search");
-        yield return Command("View", "Terminal", ShowToolCommand, "Terminal", shortcut: "Ctrl+`", icon: "Terminal");
-        yield return Command("View", "Debugger", ShowToolCommand, "Debugger", icon: "Bug");
-        yield return Command("View", "SQL Server", ShowToolCommand, "Database", icon: "Database");
-        yield return Command("Tools", "Memory profiler", ShowToolCommand, "Profiler", icon: "Layers", detail: "Dumps, live snapshots, GC roots and reference-removal estimates");
+        yield return Command("View", "Output", ShowToolCommand, Workbenches.Output, icon: "Output");
+        yield return Command("View", "Problems", ShowToolCommand, Workbenches.Problems, icon: "Warning");
+        yield return Command("View", "Search results", ShowToolCommand, Workbenches.Search, icon: "Search");
+        yield return Command("View", "Terminal", ShowToolCommand, Workbenches.Terminal, shortcut: "Ctrl+`", icon: "Terminal");
+        yield return Command("View", "Debugger", ShowToolCommand, Workbenches.Debugger, icon: "Bug");
+        yield return Command("View", "SQL Server", ShowToolCommand, Workbenches.Database, icon: "Database");
+        yield return Command("Tools", "Memory profiler", ShowToolCommand, Workbenches.Profiler, icon: "Layers", detail: "Dumps, live snapshots, GC roots and reference-removal estimates");
         yield return MemoryCommand("Capture memory snapshot", MemoryProfiler.CaptureCommand, icon: "Camera", detail: "Snapshot the selected process's managed heap");
         yield return MemoryCommand("Open memory dump…", MemoryProfiler.OpenDumpCommand, icon: "FolderOpen");
         yield return MemoryCommand("Compare memory snapshots", MemoryProfiler.ShowViewCommand, "4", icon: "Timeline", detail: "Live memory, snapshot history and type growth");
@@ -196,7 +192,7 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Save window layout", SaveLayoutCommand, icon: "Sidebar");
         yield return Command("View", "Reset window layout", ResetLayoutCommand, icon: "Sidebar");
         yield return Command("Tools", "NuGet packages", OpenPackagesCommand, icon: "Package", detail: "Search, install, update, remove");
-        if (Features?.Git is { HasRemote: true } git)
+        if (Features.Git is { HasRemote: true } git)
         {
             yield return Command("Tools", git.RemoteText, git.OpenRemoteCommand, icon: "Link", detail: git.Remote!.WebUrl);
             yield return Command("Tools", git.PullRequestText, git.CreatePullRequestCommand, icon: "Link", detail: "Opens " + git.Remote.HostName + " for the current branch");

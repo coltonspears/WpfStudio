@@ -198,7 +198,7 @@ public sealed partial class EditorSurface
                 if (!ReferenceEquals(model, ViewModel) || !ReferenceEquals(document, Document) || model?.LineChanges.Contains(change) != true) return;
                 RevertChange(change); Focus();
             }),
-            new RelayCommand(() => { _changePopup.IsOpen = false; Focus(); }));
+            new RelayCommand(() => { _changePopup.IsOpen = false; Focus(); })) with { Preferences = model?.Preferences };
     }
 
     /// <summary>Thin bars beside the line numbers: added (green), changed (accent) and deleted (red marker) since the last commit.</summary>

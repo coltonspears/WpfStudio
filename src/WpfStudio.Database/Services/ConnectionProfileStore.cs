@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using WpfStudio.Core.IO;
 using WpfStudio.Database.Models;
 
 namespace WpfStudio.Database.Services;
@@ -10,7 +11,6 @@ public sealed class ConnectionProfileStore : IConnectionProfileStore
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("WpfStudio.SqlConnections.v1");
-    public ConnectionProfileStore() : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "sql-connections.json")) { }
     public ConnectionProfileStore(string path) => _path = path;
 
     public async Task<IReadOnlyList<ConnectionProfile>> LoadAsync(CancellationToken cancellationToken = default)
@@ -29,21 +29,13 @@ public sealed class ConnectionProfileStore : IConnectionProfileStore
     public async Task SaveAsync(IReadOnlyList<ConnectionProfile> profiles, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        string temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             // Profiles nobody has opened keep their blob as it is, including one this account cannot unlock.
             var saved = profiles.Select(profile => new StoredProfile(profile, profile.RememberPassword && !profile.WindowsAuthentication ? profile.ProtectedPassword ?? Encrypt(profile.Password) : null));
-            await using (var stream = File.Create(temporary))
-                await JsonSerializer.SerializeAsync(stream, saved, new JsonSerializerOptions { WriteIndented = true }, cancellationToken).ConfigureAwait(false);
-            File.Move(temporary, _path, true);
+            await AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(saved, new JsonSerializerOptions { WriteIndented = true }), cancellationToken).ConfigureAwait(false);
         }
-        finally
-        {
-            if (File.Exists(temporary)) File.Delete(temporary);
-            _gate.Release();
-        }
+        finally { _gate.Release(); }
     }
 
     public string UnlockPassword(ConnectionProfile profile) => profile.ProtectedPassword is { } saved ? Decrypt(saved) : profile.Password;

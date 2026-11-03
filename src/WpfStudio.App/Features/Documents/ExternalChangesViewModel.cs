@@ -18,19 +18,19 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
 {
     private readonly IExternalChangesHost _host;
     private readonly DocumentStore _store;
-    private readonly OpenDocumentWatcher _watcher;
+    private readonly IOpenDocumentWatcher _watcher;
     private Task? _check;
     private bool _recheckFiles, _recheckFromApp;
     private bool _disposed;
 
     private readonly Action<Exception> _report;
 
-    public ExternalChangesViewModel(IExternalChangesHost host, DocumentStore store, IUiDispatcher dispatcher)
+    public ExternalChangesViewModel(IExternalChangesHost host, DocumentStore store, IUiDispatcher dispatcher, OpenDocumentWatcherFactory watchDocuments)
     {
         _host = host; _store = store;
         Changes.CollectionChanged += ChangesChanged;
         _report = fault => dispatcher.Post(() => _host.AppendOutput("Checking files changed outside WpfStudio: " + fault.Message));
-        _watcher = new OpenDocumentWatcher(() => dispatcher.Post(() => CheckAsync().Forget(_report)));
+        _watcher = watchDocuments(() => dispatcher.Post(() => CheckAsync().Forget(_report)));
         host.DocumentsChanged += () =>
         {
             _watcher.Watch(host.Documents.Select(document => document.State.Path));
@@ -39,11 +39,10 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
     }
 
     public ObservableCollection<ExternalChange> Changes { get; } = [];
-    [ObservableProperty] public partial bool IsExpanded { get; set; } = true;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(ToggleText))] public partial bool IsExpanded { get; set; } = true;
     /// <summary>Files without unsaved edits follow the disk without asking; the banner then lists only conflicts.</summary>
     [ObservableProperty] public partial bool AutoReloadUnchangedFiles { get; set; }
     partial void OnAutoReloadUnchangedFilesChanged(bool value) { _host.SettingChanged(); if (value) CheckAsync().Forget(_report); }
-    partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ToggleText));
 
     public bool HasChanges => Changes.Count > 0;
     public string ToggleText => IsExpanded ? "Hide details" : "Review";
@@ -195,8 +194,7 @@ public sealed partial class ExternalChange : ObservableObject
     public bool HasUnsavedEdits => _document.State.IsDirty;
     public string EditorText => _document.State.Content;
     [ObservableProperty] public partial string Summary { get; private set; } = "";
-    [ObservableProperty] public partial bool IsComparing { get; set; }
-    partial void OnIsComparingChanged(bool value) { OnPropertyChanged(nameof(CompareBefore)); OnPropertyChanged(nameof(CompareAfter)); }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(CompareBefore), nameof(CompareAfter))] public partial bool IsComparing { get; set; }
     public bool CanCompare => !IsDeleted;
     // The diff is computed only while it is shown; the editor text changes with every keystroke.
     public string? CompareBefore => IsComparing ? EditorText : null;

@@ -48,8 +48,6 @@ public partial class DiffView : UserControl
     public string OldLabel { get => (string)GetValue(OldLabelProperty); set => SetValue(OldLabelProperty, value); }
     public string NewLabel { get => (string)GetValue(NewLabelProperty); set => SetValue(NewLabelProperty, value); }
 
-    public IRelayCommand NextChangeCommand { get; }
-    public IRelayCommand PreviousChangeCommand { get; }
     public TextDiff? Diff => _diff;
     public DiffLayout? Layout => _layout;
     internal TextEditor LeftEditor => _left;
@@ -81,8 +79,6 @@ public partial class DiffView : UserControl
 
     public DiffView()
     {
-        NextChangeCommand = new RelayCommand(() => GoToChange(_current + 1), () => Changes.Count > 0 && _current < Changes.Count - 1);
-        PreviousChangeCommand = new RelayCommand(() => GoToChange(_current - 1), () => Changes.Count > 0 && _current > 0);
         InitializeComponent();
         InputBindings.Add(new KeyBinding(NextChangeCommand, Key.F8, ModifierKeys.None));
         InputBindings.Add(new KeyBinding(PreviousChangeCommand, Key.F8, ModifierKeys.Shift));
@@ -106,9 +102,8 @@ public partial class DiffView : UserControl
         _inline.TextArea.TextView.VisualLinesChanged += (_, _) => UpdateRulerViewport();
         _splitRuler.Navigate += fraction => ScrollToFraction(_right, fraction);
         _inlineRuler.Navigate += fraction => ScrollToFraction(_inline, fraction);
-        // WPF can raise Loaded twice without Unloaded between, as when a tab is re-hosted.
-        Loaded += (_, _) => { ThemeService.Applied -= ThemeApplied; ThemeService.Applied += ThemeApplied; ApplyHighlighting(); };
-        Unloaded += (_, _) => ThemeService.Applied -= ThemeApplied;
+        Loaded += (_, _) => ApplyHighlighting();
+        SetResourceReference(ThemePaletteProperty, Palette.ResourceKey);
         UpdateLabels();
         ModeChanged();
         ShowMessage(EmptyText);
@@ -283,6 +278,11 @@ public partial class DiffView : UserControl
         _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => editor.ScrollToVerticalOffset(offset));
     }
 
+    private bool CanGoToNextChange() => Changes.Count > 0 && _current < Changes.Count - 1;
+    [RelayCommand(CanExecute = nameof(CanGoToNextChange))] private void NextChange() => GoToChange(_current + 1);
+    private bool CanGoToPreviousChange() => Changes.Count > 0 && _current > 0;
+    [RelayCommand(CanExecute = nameof(CanGoToPreviousChange))] private void PreviousChange() => GoToChange(_current - 1);
+
     private void GoToChange(int index)
     {
         var changes = Changes;
@@ -411,7 +411,11 @@ public partial class DiffView : UserControl
         foreach (var editor in new[] { _left, _right, _inline }) editor.SyntaxHighlighting = definition;
     }
 
-    private void ThemeApplied(bool light)
+    // Follows the application resource, so a closed view holds no subscription on any service.
+    private static readonly DependencyProperty ThemePaletteProperty = DependencyProperty.Register("ThemePalette", typeof(Palette), typeof(DiffView),
+        new PropertyMetadata(null, (view, _) => ((DiffView)view).ThemeApplied()));
+
+    private void ThemeApplied()
     {
         foreach (var editor in new[] { _left, _right, _inline })
         {

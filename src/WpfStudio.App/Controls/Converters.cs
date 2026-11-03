@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Data;
+using WpfStudio.App.Features.Workbench;
 
 namespace WpfStudio.App.Controls;
 
@@ -11,9 +12,8 @@ public sealed class FileIconKindConverter : IValueConverter
 {
     public static string KindFor(string? path)
     {
-        var name = (path ?? "").Replace(" •", "").Trim();
-        if (name.EndsWith("ViewModel.cs", StringComparison.OrdinalIgnoreCase)) return "ViewModel";
-        return Path.GetExtension(name).ToLowerInvariant() switch
+        if (path?.EndsWith("ViewModel.cs", StringComparison.OrdinalIgnoreCase) == true) return "ViewModel";
+        return Path.GetExtension(path ?? "").ToLowerInvariant() switch
         {
             ".csproj" or ".sln" or ".slnx" => "Project",
             ".cs" => "CSharp",
@@ -27,11 +27,11 @@ public sealed class FileIconKindConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => Binding.DoNothing;
 }
 
-/// <summary>Visible when the text looks like a file name (it has an extension).</summary>
+/// <summary>Visible when a dock content id is a file path (it has an extension) rather than a workbench id.</summary>
 public sealed class FileNameVisibilityConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => Path.HasExtension((value as string ?? "").Replace(" •", "").Trim()) ? Visibility.Visible : Visibility.Collapsed;
+        => Path.HasExtension(value as string ?? "") ? Visibility.Visible : Visibility.Collapsed;
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => Binding.DoNothing;
 }
 
@@ -40,20 +40,20 @@ public sealed class ContentGlyphConverter : IValueConverter
 {
     public static string KindFor(string? contentId) => contentId switch
     {
-        "Explorer" => "Folder",
-        "WpfTools" => "Layers",
-        "ColtonGPT" => "Chat",
-        "Output" => "Output",
-        "Problems" => "Warning",
-        "TaskList" => "Check",
-        "FileGroups" => "Pin",
-        "Search" => "Search",
-        "Terminal" => "Terminal",
-        "Debugger" => "Bug",
-        "Database" => "Database",
-        "Packages" => "Package",
-        "Git" => "Git",
-        "Welcome" => "Window",
+        Workbenches.Explorer => "Folder",
+        Workbenches.WpfTools => "Layers",
+        Workbenches.Assistant => "Chat",
+        Workbenches.Output => "Output",
+        Workbenches.Problems => "Warning",
+        Workbenches.TaskList => "Check",
+        Workbenches.FileGroups => "Pin",
+        Workbenches.Search => "Search",
+        Workbenches.Terminal => "Terminal",
+        Workbenches.Debugger => "Bug",
+        Workbenches.Database => "Database",
+        Workbenches.Packages => "Package",
+        Workbenches.Git => "Git",
+        Workbenches.Welcome => "Window",
         _ => ""
     };
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => KindFor(value as string);

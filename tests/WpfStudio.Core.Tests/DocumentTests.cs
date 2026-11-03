@@ -13,6 +13,34 @@ public class DocumentTests
         return path;
     }
 
+    [Fact]
+    public void EverySourceOfTheDirtyStateAndTitleNotifiesThem()
+    {
+        var document = new DocumentState(Path.Combine(Path.GetTempPath(), "Notified.cs"), "saved", diskHash: "first");
+        var raised = new List<string?>();
+        document.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        void NotifiesBoth(Action change, bool dirty)
+        {
+            raised.Clear();
+            change();
+            Assert.Contains(nameof(DocumentState.IsDirty), raised);
+            Assert.Contains(nameof(DocumentState.Title), raised);
+            Assert.Equal(dirty, document.IsDirty);
+        }
+
+        NotifiesBoth(() => document.Content = "edited", dirty: true);
+        // Only the saved text changes here, and only the hash in the next one.
+        NotifiesBoth(() => document.MarkSavedSnapshot("edited", "first"), dirty: false);
+        NotifiesBoth(() => document.KeepEditorVersion("edited", null), dirty: true);
+        NotifiesBoth(() => document.MarkSaved("second"), dirty: false);
+        NotifiesBoth(() => document.KeepEditorVersion("on disk", "third"), dirty: true);
+
+        raised.Clear();
+        document.HasExternalChange = true;
+        Assert.Contains(nameof(DocumentState.Title), raised);
+        Assert.EndsWith("\u26a0", document.Title);
+    }
+
     [Theory]
     [InlineData("utf-16", "\ufeffcaf\u00e9")]
     [InlineData("utf-8", "\ufeffcaf\u00e9")]
