@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using WpfStudio.Core.IO;
 using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.Core.Documents;
@@ -61,7 +62,7 @@ public sealed class DocumentStore
             var content = document.Content;
             byte[] bytes = [.. document.Encoding.GetPreamble(), .. document.Encoding.GetBytes(content)];
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(document.Path)!);
-            await AtomicWriteAsync(document.Path, bytes, cancellationToken);
+            await AtomicFile.WriteAsync(document.Path, bytes, cancellationToken);
             document.MarkSavedSnapshot(content, Hash(bytes));
             await _recoveryGate.WaitAsync(cancellationToken);
             try
@@ -70,7 +71,7 @@ public sealed class DocumentStore
                 else
                 {
                     var recovery = new RecoveryDocument(document.Path, document.Content, DateTimeOffset.UtcNow);
-                    await AtomicWriteAsync(RecoveryPath(document.Path), JsonSerializer.SerializeToUtf8Bytes(recovery), cancellationToken).ConfigureAwait(false);
+                    await AtomicFile.WriteAsync(RecoveryPath(document.Path), JsonSerializer.SerializeToUtf8Bytes(recovery), cancellationToken).ConfigureAwait(false);
                 }
             }
             finally { _recoveryGate.Release(); }
@@ -117,7 +118,7 @@ public sealed class DocumentStore
             cancellationToken.ThrowIfCancellationRequested();
             if (!doc.IsDirty) { DeleteRecoveryCore(doc.Path); continue; }
             var recovery = new RecoveryDocument(doc.Path, doc.Content, DateTimeOffset.UtcNow);
-            await AtomicWriteAsync(RecoveryPath(doc.Path), JsonSerializer.SerializeToUtf8Bytes(recovery), cancellationToken).ConfigureAwait(false);
+            await AtomicFile.WriteAsync(RecoveryPath(doc.Path), JsonSerializer.SerializeToUtf8Bytes(recovery), cancellationToken).ConfigureAwait(false);
         }
         }
         finally { _recoveryGate.Release(); }
@@ -151,11 +152,4 @@ public sealed class DocumentStore
     private void DeleteRecoveryCore(string path) { var file = RecoveryPath(path); if (File.Exists(file)) File.Delete(file); }
     private string RecoveryPath(string path) => System.IO.Path.Combine(_recoveryDirectory, Hash(Encoding.UTF8.GetBytes(path.ToUpperInvariant())) + ".json");
     public static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
-    public static async Task AtomicWriteAsync(string path, byte[] bytes, CancellationToken cancellationToken = default)
-    {
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
-        var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try { await File.WriteAllBytesAsync(temp, bytes, cancellationToken).ConfigureAwait(false); File.Move(temp, path, true); }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
-    }
 }

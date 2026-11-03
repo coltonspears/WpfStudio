@@ -2,8 +2,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using WpfStudio.Core;
-using WpfStudio.Core.Documents;
+using WpfStudio.Core.IO;
 
 namespace WpfStudio.App.Features.ColtonGpt;
 
@@ -29,7 +28,7 @@ public sealed class AssistantSettingsStore(string directory)
     }
 
     public Task SaveAsync(AssistantConfiguration settings, CancellationToken token = default) =>
-        DocumentStore.AtomicWriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(settings, new JsonSerializerOptions { WriteIndented = true }), token);
+        AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(settings, new JsonSerializerOptions { WriteIndented = true }), token);
 
     public string ProtectKey(string value)
     {

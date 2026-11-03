@@ -1,5 +1,5 @@
 using System.Text.Json;
-using WpfStudio.Core.Documents;
+using WpfStudio.Core.IO;
 
 namespace WpfStudio.Core;
 
@@ -13,5 +13,5 @@ public sealed class SettingsStore
         catch (JsonException) { return new(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return new(); }
     }
-    public Task SaveAsync(StudioSettings settings, CancellationToken token = default) => DocumentStore.AtomicWriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(settings, new JsonSerializerOptions { WriteIndented = true }), token);
+    public Task SaveAsync(StudioSettings settings, CancellationToken token = default) => AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(settings, new JsonSerializerOptions { WriteIndented = true }), token);
 }

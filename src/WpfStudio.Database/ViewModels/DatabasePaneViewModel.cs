@@ -4,6 +4,7 @@ using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts;
+using WpfStudio.Core.IO;
 using WpfStudio.Database.Models;
 using WpfStudio.Database.Services;
 
@@ -343,7 +344,6 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
         string text = document.SqlText;
         string? path = await _files.SaveFileAsync("Save SQL script", "SQL files|*.sql", document.FilePath ?? document.Title + (document.Title.EndsWith(".sql", StringComparison.OrdinalIgnoreCase) ? "" : ".sql"));
         if (path is null) return false;
-        string? temporary = null;
         try
         {
             if (document.FilePath is not null && Path.GetFullPath(path).Equals(Path.GetFullPath(document.FilePath), StringComparison.OrdinalIgnoreCase)
@@ -356,15 +356,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
                 }
             }
             path = Path.GetFullPath(path);
-            temporary = Path.Combine(Path.GetDirectoryName(path)!, "." + Path.GetFileName(path) + "." + Guid.NewGuid().ToString("N") + ".tmp");
-            await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
-            await using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false)))
-            {
-                await writer.WriteAsync(text.AsMemory(), cancellationToken);
-                await writer.FlushAsync(cancellationToken);
-            }
-            // There is no asynchronous move, and the script may live on a slow or network drive.
-            await Task.Run(() => File.Move(temporary, path, true), cancellationToken);
+            await AtomicFile.WriteAsync(path, new System.Text.UTF8Encoding(false).GetBytes(text), cancellationToken, writeThrough: true);
             document.MarkSaved(text);
             document.FilePath = path;
             await FlushRecoveryAsync();
@@ -372,11 +364,6 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
             return !document.IsDirty;
         }
         catch (Exception exception) { Status = exception.Message; return false; }
-        finally
-        {
-            // A cleanup failure must not replace the result reported above; the temporary file is hidden and uniquely named.
-            if (temporary is not null) await Task.Run(() => { try { if (File.Exists(temporary)) File.Delete(temporary); } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { } });
-        }
     }
 
     private ConnectionProfile CurrentProfile() => new()

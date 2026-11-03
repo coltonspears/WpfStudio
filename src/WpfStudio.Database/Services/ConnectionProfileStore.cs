@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using WpfStudio.Core.IO;
 using WpfStudio.Database.Models;
 
 namespace WpfStudio.Database.Services;
@@ -28,20 +29,12 @@ public sealed class ConnectionProfileStore : IConnectionProfileStore
     public async Task SaveAsync(IReadOnlyList<ConnectionProfile> profiles, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        string temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             var saved = profiles.Select(profile => new StoredProfile(profile, profile.RememberPassword && !profile.WindowsAuthentication ? Encrypt(profile.Password) : null));
-            await using (var stream = File.Create(temporary))
-                await JsonSerializer.SerializeAsync(stream, saved, new JsonSerializerOptions { WriteIndented = true }, cancellationToken).ConfigureAwait(false);
-            File.Move(temporary, _path, true);
+            await AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(saved, new JsonSerializerOptions { WriteIndented = true }), cancellationToken).ConfigureAwait(false);
         }
-        finally
-        {
-            if (File.Exists(temporary)) File.Delete(temporary);
-            _gate.Release();
-        }
+        finally { _gate.Release(); }
     }
 
     private static string Encrypt(string password)

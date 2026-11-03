@@ -1,5 +1,5 @@
 using System.Text.Json;
-using WpfStudio.Core.Documents;
+using WpfStudio.Core.IO;
 
 namespace WpfStudio.Core;
 
@@ -45,7 +45,7 @@ public sealed class WorkspaceStateStore<T>(string folder, string directory)
         try
         {
             if (_written.TryGetValue(path, out var newest) && newest > sequence) return;
-            await DocumentStore.AtomicWriteAsync(path, bytes, token).ConfigureAwait(false);
+            await AtomicFile.WriteAsync(path, bytes, token).ConfigureAwait(false);
             _written[path] = sequence;
         }
         finally { _writeGate.Release(); }
