@@ -96,6 +96,72 @@ public sealed class PackageManagementTests
         Assert.DoesNotContain(runner.Calls, x => x.Args[0] == "restore");
     }
 
+    [Theory]
+    [InlineData(0, """{"version":1,"problems":[{"level":"error","text":"The project could not be read"}]}""", "The project could not be read")]
+    [InlineData(1, """{"version":1,"problems":[{"project":"Example.csproj","level":"error","text":"No assets file was found"}],"projects":[{"path":"Example.csproj"}]}""", "No assets file was found")]
+    public async Task ListResponseWithProblemsFallsBackToDeclaredReferencesAndSaysWhy(int exitCode, string response, string reason)
+    {
+        using var fixture = new Fixture();
+        File.WriteAllText(fixture.Project, "<Project><ItemGroup><PackageReference Include=\"Declared\" Version=\"1.2.3\"/></ItemGroup></Project>");
+        var runner = new FakeRunner((args, _) => Task.FromResult(args[0] == "list" ? new PackageProcessResult(exitCode, response) : new PackageProcessResult(0, "10.0.400")));
+        using var service = new NuGetPackageService(new HttpClient(new HttpStub(_ => "{}")), runner);
+        var inventory = await service.ReadProjectAsync(fixture.Project, default);
+        Assert.Equal("Declared", Assert.Single(inventory.Packages).Id);
+        Assert.Contains(reason, inventory.Warning);
+        Assert.DoesNotContain("\"problems\"", inventory.Warning);
+    }
+
+    [Fact]
+    public async Task FeedWithoutAVersionListOffersNoVersions()
+    {
+        using var http = new HttpClient(new HttpStub(uri => uri.AbsolutePath == "/v3/index.json"
+            ? """{"resources":[{"@id":"https://feed.test/flat/","@type":"PackageBaseAddress/3.0.0"}]}"""
+            : "{}"));
+        using var service = new NuGetPackageService(http, new FakeRunner());
+        Assert.Empty(await service.GetVersionsAsync(new("Custom", "https://feed.test/v3/index.json"), "Example", false, default));
+    }
+
+    [Fact]
+    public async Task RunnerKeepsMSBuildWarningsOutOfTheJsonOnStandardOutput()
+    {
+        using var fixture = new Fixture();
+        // The warning quotes this path, so its first brace comes before the JSON's.
+        var directory = Directory.CreateDirectory(Path.Combine(fixture.Root, "{braces}")).FullName;
+        File.WriteAllText(Path.Combine(directory, "Twice.props"), "<Project />");
+        var project = Path.Combine(directory, "Warns.csproj");
+        File.WriteAllText(project, "<Project><Import Project=\"Twice.props\"/><Import Project=\"Twice.props\"/><PropertyGroup><First>1</First><Second>2</Second></PropertyGroup></Project>");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        var result = await new PackageProcessRunner().RunAsync(directory, ["msbuild", project, "-nologo", "-getProperty:First,Second"], null, timeout.Token);
+        Assert.True(result.ExitCode == 0, result.Output);
+        using var json = System.Text.Json.JsonDocument.Parse(result.Output);
+        Assert.Equal("2", json.RootElement.GetProperty("Properties").GetProperty("Second").GetString());
+        Assert.Contains("MSB4011", result.Error);
+        Assert.Contains("MSB4011", result.Display);
+    }
+
+    [Fact]
+    public async Task WarningsWithBracesOnStandardErrorDoNotDisturbTheInventory()
+    {
+        using var fixture = new Fixture();
+        const string list = """{"version":1,"projects":[{"frameworks":[{"framework":"net10.0","topLevelPackages":[{"id":"Example","requestedVersion":"1.0.0","resolvedVersion":"1.0.0"}]}]}]}""";
+        var runner = new FakeRunner((args, _) => Task.FromResult(args[0] == "list" ? new PackageProcessResult(0, list, "warning NU1701: {not json}") : new PackageProcessResult(0, "10.0.400", "warning {not json}")));
+        using var service = new NuGetPackageService(new HttpClient(new HttpStub(_ => "{}")), runner);
+        var inventory = await service.ReadProjectAsync(fixture.Project, default);
+        Assert.Null(inventory.Warning);
+        Assert.Equal("1.0.0", Assert.Single(inventory.Packages).ResolvedVersion);
+    }
+
+    [Fact]
+    public async Task FailedListWithoutJsonReportsBothStreams()
+    {
+        using var fixture = new Fixture();
+        var runner = new FakeRunner((args, _) => Task.FromResult(args[0] == "list" ? new PackageProcessResult(1, "on stdout\n", "on stderr\n") : new PackageProcessResult(0, "10.0.400")));
+        using var service = new NuGetPackageService(new HttpClient(new HttpStub(_ => "{}")), runner);
+        var inventory = await service.ReadProjectAsync(fixture.Project, default);
+        Assert.Contains("on stdout", inventory.Warning);
+        Assert.Contains("on stderr", inventory.Warning);
+    }
+
     [Fact]
     public async Task BrowsingDiscoversFeedEndpointsAndEncodesSearchQuery()
     {

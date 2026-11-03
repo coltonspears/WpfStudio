@@ -80,6 +80,7 @@ public sealed class DebuggerInstaller(HttpMessageHandler? handler = null, string
                 if (license.IsSuccessStatusCode) await File.WriteAllBytesAsync(Path.Combine(contents, "LICENSE"), await license.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
             }
             catch (HttpRequestException) { } // The license copy is informational; the adapter works without it.
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { } // HttpClient's own timeout looks like this.
             if (Directory.Exists(InstallDirectory)) Directory.Delete(InstallDirectory, recursive: true);
             Directory.Move(contents, InstallDirectory);
             progress?.Report($"Installed netcoredbg {Version}");

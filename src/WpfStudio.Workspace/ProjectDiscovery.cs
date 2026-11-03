@@ -40,9 +40,7 @@ public static partial class ProjectDiscovery
         // MSBuild before Visual Studio 2022 17.8 has no -getProperty switch; the .NET SDK evaluates most legacy projects too.
         if (result.ExitCode != 0) result = await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(directory, ["msbuild", .. arguments]), cancellationToken);
         if (result.ExitCode != 0) throw new InvalidOperationException($"Project evaluation failed for {projectPath}: {result.Error} {result.Output}");
-        var start = result.Output.IndexOf('{');
-        if (start < 0) throw new InvalidOperationException("MSBuild did not return project evaluation data.");
-        using var json = JsonDocument.Parse(result.Output[start..]);
+        using var json = ParseEvaluation(result.Output);
         var properties = json.RootElement.GetProperty("Properties");
         string Property(string name) => properties.TryGetProperty(name, out var value) ? value.GetString() ?? "" : "";
         var files = new Dictionary<string, WorkspaceFile>(StringComparer.OrdinalIgnoreCase);
@@ -81,6 +79,13 @@ public static partial class ProjectDiscovery
         return new EvaluatedProject(Property("TargetFramework"), Property("TargetFrameworks"), Property("TargetPath"), Property("OutputType"), files.Values.ToArray(), Property("AssemblyName"), Property("Configurations"), resources.ToArray(),
             string.IsNullOrWhiteSpace(Property("ProjectAssetsFile")) ? null : System.IO.Path.GetFullPath(Property("ProjectAssetsFile"), System.IO.Path.GetDirectoryName(projectPath)!),
             moniker.Length == 0 ? null : moniker, ReadEvaluatedDependencies(projectPath, items, Property("TargetFramework"), Property("TargetFrameworks"), moniker));
+    }
+
+    /// <summary>With -getProperty, MSBuild writes warnings to standard error, so standard output is exactly one JSON document.</summary>
+    private static JsonDocument ParseEvaluation(string output)
+    {
+        try { return JsonDocument.Parse(output); }
+        catch (JsonException exception) { throw new InvalidOperationException("MSBuild did not return project evaluation data.", exception); }
     }
 
     /// <summary>A solution build defines SolutionDir itself; a project built from a solution receives it the way Visual Studio passes it.</summary>

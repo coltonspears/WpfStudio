@@ -34,7 +34,7 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
         {
             var result = await _process.RunAsync(directory, ["nuget", "list", "source", "--format", "Short"], null, cancellationToken).ConfigureAwait(false);
             sources = result.ExitCode == 0 ? ParseSources(result.Output) : [];
-            if (result.ExitCode != 0) warnings.Add("Could not evaluate NuGet sources: " + ShortError(result.Output));
+            if (result.ExitCode != 0) warnings.Add("Could not evaluate NuGet sources: " + ShortError(result.Display));
         }
         catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception) { sources = []; warnings.Add(ex.Message); }
 
@@ -53,10 +53,10 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
                 var args = new List<string> { "list", Path.GetFullPath(projectPath), "package", "--format", "json", "--output-version", "1" };
                 if (sdk.ExitCode == 0 && int.TryParse(sdk.Output.Trim().Split('.')[0], out var major) && major >= 10) args.Add("--no-restore");
                 var result = await _process.RunAsync(directory, args, null, cancellationToken).ConfigureAwait(false);
-                if (result.ExitCode != 0) throw new InvalidDataException(ShortError(result.Output));
+                if (result.ExitCode != 0) throw new InvalidDataException(DescribeListFailure(result));
                 packages = ParseInstalledPackages(result.Output);
             }
-            catch (Exception ex) when (ex is IOException or JsonException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
                 packages = ReadProjectReferences(projectPath, central);
                 warnings.Add("Showing declared references because SDK evaluation failed. Conditions/imports may differ; restore the project to obtain resolved versions. " + ex.Message);
@@ -84,7 +84,7 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
         var endpoints = await GetEndpointsAsync(source, cancellationToken).ConfigureAwait(false);
         if (endpoints.Content is null) throw new InvalidOperationException("This feed does not expose package versions. Enter an exact version to install.");
         using var json = await ReadJsonAsync(endpoints.Content.TrimEnd('/') + "/" + packageId.ToLowerInvariant() + "/index.json", cancellationToken).ConfigureAwait(false);
-        return SortVersions(json.RootElement.GetProperty("versions").EnumerateArray().Select(x => x.GetString()!), prerelease);
+        return json.RootElement.TryGetProperty("versions", out var versions) ? SortVersions(versions.EnumerateArray().Select(x => x.GetString()!), prerelease) : [];
     }
 
     public async Task<PackageProcessResult> ChangeAsync(string projectPath, string packageId, string? version, bool remove,
@@ -102,7 +102,7 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
             {
                 output?.Report("Restoring project after removing the reference…");
                 var restore = await _process.RunAsync(directory, ["restore", Path.GetFullPath(projectPath), "--verbosity", "minimal"], output, cancellationToken).ConfigureAwait(false);
-                return new(restore.ExitCode, result.Output + restore.Output);
+                return new(restore.ExitCode, result.Output + restore.Output, result.Error + restore.Error);
             }
             return result;
         }
@@ -131,10 +131,11 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
 
     public static IReadOnlyList<InstalledPackage> ParseInstalledPackages(string output)
     {
-        var start = output.IndexOf('{');
-        using var json = JsonDocument.Parse(start < 0 ? output : output[start..]);
+        using var json = JsonDocument.Parse(output);
+        if (!json.RootElement.TryGetProperty("projects", out var projects))
+            throw new InvalidDataException(ProblemText(json.RootElement) ?? "dotnet list package returned no projects.");
         var rows = new List<InstalledPackage>();
-        foreach (var project in json.RootElement.GetProperty("projects").EnumerateArray())
+        foreach (var project in projects.EnumerateArray())
         {
             if (!project.TryGetProperty("frameworks", out var frameworks)) continue;
             foreach (var framework in frameworks.EnumerateArray())
@@ -148,6 +149,25 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
             }
         }
         return rows.GroupBy(x => (x.Id, x.RequestedVersion, x.ResolvedVersion)).Select(g => g.First() with { Frameworks = string.Join(", ", g.Select(x => x.Frameworks).Distinct()) }).OrderBy(x => x.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    /// <summary>A project without restore assets exits with 1 and gives the reason in the JSON's problems.</summary>
+    private static string DescribeListFailure(PackageProcessResult result)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(result.Output);
+            if (ProblemText(json.RootElement) is { } problems) return problems;
+        }
+        catch (JsonException) { }
+        return ShortError(result.Display);
+    }
+
+    private static string? ProblemText(JsonElement root)
+    {
+        if (!root.TryGetProperty("problems", out var problems)) return null;
+        var text = string.Join(" ", problems.EnumerateArray().Select(problem => Text(problem, "text")).Where(line => line.Length > 0));
+        return text.Length == 0 ? null : text;
     }
 
     public static IReadOnlyList<InstalledPackage> ReadProjectReferences(string projectPath, string? centralPath)
