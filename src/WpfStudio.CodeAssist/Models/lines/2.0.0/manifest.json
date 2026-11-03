@@ -1,0 +1,32 @@
+{
+  "formatVersion": 1,
+  "id": "code-assist-lines",
+  "kind": "lines",
+  "version": "2.0.0",
+  "language": "csharp",
+  "summary": "Continues the current line as far as it is confident. Stays quiet the rest of the time.",
+  "limitations": "On code it never trained on, it offers something about 1 time in 8, and about 7 in 10 of those are right. Read what it suggests before you keep it.",
+  "provenance": {
+    "trainedAs": "lines-a",
+    "createdUtc": "2026-11-03T14:42:40.008538+00:00",
+    "corpus": "1,311 C# files from 8 of the owner's public repositories. No private code. No Microsoft model weights or predictions.",
+    "datasetSha256": "42e3a0ae960edd4eda61e9eb7ac55483dd96196fd4446437f14d1b67507782b1"
+  },
+  "evaluation": "1,500 places where ghost text can appear, from 679 files in 8 private repositories it never trained on: offered 12.1%, right when offered 69.2%, 3.7 wrong per 100 requests, 2.0% of characters saved. Version 1.0.0 as first shipped, on the same cases: offered 82.2%, right 1.5%, 81 wrong per 100, 0.4% saved.",
+  "files": {
+    "model.onnx": "c768a4fc445a49e8d730be55767de57127a33219f020c146d7e0b5cb5b01c02f",
+    "tokenizer.json": "148977e4c79bb0925fe9d7737d1187ffbe10af6a3640d87ec8d8d9ff3fd24050"
+  },
+  "lines": {
+    "featureVersion": 1,
+    "vocabSize": 4096,
+    "hiddenSize": 384,
+    "contextTokens": 256,
+    "padId": 0,
+    "bosId": 1,
+    "eosId": 2,
+    "contextCacheWeight": 0.3,
+    "layers": 2,
+    "tokenConfidence": 0.7
+  }
+}

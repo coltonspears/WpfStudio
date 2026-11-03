@@ -1,0 +1,27 @@
+{
+  "formatVersion": 1,
+  "id": "code-assist-members",
+  "kind": "members",
+  "version": "1.0.0",
+  "language": "csharp",
+  "summary": "Ranks member completions from recent code. Ignores comments.",
+  "limitations": "Trained on one repository with a narrower member list than the compiler offers. Extension methods are not ranked. Scores are relative, not confidence.",
+  "provenance": {
+    "trainedAs": "compact-csharp-members-v1",
+    "createdUtc": "2026-10-09T16:51:19Z",
+    "corpus": "WpfStudio's own C# source, mined with Roslyn. No Microsoft model weights or predictions.",
+    "datasetSha256": "6fe9c1c98c99e1d58bc64515b83f27ba603ad525674913b641a6e8030f573119"
+  },
+  "evaluation": "2,012 held-out examples from 50 files of the training repository: top-1 41.95%, top-5 80.72%, MRR@5 0.5646.",
+  "files": {
+    "model.onnx": "bd4565f47f6498e5fff7c0fef1ac587766b25594dc09b67d93ba548b81571c06"
+  },
+  "members": {
+    "featureVersion": 1,
+    "contextSize": 1024,
+    "candidateSize": 512,
+    "auxiliarySize": 4,
+    "lookbackTokens": 100,
+    "commentWords": 0
+  }
+}

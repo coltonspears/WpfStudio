@@ -1,0 +1,27 @@
+{
+  "formatVersion": 1,
+  "id": "code-assist-members",
+  "kind": "members",
+  "version": "2.0.0",
+  "language": "csharp",
+  "summary": "Ranks member completions from recent code and comment words.",
+  "limitations": "Trained on one repository with a narrower member list than the compiler offers. Extension methods are not ranked. It learns word associations from comments, not their meaning. Scores are relative, not confidence.",
+  "provenance": {
+    "trainedAs": "compact-csharp-members-v2",
+    "createdUtc": "2026-10-09T18:10:52Z",
+    "corpus": "WpfStudio's own C# source, mined with Roslyn, plus name-derived comment hints on 25% of training examples. No Microsoft model weights or predictions.",
+    "datasetSha256": "6fe9c1c98c99e1d58bc64515b83f27ba603ad525674913b641a6e8030f573119"
+  },
+  "evaluation": "2,012 held-out examples from 50 files of the training repository: top-1 42.10%, top-5 79.87%, MRR@5 0.5610.",
+  "files": {
+    "model.onnx": "71f2ea06036428cae5c3e0cf8529757f6b0c1699b4a4430c66f2c0e01abd0fc6"
+  },
+  "members": {
+    "featureVersion": 2,
+    "contextSize": 1024,
+    "candidateSize": 512,
+    "auxiliarySize": 8,
+    "lookbackTokens": 100,
+    "commentWords": 50
+  }
+}

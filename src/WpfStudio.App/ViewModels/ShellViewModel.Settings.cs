@@ -12,10 +12,11 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class ShellViewModel
 {
     public const string AppearancePage = "Appearance", EditorPage = "Editor", IntelligencePage = "Intelligence",
-        FilesPage = "Files", AssistantPage = "Assistant", ShortcutsPage = "Shortcuts";
+        FilesPage = "Files", AssistantPage = "Assistant", ExperimentalPage = "Experimental", ShortcutsPage = "Shortcuts";
     private CancellationTokenSource? _settingsSave;
 
     public EditorPreferences Editor { get; }
+    public CodeAssistPreferences CodeAssist { get; }
     [ObservableProperty] public partial string SettingsPage { get; set; } = AppearancePage;
     [ObservableProperty] public partial bool ShowQuickInfo { get; set; } = true;
     partial void OnShowQuickInfoChanged(bool value) { foreach (var document in Documents) document.ShowQuickInfo = value; ScheduleSettingsSave(); }
@@ -50,7 +51,11 @@ public sealed partial class ShellViewModel
 
     [RelayCommand] private void ShowSettingsPage(string? page) { if (!string.IsNullOrEmpty(page)) SettingsPage = page; }
 
-    private void InitializeSettings() => Editor.PropertyChanged += EditorPreferenceChanged;
+    private void InitializeSettings()
+    {
+        Editor.PropertyChanged += EditorPreferenceChanged;
+        CodeAssist.PropertyChanged += (_, args) => { if (args.PropertyName != nameof(CodeAssistPreferences.Status)) ScheduleSettingsSave(); };
+    }
     private void EditorPreferenceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args) => ScheduleSettingsSave();
 
     // Settings are written after a short pause, so dragging through font sizes writes once.

@@ -51,7 +51,7 @@ function Export-PackageNotices {
             $packageNotices = Join-Path $noticeDirectory $safeName
             New-Item -ItemType Directory -Path $packageNotices -Force | Out-Null
             Copy-Item -LiteralPath $nuspecFile.FullName -Destination $packageNotices
-            $licenseFiles = @(Get-ChildItem -LiteralPath $packageDirectory -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE|NOTICE|THIRD[-.]PARTY)' })
+            $licenseFiles = @(Get-ChildItem -LiteralPath $packageDirectory -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE|NOTICE|THIRD[-.]?PARTY)' })
             if ($license -and $license.type -eq 'file') {
                 $declaredFile = Join-Path $packageDirectory $license.InnerText
                 if (Test-Path -LiteralPath $declaredFile) { $licenseFiles += Get-Item -LiteralPath $declaredFile }
@@ -118,7 +118,13 @@ try {
         'WorkspaceHost/BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll',
         'Assets/Terminal/index.html',
         'Assets/Terminal/xterm.js',
-        'debugger/netcoredbg.exe'
+        'debugger/netcoredbg.exe',
+        'onnxruntime.dll',
+        'CodeAssist/Models/members/2.0.0/manifest.json',
+        'CodeAssist/Models/members/2.0.0/model.onnx',
+        'CodeAssist/Models/lines/2.0.0/manifest.json',
+        'CodeAssist/Models/lines/2.0.0/model.onnx',
+        'CodeAssist/Models/lines/2.0.0/tokenizer.json'
     )
     foreach ($relative in $required) {
         if (-not (Test-Path -LiteralPath (Join-Path $staging $relative))) { throw "Published package is incomplete: $relative is missing." }

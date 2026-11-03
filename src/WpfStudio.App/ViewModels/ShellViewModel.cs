@@ -57,7 +57,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         _store = store; _settings = settings; _workspace = language.Workspace; _build = language.Build; _indexer = language.Indexer; _scaffolding = language.Scaffolding; _edits = language.Edits; _xaml = language.Xaml; _xamlFormatter = language.XamlFormatter;
         _files = desktop.Files; _dialogs = desktop.Dialogs; _desktop = desktop.Desktop; _clipboard = desktop.Clipboard; Theme = desktop.Theme;
         _dispatcher = dispatcher; Messenger = messenger; _logger = logger; _paths = paths.Value;
-        Debugger = panes.Debugger; Terminal = panes.Terminal; Database = panes.Database; MemoryProfiler = panes.MemoryProfiler; Designer = panes.Designer; Features = features; Editor = editor;
+        Debugger = panes.Debugger; Terminal = panes.Terminal; Database = panes.Database; MemoryProfiler = panes.MemoryProfiler; Designer = panes.Designer; Features = features; Editor = editor; CodeAssist = language.CodeAssist;
         // System colours and syntax highlighting are not set until a theme is applied.
         Theme.Apply(ThemeName);
         Designer.AttachSourceHost(this);
@@ -177,6 +177,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         ShowQuickInfo = settings.ShowQuickInfo;
         Explorer.NestRelatedFiles = settings.NestRelatedFiles;
         Editor.Load(settings.Editor);
+        CodeAssist.Load(settings.CodeAssist);
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true; AutoSave.IsEnabled = true;
@@ -428,6 +429,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources)
         {
             Preferences = Editor,
+            CodeAssist = CodeAssist.Engine,
             DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
             XamlCodeActionApplier = ApplyXamlCodeActionAsync,
             CSharpCodeActionApplier = (editor, action) => GuardAsync(() => ApplyCSharpCodeActionAsync(editor, action)),
@@ -904,7 +906,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) await _store.DeleteRecoveryAsync(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings() });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings(), CodeAssist = CodeAssist.ToSettings() });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }

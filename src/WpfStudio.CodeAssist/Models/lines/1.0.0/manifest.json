@@ -1,0 +1,30 @@
+{
+  "formatVersion": 1,
+  "id": "code-assist-lines",
+  "kind": "lines",
+  "version": "1.0.0",
+  "language": "csharp",
+  "summary": "Continues the current line. A small network trained on one repository.",
+  "limitations": "Often suggests wrong, repetitive or invalid code. It is here to evaluate, not to rely on: read what it suggests before you keep it.",
+  "provenance": {
+    "trainedAs": "compact-csharp-lines-v1",
+    "createdUtc": "2026-10-09T18:26:55Z",
+    "corpus": "WpfStudio's own C# source. No Microsoft model weights or predictions.",
+    "datasetSha256": "0eb02cc3d06874012fa7c37b5bfd4058bb7112bd92eeda231707477caaa15181"
+  },
+  "evaluation": "120 held-out statement suffixes, lexical replay: 10 matched ignoring literals and whitespace, 6 matched exactly. Usefulness in real editing was not measured.",
+  "files": {
+    "model.onnx": "9ba4cb1dfe6db6736fc803ad095926197de6de9d42901bfdfdf77857e1a3fb0d",
+    "tokenizer.json": "6c93acabda2a2746cdda2064e05a02a8cee9ab9fcbb3afb9878a0a457d41db10"
+  },
+  "lines": {
+    "featureVersion": 1,
+    "vocabSize": 2048,
+    "hiddenSize": 192,
+    "contextTokens": 256,
+    "padId": 0,
+    "bosId": 1,
+    "eosId": 2,
+    "contextCacheWeight": 0.6
+  }
+}

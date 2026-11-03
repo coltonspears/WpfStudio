@@ -15,11 +15,15 @@ WpfStudio combines the following packages. Their licenses remain with their resp
 | Microsoft.Extensions libraries | 10.0.12 and transitive versions | [dotnet/runtime](https://github.com/dotnet/runtime), MIT |
 | Microsoft.Data.SqlClient | 7.1.0 | [dotnet/SqlClient](https://github.com/dotnet/SqlClient), MIT |
 | Microsoft.Web.WebView2 SDK | 1.0.4191.47 | [Microsoft WebView2](https://developer.microsoft.com/microsoft-edge/webview2/), Microsoft software license terms included in the SDK package |
+| ONNX Runtime | 1.30.0 | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime), MIT; runs the experimental Code Assist models. Its package's third-party notices ship in `licenses/` |
+| System.IO.Hashing | 10.0.12 | [dotnet/runtime](https://github.com/dotnet/runtime), MIT |
 | netcoredbg | 3.2.0-1092 | [Samsung/netcoredbg](https://github.com/Samsung/netcoredbg), MIT; see [debugger notices](tools/DEBUGGER-NOTICES.md) |
 | xterm.js | 6.0.0 | [xtermjs/xterm.js](https://github.com/xtermjs/xterm.js), MIT |
 | xterm fit / search addons | 0.11.0 / 0.16.0 | [terminal notices](src/WpfStudio.Runtime/Assets/Terminal/THIRD-PARTY-NOTICES.md), MIT |
 
 The studio docking templates in `src/WpfStudio.App/Resources/DockStyles.xaml` follow the structure and bindings of AvalonDock's VS2013 theme templates (Ms-PL), and `StudioDockTheme` layers them over that theme at run time. The Ctrl+F find panel template in `StudioTheme.xaml` binds to the same parts and commands as AvalonEdit's default `SearchPanel` template (MIT). The application icon and the vector glyphs in `Controls/Glyph.cs` were drawn for WpfStudio.
+
+The Code Assist models in `src/WpfStudio.CodeAssist/Models` were trained on WpfStudio's own source and contain no Microsoft model weights or predictions; each folder's manifest records its provenance. Microsoft's IntelliCode model bundles are licensed only for its IntelliCode extensions and are not part of this project.
 
 The terminal assets carry their original license files next to the bundled JavaScript. The downloaded debugger distribution carries its own license and notices for bundled Roslyn and .NET components. The Microsoft Edge WebView2 runtime is installed separately and is not redistributed in the portable package. The .NET SDK and SQL Server are also separate installations.
 

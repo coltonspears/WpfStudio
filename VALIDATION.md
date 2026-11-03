@@ -2,6 +2,43 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Code Assist, experimental and off by default (2026-11-03)
+
+**Settings > Experimental** adds Code Assist, which ranks C# member completions with small local ONNX models, and separately offers line suggestions. See [Code Assist](docs/code-assist.md).
+
+| Check | Result |
+| --- | --- |
+| Off by default | Started the built `WpfStudio.exe` on a sample project with an empty data folder: neither ONNX Runtime library was loaded, and the saved settings said `Enabled: false`. A settings file older than the feature also leaves it off (test) |
+| C# port against the training code | Features, scores, tokens and generated lines match Python's on the golden cases (`GoldenParityTests`) |
+| Quality through the C# path | All 2,012 held-out cases replayed: 2.0.0 gave top-1 42.10%, top-5 79.87%, MRR@5 0.5610 and 1.0.0 gave 41.95%, 80.72%, 0.5646, the same as the sandbox's report |
+| Speed | Release build, one thread on the Ryzen 9 5900X: 0.27 ms median and 0.67 ms p95 on those cases; 8.7 ms for 1,500 names; line suggestions 5.5 ms median and 26 ms at most over 200 requests |
+| Real window | Settings page, Roslyn's list in the real popup, stars, selection, filtering, commit through Roslyn's change, line suggestion taken with Tab, and turning it off (`WPFSTUDIO_TEST_CODEASSIST_ONLY=1`, and in the full smoke test) |
+| Publish | `dotnet publish -r win-x64` carries `onnxruntime.dll` and all model folders. `tools/Publish.ps1` itself was not run |
+
+| Suite | Result |
+| --- | --- |
+| CodeAssist | 36 passed (new) |
+| App | 1 passed, including the new scenario |
+| Shell | 837 of 838 on the final code: only `AutomaticReloadAppliesOnlyToFilesWithoutUnsavedEdits`, already failing on main on this machine. One earlier run also failed the two known intermittent tests `BindingNavigationAndExplicitFixes` and `WatchedModelChangeRestoresHealthyEditor`, which passed when rerun |
+| Core, Workspace, Runtime, Database, NativeView, Preview, Inspection, Profiling | Ran before the final engine fixes, which touched only `WpfStudio.CodeAssist`. Only the failures already known on this machine, plus one race in the smoke test's own read of `ready.json`, which did not recur |
+
+Not checked: use by a person at the keyboard (the real window was driven in-process, because desktop tools could not target a dev build without seeing other windows), and a suggestion's usefulness in real editing.
+
+### Line model 2.0.0
+
+Line model 1.0.0 suggested gibberish in the editor: for `public string Title { get; ` it offered `Heapab.Next\"><TextBlock Text=\"{Binding Name}\" />");`. It was replaced after finding three causes:
+
+- **Too little to go on.** It was small and trained on one repository. Version 2.0.0 has 2.4M parameters and a 4,096-token vocabulary, and trained on 8 public repositories. Its file is 9.7 MB, against 2.3 MB.
+- **It always guessed.** A line now stops before the first token the model is less than 70% sure of. The gate and the model were chosen on 2 public repositories it never trained on, before any test run.
+- **Two decoding bugs.** A carriage return reached the model, which trained on bare newlines, and a caret after a space left it on a lone space token it had rarely seen. Both are fixed for both versions. The older evaluation could not catch the second, because it only stopped right after words and some punctuation, so `evaluate_lines.py` now stops where ghost text can really appear.
+
+| 1,500 stops, 679 files, 8 private repositories never trained on | Offers | Right when it offers | Wrong per 100 | Whole lines | Characters saved |
+| --- | --- | --- | --- | --- | --- |
+| 2.0.0 | 12.1% | 69.2% | 3.7 | 1.6% | 2.0% |
+| 1.0.0 as first shipped | 82.2% | 1.5% | 81.0 | 1.1% | 0.4% |
+
+An earlier run on these repositories, before the second bug was found and using the older stopping points, was seen before this one. It changed nothing except prompting the search for that bug; the gate was chosen on the public repositories alone. On 19 places in freshly written code, through the shipped C#, 2.0.0 offered 3 suggestions and all 3 were right, at about 20 ms; 1.0.0 offered 15 and 2 were right. `GoldenParityTests` compares C# with Python on 66 line contexts for 2.0.0. The real-window scenario failed once, right after a rebuild, with its message not captured, then passed 8 runs in a row and in the full smoke test.
+
 ## Memory profiler: snapshots, grouping and sunburst (2026-10-04)
 
 A fifth view, **Snapshots** (Ctrl+5), keeps every capture of the session as a summary. It charts the selected process's private bytes and working set live with each snapshot marked, and compares the newest capture with the previous one of the same process automatically (or with a pinned baseline). The comparison shows every type's change as a diverging bar with a trend line across the snapshots, and flags types that grew in every snapshot; those also become a High-severity finding when they are application types. The empty workbench shows the live chart as soon as a process is selected. The type view's **Instances** tab groups instances by retention path, exclusive owner, generation or value: identical strings, arrays and field values form duplicate groups that report the bytes the extra copies waste. **Retention** adds a sunburst of the dominator tree whose drill-in stays in step with the tree and breadcrumb. One right-click menu now serves every object and type list and graph nodes. The command palette has memory entries. Export writes a self-contained HTML report, or JSON for a `.json` name. The largest-owner list keeps an application object that wraps a framework buffer (a page and its `byte[]`), so the browser opens on the page.
