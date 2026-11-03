@@ -9,7 +9,7 @@ public partial class MemoryRetentionView : UserControl
 {
     public MemoryRetentionView() => InitializeComponent();
 
-    private MemoryProfilerViewModel? Model => DataContext as MemoryProfilerViewModel;
+    private RetentionViewModel? Model => (DataContext as MemoryProfilerViewModel)?.Retention;
 
     private void TreeSelectionChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {

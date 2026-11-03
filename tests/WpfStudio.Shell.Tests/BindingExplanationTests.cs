@@ -122,11 +122,11 @@ public sealed partial class DesignerTests
         await using var model = new DesignerViewModel(client, new InlineDispatcher());
         await model.OpenAsync(Document("Binding.xaml")); model.SelectedNode = model.Tree[0];
         model.SelectedProperty = model.Properties[0]; model.EditedValue = "Unsubmitted draft";
-        model.SelectedBindingDeclaration = model.BindingDeclarations.Single(item => item.Declaration.ExpressionId == "second-expression");
+        model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Single(item => item.Declaration.ExpressionId == "second-expression");
         Assert.Equal("Second", model.BindingExplanation.Observation!.Path);
-        Assert.Equal("Tag", model.SelectedBindingDeclaration.Property);
+        Assert.Equal("Tag", model.BindingDeclarations.Selected.Property);
         await model.UpdateSnapshotCommand.ExecuteAsync(null);
-        Assert.Equal("second-expression", model.SelectedBindingDeclaration!.Declaration.ExpressionId);
+        Assert.Equal("second-expression", model.BindingDeclarations.Selected!.Declaration.ExpressionId);
         Assert.Equal("Second", model.BindingExplanation.Observation!.Path);
         Assert.Equal("Text", model.SelectedProperty!.Name);
         Assert.Equal("Unsubmitted draft", model.EditedValue);
@@ -155,7 +155,7 @@ public sealed partial class DesignerTests
         };
         model.SelectedProperty = model.Properties[1]; model.EditedValue = "Keep Tag draft";
         await model.ShowBindingDiagnosticCommand.ExecuteAsync(current);
-        Assert.Equal("text-expression", model.SelectedBindingDeclaration!.BindingId);
+        Assert.Equal("text-expression", model.BindingDeclarations.Selected!.BindingId);
         Assert.Equal("Active", model.BindingExplanation.Observation!.Status);
         Assert.Single(model.BindingExplanation.Evidence);
         Assert.DoesNotContain(current, model.Diagnostics); Assert.Contains(historical, model.Diagnostics);
@@ -183,12 +183,12 @@ public sealed partial class DesignerTests
         var response = await inspect(new(client.Requests.Last().Version, "1"));
         if (change == "replacement") response = response with { Properties = response.Properties.Select(property => property.Name == "Text"
             ? property with { BindingSources = BindingExplanationTestData.WithObservations(BindingNavigationTestData.Single("file:///C:/View.xaml", "replacement")) } : property).ToArray() };
-        if (change == "selection") model.SelectedBindingDeclaration = model.BindingDeclarations.Single(item => item.Declaration.ExpressionId == "second-expression");
+        if (change == "selection") model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Single(item => item.Declaration.ExpressionId == "second-expression");
         if (change == "source") document.Content += "<!-- edited -->";
         pending.SetResult(response); await action;
-        if (change == "selection") Assert.Equal("second-expression", model.SelectedBindingDeclaration!.Declaration.ExpressionId);
+        if (change == "selection") Assert.Equal("second-expression", model.BindingDeclarations.Selected!.Declaration.ExpressionId);
         else Assert.False(model.BindingExplanation.Available);
-        Assert.NotEqual("replacement", model.SelectedBindingDeclaration?.BindingId);
+        Assert.NotEqual("replacement", model.BindingDeclarations.Selected?.BindingId);
     }
 }
 
@@ -253,7 +253,7 @@ public sealed partial class InspectionViewModelTests
         session.Inspect = inspect;
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.True(model.BindingExplanation.Available);
-        Assert.Equal("text-expression", model.SelectedBindingDeclaration!.BindingId);
+        Assert.Equal("text-expression", model.BindingDeclarations.Selected!.BindingId);
         Assert.Equal("Keep this draft", model.EditedValue);
     }
 
@@ -280,13 +280,13 @@ public sealed partial class InspectionViewModelTests
         var issue = new WpfStudio.Runtime.Inspection.InspectionBindingIssue("text-expression", model.SelectedNode.Node.Id, "Target", "Text", "Nmae", "Demo.Model",
             "PathError", "Failure", "Active", 1, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
         await model.SelectBindingIssueCommand.ExecuteAsync(issue);
-        Assert.Equal("text-expression", model.SelectedBindingDeclaration!.BindingId);
-        Assert.Equal("Text", model.SelectedBindingDeclaration.Property);
+        Assert.Equal("text-expression", model.BindingDeclarations.Selected!.BindingId);
+        Assert.Equal("Text", model.BindingDeclarations.Selected.Property);
         Assert.True(model.BindingExplanation.Available);
         Assert.Equal("Tag", model.SelectedProperty!.Name); Assert.Equal("Tag draft", model.EditedValue);
-        model.SelectedBindingDeclaration = model.BindingDeclarations.Single(item => item.Declaration.ExpressionId == "second-expression");
+        model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Single(item => item.Declaration.ExpressionId == "second-expression");
         await model.RefreshCommand.ExecuteAsync(null);
-        Assert.Equal("second-expression", model.SelectedBindingDeclaration!.Declaration.ExpressionId);
+        Assert.Equal("second-expression", model.BindingDeclarations.Selected!.Declaration.ExpressionId);
         Assert.Equal("Second", model.BindingExplanation.Observation!.Path);
         Assert.Equal("Tag draft", model.EditedValue);
     }
@@ -312,13 +312,13 @@ public sealed partial class InspectionViewModelTests
         var response = await inspect(request!);
         if (change == "replacement") response = response with { Properties = response.Properties.Select(property => property.Name == "Text"
             ? property with { Binding = property.Binding! with { Sources = BindingExplanationTestData.WithObservations(BindingNavigationTestData.Single("file:///C:/View.xaml", "replacement")) } } : property).ToArray() };
-        if (change == "selection") model.SelectedBindingDeclaration = model.BindingDeclarations.Single(item => item.Declaration.ExpressionId == "second-expression");
+        if (change == "selection") model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Single(item => item.Declaration.ExpressionId == "second-expression");
         if (change == "pause") model.SetDebuggerState(true);
         if (change == "disconnect") await model.DisconnectCommand.ExecuteAsync(null);
         pending.SetResult(response); await selecting;
-        if (change == "selection") Assert.Equal("second-expression", model.SelectedBindingDeclaration!.Declaration.ExpressionId);
+        if (change == "selection") Assert.Equal("second-expression", model.BindingDeclarations.Selected!.Declaration.ExpressionId);
         else Assert.False(model.BindingExplanation.Available);
-        Assert.NotEqual("replacement", model.SelectedBindingDeclaration?.BindingId);
+        Assert.NotEqual("replacement", model.BindingDeclarations.Selected?.BindingId);
     }
 
     [Fact]
@@ -328,7 +328,7 @@ public sealed partial class InspectionViewModelTests
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         await model.AttachAsync(session); model.SelectedNode = model.Tree[0];
         Assert.True(model.BindingExplanation.Available);
-        model.SelectedBindingDeclaration = model.BindingDeclarations.Single(item => item.Declaration.ExpressionId == "second-expression");
+        model.BindingDeclarations.Selected = model.BindingDeclarations.Items.Single(item => item.Declaration.ExpressionId == "second-expression");
         Assert.False(model.BindingExplanation.Available); Assert.Contains("host", model.BindingExplanation.Status);
         var inspect = session.Inspect;
         session.Inspect = async request =>

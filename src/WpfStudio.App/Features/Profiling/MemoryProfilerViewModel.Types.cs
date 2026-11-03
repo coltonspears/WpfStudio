@@ -54,7 +54,7 @@ public sealed partial class MemoryProfilerViewModel
     partial void OnTypeGroupingChanged(MemoryTypeGrouping value) => RefreshTypes();
     partial void OnOnlyApplicationTypesChanged(bool value) => RefreshTypes();
     partial void OnFlowUsesBytesChanged(bool value) => DescribeFlow();
-    partial void OnSelectedObjectChanged(MemoryObjectInfo? value) { if (!_updating && value is not null) InspectObjectAsync(value.Id, _lifetime.Token).Forget(ReportFault); }
+    partial void OnSelectedObjectChanged(MemoryObjectInfo? value) { if (!_updating && value is not null) Browser.InspectObjectAsync(value.Id, _lifetime.Token).Forget(ReportFault); }
 
     private void RefreshTypes()
     {
@@ -109,8 +109,7 @@ public sealed partial class MemoryProfilerViewModel
         if (_session is not { } session || _disposed || IsBusy) return;
         _query?.Cancel(); _query?.Dispose(); _query = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
         var queryToken = _query.Token; var revision = _revision; var queryRevision = ++_queryRevision;
-        CancelInspection();
-        Details = null; Graph = null; SelectedReference = null; SelectedIncomingReference = null; SelectedOutgoingReference = null; ResetEstimate(); ResetBrowserContent(); NotifyEstimates();
+        Browser.ClearObject(); Graph = null;
         try
         {
             var page = await session.GetObjectsAsync(new(SelectedType?.Key, ObjectFilter, _skip), queryToken);

@@ -150,6 +150,5 @@ public sealed class SolutionExplorerViewModelTests
         public List<string> Opened { get; } = [];
         public Task OpenDocumentAsync(string path) { Opened.Add(path); return Task.CompletedTask; }
         public Task<bool> CloseDocumentAsync(string path) => Task.FromResult(true);
-        public void ShowTool(string toolId) { }
     }
 }

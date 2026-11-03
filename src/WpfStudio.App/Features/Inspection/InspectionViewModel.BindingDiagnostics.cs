@@ -24,13 +24,8 @@ public sealed partial class InspectionViewModel
         }
         if (IsPropertyOperationRunning || IsSourceEditRunning || !_bindingObservationReady || _bindingObservationRevision != _revision)
         { BindingExplanation.Clear("Refresh or finish inspecting the selected element to observe its bindings."); return; }
-        if (BindingDeclarations.Count == 0 && Bindings.Count > 0)
-        { BindingExplanation.Clear("This agent did not supply binding expression identities. A selected-binding explanation is unavailable."); return; }
-        if (SelectedBindingDeclaration is not { } item || !BindingDeclarations.Any(current => current.SameIdentity(item)))
-        { BindingExplanation.Clear("Select a binding declaration. A removed or replaced expression is not the previous binding."); return; }
-        var property = Bindings.FirstOrDefault(value => value.PropertyId == item.PropertyId && value.Binding?.Sources?.BindingId == item.BindingId);
-        if (property is null) { BindingExplanation.Clear("The selected binding is no longer in this observation."); return; }
-        var observation = item.Declaration.Observation ?? (item.Declaration.ParentExpressionId is null ? property.Binding : null);
-        BindingExplanation.Apply(item, observation, property.Value, property.ValueSource);
+        BindingExplanation.ExplainSelected(BindingDeclarations, Bindings.Count > 0, "This agent did not supply binding expression identities. A selected-binding explanation is unavailable.",
+            item => Bindings.FirstOrDefault(value => value.PropertyId == item.PropertyId && value.Binding?.Sources?.BindingId == item.BindingId) is { } property
+                ? (property.Binding, property.Value, property.ValueSource) : null);
     }
 }

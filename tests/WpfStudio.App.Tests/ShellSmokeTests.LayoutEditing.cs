@@ -39,9 +39,9 @@ public sealed partial class ShellSmokeTests
         var model = shell.Designer;
         model.AutoRefresh = false;
         model.Mode = PreviewMode.Source;
-        model.PreviewWidth = 640;
-        model.PreviewHeight = 340;
-        model.Zoom = .55;
+        model.Canvas.PreviewWidth = 640;
+        model.Canvas.PreviewHeight = 340;
+        model.Canvas.Zoom = .55;
         await shell.OpenDesignerCommand.ExecuteAsync(null);
         await Idle();
         Assert.True(model.IsCurrent, model.Status);
@@ -49,28 +49,28 @@ public sealed partial class ShellSmokeTests
         var view = (FrameworkElement)pane.Content;
         var toggle = Descendants<CheckBox>(view).Single(box => AutomationProperties.GetName(box) == "Edit preview layout");
         toggle.IsChecked = true;
-        Assert.True(model.IsLayoutEditingEnabled);
+        Assert.True(model.LayoutGesture.IsEnabled);
         static IEnumerable<DesignerNode> Flatten(IEnumerable<DesignerNode> nodes) => nodes.SelectMany(n => new[] { n }.Concat(Flatten(n.Children)));
         async Task<PreviewLayoutEditContext> SelectAsync()
         {
             model.SelectedNode = Flatten(model.Tree).Single(n => n.Node.Name == "PrimaryAction");
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            while (model.LayoutEditing is null) await Task.Delay(25, deadline.Token);
-            Assert.True(model.LayoutEditing.Available, model.LayoutEditing.Status);
-            return model.LayoutEditing;
+            while (model.LayoutGesture.Context is null) await Task.Delay(25, deadline.Token);
+            Assert.True(model.LayoutGesture.Context.Available, model.LayoutGesture.Context.Status);
+            return model.LayoutGesture.Context;
         }
         var original = await SelectAsync();
         Assert.Equal(new PreviewBounds(32, 244, 160, 42), original.Bounds);
         await Idle();
         var surface = Descendants<PreviewSurface>(view).Single();
-        Assert.Same(model.LayoutEditing, surface.LayoutEditing);
-        Assert.Same(model.LayoutGestureCommand, surface.LayoutGestureCommand);
+        Assert.Same(model.LayoutGesture.Context, surface.LayoutEditing);
+        Assert.Same(model.LayoutGesture.GestureCommand, surface.LayoutGestureCommand);
         var pixels = RenderPixels(surface);
-        await model.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Begin, XamlLayoutHandle.Right, Zoom: model.Zoom));
-        await model.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Update, XamlLayoutHandle.Right, 103, 0, Zoom: model.Zoom));
-        Assert.True(model.LayoutDraft?.Success, model.LayoutEditingStatus);
-        Assert.Equal(264, model.LayoutDraft!.Bounds!.Width); // Snaps to the card's right edge.
-        Assert.NotEmpty(model.LayoutDraft.Guides);
+        await model.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Begin, XamlLayoutHandle.Right, Zoom: model.Canvas.Zoom));
+        await model.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Update, XamlLayoutHandle.Right, 103, 0, Zoom: model.Canvas.Zoom));
+        Assert.True(model.LayoutGesture.Draft?.Success, model.LayoutGesture.Status);
+        Assert.Equal(264, model.LayoutGesture.Draft!.Bounds!.Width); // Snaps to the card's right edge.
+        Assert.NotEmpty(model.LayoutGesture.Draft.Guides);
         Assert.Equal(source, document.State.Content);
         await Idle();
         Assert.False(pixels.SequenceEqual(RenderPixels(surface)), "A resize draft must visibly show its frame and snap guide.");
@@ -84,7 +84,7 @@ public sealed partial class ShellSmokeTests
         Task commit;
         try
         {
-            commit = model.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Right, 103, 0, Zoom: model.Zoom));
+            commit = model.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Right, 103, 0, Zoom: model.Canvas.Zoom));
             await Task.WhenAny(diffOpened.Task, commit).WaitAsync(TimeSpan.FromSeconds(15));
             Assert.True(shell.IsPreviewOpen, model.Status);
         }
@@ -106,9 +106,9 @@ public sealed partial class ShellSmokeTests
         Assert.Equal(original.Bounds, (await SelectAsync()).Bounds);
         toggle.IsChecked = false;
         await shell.CloseDocumentAsync(document);
-        model.PreviewWidth = 960;
-        model.PreviewHeight = 640;
-        model.Zoom = .65;
+        model.Canvas.PreviewWidth = 960;
+        model.Canvas.PreviewHeight = 640;
+        model.Canvas.Zoom = .65;
         pane.Hide();
     }
 }

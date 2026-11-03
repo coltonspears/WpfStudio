@@ -40,18 +40,24 @@ public sealed class ChangeReviewFile
     public string RemovedText => Removed > 0 ? $"−{Removed}" : "";
 }
 
+/// <summary>What the change review needs beyond the workbench: someone to tell when it opens or closes.</summary>
+public interface IChangeReviewHost : IWorkbenchHost
+{
+    void ReviewOpenChanged();
+}
+
 /// <summary>
 /// The modal change review: a set of proposed file changes shown as a diff per file, which the user applies or
 /// cancels. <see cref="ShowAsync"/> completes with that decision, so callers read as "if (await review) apply".
 /// </summary>
 public sealed partial class ChangeReviewViewModel : ObservableObject
 {
-    private readonly IWorkbenchHost _host;
+    private readonly IChangeReviewHost _host;
     private readonly IUiDispatcher _dispatcher;
     private TaskCompletionSource<bool>? _completion;
     private bool _filesPending;
 
-    public ChangeReviewViewModel(IWorkbenchHost host, IUiDispatcher dispatcher)
+    public ChangeReviewViewModel(IChangeReviewHost host, IUiDispatcher dispatcher)
     {
         _host = host; _dispatcher = dispatcher;
         // A review adds its files one at a time; summarize them once, after the batch.
@@ -66,6 +72,7 @@ public sealed partial class ChangeReviewViewModel : ObservableObject
     public ObservableCollection<FileChange> Changes { get; } = [];
     public ObservableCollection<ChangeReviewFile> Files { get; } = [];
     [ObservableProperty] public partial bool IsOpen { get; private set; }
+    partial void OnIsOpenChanged(bool value) => _host.ReviewOpenChanged();
     [ObservableProperty] public partial string Title { get; private set; } = "Preview changes";
     [ObservableProperty] public partial string Warnings { get; private set; } = "";
     [ObservableProperty] public partial FileChange? SelectedChange { get; set; }

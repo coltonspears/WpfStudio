@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.Runtime.Debugging;
@@ -12,6 +13,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private readonly DebugSession session;
     private readonly IUiDispatcher dispatcher;
     private readonly IDebugAdapterProvider adapters;
+    private readonly IMessenger messenger;
     private readonly DapClient client;
     private readonly BreakpointStore store;
     private readonly OutputBuffer output;
@@ -21,10 +23,10 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private int sessionEnds;
     private int applyingBreakpoints;
     private readonly List<DapBreakpoint> changesWhileApplying = [];
-    public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters) : this(session, dispatcher, adapters, new BreakpointStore()) { }
-    internal DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters, BreakpointStore store)
+    public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters, IMessenger messenger) : this(session, dispatcher, adapters, messenger, new BreakpointStore()) { }
+    internal DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters, IMessenger messenger, BreakpointStore store)
     {
-        this.session = session; this.dispatcher = dispatcher; this.adapters = adapters; this.store = store;
+        this.session = session; this.dispatcher = dispatcher; this.adapters = adapters; this.messenger = messenger; this.store = store;
         client = new DapClient(session);
         output = new OutputBuffer(dispatcher, text => Output = text);
         if (adapters.Locate() is { } adapter) session.AdapterPath = adapter;
@@ -32,7 +34,6 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         session.Output += output.Append;
         session.Error += OnError;
     }
-    public event Action<string, int>? SourceRequested;
     public string AdapterDescription => adapters.Description;
     public bool IsAdapterMissing => !File.Exists(session.AdapterPath);
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(InstallAdapterCommand))] public partial bool IsInstallingAdapter { get; set; }
@@ -77,6 +78,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     public partial bool IsActive { get; set; }
     public bool CanDetach => IsActive && session.CanDetach;
     [ObservableProperty] public partial bool IsStopped { get; set; }
+    partial void OnIsStoppedChanged(bool value) => messenger.Send(new DebuggerStateMessage(value));
     [ObservableProperty] public partial int SelectedTab { get; set; }
     partial void OnSelectedThreadChanged(DebugThread? value) { if (value is not null && IsStopped) { threadId = value.Id; _ = GuardAsync(RefreshFramesAsync); } }
     partial void OnSelectedFrameChanged(DebugFrame? value) { if (value is not null && IsStopped) _ = GuardAsync(() => RefreshFrameAsync(value)); }
@@ -148,7 +150,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         if (SelectedBreakpoint is not { } selected) return;
         Breakpoints.Remove(selected); await store.SaveAsync(); if (IsActive) await ApplyFileBreakpointsAsync(selected.Path);
     });
-    [RelayCommand] private void NavigateBreakpoint() { if (SelectedBreakpoint is { } selected) SourceRequested?.Invoke(selected.Path, selected.Line); }
+    [RelayCommand] private void NavigateBreakpoint() { if (SelectedBreakpoint is { } selected) messenger.Send(new DebuggerSourceMessage(selected.Path, selected.Line)); }
     [RelayCommand] private Task EnableAllBreakpointsAsync() => SetAllBreakpointsAsync(true);
     [RelayCommand] private Task DisableAllBreakpointsAsync() => SetAllBreakpointsAsync(false);
     private Task SetAllBreakpointsAsync(bool enabled) => GuardAsync(async () =>
@@ -297,7 +299,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     }
     private async Task RefreshFrameAsync(DebugFrame frame)
     {
-        if (!string.IsNullOrWhiteSpace(frame.Path) && frame.Line > 0) SourceRequested?.Invoke(frame.Path, frame.Line);
+        if (!string.IsNullOrWhiteSpace(frame.Path) && frame.Line > 0) messenger.Send(new DebuggerSourceMessage(frame.Path, frame.Line));
         var version = stopVersion;
         var scopes = await client.GetScopesAsync(frame.Id);
         if (version != stopVersion || SelectedFrame?.Id != frame.Id || !IsStopped) return;

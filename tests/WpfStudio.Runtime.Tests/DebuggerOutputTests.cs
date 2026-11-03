@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using System.Reflection;
+using System.Text.Json;
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.Contracts;
 using WpfStudio.Runtime.Debugging;
 
@@ -68,6 +71,39 @@ public sealed class DebuggerOutputTests
         dispatcher.Drain();
         await Task.Delay(150); dispatcher.Drain();
         Assert.Equal(0, published);
+    }
+
+    [Fact]
+    public async Task AnAdapterEventFromAnyThreadAnnouncesItsStateOnTheDispatcher()
+    {
+        var dispatcher = new QueuedDispatcher();
+        var messenger = new WeakReferenceMessenger();
+        await using var viewModel = new DebuggerViewModel(new DebugSession(), dispatcher, new NoDebugAdapter(), messenger);
+        var received = new List<(bool IsStopped, int Thread)>();
+        messenger.Register<DebuggerStateMessage>(this, (_, message) => received.Add((message.IsStopped, Environment.CurrentManagedThreadId)));
+        viewModel.IsStopped = true;
+        received.Clear();
+
+        var onEvent = typeof(DebuggerViewModel).GetMethod("OnDebugEvent", BindingFlags.NonPublic | BindingFlags.Instance)!.CreateDelegate<Action<DebugEvent>>(viewModel);
+        await Task.Run(() => onEvent(new DebugEvent("continued", JsonDocument.Parse("{}").RootElement)));
+        Assert.Empty(received);
+
+        dispatcher.Drain();
+        Assert.Equal([(false, Environment.CurrentManagedThreadId)], received);
+    }
+
+    [Fact]
+    public async Task TheChosenBreakpointIsAnnouncedAsASourceLine()
+    {
+        var messenger = new WeakReferenceMessenger();
+        await using var viewModel = new DebuggerViewModel(new DebugSession(), new QueuedDispatcher(), new NoDebugAdapter(), messenger);
+        DebuggerSourceMessage? received = null;
+        messenger.Register<DebuggerSourceMessage>(this, (_, message) => received = message);
+        viewModel.SelectedBreakpoint = new BreakpointViewModel { Path = "App.cs", Line = 12 };
+
+        viewModel.NavigateBreakpointCommand.Execute(null);
+
+        Assert.Equal(new DebuggerSourceMessage("App.cs", 12), received);
     }
 
     private sealed class QueuedDispatcher : IUiDispatcher

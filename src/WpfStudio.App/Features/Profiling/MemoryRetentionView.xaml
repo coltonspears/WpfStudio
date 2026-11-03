@@ -7,7 +7,7 @@
    <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="MemoryStyles.xaml"/></ResourceDictionary.MergedDictionaries>
   </ResourceDictionary>
  </UserControl.Resources>
- <Grid>
+ <Grid DataContext="{Binding Retention}">
   <Grid.ColumnDefinitions><ColumnDefinition Width="450" MinWidth="300"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*" MinWidth="280"/></Grid.ColumnDefinitions>
 
   <Grid>
@@ -56,7 +56,7 @@
       <DataTemplate>
        <StackPanel Orientation="Horizontal">
         <c:Glyph Kind="ChevronRight" Width="12" Height="12" Foreground="{DynamicResource SubtleBrush}" VerticalAlignment="Center"/>
-        <Button Content="{Binding Title}" Style="{StaticResource LinkButton}" MaxWidth="180" Command="{Binding DataContext.FocusDominatorCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+        <Button Content="{Binding Title}" Style="{StaticResource LinkButton}" MaxWidth="180" Command="{Binding DataContext.Retention.FocusDominatorCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
        </StackPanel>
       </DataTemplate>
      </ItemsControl.ItemTemplate>

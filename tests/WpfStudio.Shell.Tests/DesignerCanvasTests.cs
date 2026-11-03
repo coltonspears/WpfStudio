@@ -161,7 +161,7 @@ public sealed partial class DesignerTests
         Serve(client, version => Nodes(version, document.Path, (Grid, "Root", -1, true), (Text, "Greeting", 0, true)));
         await model.OpenAsync(document);
         var revealed = new List<SourceLocation>();
-        model.SelectionSourceChanged += revealed.Add;
+        model.StubHost().Revealed = revealed.Add;
 
         model.SelectedNode = Flatten(model.Tree).Single(node => node.Node.Name == "Greeting");
         Assert.Equal(10, Assert.Single(revealed).Start);
@@ -244,27 +244,27 @@ public sealed partial class DesignerTests
     {
         var client = new FakePreview { Render = request => Task.FromResult(Frame(request.Version, 1, [Node()], 2000, 1000)) };
         await using var model = new DesignerViewModel(client, new InlineDispatcher());
-        model.CanvasViewportWidth = 1072;
-        model.CanvasViewportHeight = 792;
+        model.Canvas.ViewportWidth = 1072;
+        model.Canvas.ViewportHeight = 792;
         await model.OpenAsync(Document("view.xaml"));
-        Assert.True(model.IsZoomToFit);
-        Assert.Equal(0.5, model.Zoom, 3);
-        Assert.Equal("2000 × 1000", model.ArtboardSizeText);
+        Assert.True(model.Canvas.IsZoomToFit);
+        Assert.Equal(0.5, model.Canvas.Zoom, 3);
+        Assert.Equal("2000 × 1000", model.Canvas.ArtboardSizeText);
 
-        model.CanvasViewportWidth = 2072;
-        Assert.Equal(0.7, model.Zoom, 3);
-        model.ZoomInCommand.Execute(null);
-        Assert.False(model.IsZoomToFit);
-        Assert.Equal(0.75, model.Zoom, 3);
-        model.CanvasViewportWidth = 1072;
-        Assert.Equal(0.75, model.Zoom, 3);
-        model.ZoomToFitCommand.Execute(null);
-        Assert.True(model.IsZoomToFit);
-        Assert.Equal(0.5, model.Zoom, 3);
-        model.ZoomToActualSizeCommand.Execute(null);
-        Assert.Equal(1, model.Zoom);
-        Assert.Equal(0.1, DesignerViewModel.StepZoom(0.1, -1));
-        Assert.Equal(3, DesignerViewModel.StepZoom(3, 1));
+        model.Canvas.ViewportWidth = 2072;
+        Assert.Equal(0.7, model.Canvas.Zoom, 3);
+        model.Canvas.ZoomInCommand.Execute(null);
+        Assert.False(model.Canvas.IsZoomToFit);
+        Assert.Equal(0.75, model.Canvas.Zoom, 3);
+        model.Canvas.ViewportWidth = 1072;
+        Assert.Equal(0.75, model.Canvas.Zoom, 3);
+        model.Canvas.ZoomToFitCommand.Execute(null);
+        Assert.True(model.Canvas.IsZoomToFit);
+        Assert.Equal(0.5, model.Canvas.Zoom, 3);
+        model.Canvas.ZoomToActualSizeCommand.Execute(null);
+        Assert.Equal(1, model.Canvas.Zoom);
+        Assert.Equal(0.1, PreviewCanvasViewModel.StepZoom(0.1, -1));
+        Assert.Equal(3, PreviewCanvasViewModel.StepZoom(3, 1));
     }
 
     [Fact]
@@ -275,17 +275,17 @@ public sealed partial class DesignerTests
         await model.OpenAsync(Document("view.xaml"));
         Assert.True(client.Requests[^1].SizeToRoot);
 
-        model.SelectedSizePreset = model.SizePresets.Single(preset => preset.Name == "1280 × 720");
-        Assert.False(model.AutoSize);
-        Assert.Equal((1280d, 720d), (model.PreviewWidth, model.PreviewHeight));
+        model.Canvas.SelectedSizePreset = model.Canvas.SizePresets.Single(preset => preset.Name == "1280 × 720");
+        Assert.False(model.Canvas.AutoSize);
+        Assert.Equal((1280d, 720d), (model.Canvas.PreviewWidth, model.Canvas.PreviewHeight));
         Assert.False(model.IsCurrent);
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.Equal((false, 1280d, 720d), (client.Requests[^1].SizeToRoot, client.Requests[^1].Width, client.Requests[^1].Height));
 
-        model.PreviewWidth = 1000;
-        Assert.Same(DesignerViewModel.CustomSizePreset, model.SelectedSizePreset);
-        model.AutoSize = true;
-        Assert.Same(DesignerViewModel.AutoSizePreset, model.SelectedSizePreset);
+        model.Canvas.PreviewWidth = 1000;
+        Assert.Same(PreviewCanvasViewModel.CustomSizePreset, model.Canvas.SelectedSizePreset);
+        model.Canvas.AutoSize = true;
+        Assert.Same(PreviewCanvasViewModel.AutoSizePreset, model.Canvas.SelectedSizePreset);
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.True(client.Requests[^1].SizeToRoot);
     }

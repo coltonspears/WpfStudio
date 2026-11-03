@@ -41,7 +41,7 @@ public sealed partial class MemoryProfilerViewModel
     private void ReloadForRootFilter()
     {
         if (_session is null) return;
-        if (Details?.Object.Id is int id) ReloadGraphAsync(id, _lifetime.Token).Forget(ReportFault);
+        if (Browser.Details?.Object.Id is int id) ReloadGraphAsync(id, _lifetime.Token).Forget(ReportFault);
         if (SelectedType is { } type) LoadFlowAsync(type.Key, _lifetime.Token).Forget(ReportFault);
         if (InstanceGrouping == "Retention") LoadGroupsAsync(_lifetime.Token).Forget(ReportFault);
     }
@@ -49,7 +49,7 @@ public sealed partial class MemoryProfilerViewModel
     private void CancelGraph() { _graphRevision++; _graphLoad?.Cancel(); _graphLoad?.Dispose(); _graphLoad = null; IsExpandingGraph = false; }
 
     [RelayCommand]
-    private Task ResetGraphAsync() => Details?.Object.Id is int id ? ReloadGraphAsync(id, _lifetime.Token) : Task.CompletedTask;
+    private Task ResetGraphAsync() => Browser.Details?.Object.Id is int id ? ReloadGraphAsync(id, _lifetime.Token) : Task.CompletedTask;
 
     private async Task ReloadGraphAsync(int objectId, CancellationToken token)
     {
@@ -60,7 +60,7 @@ public sealed partial class MemoryProfilerViewModel
         try
         {
             var graph = await session.GetGraphAsync(new(objectId, HiddenRootKinds: HiddenRootKinds), _graphLoad.Token);
-            if (_disposed || revision != _revision || graphRevision != _graphRevision || Details?.Object.Id != objectId) return;
+            if (_disposed || revision != _revision || graphRevision != _graphRevision || Browser.Details?.Object.Id != objectId) return;
             Graph = graph; _graphObject = objectId;
         }
         catch (OperationCanceledException) { }
@@ -96,5 +96,5 @@ public sealed partial class MemoryProfilerViewModel
         return current with { Nodes = nodes.Values.ToArray(), References = references.Values.ToArray(), IsTruncated = current.IsTruncated || more.IsTruncated };
     }
 
-    [RelayCommand] private void InspectGraphSelection() { if (GraphSelectedObjectId is int id) InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault); }
+    [RelayCommand] private void InspectGraphSelection() { if (GraphSelectedObjectId is int id) Browser.InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault); }
 }

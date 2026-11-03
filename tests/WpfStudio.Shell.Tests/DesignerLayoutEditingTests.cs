@@ -45,16 +45,16 @@ public sealed partial class DesignerTests
         var designer = test.Shell.Designer;
         designer.AutoRefresh = false;
         await designer.OpenAsync(test.Shell.ActiveDocument!.State);
-        designer.IsLayoutEditingEnabled = true;
+        designer.LayoutGesture.IsEnabled = true;
         designer.SelectedNode = designer.Tree[0].Children[0];
-        Assert.True(designer.LayoutEditing?.Available);
+        Assert.True(designer.LayoutGesture.Context?.Available);
     }
 
     private static async Task BeginLayoutAsync(DesignerViewModel model, XamlLayoutHandle handle, double x, double y)
     {
-        await model.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Begin, handle));
-        await model.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Update, handle, x, y, true));
-        Assert.True(model.LayoutDraft?.Success, model.LayoutEditingStatus);
+        await model.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Begin, handle));
+        await model.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Update, handle, x, y, true));
+        Assert.True(model.LayoutGesture.Draft?.Success, model.LayoutGesture.Status);
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public sealed partial class DesignerTests
         await BeginLayoutAsync(designer, XamlLayoutHandle.TopLeft, -10, -5);
         Assert.Equal(LayoutSource, document.Content);
         Assert.Empty(client.Edits);
-        var pending = designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.TopLeft, -10, -5, true));
+        var pending = designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.TopLeft, -10, -5, true));
         Assert.True(test.Shell.IsPreviewOpen, designer.Status);
         var change = Assert.Single(test.Shell.ChangeReview.Changes);
         Assert.Contains("Canvas.Left='10'", change.After);
@@ -100,12 +100,12 @@ public sealed partial class DesignerTests
         designer.EditedValue = "Unapplied inspector draft";
         var property = designer.SelectedProperty;
         await BeginLayoutAsync(designer, XamlLayoutHandle.Move, 20, 15);
-        await designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Cancel, XamlLayoutHandle.Move));
-        Assert.Null(designer.LayoutDraft);
+        await designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Cancel, XamlLayoutHandle.Move));
+        Assert.Null(designer.LayoutGesture.Draft);
         Assert.Equal(LayoutSource, document.Content);
         Assert.Empty(client.LayoutValidations);
         await BeginLayoutAsync(designer, XamlLayoutHandle.Move, 20, 15);
-        var pending = designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 20, 15, true));
+        var pending = designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 20, 15, true));
         Assert.True(test.Shell.IsPreviewOpen, designer.Status);
         test.Shell.ChangeReview.CancelCommand.Execute(null);
         await pending;
@@ -127,12 +127,12 @@ public sealed partial class DesignerTests
         var designer = test.Shell.Designer;
         var document = test.Shell.ActiveDocument!.State;
         await BeginLayoutAsync(designer, XamlLayoutHandle.BottomRight, 20, 10);
-        var pending = designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.BottomRight, 20, 10, true));
+        var pending = designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.BottomRight, 20, 10, true));
         Assert.True(test.Shell.IsPreviewOpen, designer.Status);
         if (change == "source") document.Content += "<!-- newer source -->";
         else if (change == "selection") { var node = designer.SelectedNode; designer.SelectedNode = null; designer.SelectedNode = node; }
         else if (change == "mode") designer.Mode = PreviewMode.Compiled;
-        else designer.IsLayoutEditingEnabled = false;
+        else designer.LayoutGesture.IsEnabled = false;
         string expected = document.Content;
         test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
@@ -152,22 +152,22 @@ public sealed partial class DesignerTests
         await File.WriteAllTextAsync(configuration, "{\"version\":1,\"views\":[]}");
         var timestamp = File.GetLastWriteTimeUtc(configuration);
         await designer.OpenAsync(test.Shell.ActiveDocument!.State, projectDirectory: test.Root);
-        designer.IsLayoutEditingEnabled = true;
+        designer.LayoutGesture.IsEnabled = true;
         designer.SelectedNode = designer.Tree[0].Children[0];
-        Assert.True(designer.LayoutEditing?.Available, designer.LayoutEditingStatus);
-        await designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Begin, XamlLayoutHandle.Move));
+        Assert.True(designer.LayoutGesture.Context?.Available, designer.LayoutGesture.Status);
+        await designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Begin, XamlLayoutHandle.Move));
 
         // The guard treats a file it cannot open as changed, so a move that read it would end the gesture.
         using (new FileStream(configuration, FileMode.Open, FileAccess.Read, FileShare.None))
-            await designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Update, XamlLayoutHandle.Move, 20, 15, true));
-        Assert.True(designer.LayoutDraft?.Success, designer.LayoutEditingStatus);
+            await designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Update, XamlLayoutHandle.Move, 20, 15, true));
+        Assert.True(designer.LayoutGesture.Draft?.Success, designer.LayoutGesture.Status);
 
         // A change that keeps the timestamp and is not seen by the watcher still fails the commit.
         await File.WriteAllTextAsync(configuration, "{\"version\":1,\"views\":[ ]}");
         File.SetLastWriteTimeUtc(configuration, timestamp);
-        await designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 20, 15, true));
+        await designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 20, 15, true));
         Assert.False(test.Shell.IsPreviewOpen);
-        Assert.Null(designer.LayoutDraft);
+        Assert.Null(designer.LayoutGesture.Draft);
         Assert.Equal(LayoutSource, test.Shell.ActiveDocument!.State.Content);
     }
 
@@ -182,7 +182,7 @@ public sealed partial class DesignerTests
         await OpenLayoutAsync(test);
         var designer = test.Shell.Designer;
         await BeginLayoutAsync(designer, XamlLayoutHandle.Move, 15, 0);
-        var pending = designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 15, 0, true));
+        var pending = designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 15, 0, true));
         Assert.True(test.Shell.IsPreviewOpen, designer.Status);
         test.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
@@ -201,7 +201,7 @@ public sealed partial class DesignerTests
         await OpenLayoutAsync(test);
         var designer = test.Shell.Designer;
         await BeginLayoutAsync(designer, XamlLayoutHandle.Move, 15, 0);
-        await designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 15, 0, true));
+        await designer.LayoutGesture.GestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 15, 0, true));
         Assert.False(test.Shell.IsPreviewOpen);
         Assert.Equal(LayoutSource, test.Shell.ActiveDocument!.State.Content);
         Assert.Contains("changed", designer.Status, StringComparison.OrdinalIgnoreCase);

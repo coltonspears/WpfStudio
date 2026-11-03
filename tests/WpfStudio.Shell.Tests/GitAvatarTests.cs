@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows.Media;
 using WpfStudio.App.Features.Git;
+using WpfStudio.Core.Git;
 
 namespace WpfStudio.Shell.Tests;
 

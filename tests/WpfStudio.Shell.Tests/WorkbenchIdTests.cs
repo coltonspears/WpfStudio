@@ -7,23 +7,26 @@ namespace WpfStudio.Shell.Tests;
 
 public sealed class WorkbenchIdTests
 {
-    private static string MainWindowXaml()
+    private static string ShellXaml()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
-            var path = Path.Combine(directory.FullName, "src", "WpfStudio.App", "MainWindow.xaml");
-            if (File.Exists(path)) return File.ReadAllText(path);
+            var app = Path.Combine(directory.FullName, "src", "WpfStudio.App");
+            var window = Path.Combine(app, "MainWindow.xaml");
+            if (File.Exists(window))
+                return string.Concat(Directory.GetFiles(Path.Combine(app, "Views", "Shell"), "*.xaml").Prepend(window).Select(File.ReadAllText));
         }
         throw new FileNotFoundException("MainWindow.xaml was not found above the test output.");
     }
 
     [Fact]
-    public void MainWindowOnlyUsesKnownIdsAsStrings()
+    public void TheShellOnlyUsesKnownIdsAsStrings()
     {
-        var xaml = MainWindowXaml();
+        var xaml = ShellXaml();
         var ids = Regex.Matches(xaml, @"ContentId=""([^""{]+)""|ShowToolCommand\}"" CommandParameter=""([^""{]+)""").Select(match => match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value).Distinct().ToArray();
         Assert.Contains(Workbenches.Search, ids);
         Assert.Contains(Workbenches.Welcome, ids);
+        Assert.Contains(Workbenches.Problems, ids);
         Assert.All(ids, id => Assert.Contains(id, Workbenches.All));
     }
 

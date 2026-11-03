@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Threading.Channels;
 using System.Windows.Threading;
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.Contracts;
 using WpfStudio.Runtime.Debugging;
 
@@ -60,7 +61,7 @@ public sealed class DebuggerWatchTests
                 {
                     var session = new DebugSession();
                     await using var adapter = await ScriptedAdapter.AttachAsync(session);
-                    await using var model = new DebuggerViewModel(session, new TestDispatcher(dispatcher), new NoDebugAdapter());
+                    await using var model = new DebuggerViewModel(session, new TestDispatcher(dispatcher), new NoDebugAdapter(), new WeakReferenceMessenger());
                     await test(model, adapter);
                     result.TrySetResult();
                 }

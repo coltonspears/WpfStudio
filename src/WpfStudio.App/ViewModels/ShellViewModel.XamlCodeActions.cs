@@ -1,4 +1,5 @@
 using System.IO;
+using WpfStudio.App.Features.Documents;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 
@@ -6,22 +7,9 @@ namespace WpfStudio.App.ViewModels;
 
 public sealed partial class ShellViewModel
 {
-    internal async Task ApplyXamlCodeActionAsync(EditorViewModel editor, XamlCodeAction action)
-    {
-        var existing = _store.Documents.ToHashSet();
-        try { await ApplyXamlCodeActionCoreAsync(editor, action); }
-        finally
-        {
-            // Resource prerequisites are observations, not user-open buffers.
-            // Release newly read clean snapshots on success and on rejection so
-            // a later request reads the latest disk bytes.
-            var paths = new[] { action.Edit }.Concat(action.AdditionalEdits ?? [])
-                .Select(edit => Path.GetFullPath(edit.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var document in _store.Documents.Where(document => !existing.Contains(document) && !document.IsDirty
-                && paths.Contains(document.Path) && !Documents.Any(open => ReferenceEquals(open.State, document))).ToArray())
-                if (ReferenceEquals(_store.Find(document.Path), document)) _store.Close(document);
-        }
-    }
+    // Resource prerequisites are observations, not user-open buffers.
+    internal Task ApplyXamlCodeActionAsync(EditorViewModel editor, XamlCodeAction action) =>
+        _verifiedEdits.ReleasingOpenedTargetsAsync(new[] { action.Edit }.Concat(action.AdditionalEdits ?? []).Select(edit => edit.Path), () => ApplyXamlCodeActionCoreAsync(editor, action));
 
     private async Task ApplyXamlCodeActionCoreAsync(EditorViewModel editor, XamlCodeAction action)
     {
@@ -38,16 +26,12 @@ public sealed partial class ShellViewModel
         if (!SourceCurrent() || !editor.IsXaml || action.Edit.Version != version ||
             !Path.GetFullPath(action.Edit.Path).Equals(state.Path, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The XAML document or quick-fix context changed. Request the quick fix again.");
-        if (edits.Any(edit => string.IsNullOrEmpty(edit.ExpectedTextHash)))
-            throw new InvalidOperationException("The quick fix has no verified source snapshot. Request it again.");
-        if (edits.Select(edit => Path.GetFullPath(edit.Path)).Distinct(StringComparer.OrdinalIgnoreCase).Count() != edits.Length)
-            throw new InvalidOperationException("The quick fix contains duplicate document targets. Request it again.");
+        VerifiedEditPipeline.RequireVerifiedTargets(edits, "The quick fix", "Request it again.");
         if (additional.Any(edit => !(Path.GetExtension(edit.Path).Equals(".xaml", StringComparison.OrdinalIgnoreCase) && edit.Edits.Count == 0)
             && !(Path.GetExtension(edit.Path).Equals(".cs", StringComparison.OrdinalIgnoreCase) && File.Exists(edit.Path))))
             throw new InvalidOperationException("Additional quick-fix targets must be existing C# source files or unchanged XAML resource prerequisites.");
         foreach (var edit in edits.Where(edit => edit.Edits.Count != 0)) EnsureCodeActionTargetEditable(edit.Path);
-        var openedTargets = edits.Select(edit => _store.Find(edit.Path)).OfType<DocumentState>()
-            .Select(document => (Document: document, document.Version)).ToArray();
+        var openedTargets = edits.Select(edit => _store.Find(edit.Path)).OfType<DocumentState>().Select(_verifiedEdits.Remember).ToArray();
 
         var changes = await _edits.PrepareAsync(new WorkspaceEditResult(edits, []), _lifetime.Token);
         // Capture every prepared buffer, including newly opened code-behind. A
@@ -57,21 +41,18 @@ public sealed partial class ShellViewModel
             var document = _store.Find(edit.Path) ?? throw new InvalidOperationException("A quick-fix target was closed.");
             if (edit.Version > 0 && document.Version != edit.Version)
                 throw new InvalidOperationException("A target document changed while the quick fix was prepared. Request it again.");
-            return (Document: document, document.Version, document.Content);
+            return _verifiedEdits.Remember(document);
         }).ToArray();
         bool Current()
         {
-            if (!SourceCurrent() || openedTargets.Any(target => _store.Find(target.Document.Path) != target.Document || target.Document.Version != target.Version) ||
-                targets.Any(target => _store.Find(target.Document.Path) != target.Document ||
-                target.Document.Version != target.Version || target.Document.Content != target.Content)) return false;
+            if (!SourceCurrent() || !openedTargets.All(unchanged => unchanged()) || !targets.All(unchanged => unchanged())) return false;
             foreach (var edit in edits.Where(edit => edit.Edits.Count != 0)) EnsureCodeActionTargetEditable(edit.Path);
             return true;
         }
         if (!Current()) throw new InvalidOperationException("The document, selection or XAML project context changed. Request the quick fix again.");
         // No-op XAML remains a version/hash/disk prerequisite. The transaction
         // validates it but records only actual mutations in the shared undo entry.
-        await _edits.ApplyAsync(changes, _lifetime.Token, Current);
-        foreach (var change in changes.Where(change => change.Before != change.After)) AddDocument(_store.Find(change.Path)!);
+        await _verifiedEdits.ApplyAsync(changes, Current, _lifetime.Token);
 
         var navigation = additional.FirstOrDefault(edit => changes.Any(change => change.Path.Equals(Path.GetFullPath(edit.Path),
             StringComparison.OrdinalIgnoreCase) && change.Before != change.After));

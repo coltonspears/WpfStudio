@@ -1,4 +1,5 @@
 using System.Windows.Threading;
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.Contracts;
 using WpfStudio.Runtime.Debugging;
 
@@ -8,6 +9,7 @@ namespace WpfStudio.Runtime.Tests;
 [Collection(AdapterRun.Collection)]
 public sealed class DebuggerFlowTests
 {
+    private readonly WeakReferenceMessenger _messenger = new();
     private const string Source = @"C:\src\Program.cs";
     private const string Workspace = @"C:\src";
 
@@ -32,7 +34,7 @@ public sealed class DebuggerFlowTests
     public Task SelectingAFrameRequestsItsSourceOnlyWhenItHasOne() => WithAttachedModelAsync("debug-step", async model =>
     {
         var requested = new List<(string Path, int Line)>();
-        model.SourceRequested += (path, line) => requested.Add((path, line));
+        _messenger.Register<DebuggerSourceMessage>(this, (_, source) => requested.Add((source.Path, source.Line)));
         await Until(() => model.Frames.Count == 2 && model.Locals.Count == 2);
         requested.Clear();
         model.SelectedFrame = model.Frames[1];
@@ -82,7 +84,7 @@ public sealed class DebuggerFlowTests
     [Fact]
     public Task DataTipsDescribeTheValueAndAreEmptyWhenNotPaused() => WithAttachedModelAsync("debug-step", async model =>
     {
-        Assert.Null(await new DebuggerViewModel(new DebugSession(), new DispatcherPost(Dispatcher.CurrentDispatcher), new NoDebugAdapter()).EvaluateDataTipAsync("x"));
+        Assert.Null(await new DebuggerViewModel(new DebugSession(), new DispatcherPost(Dispatcher.CurrentDispatcher), new NoDebugAdapter(), _messenger).EvaluateDataTipAsync("x"));
         await Until(() => model.SelectedFrame is not null);
         Assert.Equal("x = value of x  (int)", await model.EvaluateDataTipAsync("x"));
     });
@@ -274,7 +276,7 @@ public sealed class DebuggerFlowTests
 
     /// <param name="breakpoint">Shapes the one breakpoint before the session starts.</param>
     /// <param name="start">How the session starts, when not by attaching.</param>
-    private static Task WithAttachedModelAsync(string scenario, Func<DebuggerViewModel, Task> test, Action<BreakpointViewModel>? breakpoint = null, Func<DebuggerViewModel, Task>? start = null, BreakpointStore? store = null, DispatcherPriority posts = DispatcherPriority.Normal)
+    private Task WithAttachedModelAsync(string scenario, Func<DebuggerViewModel, Task> test, Action<BreakpointViewModel>? breakpoint = null, Func<DebuggerViewModel, Task>? start = null, BreakpointStore? store = null, DispatcherPriority posts = DispatcherPriority.Normal)
     {
         var result = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -286,7 +288,7 @@ public sealed class DebuggerFlowTests
                 try
                 {
                     AdapterRun.UseScenario(scenario);
-                    await using var model = new DebuggerViewModel(new DebugSession { AdapterPath = AdapterRun.LocateAdapter() }, new DispatcherPost(dispatcher, posts), new NoDebugAdapter(), store ?? new BreakpointStore());
+                    await using var model = new DebuggerViewModel(new DebugSession { AdapterPath = AdapterRun.LocateAdapter() }, new DispatcherPost(dispatcher, posts), new NoDebugAdapter(), _messenger, store ?? new BreakpointStore());
                     if (store is not null) await model.SetWorkspaceAsync(Workspace);
                     var item = new BreakpointViewModel { Path = Source, Line = 12 };
                     breakpoint?.Invoke(item);

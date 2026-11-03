@@ -12,21 +12,20 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class ShellViewModel
 {
     public InspectionViewModel LiveInspection { get; }
-    [RelayCommand] private Task RunWithInspectionAsync() => LaunchWithInspectionAsync(false);
-    [RelayCommand] private Task DebugWithInspectionAsync() => LaunchWithInspectionAsync(true);
-    private Task LaunchWithInspectionAsync(bool debug) => GuardAsync(async () =>
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RunWithInspectionAsync(CancellationToken cancel) => LaunchWithInspectionAsync(false, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task DebugWithInspectionAsync(CancellationToken cancel) => LaunchWithInspectionAsync(true, cancel);
+    private Task LaunchWithInspectionAsync(bool debug, CancellationToken cancel) => GuardAsync(async () =>
     {
-        if (IsBusy || _loading) return;
+        if (IsBusy) return;
         if (StartupProject is not { } project) { Status = "Select a startup project before launching with inspection."; return; }
         if (debug && Debugger.IsActive) { Status = "Stop the current debugger before launching another application."; return; }
         if (debug && !await EnsureDebuggerAsync()) return;
-        // The install prompt above keeps the dispatcher running; a build started meanwhile owns the operation token.
-        if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
         var framework = TargetFramework ?? project.TargetFramework;
         if (framework == null || !new[] { "net8.0", "net9.0", "net10.0" }.Any(prefix => framework == prefix || framework.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase)))
         { Status = "Running-app inspection currently requires an untrimmed .NET 8, 9 or 10 WPF project."; return; }
         string hook = InspectionLaunch.FindStartupHook();
-        IsBusy = true; _operation = new();
+        // The install prompt above keeps the dispatcher running, so a build may have started behind it.
+        if (_operations.TryEnter(cancel) is not { } operation) { Status = "Wait for the current workspace operation to finish"; return; }
         InspectionSession? session = null, attached = null;
         try
         {
@@ -42,11 +41,11 @@ public sealed partial class ShellViewModel
             // bytes; a post-build hash alone would not prove that relationship.
             using (var lease = await XamlBuildSourceLease.AcquireAsync((LiveInspection.VerifySourceOnBuild ? Projects.SelectMany(p => p.Files)
                 .Where(f => !f.IsGenerated && f.Kind is "Page" or "ApplicationDefinition")
-                .Select(f => f.Path) : []), _operation.Token))
+                .Select(f => f.Path) : []), operation.Token))
             {
                 foreach (var issue in lease.Issues) AppendOutput("XAML source navigation: " + issue);
                 result = await _build.RunAsync(new(project.ProjectPath, BuildOperation.Rebuild, configuration,
-                    framework, XamlDebuggingInformation: true, SolutionPath: SolutionPathFor(project.ProjectPath)), progress, _operation.Token);
+                    framework, XamlDebuggingInformation: true, SolutionPath: SolutionPathFor(project.ProjectPath)), progress, operation.Token);
                 buildSources = lease.Sources;
             }
             progress.Flush();
@@ -56,20 +55,20 @@ public sealed partial class ShellViewModel
                     ? " If a custom build target rewrites XAML, turn off ‘Verify source on build’ in Live XAML and retry." : "");
                 return;
             }
-            var launch = await _build.ResolveLaunchAsync(project.ProjectPath, configuration, framework, profile, _operation.Token);
+            var launch = await _build.ResolveLaunchAsync(project.ProjectPath, configuration, framework, profile, operation.Token);
             await LiveInspection.DisconnectCommand.ExecuteAsync(null);
             InspectionSources.Capture(buildSources, sourceWorkspace);
             session = new InspectionSession();
             var environment = InspectionLaunch.CreateEnvironment(launch.Environment, session, hook);
             ToolRequested?.Invoke(Workbenches.LiveInspection);
-            var connection = LiveInspection.AttachAsync(attached = session, debug, _operation.Token);
+            var connection = LiveInspection.AttachAsync(attached = session, debug, operation.Token);
             // AttachAsync owns disposal from here: it disposes a session it does not adopt, and
             // Disconnect one it did. The launch environment applies to the target only, never the build or adapter.
             session = null;
             if (debug)
             {
                 await Debugger.LaunchAsync(new DebugLaunchConfiguration(launch.Program, launch.WorkingDirectory,
-                    launch.Arguments, environment), _operation.Token);
+                    launch.Arguments, environment), operation.Token);
                 LiveInspection.SetDebuggerState(Debugger.IsStopped);
             }
             else
@@ -93,8 +92,7 @@ public sealed partial class ShellViewModel
         finally
         {
             if (session != null) await session.DisposeAsync();
-            _operation.Dispose(); _operation = null; IsBusy = false;
-            if (_contextReloadPending) _ = ReloadWorkspaceAsync();
+            EndOperation(operation);
         }
     });
 }

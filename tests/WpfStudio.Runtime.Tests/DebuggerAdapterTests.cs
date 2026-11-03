@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.Contracts;
 using WpfStudio.Runtime.Debugging;
 
@@ -12,7 +13,7 @@ public sealed class DebuggerAdapterTests
     {
         var located = Environment.ProcessPath!;
         var session = new DebugSession { AdapterPath = Missing };
-        await using var model = new DebuggerViewModel(session, new Inline(), new FakeAdapters { Located = located });
+        await using var model = new DebuggerViewModel(session, new Inline(), new FakeAdapters { Located = located }, new WeakReferenceMessenger());
         Assert.Equal(located, session.AdapterPath);
         Assert.False(model.IsAdapterMissing);
     }
@@ -22,7 +23,7 @@ public sealed class DebuggerAdapterTests
     {
         var adapters = new FakeAdapters { Installed = Environment.ProcessPath! };
         var session = new DebugSession { AdapterPath = Missing };
-        await using var model = new DebuggerViewModel(session, new Inline(), adapters);
+        await using var model = new DebuggerViewModel(session, new Inline(), adapters, new WeakReferenceMessenger());
         Assert.Equal("the fake adapter", model.AdapterDescription);
         Assert.True(model.IsAdapterMissing);
 

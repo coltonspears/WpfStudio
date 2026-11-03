@@ -23,31 +23,31 @@ public sealed partial class DesignerTests
         var document = Document("layout-view.xaml");
         await model.OpenAsync(document);
         model.SelectedNode = model.Tree[0];
-        Assert.True(model.HasLayout);
-        Assert.Equal("100 × 30", model.Layout!.Facts[0].Value);
-        Assert.True(model.CanShowLayoutOverlay);
+        Assert.True(model.LayoutDetails.Available);
+        Assert.Equal("100 × 30", model.LayoutDetails.Snapshot!.Facts[0].Value);
+        Assert.True(model.LayoutDetails.CanShowOverlay);
         Assert.Empty(model.LayoutDetails.VisibleOverlays);
-        model.ShowLayoutOverlay = true;
+        model.LayoutDetails.ShowOverlay = true;
         Assert.Single(model.LayoutDetails.VisibleOverlays);
 
         var pending = new TaskCompletionSource<PreviewInspection>();
         client.Inspect = _ => pending.Task;
         model.SelectedNode = null;
         model.SelectedNode = model.Tree[0];
-        Assert.False(model.HasLayout);
+        Assert.False(model.LayoutDetails.Available);
         document.Content = "<Button Content=\"Changed\" />";
         pending.SetResult(Inspection(client.Requests.Last().Version) with { Layout = LayoutTestData.Snapshot("STALE") });
         await Task.Yield();
-        Assert.Null(model.Layout);
+        Assert.Null(model.LayoutDetails.Snapshot);
         Assert.Empty(model.LayoutDetails.VisibleOverlays);
-        Assert.False(model.CanShowLayoutOverlay);
+        Assert.False(model.LayoutDetails.CanShowOverlay);
 
         client.Inspect = request => Task.FromResult(Inspection(request.Version) with { Layout = LayoutTestData.Snapshot("200 × 40") });
         await model.RefreshCommand.ExecuteAsync(null);
         model.SelectedNode = model.Tree[0];
-        Assert.Equal("200 × 40", model.Layout!.Facts[0].Value);
+        Assert.Equal("200 × 40", model.LayoutDetails.Snapshot!.Facts[0].Value);
         client.Exit("Host ended");
-        Assert.Null(model.Layout);
+        Assert.Null(model.LayoutDetails.Snapshot);
         Assert.Empty(model.LayoutDetails.Facts);
         Assert.Empty(model.LayoutDetails.VisibleOverlays);
     }
@@ -71,7 +71,7 @@ public sealed partial class DesignerTests
         if (failed) pending.SetException(new InvalidOperationException("Old inspection failed"));
         else pending.SetResult(Inspection(client.Requests.Last().Version) with { Layout = LayoutTestData.Snapshot("First") });
         await Task.Yield();
-        Assert.Equal("Second", model.Layout!.Facts[0].Value);
+        Assert.Equal("Second", model.LayoutDetails.Snapshot!.Facts[0].Value);
     }
 }
 
@@ -101,14 +101,14 @@ public sealed partial class InspectionViewModelTests
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false };
         await model.AttachAsync(session);
         model.SelectedNode = model.Tree[0];
-        Assert.Equal(supportsLayout, model.HasLayout);
-        Assert.Equal(supportsLayout && supportsOverlay, model.CanShowLayoutOverlay);
-        model.ShowLayoutOverlay = true;
+        Assert.Equal(supportsLayout, model.LayoutDetails.Available);
+        Assert.Equal(supportsLayout && supportsOverlay, model.LayoutDetails.CanShowOverlay);
+        model.LayoutDetails.ShowOverlay = true;
         Assert.Equal(supportsLayout && supportsOverlay, requests.Last().ShowLayout);
-        model.ShowLayoutOverlay = false;
+        model.LayoutDetails.ShowOverlay = false;
         Assert.False(requests.Last().ShowLayout);
-        if (!supportsLayout) Assert.Contains("does not provide", model.LayoutStatus);
-        else Assert.Contains("Render size", model.Layout!.Facts.Select(fact => fact.Name));
+        if (!supportsLayout) Assert.Contains("does not provide", model.LayoutDetails.Status);
+        else Assert.Contains("Render size", model.LayoutDetails.Snapshot!.Facts.Select(fact => fact.Name));
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public sealed partial class InspectionViewModelTests
         await using var model = new InspectionViewModel(new InlineDispatcher()) { AutoRefresh = false, HighlightSelection = false };
         await model.AttachAsync(session);
         model.SelectedNode = model.Tree[0];
-        model.ShowLayoutOverlay = true;
+        model.LayoutDetails.ShowOverlay = true;
         Assert.Equal("first", requests.Last().NodeId);
         Assert.True(requests.Last().ShowLayout);
 
@@ -128,14 +128,14 @@ public sealed partial class InspectionViewModelTests
         InspectionNodeRequest? observed = null;
         session.Inspect = request => { observed = request; return pending.Task; };
         var refresh = model.RefreshCommand.ExecuteAsync(null);
-        Assert.Null(model.Layout);
-        Assert.False(model.CanShowLayoutOverlay);
+        Assert.Null(model.LayoutDetails.Snapshot);
+        Assert.False(model.LayoutDetails.CanShowOverlay);
         Assert.Null(requests.Last().NodeId);
         pending.SetResult(Element(observed!, "Hello") with { Layout = LayoutTestData.Snapshot("Refreshed") });
         await refresh;
-        Assert.Equal("Refreshed", model.Layout!.Facts[0].Value);
+        Assert.Equal("Refreshed", model.LayoutDetails.Snapshot!.Facts[0].Value);
         Assert.True(requests.Last().ShowLayout);
-        model.ShowLayoutOverlay = false;
+        model.LayoutDetails.ShowOverlay = false;
         Assert.Null(requests.Last().NodeId);
     }
 
@@ -153,8 +153,8 @@ public sealed partial class InspectionViewModelTests
         model.SelectedNode = model.Tree[1];
         first.SetResult(Element(new(1, "first"), "Late") with { Layout = LayoutTestData.Snapshot("First") });
         await Task.Yield();
-        Assert.Equal("Second", model.Layout!.Facts[0].Value);
-        model.ShowLayoutOverlay = true;
+        Assert.Equal("Second", model.LayoutDetails.Snapshot!.Facts[0].Value);
+        model.LayoutDetails.ShowOverlay = true;
         Assert.True(highlights.Last().ShowLayout);
 
         var delayed = new TaskCompletionSource<InspectionElement>();
@@ -163,11 +163,11 @@ public sealed partial class InspectionViewModelTests
         var refresh = model.RefreshCommand.ExecuteAsync(null);
         model.SetDebuggerState(true);
         var pausedRequests = highlights.Count;
-        Assert.Null(model.Layout);
-        Assert.False(model.CanShowLayoutOverlay);
-        Assert.Contains("paused", model.LayoutStatus);
-        model.ShowLayoutOverlay = false;
-        model.ShowLayoutOverlay = true;
+        Assert.Null(model.LayoutDetails.Snapshot);
+        Assert.False(model.LayoutDetails.CanShowOverlay);
+        Assert.Contains("paused", model.LayoutDetails.Status);
+        model.LayoutDetails.ShowOverlay = false;
+        model.LayoutDetails.ShowOverlay = true;
         Assert.Equal(pausedRequests, highlights.Count);
         model.SetDebuggerState(false);
         Assert.Equal(pausedRequests + 1, highlights.Count);
@@ -175,14 +175,14 @@ public sealed partial class InspectionViewModelTests
         Assert.False(highlights.Last().ShowLayout);
         delayed.SetResult(Element(observed!, "Late") with { Layout = LayoutTestData.Snapshot("Before pause") });
         await refresh;
-        Assert.Null(model.Layout);
+        Assert.Null(model.LayoutDetails.Snapshot);
         session.Inspect = request => Task.FromResult(Element(request, "Hello") with { Layout = LayoutTestData.Snapshot("After pause") });
         await model.RefreshCommand.ExecuteAsync(null);
-        Assert.Equal("After pause", model.Layout!.Facts[0].Value);
+        Assert.Equal("After pause", model.LayoutDetails.Snapshot!.Facts[0].Value);
         await model.DisconnectCommand.ExecuteAsync(null);
-        Assert.Null(model.Layout);
+        Assert.Null(model.LayoutDetails.Snapshot);
         Assert.Empty(model.LayoutDetails.Facts);
-        Assert.False(model.CanShowLayoutOverlay);
+        Assert.False(model.LayoutDetails.CanShowOverlay);
     }
 
     [Fact]
@@ -199,8 +199,8 @@ public sealed partial class InspectionViewModelTests
         model.SelectedNode = model.Tree[1];
         pending.SetResult(Element(new(1, "first"), "Late") with { Layout = LayoutTestData.Snapshot("Old session") });
         await Task.Yield();
-        Assert.Null(model.Layout);
+        Assert.Null(model.LayoutDetails.Snapshot);
         Assert.Empty(model.LayoutDetails.VisibleOverlays);
-        Assert.Contains("removed", model.LayoutStatus);
+        Assert.Contains("removed", model.LayoutDetails.Status);
     }
 }

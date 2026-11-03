@@ -7,40 +7,15 @@ namespace WpfStudio.Workspace;
 
 public sealed partial class WorkspaceEngine
 {
-    // Authored buffers and actual MSBuild documents are the inputs. Editor-derived
-    // page partials exist only in _solution, never in the workspace or on disk.
-    private Solution? _authoredSolution;
-    private readonly SemaphoreSlim _pageProjectionGate = new(1, 1);
-    private readonly Dictionary<string, string> _pageProjectionTexts = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string> _pageProjectionReadStatuses = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string> _nameProjectionStatuses = new(StringComparer.OrdinalIgnoreCase);
-    private XamlPageSemanticProjectionResult? _pageProjection;
-    private long _pageProjectionEpoch;
-    private long _pageProjectionLoadEpoch;
-    private bool _pageProjectionPending;
-
     private void SetAuthoredSolution(Solution solution)
     {
-        _authoredSolution = solution;
-        _solution = solution;
-        _pageProjectionPending = true;
-        _pageProjectionEpoch++;
-        CancelProjectDiagnostics();
+        _pages.Authored = solution;
+        CurrentSolution = solution;
+        _pages.Invalidate();
+        _projectDiagnostics.CancelRunning();
     }
 
-    private void ResetPageProjection()
-    {
-        _authoredSolution = null;
-        _pageProjection = null;
-        _pageProjectionTexts.Clear();
-        _pageProjectionReadStatuses.Clear();
-        _nameProjectionStatuses.Clear();
-        _pageProjectionPending = false;
-        _pageProjectionEpoch++;
-        _pageProjectionLoadEpoch++;
-    }
-
-    private (ProjectId Project, string Path)[] PageProjectionInventory() => _xamlResourceInventory
+    private (ProjectId Project, string Path)[] PageProjectionInventory() => _ownership.Resources
         .SelectMany(pair => pair.Value.Items.Where(item => item.Kind == "Page")
             .Select(item => (pair.Key, Path.GetFullPath(item.Path))))
         .Distinct().ToArray();
@@ -52,13 +27,13 @@ public sealed partial class WorkspaceEngine
         long epoch;
         lock (_gate)
         {
-            original = _authoredSolution;
+            original = _pages.Authored;
             if (original is null) return false;
-            epoch = _pageProjectionEpoch;
+            epoch = _pages.Epoch;
             var requested = paths?.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
             selected = PageProjectionInventory().Select(item => item.Path).Distinct(StringComparer.OrdinalIgnoreCase)
-                .Where(path => !_syncedTexts.ContainsKey(path) && (requested is null || requested.Contains(path)))
-                .Select(path => (path, _pageProjectionTexts.GetValueOrDefault(path), _pageProjectionReadStatuses.GetValueOrDefault(path))).ToArray();
+                .Where(path => !_documents.IsOpen(path) && (requested is null || requested.Contains(path)))
+                .Select(path => (path, _pages.Texts.GetValueOrDefault(path), _pages.ReadStatuses.GetValueOrDefault(path))).ToArray();
         }
         var reads = new Dictionary<string, DiskText>(StringComparer.OrdinalIgnoreCase);
         long characters = 0;
@@ -72,26 +47,23 @@ public sealed partial class WorkspaceEngine
         }
         lock (_gate)
         {
-            if (!ReferenceEquals(original, _authoredSolution) || epoch != _pageProjectionEpoch) return false;
+            if (!ReferenceEquals(original, _pages.Authored) || epoch != _pages.Epoch) return false;
             bool changed = false;
             foreach (var item in selected)
             {
-                if (_syncedTexts.ContainsKey(item.Path)) continue;
+                if (_documents.IsOpen(item.Path)) continue;
                 var read = reads[item.Path];
                 string text = read.Text ?? "";
                 string? status = read.Text is null ? read.Status ?? "The page source is unavailable for current XAML fields." : null;
                 changed |= item.OldText != text || item.OldStatus != status;
-                _pageProjectionTexts[item.Path] = text;
-                if (status is null) _pageProjectionReadStatuses.Remove(item.Path);
-                else _pageProjectionReadStatuses[item.Path] = status;
+                _pages.Texts[item.Path] = text;
+                if (status is null) _pages.ReadStatuses.Remove(item.Path);
+                else _pages.ReadStatuses[item.Path] = status;
             }
             if (changed)
             {
-                _pageProjectionPending = true;
-                _pageProjectionEpoch++;
-                _semanticRevision++;
-                _completions.Clear();
-                _xamlBatchCache.Clear();
+                _pages.Invalidate();
+                SemanticsChanged();
             }
             return changed;
         }
@@ -99,8 +71,8 @@ public sealed partial class WorkspaceEngine
 
     private async Task EnsurePageProjectionAsync(CancellationToken token)
     {
-        lock (_gate) if (!_pageProjectionPending || _authoredSolution is null) return;
-        await _pageProjectionGate.WaitAsync(token).ConfigureAwait(false);
+        lock (_gate) if (!_pages.Pending || _pages.Authored is null) return;
+        await _pages.BuildGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
             while (true)
@@ -110,34 +82,30 @@ public sealed partial class WorkspaceEngine
                 XamlPageProjectionInput[] inputs;
                 lock (_gate)
                 {
-                    if (!_pageProjectionPending || _authoredSolution is null) return;
-                    authored = _authoredSolution;
-                    epoch = _pageProjectionEpoch;
+                    if (!_pages.Pending || _pages.Authored is null) return;
+                    authored = _pages.Authored;
+                    epoch = _pages.Epoch;
                     inputs = PageProjectionInventory().Select(item => new XamlPageProjectionInput(item.Project, item.Path,
-                        _syncedTexts.GetValueOrDefault(item.Path) ?? _pageProjectionTexts.GetValueOrDefault(item.Path) ?? "")).ToArray();
+                        _documents.Text(item.Path) ?? _pages.Texts.GetValueOrDefault(item.Path) ?? "")).ToArray();
                 }
                 var result = await XamlPageSemanticProjection.BuildAsync(authored, inputs, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
                 lock (_gate)
                 {
-                    if (!ReferenceEquals(authored, _authoredSolution) || epoch != _pageProjectionEpoch) continue;
-                    _pageProjection = result;
-                    _solution = result.Solution;
-                    _pageProjectionPending = false;
-                    _nameProjectionStatuses.Clear();
+                    if (!ReferenceEquals(authored, _pages.Authored) || epoch != _pages.Epoch) continue;
+                    _pages.Published(result);
+                    CurrentSolution = result.Solution;
                     foreach (var page in result.Pages)
                     {
-                        string? status = JoinResourceStatus(page.Status, _pageProjectionReadStatuses.GetValueOrDefault(page.Input.Path));
-                        if (status is not null) _nameProjectionStatuses[page.Input.Path] = status;
+                        string? status = JoinResourceStatus(page.Status, _pages.ReadStatuses.GetValueOrDefault(page.Input.Path));
+                        if (status is not null) _pages.NameStatuses[page.Input.Path] = status;
                     }
-                    _semanticRevision++;
-                    _completions.Clear();
-                    _xamlBatchCache.Clear();
+                    SemanticsChanged();
                     return;
                 }
             }
         }
-        finally { _pageProjectionGate.Release(); }
+        finally { _pages.BuildGate.Release(); }
     }
 
     private async Task<DocumentUpdateResult> UpdateXamlProjectionDocumentAsync(UpdateDocumentRequest request, CancellationToken token)
@@ -145,33 +113,29 @@ public sealed partial class WorkspaceEngine
         string path = Path.GetFullPath(request.Path);
         lock (_gate)
         {
-            if (!_xamlProjects.ContainsKey(path)) return new(false, request.Version, []);
-            if (_versions.TryGetValue(path, out long version))
+            if (!_ownership.Owners.ContainsKey(path)) return new(false, request.Version, []);
+            if (_documents.OpenVersion(path) is { } version)
             {
                 if (version > request.Version) return new(false, version, []);
-                if (version == request.Version && _syncedTexts.GetValueOrDefault(path) != request.Text)
+                if (version == request.Version && _documents.Text(path) != request.Text)
                     throw new InvalidOperationException("A document version cannot identify different text. Increment its version before updating.");
             }
             // Opening an unchanged page registers a buffer version, but the
             // loaded disk text already established these compiler fields.
             // Rebuilding here needlessly invalidates concurrent hover/F12.
-            string? previousText = _syncedTexts.GetValueOrDefault(path) ?? _pageProjectionTexts.GetValueOrDefault(path);
-            bool clearedReadStatus = _pageProjectionReadStatuses.Remove(path);
+            string? previousText = _documents.Text(path) ?? _pages.Texts.GetValueOrDefault(path);
+            bool clearedReadStatus = _pages.ReadStatuses.Remove(path);
             if (previousText != request.Text || clearedReadStatus)
             {
-                _pageProjectionPending = true;
-                _pageProjectionEpoch++;
-                _semanticRevision++;
-                _completions.Clear();
-                _xamlBatchCache.Clear();
+                _pages.Invalidate();
+                SemanticsChanged();
             }
-            _versions[path] = request.Version;
-            _syncedTexts[path] = request.Text;
+            _documents.Set(path, request.Version, request.Text);
         }
         await EnsurePageProjectionAsync(token).ConfigureAwait(false);
         lock (_gate)
-            return new(_versions.GetValueOrDefault(path) == request.Version && _syncedTexts.GetValueOrDefault(path) == request.Text,
-                _versions.GetValueOrDefault(path), []);
+            return new(_documents.Version(path) == request.Version && _documents.Text(path) == request.Text,
+                _documents.Version(path), []);
     }
 
     private async Task CloseXamlProjectionDocumentAsync(string path, CancellationToken token)
@@ -181,23 +145,20 @@ public sealed partial class WorkspaceEngine
         string? text;
         lock (_gate)
         {
-            epoch = _pageProjectionLoadEpoch;
-            version = _versions.TryGetValue(path, out long current) ? current : null;
-            text = _syncedTexts.GetValueOrDefault(path);
+            epoch = _pages.LoadEpoch;
+            version = _documents.OpenVersion(path);
+            text = _documents.Text(path);
         }
         var read = await ReadBoundedTextAsync(path, 1_000_000, token).ConfigureAwait(false);
         lock (_gate)
         {
-            if (epoch != _pageProjectionLoadEpoch || (_versions.TryGetValue(path, out long current) ? (long?)current : null) != version
-                || _syncedTexts.GetValueOrDefault(path) != text) return;
-            _versions.Remove(path);
-            _syncedTexts.Remove(path);
-            _pageProjectionTexts[path] = read.Text ?? "";
-            if (read.Text is null) _pageProjectionReadStatuses[path] = read.Status ?? "Saved XAML is unavailable.";
-            else _pageProjectionReadStatuses.Remove(path);
-            _pageProjectionPending = true;
-            _pageProjectionEpoch++;
-            _semanticRevision++;
+            if (epoch != _pages.LoadEpoch || _documents.OpenVersion(path) != version || _documents.Text(path) != text) return;
+            _documents.Remove(path);
+            _pages.Texts[path] = read.Text ?? "";
+            if (read.Text is null) _pages.ReadStatuses[path] = read.Status ?? "Saved XAML is unavailable.";
+            else _pages.ReadStatuses.Remove(path);
+            _pages.Invalidate();
+            SemanticRevision++;
         }
         await EnsurePageProjectionAsync(token).ConfigureAwait(false);
     }

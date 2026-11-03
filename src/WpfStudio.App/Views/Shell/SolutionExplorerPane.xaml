@@ -1,0 +1,74 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.SolutionExplorerPane"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:WpfStudio.App.ViewModels"
+             xmlns:controls="clr-namespace:WpfStudio.App.Controls"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:b="clr-namespace:WpfStudio.App.Behaviors">
+  <UserControl.Resources>
+    <HierarchicalDataTemplate DataType="{x:Type vm:ExplorerNode}" ItemsSource="{Binding Children}">
+      <StackPanel Orientation="Horizontal" ToolTip="{Binding ToolTip}">
+        <controls:StudioIcon Kind="{Binding IconKind}" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="{Binding Detail, Converter={StaticResource Presence}}" />
+      </StackPanel>
+    </HierarchicalDataTemplate>
+  </UserControl.Resources>
+  <DockPanel Background="{DynamicResource SurfaceBrush}">
+    <DockPanel DockPanel.Dock="Top" Margin="12,0,6,4" Height="28">
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+        <ToggleButton Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Tree" IsChecked="{Binding Explorer.NestRelatedFiles}" ToolTip="Nest related files: code-behind under XAML, partial files under their main file" Height="26" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" ToolTip="New WPF item (Ctrl+Shift+N)" Width="26" Height="26" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Refresh" Command="{Binding ReloadWorkspaceCommand}" ToolTip="Reload workspace" Width="26" Height="26" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="FolderOpen" Command="{Binding OpenWorkspaceCommand}" ToolTip="Open solution or project (Ctrl+Shift+O)" Width="26" Height="26" />
+      </StackPanel>
+      <TextBlock Text="{Binding WorkspaceSummary}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+    </DockPanel>
+    <DockPanel DockPanel.Dock="Top" Margin="10,0,8,6" Visibility="{Binding HasWorkspace, Converter={StaticResource BooleanToVisibility}}">
+      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding Explorer.ClearFilterCommand}" ToolTip="Clear filter (Esc)" Width="24" Height="24" Visibility="{Binding Explorer.IsFiltered, Converter={StaticResource BooleanToVisibility}}" />
+      <TextBox Text="{Binding Explorer.Filter, UpdateSourceTrigger=PropertyChanged, Delay=200}" c:Ui.Placeholder="Filter files and dependencies" ToolTip="Show files whose name contains this text; include / to match folders">
+        <TextBox.InputBindings>
+          <KeyBinding Key="Escape" Command="{Binding Explorer.ClearFilterCommand}" />
+        </TextBox.InputBindings>
+      </TextBox>
+    </DockPanel>
+    <Grid>
+      <TextBlock Text="No files match the filter" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" Margin="0,24,0,0" Visibility="{Binding Explorer.ShowNoMatches, Converter={StaticResource BooleanToVisibility}}" />
+      <TreeView x:Name="ExplorerTree" b:Interaction.SelectOnRightClick="True" ItemsSource="{Binding Explorer.Nodes}" b:Interaction.ActivateCommand="{Binding OpenNodeCommand}" b:Interaction.TrackSelection="True" b:Interaction.SelectionSource="{Binding Explorer.SelectedNode, Mode=TwoWay}">
+        <TreeView.ContextMenu>
+          <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+            <MenuItem Header="Build" c:Ui.Icon="Build" Command="{Binding BuildSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+            <MenuItem Header="Rebuild" Command="{Binding RebuildSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+            <MenuItem Header="Clean" c:Ui.Icon="Trash" Command="{Binding CleanSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+            <MenuItem Header="Restore packages" c:Ui.Icon="Package" Command="{Binding RestoreSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+            <Separator Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
+            <MenuItem Header="Open" c:Ui.Icon="File" Command="{Binding OpenNodeCommand}" CommandParameter="{Binding Explorer.SelectedNode}" />
+            <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
+            <MenuItem Header="Add to file group…" c:Ui.Icon="Pin" Command="{Binding FileGroups.AddSelectedCommand}" />
+            <Separator />
+            <MenuItem Header="Set as startup project" c:Ui.Icon="Target" Command="{Binding Explorer.SetStartupProjectCommand}" />
+            <MenuItem Header="Edit project file" Command="{Binding Explorer.EditProjectCommand}" />
+            <MenuItem Header="Manage NuGet packages…" c:Ui.Icon="Package" Command="{Binding OpenSelectedProjectPackagesCommand}" />
+            <Separator />
+            <MenuItem Header="Git changes…" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" />
+            <MenuItem Header="Open containing folder" c:Ui.Icon="FolderOpen" Command="{Binding Explorer.RevealSelectedCommand}" />
+            <MenuItem Header="Copy full path" c:Ui.Icon="Link" Command="{Binding Explorer.CopySelectedPathCommand}" />
+          </ContextMenu>
+        </TreeView.ContextMenu>
+        <TreeView.ItemContainerStyle>
+          <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+          </Style>
+        </TreeView.ItemContainerStyle>
+      </TreeView>
+      <StackPanel VerticalAlignment="Center" Margin="22,0,22,40" Visibility="{Binding Explorer.ShowPlaceholder, Converter={StaticResource BooleanToVisibility}}">
+        <c:Glyph Kind="FolderOpen" Width="30" Height="30" Foreground="{DynamicResource SubtleBrush}" StrokeWeight="1.1" />
+        <TextBlock Text="No workspace open" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,12,0,4" />
+        <TextBlock Text="Open a solution or project to browse its files, WPF components and resources." Style="{StaticResource Caption}" TextAlignment="Center" />
+        <Button Style="{StaticResource AccentButton}" Content="Open solution…" Command="{Binding OpenWorkspaceCommand}" HorizontalAlignment="Center" Margin="0,14,0,0" />
+        <Button Style="{StaticResource QuietButton}" Content="Try the sample app" Command="{Binding OpenSampleCommand}" HorizontalAlignment="Center" Foreground="{DynamicResource AccentBrush}" Visibility="{Binding HasSample, Converter={StaticResource BooleanToVisibility}}" />
+      </StackPanel>
+    </Grid>
+  </DockPanel>
+</UserControl>
