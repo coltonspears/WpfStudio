@@ -1,6 +1,7 @@
 using System.IO;
 using System.Security.Cryptography;
 using WpfStudio.Contracts;
+using WpfStudio.PreviewHost;
 using WpfStudio.Runtime.Design;
 
 namespace WpfStudio.Preview.Tests;
@@ -34,6 +35,27 @@ public sealed class CompiledPreviewTests
         Assert.Contains(inspection.Properties, p => p.Name == "Foreground" && p.Value == "#FF008080" && p.ValueSource == "Style");
         Assert.NotNull(message.Bounds);
         Assert.True(message.Bounds!.Width > 0 && message.Bounds.Height > 0);
+    }
+
+    [Fact]
+    public void AssemblyHashRereadsOnlyWhenLengthOrWriteTimeChanges()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "WpfStudio.HashTest." + Guid.NewGuid().ToString("N") + ".dll");
+        var built = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        static string Sha(string text) => Convert.ToHexString(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(text)));
+        void Build(string text, DateTime written) { File.WriteAllText(path, text, System.Text.Encoding.ASCII); File.SetLastWriteTimeUtc(path, written); }
+        try
+        {
+            Build("first build", built);
+            Assert.Equal(Sha("first build"), CompiledPreview.AssemblySha256(path));
+            Build("other build", built); // Same stamp: the file is not read again.
+            Assert.Equal(Sha("first build"), CompiledPreview.AssemblySha256(path));
+            File.SetLastWriteTimeUtc(path, built.AddSeconds(1)); // A same-length rebuild has a new write time.
+            Assert.Equal(Sha("other build"), CompiledPreview.AssemblySha256(path));
+            Build("a longer build", built.AddSeconds(1));
+            Assert.Equal(Sha("a longer build"), CompiledPreview.AssemblySha256(path));
+        }
+        finally { File.Delete(path); }
     }
 
     [Fact]
