@@ -180,12 +180,16 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
 
     private async Task<WorkspaceSnapshot> PublishAsync(LoadWorkspaceRequest request, Acquired acquired, CancellationToken cancellationToken)
     {
+        Microsoft.CodeAnalysis.Workspace? previous;
         lock (_gate)
         {
             _solution = null;
             ResetPageProjection();
             _semanticRevision++;
             ResetProjectAnalysis();
+            // With its solution unpublished above, no new request can start on the workspace closed below.
+            previous = _workspace;
+            _workspace = acquired.Workspace;
         }
         var path = Path.GetFullPath(request.Path);
         var issues = acquired.Issues;
@@ -193,9 +197,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var paths = acquired.Paths;
         var sdk = acquired.Sdk;
         Task<ProjectDiscovery.EvaluatedProject?> Evaluate(string projectPath) => acquired.Evaluate(projectPath);
-        var previous = _workspace;
-        _workspace = acquired.Workspace;
-        if (!ReferenceEquals(previous, _workspace)) previous?.Dispose();
+        if (!ReferenceEquals(previous, acquired.Workspace)) previous?.Dispose();
         lock (_gate)
         {
             if (acquired.Solution is { } loaded) { SetAuthoredSolution(loaded); _semanticRevision++; }
@@ -203,7 +205,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             _versions.Clear(); _syncedTexts.Clear(); _completions.Clear(); _codeActions.Clear(); _xamlProjects.Clear();
         }
         var configurations = new HashSet<string>(ProjectDiscovery.GetDeclaredConfigurations(path), StringComparer.OrdinalIgnoreCase);
-        var loadedProjects = _solution?.Projects.ToArray() ?? [];
+        var loadedProjects = acquired.Solution?.Projects.ToArray() ?? [];
         async Task<(WorkspaceProject Model, IEnumerable<string> Configurations)> BuildProjectAsync(string projectPath)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -592,14 +594,17 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
     }
     public void Dispose()
     {
+        Microsoft.CodeAnalysis.Workspace? workspace;
         lock (_gate)
         {
             _solution = null;
             _semanticRevision++;
             ResetProjectAnalysis();
             ResetPageProjection();
+            workspace = _workspace;
+            _workspace = null;
         }
-        _workspace?.Dispose();
+        workspace?.Dispose();
         Interlocked.Exchange(ref _prepared, null)?.Workspace?.Dispose();
     }
 }
