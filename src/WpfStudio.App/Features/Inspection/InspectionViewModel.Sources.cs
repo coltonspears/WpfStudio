@@ -10,13 +10,15 @@ public sealed partial class InspectionViewModel
 {
     public event Func<InspectionSourceRequest, CancellationToken, Task<string>>? SourceRequested;
     private bool _openingSource;
-    private string? _sourceStatus;
+    /// <summary>Source navigation's latest outcome, shown instead of the hint. Any outcome ends the verifying state.</summary>
+    private string? SourceStatus { get; set { field = value; _verifyingSource = false; } }
+    private bool _verifyingSource;
     private InspectionNode? _sourceStatusNode;
     private InspectionNode? _sourceContextNode;
     private bool _sourceContextPaused, _sourceContextConnected;
     private long _sourceEpoch;
     [ObservableProperty] public partial bool VerifySourceOnBuild { get; set; } = true;
-    public string SourceDescription => _sourceStatus ?? (SelectedNode?.Node.Source is { } hint
+    public string SourceDescription => SourceStatus ?? (SelectedNode?.Node.Source is { } hint
         ? $"Source hint: {hint.Uri}:{hint.Line}:{hint.Column}. Show XAML verifies the running module, build source and editor buffer."
         : "WPF supplied no source location for this object. Code-created elements and some generated content cannot be mapped to XAML.");
     private bool CanShowSource() => !_openingSource && !_disposed && IsConnected && !IsPaused
@@ -30,11 +32,10 @@ public sealed partial class InspectionViewModel
         {
             _sourceEpoch++;
             _sourceContextNode = current; _sourceContextPaused = IsPaused; _sourceContextConnected = IsConnected;
-            if (_sourceStatus == "Verifying compiled XAML source…")
-                _sourceStatus = "Source navigation cancelled because the inspection context changed.";
+            if (_verifyingSource) SourceStatus = "Source navigation cancelled because the inspection context changed.";
         }
         if (clear || _sourceStatusNode is { } previous && (current == null || current.Id != previous.Id
-            || current.Source != previous.Source || current.Type != previous.Type || current.Name != previous.Name)) _sourceStatus = null;
+            || current.Source != previous.Source || current.Type != previous.Type || current.Name != previous.Name)) SourceStatus = null;
         OnPropertyChanged(nameof(SourceDescription));
         ShowSourceCommand.NotifyCanExecuteChanged();
         RefreshBindingSourceState();
@@ -51,22 +52,21 @@ public sealed partial class InspectionViewModel
         bool Current() => generation == _generation && epoch == _sourceEpoch && ReferenceEquals(session, _session) && !_disposed
             && IsConnected && !IsPaused && SelectedNode?.Node is { } current && current.Id == node.Id
             && current.Source == node.Source && current.Type == node.Type && current.Name == node.Name;
-        _openingSource = true; _sourceStatusNode = node; _sourceStatus = "Verifying compiled XAML source…"; RefreshSourceState();
+        _openingSource = true; _sourceStatusNode = node; SourceStatus = "Verifying compiled XAML source…"; _verifyingSource = true; RefreshSourceState();
         try
         {
             var token = _poll?.Token ?? default;
             var modules = await session.GetModulesAsync(token);
             if (!Current()) return;
             var status = await navigate(new(node, modules, Current), token);
-            if (Current()) _sourceStatus = status;
+            if (Current()) SourceStatus = status;
         }
         catch (OperationCanceledException) { }
         catch (Exception exception) when (exception is not OutOfMemoryException)
-        { if (Current()) _sourceStatus = "Source navigation unavailable: " + exception.Message; }
+        { if (Current()) SourceStatus = "Source navigation unavailable: " + exception.Message; }
         finally
         {
-            if (!Current() && _sourceStatus == "Verifying compiled XAML source…")
-                _sourceStatus = "Source navigation cancelled because the inspection context changed.";
+            if (!Current() && _verifyingSource) SourceStatus = "Source navigation cancelled because the inspection context changed.";
             _openingSource = false; RefreshSourceState();
         }
     }

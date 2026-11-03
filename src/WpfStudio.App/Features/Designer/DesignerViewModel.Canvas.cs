@@ -134,7 +134,7 @@ public sealed partial class DesignerViewModel
 
     partial void OnDisplayImageChanged(byte[]? value) => NotifyCanvasState();
     partial void OnRenderErrorChanged(string? value) => OnPropertyChanged(nameof(HasRenderError));
-    partial void OnStatusChanged(string value) { if (DisplayImage is null) OnPropertyChanged(nameof(EmptyCanvasText)); }
+    partial void OnStatusChanged(string value) { _statusShowsSnapshotUpdate = false; if (DisplayImage is null) OnPropertyChanged(nameof(EmptyCanvasText)); }
     partial void OnDocumentNameChanged(string value) => OnPropertyChanged(nameof(ArtboardTitle));
 
     // ------------------------------------------------------------------ Zoom

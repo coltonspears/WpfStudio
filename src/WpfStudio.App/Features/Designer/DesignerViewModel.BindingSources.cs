@@ -18,7 +18,8 @@ public sealed partial class DesignerViewModel
     [ObservableProperty] public partial string BindingSourceStatus { get; set; } = "Select an element to inspect its binding declarations.";
     [ObservableProperty] public partial string BindingDeclarationCoverage { get; set; } = "";
     private long _bindingSourceEpoch;
-    private bool _updatingBindingDeclarations, _openingBindingSource, _bindingSelectionRemoved;
+    private bool _updatingBindingDeclarations, _openingBindingSource, _bindingSelectionRemoved, _verifyingBindingSource;
+    partial void OnBindingSourceStatusChanged(string value) => _verifyingBindingSource = false;
 
     private void RefreshBindingDeclarations()
     {
@@ -108,7 +109,7 @@ public sealed partial class DesignerViewModel
                 throw new InvalidOperationException("The binding source acknowledgement did not match the observed declaration.");
             return response;
         }
-        _openingBindingSource = true; BindingSourceStatus = "Verifying binding declaration source…"; RefreshBindingSourceState();
+        _openingBindingSource = true; BindingSourceStatus = "Verifying binding declaration source…"; _verifyingBindingSource = true; RefreshBindingSourceState();
         try
         {
             var response = await ValidateAsync(_lifetime.Token);
@@ -122,8 +123,7 @@ public sealed partial class DesignerViewModel
         { if (CurrentBinding()) BindingSourceStatus = "Binding source unavailable: " + exception.Message; }
         finally
         {
-            if (!CurrentBinding() && BindingSourceStatus == "Verifying binding declaration source…")
-                BindingSourceStatus = "Binding source navigation cancelled because its context changed.";
+            if (!CurrentBinding() && _verifyingBindingSource) BindingSourceStatus = "Binding source navigation cancelled because its context changed.";
             _openingBindingSource = false; RefreshBindingSourceState();
         }
     }

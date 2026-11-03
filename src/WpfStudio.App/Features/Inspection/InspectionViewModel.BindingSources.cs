@@ -19,6 +19,14 @@ public sealed partial class InspectionViewModel
     [ObservableProperty] public partial string BindingDeclarationCoverage { get; set; } = "";
     private long _bindingSourceEpoch, _bindingSourceUserSelection;
     private bool _updatingBindingDeclarations, _openingBindingSource, _bindingSelectionRemoved;
+    private enum BindingSourceCondition { None, Verifying, DebuggerPaused }
+    private BindingSourceCondition _bindingSourceCondition;
+    partial void OnBindingSourceStatusChanged(string value) => _bindingSourceCondition = BindingSourceCondition.None;
+    private void ShowBindingSourceCondition(BindingSourceCondition condition)
+    {
+        BindingSourceStatus = condition == BindingSourceCondition.Verifying ? "Verifying binding declaration source…" : "Debugger paused. Resume before verifying a binding declaration.";
+        _bindingSourceCondition = condition;
+    }
 
     private void RefreshBindingDeclarations(bool available = true)
     {
@@ -65,12 +73,12 @@ public sealed partial class InspectionViewModel
     private void RefreshBindingSourceState()
     {
         if (!IsConnected) BindingSourceStatus = "Connect to an application to navigate binding declarations.";
-        else if (IsPaused) BindingSourceStatus = "Debugger paused. Resume before verifying a binding declaration.";
+        else if (IsPaused) ShowBindingSourceCondition(BindingSourceCondition.DebuggerPaused);
         else if (_session?.Hello?.Capabilities.Contains("binding-source") != true)
             BindingSourceStatus = "This inspection agent does not provide binding declaration identities.";
         else if (!_openingBindingSource && BindingDeclarations.Count == 0)
             BindingSourceStatus = "No binding declarations are available in this element observation.";
-        else if (BindingSourceStatus == "Debugger paused. Resume before verifying a binding declaration.")
+        else if (_bindingSourceCondition == BindingSourceCondition.DebuggerPaused)
             BindingSourceStatus = SelectedBindingDeclaration?.Description ?? "Select a binding declaration.";
         ShowBindingSourceCommand.NotifyCanExecuteChanged();
         ShowBindingIssueSourceCommand.NotifyCanExecuteChanged();
@@ -104,7 +112,7 @@ public sealed partial class InspectionViewModel
                 throw new InvalidOperationException("The binding source acknowledgement did not match the observed declaration.");
             return response;
         }
-        _openingBindingSource = true; BindingSourceStatus = "Verifying binding declaration source…"; RefreshBindingSourceState();
+        _openingBindingSource = true; ShowBindingSourceCondition(BindingSourceCondition.Verifying); RefreshBindingSourceState();
         try
         {
             var token = _poll?.Token ?? default;
@@ -121,7 +129,7 @@ public sealed partial class InspectionViewModel
         { if (CurrentBinding()) BindingSourceStatus = "Binding source unavailable: " + exception.Message; }
         finally
         {
-            if (!CurrentBinding() && BindingSourceStatus == "Verifying binding declaration source…")
+            if (!CurrentBinding() && _bindingSourceCondition == BindingSourceCondition.Verifying)
                 BindingSourceStatus = "Binding source navigation cancelled because its context changed.";
             _openingBindingSource = false; RefreshBindingSourceState();
         }

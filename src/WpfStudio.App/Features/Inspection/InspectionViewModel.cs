@@ -253,7 +253,7 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
         ++_bindingSourceEpoch;
         RefreshBindingDeclarations(available: false);
         ClearAppearance("Inspector disconnected. Connect and refresh to inspect appearance.", invalidateElement: true);
-        _sourceStatus = null;
+        SourceStatus = null;
         IsPropertyOperationRunning = false;
         _poll?.Cancel(); _poll?.Dispose(); _poll = null;
         var session = _session; _session = null;

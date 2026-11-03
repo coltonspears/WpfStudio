@@ -18,6 +18,8 @@ public sealed partial class InspectionViewModel
     private sealed record SourceEditContext(string? NodeId, string? PropertyId, string? Token, string Value, bool IsNull);
     private SourceEditContext? _sourceEditContext;
     private long _sourceEditEpoch, _sourceEditOperation;
+    private bool _preparingSourceEdit;
+    partial void OnSourceEditStatusChanged(string value) => _preparingSourceEdit = false;
     [ObservableProperty] public partial bool IsSourceEditRunning { get; set; }
     [ObservableProperty] public partial string SourceEditStatus { get; set; } = "";
     public string SourcePropertyEditHint => _pendingEdit is not null
@@ -60,7 +62,7 @@ public sealed partial class InspectionViewModel
         if (_session is null || !IsConnected)
         {
             _sourceEditOperation++;
-            if (SourceEditStatus == "Preparing a verified XAML edit…") SourceEditStatus = "XAML edit cancelled because the inspector disconnected.";
+            if (_preparingSourceEdit) SourceEditStatus = "XAML edit cancelled because the inspector disconnected.";
             IsSourceEditRunning = false;
         }
         WritePropertyToSourceCommand.NotifyCanExecuteChanged();
@@ -124,6 +126,7 @@ public sealed partial class InspectionViewModel
 
         IsSourceEditRunning = true;
         SourceEditStatus = "Preparing a verified XAML edit…";
+        _preparingSourceEdit = true;
         try
         {
             var modules = await RefreshModulesAsync(lifetime);
@@ -143,8 +146,7 @@ public sealed partial class InspectionViewModel
         {
             if (generation == _generation && operation == _sourceEditOperation)
             {
-                if (!Current() && SourceEditStatus == "Preparing a verified XAML edit…")
-                    SourceEditStatus = "XAML edit cancelled because the inspection context changed.";
+                if (!Current() && _preparingSourceEdit) SourceEditStatus = "XAML edit cancelled because the inspection context changed.";
                 IsSourceEditRunning = false;
                 UpdateSourceEditingState();
             }

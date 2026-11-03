@@ -244,11 +244,19 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await RefreshWpfAsync();
             await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync();
             _ = TaskList.RefreshCommand.ExecuteAsync(null);
-            Status = $"{Projects.Count} projects · SDK {Workspace.SdkVersion}" + (Workspace.Cached ? " · refreshing project model…" : "");
+            ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
             await SaveSettingsAsync();
         }
         finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; XamlAnalysis.Request(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
         if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
+    }
+    // Any other status written meanwhile is newer than the refresh's result and stays.
+    private bool _statusShowsModelRefresh;
+    partial void OnStatusChanged(string value) => _statusShowsModelRefresh = false;
+    private void ShowWorkspaceStatus(WorkspaceSnapshot snapshot, bool refreshingModel)
+    {
+        Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}" + (refreshingModel ? " · refreshing project model…" : "");
+        _statusShowsModelRefresh = refreshingModel;
     }
     /// <summary>
     /// Closes every tab before the workspace changes, asking about each unsaved document first. Nothing is closed when any
@@ -291,7 +299,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             foreach (var issue in snapshot.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
             foreach (var doc in Documents) await doc.SyncAsync(_lifetime.Token);
             await RefreshWpfAsync();
-            if (Status.EndsWith("refreshing project model…", StringComparison.Ordinal)) Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}";
+            if (_statusShowsModelRefresh) ShowWorkspaceStatus(snapshot, refreshingModel: false);
             XamlAnalysis.Request();
         }
         catch (OperationCanceledException) { }
