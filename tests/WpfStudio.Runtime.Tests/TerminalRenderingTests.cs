@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Wpf;
+using WpfStudio.Contracts;
 using WpfStudio.Runtime.Terminal;
 
 namespace WpfStudio.Runtime.Tests;
@@ -81,7 +82,7 @@ public sealed class TerminalRenderingTests
                     do { await Task.Delay(100, timeout.Token); rendered = await browser.ExecuteScriptAsync(transcript); } while (!rendered.Contains("FLOW_1000"));
                     Assert.Equal("true", await browser.ExecuteScriptAsync("search.findPrevious('RENDER_READY')"));
                     // Crash only this terminal's renderer, then verify controlled teardown rather than an ACK deadlock.
-                    _ = browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Page.crash", "{}").ContinueWith(_ => { }, TaskScheduler.Default);
+                    browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Page.crash", "{}").Forget();
                     while (second.Content is not TextBlock) await Task.Delay(100, timeout.Token);
                     Assert.Contains("renderer stopped", ((TextBlock)second.Content).Text);
                     await shellProcess.WaitForExitAsync(timeout.Token);

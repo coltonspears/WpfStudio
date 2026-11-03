@@ -87,7 +87,6 @@ public sealed partial class TerminalSurface : ContentControl
         private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private TaskCompletionSource? acknowledgement;
         private Task? initialization;
-        private Task? pump;
         private int failed;
         private int disposed;
         public TerminalSurface? Owner { get; set; }
@@ -111,7 +110,7 @@ public sealed partial class TerminalSurface : ContentControl
             core.ProcessFailed += ProcessFailed;
             core.Navigate("https://terminal.wpfstudio.local/index.html");
             await ready.Task.WaitAsync(TimeSpan.FromSeconds(20), lifetime.Token);
-            pump = PumpAsync();
+            PumpAsync().Forget();
         }
         private void OnMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs args)
         {

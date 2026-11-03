@@ -235,7 +235,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     }
     // Nothing semantic changed, so results replace in place and same-version observations stay valid.
     private void ProjectDiagnosticsChanged(object? sender, EventArgs e) =>
-        _dispatcher.Post(() => { if (!_disposed) _ = StartAnalysisAsync(debounce: false, countsChanged: false); });
+        _dispatcher.Post(() => { if (!_disposed) StartAnalysisAsync(debounce: false, countsChanged: false).Forget(ReportFault); });
     public Task RefreshAnalysisAsync(CancellationToken token = default) => StartAnalysisAsync(debounce: false, token);
     private Task StartAnalysisAsync(bool debounce, CancellationToken token = default, bool countsChanged = true)
     {

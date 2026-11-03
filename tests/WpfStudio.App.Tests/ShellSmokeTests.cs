@@ -280,7 +280,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             shell.NewWpfItemCommand.Execute(null); await Idle(); Assert.True(shell.IsScaffoldOpen);
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/new-item.png"));
             shell.CancelScaffoldCommand.Execute(null);
-            _ = shell.ChangeReview.ShowAsync("Add customer view", [new FileChange("CustomerView.xaml", "<Grid />", "<Grid><TextBlock Text=\"Hello\" /></Grid>", "Add customer view")], "");
+            var review = shell.ChangeReview.ShowAsync("Add customer view", [new FileChange("CustomerView.xaml", "<Grid />", "<Grid><TextBlock Text=\"Hello\" /></Grid>", "Add customer view")], "");
             await Idle();
             var reviewDiff = Descendants<WpfStudio.App.Controls.Diff.DiffView>(window).Single(view => view.Name == "ReviewDiff");
             Assert.True(reviewDiff.IsVisible);
@@ -294,6 +294,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.Contains(reviewDiff.Layout!.Right, line => line.Kind == WpfStudio.App.Controls.Diff.DiffLineKind.Added && line.Text.Contains("Hello"));
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/change-preview.png"));
             shell.ChangeReview.CancelCommand.Execute(null);
+            await review.WaitAsync(TimeSpan.FromSeconds(20));
             await VerifyDesignerPaneFilterAsync(provider.GetRequiredService<IUiDispatcher>());
             await VerifySelectionAndFocusRequestsAsync(window, shell);
             await VerifyEditorPopupsAsync(root);
