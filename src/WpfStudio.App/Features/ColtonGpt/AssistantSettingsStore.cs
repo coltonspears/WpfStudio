@@ -17,6 +17,7 @@ public sealed record AssistantConfiguration
 
 public sealed class AssistantSettingsStore(string directory)
 {
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
     private readonly string _path = Path.Combine(directory, "coltongpt.json");
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("WpfStudio.ColtonGPT.OpenRouter.v1");
 
@@ -28,7 +29,7 @@ public sealed class AssistantSettingsStore(string directory)
     }
 
     public Task SaveAsync(AssistantConfiguration settings, CancellationToken token = default) =>
-        AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(settings, new JsonSerializerOptions { WriteIndented = true }), token);
+        AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(settings, Indented), token);
 
     public string ProtectKey(string value)
     {

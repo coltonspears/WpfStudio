@@ -314,12 +314,12 @@ public sealed class DesignerScenarioTests
         Path.Combine(directory, "Demo.csproj"), "net10.0-windows", Path.Combine(directory, "Demo.dll"), false,
         [new(source, "View.xaml", "Page")], "Demo");
     private static PreviewScenario Data(string name) => new(name, DataContextFactory: new("Demo.PreviewData", name.Replace(" ", "")));
+    private static readonly JsonSerializerOptions CatalogJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
     private static async Task WriteCatalogAsync(string root, string path, params PreviewScenario[] scenarios)
     {
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
         await File.WriteAllTextAsync(Path.Combine(root, PreviewScenarioCatalog.FileName),
-            JsonSerializer.Serialize(new { version = 1, views = new[] { new { path, scenarios } } }, options));
+            JsonSerializer.Serialize(new { version = 1, views = new[] { new { path, scenarios } } }, CatalogJson));
     }
     private static PreviewNode Node => new("1", null, null, "System.Windows.Controls.TextBlock", "Preview", new(0, 0, 100, 30), null, true);
     private static PreviewSnapshot Snapshot(PreviewRequest request) => new(request.Version, true, [1], 100, 30, [Node], [],

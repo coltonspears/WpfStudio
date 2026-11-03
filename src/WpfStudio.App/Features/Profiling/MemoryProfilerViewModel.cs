@@ -15,6 +15,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
 {
     public const int OverviewView = 0, TypesView = 1, RetentionView = 2, GraphView = 3;
     public const int FieldsTab = 0, RootsTab = 1, KeepsAliveTab = 2, ReferencesTab = 3;
+    private static readonly JsonSerializerOptions IndentedReport = new() { WriteIndented = true };
     private readonly CancellationTokenSource _lifetime = new();
     private IMemorySession? _session;
     private HeapSummary? _baseline;
@@ -240,7 +241,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
             {
                 var report = new { Version = 3, Summary, Baseline = _baseline, Snapshots = Snapshots.Select(s => new { s.Number, s.SourceName, s.Summary.CapturedAt, s.Summary.ManagedBytes, s.Summary.ReachableBytes, s.Summary.ObjectCount }),
                     Comparison = ComparisonRows, Object = Browser.Details, Graph, Estimate = Browser.ReleaseEstimate, Retained = Browser.RetainedComposition, Flow, Groups = InstanceGroups };
-                content = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+                content = JsonSerializer.Serialize(report, IndentedReport);
             }
             else
             {

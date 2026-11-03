@@ -29,7 +29,7 @@ public sealed partial class ShellSmokeTests
                 designer.ProjectDirectory, designer.ApplicationResourcePath,
                 Diagnostics = designer.Diagnostics.ToArray(),
                 Projects = shell.Projects.Select(project => new { project.Name, project.ProjectPath, project.OutputPath, project.ProjectAssetsPath }).ToArray() });
-            await File.WriteAllTextAsync(Path.Combine(folder, "observations.json"), JsonSerializer.Serialize(observations, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(Path.Combine(folder, "observations.json"), JsonSerializer.Serialize(observations, IndentedJson));
             Screenshot((FrameworkElement)window.Content, Path.Combine(folder, mode + "-shell.png"));
             if (designer.Image is { } bytes) await File.WriteAllBytesAsync(Path.Combine(folder, mode + "-preview.png"), bytes);
             output.WriteLine(mode + ": " + designer.Status + "\n" + string.Join("\n", designer.Diagnostics.Select(d => d.Message)));

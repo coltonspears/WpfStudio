@@ -11,6 +11,8 @@ namespace WpfStudio.Runtime.Tests;
 
 public sealed class TerminalRenderingTests
 {
+    private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
+
     [Fact]
     public async Task BundledXtermRendersRealConPtyOutputAndSurvivesReparenting()
     {
@@ -63,7 +65,7 @@ public sealed class TerminalRenderingTests
                         if (!Directory.Exists(Path.Combine(root.FullName, "src/WpfStudio.Runtime"))) continue;
                         var report = Path.Combine(root.FullName, "artifacts/performance/terminal-feature.json");
                         Directory.CreateDirectory(Path.GetDirectoryName(report)!);
-                        await File.WriteAllTextAsync(report, JsonSerializer.Serialize(metrics, new JsonSerializerOptions { WriteIndented = true }));
+                        await File.WriteAllTextAsync(report, JsonSerializer.Serialize(metrics, IndentedJson));
                         break;
                     }
                     await session.WriteAsync("echo RENDER_READY\r", timeout.Token);

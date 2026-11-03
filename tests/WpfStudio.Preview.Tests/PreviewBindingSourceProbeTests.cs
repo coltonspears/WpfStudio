@@ -23,6 +23,7 @@ namespace WpfStudio.Preview.Tests;
 [Collection("WPF preview")]
 public sealed class PreviewBindingSourceProbeTests(PreviewFixture fixture, ITestOutputHelper output)
 {
+    private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
     private const string Source = """
         <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -137,7 +138,7 @@ public sealed class PreviewBindingSourceProbeTests(PreviewFixture fixture, ITest
                 Read("Priority", Named("Priority"), TextBlock.TextProperty);
                 Assert.Equal(before, model.GetterCalls);
                 output.WriteLine(retainedReader ? "Retained XML reader" : "Production serialized stream");
-                output.WriteLine(JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }));
+                output.WriteLine(JsonSerializer.Serialize(rows, IndentedJson));
                 Dump("Original XAML", Source);
                 Dump("Serialized transformed XAML", markup);
                 Assert.Equal(16, rows.Count);
