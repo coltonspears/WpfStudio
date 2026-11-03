@@ -44,15 +44,15 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 | C2 | `StudioFeatures` callbacks replaced by `IWorkspaceMutationHost` | ee4df56 |
 | S1 | `ShellViewModel` split in nine steps: Task List, file groups, Problems, external changes, command palette, change review, project XAML analysis, Solution Explorer, related-file locator, automatic saving, WPF Explorer, breakpoint editing, explorer commands, inspection source verifier, designer source tracker. 3,996 lines across 21 partials → 2,594 across 16 | 4019b98 … 2ddd448 |
 | Performance table, row 2 | `ErrorCount`/`WarningCount` recount once per rebuild (`ProblemsViewModel`) | 240f08b |
-| B69, B70, B71 | CodeLens, blame and change-margin requests observe their faults; the unhandled-fault handler touches UI state only on the UI thread; undo stays on the caller's thread | this change |
+| B69, B70, B71 | CodeLens, blame and change-margin requests observe their faults; the unhandled-fault handler touches UI state only on the UI thread; undo stays on the caller's thread | 250f4c5 |
+| A3, A5, A8, A9, A11, A13, A14, A17–A21, B44, B45 | Async and threading pass; see the fix log | ff2f978 … 6ee5446 |
 
 ### Partly done
 
 | Item | Done | Still pending |
 |------|------|---------------|
-| A3 | The profiler monitor loop reports and resets | A shared `Forget(Task, ILogger)` helper; the other listed fire-and-forget sites |
-| A5 | IO failures in the log provider no longer throw | Logging still does synchronous IO under a lock; a background writer |
-| A20 | The shell detaches its editor-preference handler; the breakpoint, designer-tracker and auto-save owners unsubscribe on dispose | The remaining long-lived subscriptions listed in A20 |
+| A15 | Tokens and deadlines passed through; a cancelled preview render stops between its steps | `PreviewEngine` holds `_requests` for the whole render, because renders yield to the dispatcher and must not interleave. Kept by design |
+| A16 | Installer, package fallback, SQL text and binary values, script saves and the profiler's dispose are asynchronous | SQL XML values stay synchronous because the bounded formatter is. Kept by design |
 | C1 | The shell reaches extracted tools through typed host interfaces (`IWorkbenchHost` and its siblings) | The shell's 18-parameter constructor and the remaining hand wiring of features in its constructor |
 | C7 | The shell's subscription to `EditorPreferences.Current` is removed at dispose | `EditorPreferences` is still a static singleton outside the container |
 | S2 | `ReviewAndApplyAsync` is the shared tail for the C# refactoring and code-action commands | The four verified pipelines (rename, XAML quick fix, designer edit, inspection source edit) keep separate staleness checks by design |
@@ -62,11 +62,11 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 - **Coupling (1.1):** C3, C4, C5, C6, C8–C16.
 - **Large classes (1.2):** S3–S18 (`EditorSurface`, `DesignerViewModel`, `MemoryProfilerViewModel`, `GitViewModel`/`GitService`, `DebuggerViewModel`, `DatabasePaneViewModel`, `WorkspaceEngine`, `PreviewEngine`, `NativePreviewSurface`, `DiffView`, `ScaffoldingService`, `AppPaths.cs`, `EditorPreferences`, `MainWindow.xaml`).
 - **DI registration (1.3):** D1–D7, D9.
-- **Async (1.4):** A8, A9, A11, A13–A19, A21 (analyzers) and the pending halves of A3, A5, A20.
+- **Async (1.4):** none. A15 and A16 are partly done by design (above).
 - **Code-behind and MVVM (1.5):** M1–M10.
 - **CommunityToolkit.Mvvm (1.6):** T1–T9.
 - **`field` keyword (1.7):** F1–F6.
-- **Bugs (Part 2):** B13, B21, B22, B26–B68, and the performance table apart from row 2.
+- **Bugs (Part 2):** B13, B21, B22, B26–B43, B46–B68, and the performance table apart from row 2.
 
 ---
 
@@ -400,3 +400,12 @@ CodeLens crash:
 
 - **B69** `TaskObservation.Forget` (in `WpfStudio.Contracts`) is the fire-and-forget primitive: it always reads the fault, optionally reports it, and ignores cancellation. The lens, blame and change-margin requests use it instead of an empty `ContinueWith`. **B70** the handler moved to `Services/UnhandledFaultReporter.cs`, which logs from any thread and runs everything that touches the window through the dispatcher, with a failure to display contained. **B71** `UndoAsync` no longer leaves the caller's thread.
 - `WPFSTUDIO_TEST_CODELENS_ONLY=1` runs a smoke scenario with a real window and worker: lenses are requested, clicked, toggled and interrupted by typing and by killing the worker, then the test forces finalization and asserts no thread-affinity exception and no unobserved fault. Before the fix it failed with the `ScheduleCodeLens` fault; `CrashGuardTests` and `WorkspaceEditGuardTests` cover the parts without a worker.
+
+Async and threading pass:
+
+- **A3** fire-and-forget sites that can fault use `TaskObservation.Forget`, reporting through the shell's output or a logger where there is one. **A21** `Directory.Build.props` enables the threading and .NET analyzers for `src/` only (fixtures and samples stand in for user projects). VSTHRD100, VSTHRD002 and VSTHRD110 fail the build; legitimate exceptions carry a one-line reason. VSTHRD110 treats `_ = task` as observed, so that form still relies on review. VSTHRD001, 003, 103 and 200 are off: the first two need `JoinableTaskFactory`, 103 is mostly `Cancel` versus `CancelAsync`, and 200 is a naming preference.
+- **A5** the log provider writes through a channel on a background task and flushes on dispose; the provider is registered through a factory so the host disposes it. **A8** dialog methods stay synchronous by design and say so, with an owner-window accessor and `TryFindResource`. **A9** no blocking `Dispatcher.Invoke` from `PropertyChanged` handlers.
+- **A11** the Git switch guard resets in `finally`, and navigation replay is a counter. **A13** the scheduler starts its scan outside the lock and disposes the semaphore. **A14** replaced cancellation sources are disposed in Git, the editor, settings and grouping; the designer and inspection were already correct.
+- **A15** the shell's navigation, refactoring, reload and restart requests pass its lifetime token, a cancelled preview render stops between steps, and scaffolding's project evaluation has a one minute deadline. **A16** see the Partly done table.
+- **A17, A18, B44, B45** `DapTransport` uses `TryGetProperty` and never throws on dispose, the launch task is observed, and a rejected start is the error shown instead of "connection closed". Teardown still closes the transport before killing the adapter, to keep netcoredbg's graceful exit, with the wait capped at two seconds. These ran against a scripted fake adapter only: netcoredbg was not available on the machine that ran the tests.
+- **A19** the terminal reader has its own thread. **A20** named handlers detach on dispose for the assistant settings, feature, `DiffView` theme and `Interaction` subscriptions.
