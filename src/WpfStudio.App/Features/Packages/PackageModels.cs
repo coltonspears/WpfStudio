@@ -45,7 +45,7 @@ public sealed class PackageProcessRunner : IPackageProcessRunner
     {
         var start = new ProcessStartInfo("dotnet")
         {
-            WorkingDirectory = directory, UseShellExecute = false, CreateNoWindow = true,
+            WorkingDirectory = directory, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true
         };
         foreach (var name in new[] { "MSBuildSDKsPath", "MSBUILD_EXE_PATH", "MSBuildExtensionsPath", "MSBuildExtensionsPath32",

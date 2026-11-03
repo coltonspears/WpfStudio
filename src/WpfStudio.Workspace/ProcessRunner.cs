@@ -14,7 +14,7 @@ internal static class ProcessRunner
 
     public static ProcessStartInfo Create(string fileName, string directory, IEnumerable<string> arguments)
     {
-        var start = new ProcessStartInfo(fileName) { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        var start = new ProcessStartInfo(fileName) { WorkingDirectory = directory, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         ClearInheritedToolchain(start);
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         return start;

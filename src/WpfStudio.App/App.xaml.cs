@@ -10,6 +10,7 @@ using WpfStudio.Core;
 
 namespace WpfStudio.App;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0030", Justification = "The composition root owns the main window and reports startup failures before any dialog service exists.")]
 public partial class App : Application
 {
     private IHost? _host;

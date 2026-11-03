@@ -157,7 +157,7 @@ public sealed partial class BuildService
         var managed = launch.Program.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
         var start = new ProcessStartInfo(managed ? "dotnet" : launch.Program)
         {
-            WorkingDirectory = launch.WorkingDirectory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+            WorkingDirectory = launch.WorkingDirectory, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
         };
         if (managed) start.ArgumentList.Add(launch.Program);
         // As with `dotnet run`, arguments given for this run replace the launch profile's.

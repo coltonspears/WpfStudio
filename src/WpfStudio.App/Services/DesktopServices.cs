@@ -16,6 +16,7 @@ public sealed class UiDispatcher(Dispatcher dispatcher) : IUiDispatcher
     public Task InvokeAsync(Action action, CancellationToken cancellationToken = default) => dispatcher.InvokeAsync(action, DispatcherPriority.Normal, cancellationToken).Task;
 }
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0030", Justification = "This class owns shell navigation (C8).")]
 public sealed class DesktopService : IDesktopService
 {
     public void Reveal(string path)
@@ -32,6 +33,7 @@ public sealed class DesktopService : IDesktopService
     }
 }
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0030", Justification = "This class owns the clipboard and its contention handling (C8).")]
 public sealed class ClipboardService : IClipboardService
 {
     /// <summary>For views, which XAML creates out of the container's reach. It holds no state; view models take <see cref="IClipboardService"/>.</summary>
@@ -49,6 +51,7 @@ public sealed class ClipboardService : IClipboardService
 /// where callers must be. The tasks exist for the shared contract. Callers such as the close-and-save flow check state
 /// right after the answer, so deferring through the dispatcher would let other queued work run between the two.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0030", Justification = "This class owns the dialogs and the default owner window (A8).")]
 public sealed class DesktopDialogs(Func<Window?>? owner = null, IThemeService? theme = null) : IFileDialogService, IUserDialogService
 {
     private readonly Func<Window?> _owner = owner ?? ShownMainWindow;
