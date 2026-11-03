@@ -118,7 +118,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
                 {
                     bool loadedResources = CompiledPreview.PrepareApplication(request, assembly, optionalResources: _scenarioActivation is null);
                     if (!string.IsNullOrWhiteSpace(request.ApplicationResourcePath))
-                        _diagnostics.Add(new(loadedResources
+                        lock (_diagnostics) _diagnostics.Add(new(loadedResources
                             ? $"Built application resources '{request.ApplicationResourcePath}' loaded; App construction and startup are not executed. Rebuild to update those resources."
                             : $"The build contains no '{request.ApplicationResourcePath}' application resource; source preview uses the view's own resources.", "Information"));
                 }
@@ -470,7 +470,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
 
     private static bool IsAttached(DependencyProperty property, DependencyObject target)
     {
-        var wrapper = target.GetType().GetProperty(property.Name, BindingFlags.Public | BindingFlags.Instance);
+        var wrapper = PreviewDocument.Wrapper(target.GetType(), property.Name);
         if (wrapper?.SetMethod?.IsPublic != true || wrapper.PropertyType != property.PropertyType) return true;
         var descriptor = TypeDescriptor.GetProperties(target)[property.Name];
         return descriptor is null || DependencyPropertyDescriptor.FromProperty(descriptor)?.DependencyProperty != property;

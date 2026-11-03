@@ -78,6 +78,7 @@ public sealed class PreviewLayoutEditingTests(PreviewFixture fixture)
     [InlineData("<Grid><Border x:Name='Subject' Width='50' Height='40'><Border.RenderTransform><TranslateTransform X='5'/></Border.RenderTransform></Border></Grid>", "identity")]
     [InlineData("<Grid><Border x:Name='Subject' Width='{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=Grid}}' Height='40'/></Grid>", "expression")]
     [InlineData("<Grid><Border x:Name='Subject' Width='50' d:Width='60' Height='40'/></Grid>", "design-time")]
+    [InlineData("<Grid><p:WidthHidingProbe x:Name='Subject' Height='40'/></Grid>", "hides the framework Width")]
     [InlineData("<Grid><Button><Button.Template><ControlTemplate TargetType='Button'><Canvas><Border x:Name='Subject' Width='50' Height='40'/></Canvas></ControlTemplate></Button.Template></Button></Grid>", "Template")]
     public async Task UnsupportedSourceAndCoordinateContextsRemainExplicit(string content, string reason)
     {
@@ -153,6 +154,35 @@ public sealed class PreviewLayoutEditingTests(PreviewFixture fixture)
     }
 
     [Fact]
+    public async Task CapacityEvictsTheLeastRecentObservationEvenWhenARemovalFreedAnEarlierSlot()
+    {
+        var rendered = await Render($"<Canvas {Namespaces}>{string.Concat(Enumerable.Range(0, 66).Select(index => $"<Border x:Name='N{index}' Width='10' Height='10'/>"))}</Canvas>");
+        async Task<PreviewLayoutEditContext> Observe(int index)
+        {
+            var node = Assert.Single(rendered.Nodes, item => item.Name == "N" + index);
+            var context = (await Engine.InspectAsync(new(rendered.Version, node.Id), default)).LayoutEditing!;
+            Assert.True(context.Available, context.Status);
+            return context;
+        }
+        async Task<bool> Valid(PreviewLayoutEditContext context) =>
+            (await Engine.ValidateLayoutEditAsync(new(rendered.Version, context.NodeId, context.Token!, context.Surface), default)).Success;
+        var contexts = new PreviewLayoutEditContext[66];
+        for (int index = 0; index < 64; index++) contexts[index] = await Observe(index);
+        // An override makes N0 unavailable, dropping its observation and freeing the dictionary's first slot for the next new entry.
+        var edited = await Engine.SetPropertyAsync(new(rendered.Version, contexts[0].NodeId, "MaxWidth", "100"), default);
+        Assert.True(edited.Success, edited.Error);
+        Assert.False(edited.Inspection.LayoutEditing!.Available);
+        contexts[64] = await Observe(64);
+        Assert.Equal(contexts[1].Token, (await Observe(1)).Token); // Observing N1 again leaves N2 as the oldest.
+        contexts[65] = await Observe(65);
+        Assert.True(await Valid(contexts[64]));
+        Assert.True(await Valid(contexts[65]));
+        Assert.True(await Valid(contexts[1]));
+        Assert.False(await Valid(contexts[2]));
+        Assert.True(await Valid(contexts[3]));
+    }
+
+    [Fact]
     public async Task ActiveAnimationsDoNotProduceAnEditableContext()
     {
         var rendered = await Render($"<Grid {Namespaces}><p:LayoutAuthoringProbe x:Name='Subject' Width='80' Height='40'/></Grid>");
@@ -215,6 +245,11 @@ public sealed class PreviewLayoutEditingTests(PreviewFixture fixture)
         var node = Assert.Single(rendered.Nodes, item => item.Name == "Subject");
         return Assert.IsType<PreviewLayoutEditContext>((await Engine.InspectAsync(new(rendered.Version, node.Id), default)).LayoutEditing);
     }
+}
+
+public sealed class WidthHidingProbe : Border
+{
+    public new string? Width { get; set; }
 }
 
 public sealed class LayoutAuthoringProbe : Border

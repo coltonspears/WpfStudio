@@ -16,7 +16,8 @@ public sealed partial class PreviewEngine
     private readonly Dictionary<string, LayoutObservation> _layoutObservations = new(StringComparer.Ordinal);
     private sealed record LayoutObservation(PreviewLayoutEditContext Context, string Fingerprint,
         WeakReference<FrameworkElement> Target, WeakReference<Panel> Parent, object? Style, object? ParentStyle,
-        IReadOnlyList<object?> Locals);
+        IReadOnlyList<object?> Locals) { public long LastObserved { get; set; } }
+    private long _layoutObservationClock;
     private static readonly DependencyProperty[] LayoutElementProperties =
     [
         FrameworkElement.WidthProperty, FrameworkElement.HeightProperty, FrameworkElement.MarginProperty,
@@ -62,11 +63,14 @@ public sealed partial class PreviewEngine
             && previous.Target.TryGetTarget(out var previousTarget) && ReferenceEquals(previousTarget, target)
             && previous.Parent.TryGetTarget(out var previousParent) && ReferenceEquals(previousParent, parent)
             && SameLocals(previous.Locals, locals) && ReferenceEquals(previous.Style, style) && ReferenceEquals(previous.ParentStyle, parentStyle))
+        {
+            previous.LastObserved = ++_layoutObservationClock;
             return context with { Token = previous.Context.Token };
+        }
         context = context with { Token = Guid.NewGuid().ToString("N") };
         if (!_layoutObservations.ContainsKey(context.NodeId) && _layoutObservations.Count >= LayoutObservationLimit)
-            _layoutObservations.Remove(_layoutObservations.Keys.First());
-        _layoutObservations[context.NodeId] = new(context, fingerprint, new(element), new(parent), style, parentStyle, locals);
+            _layoutObservations.Remove(_layoutObservations.MinBy(observation => observation.Value.LastObserved).Key); // Enumeration order reuses slots freed by removals.
+        _layoutObservations[context.NodeId] = new(context, fingerprint, new(element), new(parent), style, parentStyle, locals) { LastObserved = ++_layoutObservationClock };
         return context;
     }
 
@@ -121,7 +125,7 @@ public sealed partial class PreviewEngine
                 if (_document.IsDesignTimeProperty(element, property))
                     return Unavailable($"{property.Name} is supplied by a design-time override; runtime source layout is not inferred from it.");
                 bool attached = property.OwnerType == typeof(Canvas) || property.OwnerType == typeof(Grid);
-                if (!attached && authored.Type.GetProperty(property.Name)?.DeclaringType != typeof(FrameworkElement))
+                if (!attached && PreviewDocument.Wrapper(authored.Type, property.Name)?.DeclaringType != typeof(FrameworkElement))
                     return Unavailable($"The authored type hides the framework {property.Name} wrapper; its source assignment is ambiguous.");
                 object value = element.GetValue(property);
                 localValues.Add(element.ReadLocalValue(property));

@@ -158,7 +158,7 @@ internal sealed partial class PreviewDocument
             owner = resolved;
         }
         DependencyProperty? property = null;
-        var wrapper = owner.IsAssignableFrom(type) ? owner.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance) : null;
+        var wrapper = owner.IsAssignableFrom(type) ? Wrapper(owner, propertyName) : null;
         if (wrapper?.SetMethod?.IsPublic == true && wrapper.GetIndexParameters().Length == 0
             && wrapper.DeclaringType?.GetField(propertyName + "Property", BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)?.GetValue(null) is DependencyProperty instance
             && instance.PropertyType == wrapper.PropertyType) property = instance;
@@ -193,13 +193,13 @@ internal sealed partial class PreviewDocument
             foreach (var child in element.Elements().Where(child => child.Name.Namespace != Design && child.Name.LocalName.EndsWith(".Inlines", StringComparison.Ordinal)).ToArray())
             {
                 var owner = ResolveType(child.Name.Namespace + child.Name.LocalName[..^8], assembly);
-                if (owner?.IsAssignableFrom(type) == true && owner.GetProperty("Inlines")?.DeclaringType == typeof(TextBlock)) child.Remove();
+                if (owner?.IsAssignableFrom(type) == true && Wrapper(owner, "Inlines")?.DeclaringType == typeof(TextBlock)) child.Remove();
             }
         if (itemsSource)
             foreach (var child in element.Elements().Where(child => child.Name.Namespace != Design && child.Name.LocalName.EndsWith(".Items", StringComparison.Ordinal)).ToArray())
             {
                 var owner = ResolveType(child.Name.Namespace + child.Name.LocalName[..^6], assembly);
-                if (owner?.IsAssignableFrom(type) == true && owner.GetProperty("Items")?.DeclaringType == typeof(ItemsControl)) child.Remove();
+                if (owner?.IsAssignableFrom(type) == true && Wrapper(owner, "Items")?.DeclaringType == typeof(ItemsControl)) child.Remove();
             }
         if (content == property.Name || textInlines && content == "Inlines" || itemsSource && content == "Items")
             foreach (var node in element.Nodes().Where(node => node is XText || node is XElement child && child.Name.Namespace != Design && !child.Name.LocalName.Contains('.')).ToArray()) node.Remove();

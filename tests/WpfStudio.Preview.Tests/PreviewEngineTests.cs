@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Threading;
 using WpfStudio.Contracts;
 using WpfStudio.PreviewHost;
@@ -300,6 +302,38 @@ public sealed class PreviewEngineTests(PreviewFixture fixture)
         Assert.Contains(properties, p => p.Name == "Padding" && !p.CanWriteSource);
         Assert.False((await Engine.ValidatePropertyAsync(new(snapshot.Version, snapshot.Nodes[0].Id, "IsTabStop", "False"), default)).Success);
     }
+
+    [Fact]
+    public async Task ControlHidingAWrapperWithAnotherTypeKeepsItsPreviewAndInspection()
+    {
+        var snapshot = await Engine.RenderAsync(Request($"<Grid {Namespace} xmlns:p='clr-namespace:WpfStudio.Preview.Tests;assembly=WpfStudio.Preview.Tests'><p:TagHidingProbe x:Name='Subject'/></Grid>"), default);
+        Assert.True(snapshot.Success, string.Join("\n", snapshot.Diagnostics.Select(d => d.Message)));
+        Assert.Contains(snapshot.Diagnostics, d => d.Property == "FrameworkElement.Tag");
+        var subject = Assert.Single(snapshot.Nodes, n => n.Name == "Subject");
+        var inspection = await Engine.InspectAsync(new(snapshot.Version, subject.Id), default);
+        Assert.DoesNotContain(inspection.Diagnostics, d => d.Message.StartsWith("Cannot inspect", StringComparison.Ordinal));
+        var tag = Assert.Single(inspection.Properties, p => p.Name == "FrameworkElement.Tag");
+        Assert.True(tag.IsAttached);
+        Assert.False(tag.CanWriteSource);
+        var edited = await Engine.SetPropertyAsync(new(snapshot.Version, subject.Id, "Width", "90"), default);
+        Assert.True(edited.Success, edited.Error);
+    }
+
+    [Fact]
+    public async Task BrushWithANullTransformRemainsAnEditableColor()
+    {
+        var snapshot = await Engine.RenderAsync(Request($"<Border {Namespace} x:Name='Subject'><Border.Background><SolidColorBrush Color='Red' Transform='{{x:Null}}'/></Border.Background></Border>"), default);
+        Assert.True(snapshot.Success, string.Join("\n", snapshot.Diagnostics.Select(d => d.Message)));
+        var inspection = await Engine.InspectAsync(new(snapshot.Version, Assert.Single(snapshot.Nodes, n => n.Name == "Subject").Id), default);
+        Assert.DoesNotContain(inspection.Diagnostics, d => d.Message.StartsWith("Cannot inspect", StringComparison.Ordinal));
+        Assert.Equal("#FFFF0000", Assert.Single(inspection.Properties, p => p.Name == "Background").EditableValue);
+    }
+}
+
+public sealed class TagHidingProbe : Border
+{
+    public TagHidingProbe() => SetBinding(FrameworkElement.TagProperty, new Binding("MissingProperty") { RelativeSource = RelativeSource.Self });
+    public new string? Tag { get; set; }
 }
 
 public sealed class PreviewFixture : IDisposable

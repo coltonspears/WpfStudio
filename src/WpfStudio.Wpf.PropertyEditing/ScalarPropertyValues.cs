@@ -78,7 +78,7 @@ public static class ScalarPropertyValues
         Type type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (type == typeof(object)) return null;
         if (type == typeof(Brush))
-            return value is SolidColorBrush brush && brush.Opacity == 1 && brush.Transform.Value.IsIdentity && brush.RelativeTransform.Value.IsIdentity
+            return value is SolidColorBrush brush && brush.Opacity == 1 && brush.Transform?.Value.IsIdentity != false && brush.RelativeTransform?.Value.IsIdentity != false
                 ? brush.Color.ToString(CultureInfo.InvariantCulture) : null;
         // Custom subclasses and application-supplied converters are never used.
         if (value.GetType() != type) return null;
