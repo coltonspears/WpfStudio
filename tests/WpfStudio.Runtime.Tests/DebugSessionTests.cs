@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using WpfStudio.Runtime.Debugging;
 
 namespace WpfStudio.Runtime.Tests;
 

@@ -4,12 +4,15 @@ using System.Windows.Controls;
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Wpf;
+using WpfStudio.Contracts;
 using WpfStudio.Runtime.Terminal;
 
 namespace WpfStudio.Runtime.Tests;
 
 public sealed class TerminalRenderingTests
 {
+    private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
+
     [Fact]
     public async Task BundledXtermRendersRealConPtyOutputAndSurvivesReparenting()
     {
@@ -62,7 +65,7 @@ public sealed class TerminalRenderingTests
                         if (!Directory.Exists(Path.Combine(root.FullName, "src/WpfStudio.Runtime"))) continue;
                         var report = Path.Combine(root.FullName, "artifacts/performance/terminal-feature.json");
                         Directory.CreateDirectory(Path.GetDirectoryName(report)!);
-                        await File.WriteAllTextAsync(report, JsonSerializer.Serialize(metrics, new JsonSerializerOptions { WriteIndented = true }));
+                        await File.WriteAllTextAsync(report, JsonSerializer.Serialize(metrics, IndentedJson));
                         break;
                     }
                     await session.WriteAsync("echo RENDER_READY\r", timeout.Token);
@@ -81,7 +84,7 @@ public sealed class TerminalRenderingTests
                     do { await Task.Delay(100, timeout.Token); rendered = await browser.ExecuteScriptAsync(transcript); } while (!rendered.Contains("FLOW_1000"));
                     Assert.Equal("true", await browser.ExecuteScriptAsync("search.findPrevious('RENDER_READY')"));
                     // Crash only this terminal's renderer, then verify controlled teardown rather than an ACK deadlock.
-                    _ = browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Page.crash", "{}").ContinueWith(_ => { }, TaskScheduler.Default);
+                    browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Page.crash", "{}").Forget();
                     while (second.Content is not TextBlock) await Task.Delay(100, timeout.Token);
                     Assert.Contains("renderer stopped", ((TextBlock)second.Content).Text);
                     await shellProcess.WaitForExitAsync(timeout.Token);

@@ -109,7 +109,8 @@ public sealed class CrashGuardTests
             var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
             void Answer()
             {
-                var prompt = System.Windows.PresentationSource.CurrentSources.OfType<System.Windows.Interop.HwndSource>()
+                // CurrentSources spans every thread, so a window another test owns can be listed here.
+                var prompt = System.Windows.PresentationSource.CurrentSources.OfType<System.Windows.Interop.HwndSource>().Where(source => source.CheckAccess())
                     .Select(source => source.RootVisual).OfType<System.Windows.Window>().FirstOrDefault(window => window.Title == "No theme");
                 if (prompt is null) { dispatcher.BeginInvoke(Answer, System.Windows.Threading.DispatcherPriority.Background); return; }
                 prompt.DialogResult = true;
@@ -243,7 +244,9 @@ public sealed class CrashGuardTests
         try
         {
             var reporter = new UnhandledFaultReporter(System.Windows.Threading.Dispatcher.CurrentDispatcher, directory, () => null, (_, _) => { });
+#pragma warning disable CA2201 // The guard under test classifies exactly this type; nothing throws it.
             Assert.False(reporter.Report(new OutOfMemoryException(), "process"));
+#pragma warning restore CA2201
         }
         finally { Directory.Delete(directory, true); }
     }

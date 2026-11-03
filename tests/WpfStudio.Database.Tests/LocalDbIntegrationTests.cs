@@ -15,6 +15,8 @@ public sealed class LocalDbFactAttribute : FactAttribute
 
 public sealed class LocalDbIntegrationTests
 {
+    private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
+
     [LocalDbFact]
     public async Task RealSqlServerHandlesSessionsResultsCapsErrorsAndCancellation()
     {
@@ -54,7 +56,7 @@ public sealed class LocalDbIntegrationTests
                     incrementalPrivateBytes = afterQuery - beforeQuery,
                     displayedResultSets = execution.Results.Count,
                     notes = "Informational process-private-memory delta after full GC. Includes .NET/xUnit test harness and SqlClient connection pooling. Excludes SQL Server LocalDB process, IDE UI, SQL pane rendering, and workspace worker. Three small result sets retained; large result overhead is separately bounded and tested. Run this test alone to avoid concurrent test allocations."
-                }, new JsonSerializerOptions { WriteIndented = true }));
+                }, IndentedJson));
             }
             Assert.DoesNotContain(execution.Messages, message => message.IsError);
             Assert.Equal(3, execution.Results.Count);

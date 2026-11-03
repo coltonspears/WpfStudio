@@ -1,11 +1,9 @@
-using System.Collections.ObjectModel;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Workbench;
-using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 

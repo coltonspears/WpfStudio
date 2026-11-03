@@ -11,7 +11,7 @@ public sealed class SolutionExplorerViewModelTests
     private static readonly string Root = Path.Combine(Path.GetTempPath(), "Shop");
     private static WorkspaceProject Project(string name, params string[] files) =>
         new(name.ToLowerInvariant(), name, Path.Combine(Root, name, name + ".csproj"), "net10.0", null, true,
-            files.Select(file => new WorkspaceFile(Path.Combine(Root, name, file), Path.GetFileName(file), file.EndsWith(".xaml") ? "Page" : "Compile")).ToArray());
+            files.Select(file => new WorkspaceFile(Path.Combine(Root, name, file), Path.GetFileName(file), file.EndsWith(".xaml", StringComparison.Ordinal) ? "Page" : "Compile")).ToArray());
 
     [Fact]
     public void TreeShowsProjectsUnderTheSolutionFiltersAndRestoresTheStateAfterwards()

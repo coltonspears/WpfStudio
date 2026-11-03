@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
-using WpfStudio.Contracts.Profiling;
 using WpfStudio.Runtime.Profiling;
 
 namespace WpfStudio.Shell.Tests;

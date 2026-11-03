@@ -152,9 +152,9 @@ public sealed partial class NativePreviewIntegrationTests
     private static IReadOnlyList<nint> ForeignChildren(nint bridge, int expectedProcess)
     {
         var children = new List<nint>();
-        EnumChildWindows(bridge, (hwnd, _) =>
+        EnumChildWindows(bridge, (hwnd, parameter) =>
         {
-            GetWindowThreadProcessId(hwnd, out uint processId);
+            _ = GetWindowThreadProcessId(hwnd, out uint processId);
             if (processId == (uint)expectedProcess && GetParent(hwnd) == bridge) children.Add(hwnd);
             return true;
         }, 0);

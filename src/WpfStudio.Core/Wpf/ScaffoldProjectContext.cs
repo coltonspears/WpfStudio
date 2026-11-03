@@ -11,7 +11,7 @@ public sealed record ScaffoldProjectContext(string RootNamespace, bool HasToolki
 
     public static async Task<ScaffoldProjectContext?> TryEvaluateAsync(string projectPath, CancellationToken token, TimeSpan? timeout = null)
     {
-        var start = new ProcessStartInfo("dotnet") { WorkingDirectory = Path.GetDirectoryName(projectPath)!, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new ProcessStartInfo("dotnet") { WorkingDirectory = Path.GetDirectoryName(projectPath)!, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var name in new[] { "MSBuildSDKsPath", "MSBUILD_EXE_PATH", "MSBuildExtensionsPath", "MSBuildExtensionsPath32", "MSBuildExtensionsPath64", "MSBuildToolsPath", "MSBuildBinPath", "DOTNET_MSBUILD_SDK_RESOLVER_SDKS_DIR", "DOTNET_MSBUILD_SDK_RESOLVER_SDKS_VER", "DOTNET_MSBUILD_SDK_RESOLVER_CLI_DIR" }) start.Environment.Remove(name);
         foreach (var arg in new[] { "msbuild", projectPath, "-nologo", "-getProperty:RootNamespace,LangVersion,TargetFramework,TargetFrameworks,ManagePackageVersionsCentrally,EnableDefaultCompileItems,EnableDefaultPageItems,EnableDefaultItems", "-getItem:PackageReference,PackageVersion" }) start.ArgumentList.Add(arg);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);

@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using WpfStudio.Contracts;
 using WpfStudio.Workspace.Xaml;
 using WorkspaceDiagnostic = WpfStudio.Contracts.WorkspaceDiagnostic;
 

@@ -1,5 +1,4 @@
 using WpfStudio.Contracts;
-using WpfStudio.Workspace;
 
 namespace WpfStudio.Workspace.Tests;
 

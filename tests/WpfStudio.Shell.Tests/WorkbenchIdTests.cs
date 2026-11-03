@@ -1,4 +1,3 @@
-using System.IO;
 using System.Text.RegularExpressions;
 using WpfStudio.App.Controls;
 using WpfStudio.App.Features.Workbench;

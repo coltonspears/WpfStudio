@@ -9,6 +9,7 @@ namespace WpfStudio.Core;
 /// </summary>
 public sealed class WorkspaceStateStore<T>(string folder, string directory)
 {
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
     private readonly string _directory = Path.Combine(directory, folder);
     private string PathFor(string workspacePath)
     {
@@ -38,7 +39,7 @@ public sealed class WorkspaceStateStore<T>(string folder, string directory)
         // Taken together, so the newest sequence number always belongs to the newest snapshot.
         lock (_snapshotGate)
         {
-            bytes = JsonSerializer.SerializeToUtf8Bytes(items.ToList(), new JsonSerializerOptions { WriteIndented = true });
+            bytes = JsonSerializer.SerializeToUtf8Bytes(items.ToList(), Indented);
             sequence = ++_sequence;
         }
         await _writeGate.WaitAsync(token).ConfigureAwait(false);

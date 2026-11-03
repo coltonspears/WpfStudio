@@ -85,7 +85,8 @@ public sealed partial class BuildService
         using var registration = cancellationToken.Register(() => ProcessRunner.Kill(process));
         async Task PumpAsync(StreamReader reader, bool error)
         {
-            await foreach (var line in BoundedLineReader.ReadLinesAsync(reader).ConfigureAwait(false)) output.Report(line, error);
+            // Killing the process ends these streams; cancelling the read would lose the last lines and fault the wait that drains them.
+            await foreach (var line in BoundedLineReader.ReadLinesAsync(reader, CancellationToken.None).ConfigureAwait(false)) output.Report(line, error);
         }
         var stdout = PumpAsync(process.StandardOutput, false);
         var stderr = PumpAsync(process.StandardError, true);
@@ -156,7 +157,7 @@ public sealed partial class BuildService
         var managed = launch.Program.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
         var start = new ProcessStartInfo(managed ? "dotnet" : launch.Program)
         {
-            WorkingDirectory = launch.WorkingDirectory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+            WorkingDirectory = launch.WorkingDirectory, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
         };
         if (managed) start.ArgumentList.Add(launch.Program);
         // As with `dotnet run`, arguments given for this run replace the launch profile's.

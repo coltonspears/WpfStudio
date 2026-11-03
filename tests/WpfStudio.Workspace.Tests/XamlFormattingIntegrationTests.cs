@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using WpfStudio.Contracts;
-using WpfStudio.Workspace;
 
 namespace WpfStudio.Workspace.Tests;
 

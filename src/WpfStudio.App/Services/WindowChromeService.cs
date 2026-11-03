@@ -26,11 +26,11 @@ public static class WindowChromeService
         {
             int dark = palette.IsLight ? 0 : 1;
             // Windows 10 builds before 19041 reject the documented id and know this attribute by the older one.
-            if (DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int)) != 0) DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkModeBefore20H1, ref dark, sizeof(int));
-            int round = 2; DwmSetWindowAttribute(hwnd, DwmCornerPreference, ref round, sizeof(int));
-            int border = ColorRef(palette.WindowFrame); DwmSetWindowAttribute(hwnd, DwmBorderColor, ref border, sizeof(int));
-            int caption = ColorRef(palette.Window); DwmSetWindowAttribute(hwnd, DwmCaptionColor, ref caption, sizeof(int));
-            int text = ColorRef(palette.Text); DwmSetWindowAttribute(hwnd, DwmTextColor, ref text, sizeof(int));
+            if (DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int)) != 0) _ = DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkModeBefore20H1, ref dark, sizeof(int));
+            int round = 2; _ = DwmSetWindowAttribute(hwnd, DwmCornerPreference, ref round, sizeof(int));
+            int border = ColorRef(palette.WindowFrame); _ = DwmSetWindowAttribute(hwnd, DwmBorderColor, ref border, sizeof(int));
+            int caption = ColorRef(palette.Window); _ = DwmSetWindowAttribute(hwnd, DwmCaptionColor, ref caption, sizeof(int));
+            int text = ColorRef(palette.Text); _ = DwmSetWindowAttribute(hwnd, DwmTextColor, ref text, sizeof(int));
         }
         catch (DllNotFoundException) { }
         catch (EntryPointNotFoundException) { }

@@ -399,7 +399,7 @@ public sealed class GitService
         cancellationToken.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo("git")
         {
-            WorkingDirectory = directory, UseShellExecute = false, CreateNoWindow = true,
+            WorkingDirectory = directory, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
             StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
             StandardInputEncoding = new UTF8Encoding(false)

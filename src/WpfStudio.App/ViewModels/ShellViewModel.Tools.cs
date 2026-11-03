@@ -1,10 +1,7 @@
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
 using WpfStudio.App.Features.Workbench;
-using WpfStudio.Runtime.Debugging;
-using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 

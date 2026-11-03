@@ -1,7 +1,6 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Windows;
-using System.Windows.Controls;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Wpf;
 

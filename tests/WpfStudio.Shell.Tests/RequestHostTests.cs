@@ -1,8 +1,5 @@
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Inspection;
-using WpfStudio.App.ViewModels;
-using WpfStudio.Core.Documents;
-using WpfStudio.Inspection.Protocol;
 
 namespace WpfStudio.Shell.Tests;
 

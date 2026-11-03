@@ -26,7 +26,7 @@ public sealed partial class ScaffoldingService
         if (ns.Split('.').Any(part => !Identifier().IsMatch(part) || Keywords.Contains(part))) throw new ArgumentException("The evaluated root namespace must contain valid C# identifiers.");
         var changes = new List<FileChange>();
         void Add(string file, string text) { var path = Path.Combine(directory, file); if (File.Exists(path)) throw new IOException($"{file} already exists."); changes.Add(new(path, "", text.Replace("\n", Environment.NewLine), $"Create {file}")); }
-        var vmName = name.EndsWith("ViewModel") ? name : name + "ViewModel";
+        var vmName = name.EndsWith("ViewModel", StringComparison.Ordinal) ? name : name + "ViewModel";
         if (kind is ScaffoldKind.ViewAndViewModel or ScaffoldKind.UserControl)
         {
             Add(name + ".xaml", ScaffoldTemplates.UserControlXaml(ns, name));

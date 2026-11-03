@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Database.Models;
-using WpfStudio.Database.Services;
 
 namespace WpfStudio.Database.ViewModels;
 

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO;
 using System.IO.Pipes;
 using StreamJsonRpc;
 using WpfStudio.Contracts;

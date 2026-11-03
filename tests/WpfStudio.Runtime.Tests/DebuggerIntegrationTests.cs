@@ -8,6 +8,8 @@ namespace WpfStudio.Runtime.Tests;
 
 public sealed class DebuggerIntegrationTests(ITestOutputHelper output)
 {
+    private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -149,7 +151,7 @@ internal class Program
                 TestHostWorkingSetDeltaBytes = testHostAtBreakpoint - beforeLaunch,
                 Limitations = "Single informational sample; adapter working set excludes debuggee and IDE UI. Test-host delta includes test runner, JIT, GC, and other concurrent test activity and is not an isolated IDE debugger feature cost."
             };
-            var json = JsonSerializer.Serialize(measurement, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(measurement, IndentedJson);
             output.WriteLine(json);
             var root = new DirectoryInfo(AppContext.BaseDirectory);
             while (root is not null && !File.Exists(Path.Combine(root.FullName, "WpfStudio.sln"))) root = root.Parent;

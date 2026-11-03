@@ -5,11 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using WpfStudio.App.Features.Debugging;
 using WpfStudio.App.Features.Documents;
-using WpfStudio.App.Features.Review;
-using WpfStudio.App.Features.WpfExplorer;
-using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.App.Services;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
@@ -262,7 +258,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(path);
             await RefreshWpfAsync();
             await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync();
-            _ = TaskList.RefreshCommand.ExecuteAsync(null);
+            TaskList.RefreshCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
             ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
             await SaveSettingsAsync();
         }
@@ -873,10 +869,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private void ToggleTheme() => ThemeName = ThemeName == "Dark" ? "Light" : "Dark";
     [RelayCommand] private void ShowTool(string? name)
     {
-        if (name == Workbenches.Packages) _ = OpenPackagesCommand.ExecuteAsync(null);
-        else if (name == Workbenches.Git) _ = OpenGitCommand.ExecuteAsync(null);
-        else if (name == Workbenches.Assistant) _ = OpenAssistantCommand.ExecuteAsync(null);
-        else if (name == Workbenches.Designer) _ = OpenDesignerCommand.ExecuteAsync(null);
+        if (name == Workbenches.Packages) OpenPackagesCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
+        else if (name == Workbenches.Git) OpenGitCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
+        else if (name == Workbenches.Assistant) OpenAssistantCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
+        else if (name == Workbenches.Designer) OpenDesignerCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name != null) ToolRequested?.Invoke(name);
     }
     [RelayCommand] private void SaveLayout() { LayoutSaveRequested?.Invoke(); Status = "Layout saved"; }

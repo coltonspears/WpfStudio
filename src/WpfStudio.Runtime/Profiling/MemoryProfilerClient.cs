@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using StreamJsonRpc;
-using WpfStudio.Contracts;
 using WpfStudio.Contracts.Profiling;
 using WpfStudio.Hosting;
 

@@ -8,6 +8,7 @@ namespace WpfStudio.Database.Services;
 
 public sealed class ConnectionProfileStore : IConnectionProfileStore
 {
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("WpfStudio.SqlConnections.v1");
@@ -33,7 +34,7 @@ public sealed class ConnectionProfileStore : IConnectionProfileStore
         {
             // Profiles nobody has opened keep their blob as it is, including one this account cannot unlock.
             var saved = profiles.Select(profile => new StoredProfile(profile, profile.RememberPassword && !profile.WindowsAuthentication ? profile.ProtectedPassword ?? Encrypt(profile.Password) : null));
-            await AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(saved, new JsonSerializerOptions { WriteIndented = true }), cancellationToken).ConfigureAwait(false);
+            await AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(saved, Indented), cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }

@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,7 +13,6 @@ using AvalonDock;
 using AvalonDock.Layout;
 using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.DependencyInjection;
-using WpfStudio.App;
 using WpfStudio.App.Behaviors;
 using WpfStudio.App.Controls;
 using WpfStudio.App.Services;
@@ -23,14 +21,9 @@ using WpfStudio.Contracts;
 using WpfStudio.Core;
 using WpfStudio.Core.Documents;
 using WpfStudio.Core.Wpf;
-using WpfStudio.Database;
-using WpfStudio.Database.Models;
-using WpfStudio.Database.Services;
 using WpfStudio.Database.Views;
 using WpfStudio.Runtime.Debugging;
-using WpfStudio.Runtime.Inspection;
 using WpfStudio.App.Features.Inspection;
-using WpfStudio.Runtime.Terminal;
 using WpfStudio.Workspace;
 using Xunit.Abstractions;
 
@@ -38,6 +31,14 @@ namespace WpfStudio.App.Tests;
 
 public sealed partial class ShellSmokeTests(ITestOutputHelper output)
 {
+    private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions ScenarioCatalogJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = true
+    };
+
     [Fact]
     public async Task LoadedShellBindsRealWorkspaceAndPreservesDockingDocumentsAndThemes()
     {
@@ -280,7 +281,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             shell.NewWpfItemCommand.Execute(null); await Idle(); Assert.True(shell.IsScaffoldOpen);
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/new-item.png"));
             shell.CancelScaffoldCommand.Execute(null);
-            _ = shell.ChangeReview.ShowAsync("Add customer view", [new FileChange("CustomerView.xaml", "<Grid />", "<Grid><TextBlock Text=\"Hello\" /></Grid>", "Add customer view")], "");
+            var review = shell.ChangeReview.ShowAsync("Add customer view", [new FileChange("CustomerView.xaml", "<Grid />", "<Grid><TextBlock Text=\"Hello\" /></Grid>", "Add customer view")], "");
             await Idle();
             var reviewDiff = Descendants<WpfStudio.App.Controls.Diff.DiffView>(window).Single(view => view.Name == "ReviewDiff");
             Assert.True(reviewDiff.IsVisible);
@@ -288,11 +289,13 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.Same(shell.Theme.Palette, reviewDiff.TryFindResource(Palette.ResourceKey));
             shell.Theme.Apply("Light"); Assert.Same(Palette.Light, reviewDiff.TryFindResource(Palette.ResourceKey));
             shell.Theme.Apply(shell.ThemeName); await Idle();
+            Assert.NotNull(shell.ChangeReview.SelectedChange);
             Assert.Equal(shell.ChangeReview.SelectedChange.After, reviewDiff.After);
             Assert.True(reviewDiff.ShowsSplit);
             Assert.Contains(reviewDiff.Layout!.Right, line => line.Kind == WpfStudio.App.Controls.Diff.DiffLineKind.Added && line.Text.Contains("Hello"));
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/change-preview.png"));
             shell.ChangeReview.CancelCommand.Execute(null);
+            await review.WaitAsync(TimeSpan.FromSeconds(20));
             await VerifyDesignerPaneFilterAsync(provider.GetRequiredService<IUiDispatcher>());
             await VerifySelectionAndFocusRequestsAsync(window, shell);
             await VerifyEditorPopupsAsync(root);
@@ -333,7 +336,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
                     MaximumDispatcherHeartbeatGapMs = Math.Round(maximumDispatcherGapMs),
                     CapturedUtc = DateTime.UtcNow
                 };
-                var json = JsonSerializer.Serialize(metrics, new JsonSerializerOptions { WriteIndented = true });
+                var json = JsonSerializer.Serialize(metrics, IndentedJson);
                 await File.WriteAllTextAsync(Path.Combine(root, "artifacts/performance/ui-measurements.json"), json);
                 output.WriteLine(json);
             }
@@ -612,7 +615,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             WorkerProcessId = client.WorkerProcessId,
             WorkerHostOverride = Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_WORKSPACE_HOST"),
             CapturedUtc = DateTime.UtcNow
-        }, new JsonSerializerOptions { WriteIndented = true }));
+        }, IndentedJson));
     }
 
     private static async Task VerifyXamlSymbolsAsync(string root, string data, MainWindow window, ShellViewModel shell, TestDialogs dialogs)
@@ -766,7 +769,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         {
             Scope = "Loaded-window workstation sample: C#/XAML reference search with two XAML files after project load; caches may be warm.",
             ReferenceMs = referenceMs, CapturedUtc = DateTime.UtcNow
-        }, new JsonSerializerOptions { WriteIndented = true }));
+        }, IndentedJson));
         // The assertions above establish preservation of unsaved work. Restore
         // this isolated fixture so later smoke workflows can switch workspaces.
         model.State.Content = modelSource;
@@ -1125,7 +1128,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         {
             Scope = "Loaded-window workstation sample: handler completion after project load and initial analysis; caches may be warm.",
             CompletionMs = completionMs, CapturedUtc = DateTime.UtcNow
-        }, new JsonSerializerOptions { WriteIndented = true }));
+        }, IndentedJson));
     }
 
     private static async Task VerifyProjectXamlAnalysisAsync(string root, string data, MainWindow window, ShellViewModel shell)
@@ -1192,7 +1195,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Scope = "Loaded-window workstation sample: two projects sharing one XAML file. Explicit check follows workspace loading; compilation and file caches may be warm.",
             ProjectCount = 2, XamlFileContexts = 2, InitialProjectScanMs = initialScanMs,
             ClosedModelChangeToDiagnosticsMs = changedSourceMs, CapturedUtc = DateTime.UtcNow
-        }, new JsonSerializerOptions { WriteIndented = true }));
+        }, IndentedJson));
     }
 
     private static async Task VerifyRuntimeInspectionAsync(string root, string data, MainWindow window, DockingManager manager, ShellViewModel shell)
@@ -1731,12 +1734,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         {
             version = 1,
             views = new[] { new { path = "Orders.xaml", scenarios = declarations } }
-        }, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-            WriteIndented = true
-        }));
+        }, ScenarioCatalogJson));
         await shell.OpenDocumentAsync(path);
         var editor = shell.ActiveDocument!;
         var model = shell.Designer;
@@ -1817,7 +1815,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             ScenarioRenderMs = timings,
             PreviewHostOverride = Environment.GetEnvironmentVariable("WPFSTUDIO_PREVIEW_HOST_UNDER_TEST"),
             CapturedUtc = DateTime.UtcNow
-        }, new JsonSerializerOptions { WriteIndented = true }));
+        }, IndentedJson));
         Assert.True(await shell.CloseDocumentAsync(editor));
         pane.Hide();
 

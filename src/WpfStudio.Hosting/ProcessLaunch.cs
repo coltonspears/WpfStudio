@@ -12,7 +12,7 @@ public static class ProcessLaunch
         var managed = program.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
         var start = new ProcessStartInfo(managed ? dotNetPath ?? "dotnet" : program)
         {
-            WorkingDirectory = workingDirectory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+            WorkingDirectory = workingDirectory, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
         };
         if (managed) start.ArgumentList.Add(program);
         foreach (var argument in arguments) start.ArgumentList.Add(argument);

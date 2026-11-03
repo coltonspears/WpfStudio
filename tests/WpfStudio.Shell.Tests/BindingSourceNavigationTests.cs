@@ -1,6 +1,5 @@
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Inspection;
-using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Inspection.Protocol;
 

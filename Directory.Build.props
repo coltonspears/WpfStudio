@@ -5,17 +5,35 @@
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
-  <!-- Product code only. Fixtures, samples and tools stand in for user projects or target frameworks these do not need to cover. -->
-  <PropertyGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">
+  <!-- samples/, tests/*/Fixtures and tools/ stay out of everything below. They stand in for user projects or fixed target frameworks (net48, net8.0), so a warning there is not a defect of ours, and they must keep building as a user would see them. -->
+  <PropertyGroup>
+    <IsProductCode Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">true</IsProductCode>
+    <IsTestCode Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)tests')) And !$(MSBuildProjectDirectory.Contains('\Fixtures\'))">true</IsTestCode>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(IsProductCode)' == 'true' Or '$(IsTestCode)' == 'true'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Vulnerability advisories stay visible warnings. As errors, a newly published advisory, or the advisory feed being unreachable (NU1900), would break every restore with no code change. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
-    <!-- async void, sync-over-async and unobserved fire-and-forget. -->
-    <WarningsAsErrors>$(WarningsAsErrors);VSTHRD100;VSTHRD002;VSTHRD110</WarningsAsErrors>
-    <!-- 001 and 003 only apply with JoinableTaskFactory, which this code does not use. 103 is mostly Cancel versus CancelAsync, and 200 is a naming preference. -->
-    <NoWarn>$(NoWarn);VSTHRD001;VSTHRD003;VSTHRD103;VSTHRD200</NoWarn>
+    <!-- analyzers.globalconfig curates this set. Without AnalysisModeStyle, Recommended would also raise the IDE style rules. -->
+    <AnalysisMode>Recommended</AnalysisMode>
+    <AnalysisModeStyle>Default</AnalysisModeStyle>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- IDE0005 only runs when the compiler parses doc comments. The XML is a side effect and stays in obj, out of the output and every published package. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <CopyDocumentationFileToOutputDirectory>false</CopyDocumentationFileToOutputDirectory>
+    <PublishDocumentationFile>false</PublishDocumentationFile>
   </PropertyGroup>
-  <ItemGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">
-    <!-- Compile-time only: nothing from this package reaches the output of any project, including those loaded into inspected applications. -->
+  <!-- Analyzer packages are compile-time only: nothing from them reaches the output of any project, including those loaded into inspected applications. -->
+  <ItemGroup Condition="'$(IsProductCode)' == 'true' Or '$(IsTestCode)' == 'true'">
+    <GlobalAnalyzerConfigFiles Include="$(MSBuildThisFileDirectory)analyzers.globalconfig" />
+    <PackageReference Include="WpfAnalyzers" Version="4.1.1" PrivateAssets="all" />
+  </ItemGroup>
+  <!-- Product code only: test harnesses own their STA loops and launch their own fixtures, so these rules have nothing to protect there. -->
+  <ItemGroup Condition="'$(IsProductCode)' == 'true'">
     <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" Visible="false" />
   </ItemGroup>
 </Project>

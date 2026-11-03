@@ -1,5 +1,4 @@
 using WpfStudio.Contracts.Profiling;
-using WpfStudio.Profiling;
 
 namespace WpfStudio.Profiling.Tests;
 
@@ -43,7 +42,7 @@ public sealed class HeapExplorationTests
         Assert.Equal(1, Assert.Single(flow.Nodes, n => n.Kind == "Unrooted").Count);
         // The pinned statics holder array is folded into the static-field root and never shown as an owner.
         Assert.DoesNotContain(flow.Nodes, n => n.Label.Contains("Object[]"));
-        var list = Assert.Single(flow.Nodes, n => n.Label.StartsWith("List<"));
+        var list = Assert.Single(flow.Nodes, n => n.Label.StartsWith("List<", StringComparison.Ordinal));
         Assert.Equal(2, Assert.Single(flow.Links, l => l.FromId == cache.Id && l.ToId == list.Id).Count);
         var array = Assert.Single(flow.Nodes, n => n.Label == "Page[]");
         Assert.Contains("_items", Assert.Single(flow.Links, l => l.FromId == list.Id && l.ToId == array.Id).Label);
@@ -166,10 +165,10 @@ public sealed class HeapExplorationTests
             [new(2, "FinalizerQueue (slot 0x1)", "FinalizerQueue"), new(0, "PinnedHandle (slot 0x2)", "PinnedHandle", IsPinned: true)]));
         var (paths, _) = analysis.GetRootPaths(2);
         Assert.Equal(2, paths.Length);
-        Assert.Contains(paths[0].References, r => r.Label.StartsWith("Static "));
+        Assert.Contains(paths[0].References, r => r.Label.StartsWith("Static ", StringComparison.Ordinal));
         var graph = analysis.BuildGraph(new(2, HiddenRootKinds: ["FinalizerQueue"]));
         Assert.DoesNotContain(graph.References, r => r.Kind == "FinalizerQueue");
-        Assert.Contains(graph.References, r => r.Label.StartsWith("Static "));
+        Assert.Contains(graph.References, r => r.Label.StartsWith("Static ", StringComparison.Ordinal));
         var focus = Assert.Single(graph.Nodes, n => n.IsFocus);
         Assert.Equal(2, focus.IncomingCount); Assert.Equal(0, focus.OutgoingCount);
         var owners = analysis.GetNeighbors(new(2, Incoming: true));

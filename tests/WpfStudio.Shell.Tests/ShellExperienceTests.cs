@@ -1,5 +1,4 @@
 using WpfStudio.App.Features.Workbench;
-using WpfStudio.App.ViewModels;
 
 namespace WpfStudio.Shell.Tests;
 

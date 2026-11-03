@@ -1,4 +1,3 @@
-using WpfStudio.Contracts;
 using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.Core.Tests;

@@ -1,5 +1,3 @@
-using WpfStudio.Contracts;
-
 namespace WpfStudio.App.Services;
 
 /// <summary>

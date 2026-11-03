@@ -5,7 +5,6 @@ using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
-using WpfStudio.Runtime.Debugging;
 using WpfStudio.Workspace;
 
 namespace WpfStudio.Shell.Tests;

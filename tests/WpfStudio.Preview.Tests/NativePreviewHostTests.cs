@@ -152,7 +152,7 @@ public sealed class NativePreviewHostTests
         var open = await Observation();
         Assert.True(open.PopupOpen);
         Assert.NotEqual(0, open.PopupHandle);
-        HostNativeTestMethods.GetWindowThreadProcessId(new nint(open.PopupHandle), out uint popupOwner);
+        _ = HostNativeTestMethods.GetWindowThreadProcessId(new nint(open.PopupHandle), out uint popupOwner);
         Assert.Equal((uint)host.Process.Id, popupOwner);
         Assert.True((await host.Rpc.UpdateSurfaceAsync(attach with { Sequence = 2, Action = PreviewSurfaceAction.Detach }, default)).Success);
         await Command("observe-again");
@@ -381,7 +381,7 @@ public sealed class DisposalHangPreviewControl : FrameworkElement
     private bool _overridden;
     public static readonly DependencyProperty MarkerPathProperty = DependencyProperty.Register(nameof(MarkerPath), typeof(string),
         typeof(DisposalHangPreviewControl), new PropertyMetadata(null));
-    public string MarkerPath { get => (string)GetValue(MarkerPathProperty); set => SetValue(MarkerPathProperty, value); }
+    public string? MarkerPath { get => (string?)GetValue(MarkerPathProperty); set => SetValue(MarkerPathProperty, value); }
     public static readonly DependencyProperty ProbeValueProperty = DependencyProperty.Register(nameof(ProbeValue), typeof(string),
         typeof(DisposalHangPreviewControl), new PropertyMetadata("original", (target, args) =>
         {
@@ -389,7 +389,7 @@ public sealed class DisposalHangPreviewControl : FrameworkElement
             if (Equals(args.NewValue, "override")) control._overridden = true;
             else if (control._overridden && Equals(args.NewValue, "original"))
             {
-                File.WriteAllText(control.MarkerPath, Environment.StackTrace);
+                File.WriteAllText(control.MarkerPath ?? throw new InvalidOperationException("MarkerPath must be set."), Environment.StackTrace);
                 Thread.Sleep(Timeout.Infinite);
             }
         }));
@@ -627,9 +627,9 @@ internal sealed class HostNativeTestBridge : IDisposable
     public nint ChildFor(int pid)
     {
         nint result = 0;
-        HostNativeTestMethods.EnumChildWindows(Handle, (child, _) =>
+        HostNativeTestMethods.EnumChildWindows(Handle, (child, parameter) =>
         {
-            HostNativeTestMethods.GetWindowThreadProcessId(child, out uint owner);
+            _ = HostNativeTestMethods.GetWindowThreadProcessId(child, out uint owner);
             if (owner != pid) return true;
             result = child;
             return false;

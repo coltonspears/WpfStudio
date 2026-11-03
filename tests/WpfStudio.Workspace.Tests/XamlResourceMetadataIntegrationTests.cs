@@ -1,5 +1,3 @@
-using WpfStudio.Workspace;
-
 namespace WpfStudio.Workspace.Tests;
 
 public sealed class XamlResourceMetadataIntegrationTests

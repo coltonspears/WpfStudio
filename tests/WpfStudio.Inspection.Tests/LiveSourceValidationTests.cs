@@ -47,9 +47,9 @@ public sealed class LiveSourceValidationTests
         var inheritedResult = await session.ValidateSourcePropertyAsync(Request(inherited, Property(inherited, "SharedValue"), "Revised"), timeout.Token);
         Assert.True(inheritedResult.Success, inheritedResult.Error);
         Assert.EndsWith("SourceAddOwnerProbe", inheritedResult.Property!.OwnerType); // Original registering owner differs.
-        var authoredBase = Assert.Single(inheritedResult.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceAddOwnerProbe"));
+        var authoredBase = Assert.Single(inheritedResult.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceAddOwnerProbe", StringComparison.Ordinal));
         Assert.Equal("SharedValue", authoredBase.ContentProperty);
-        var authoredDerived = Assert.Single(inheritedResult.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceInheritedProbe"));
+        var authoredDerived = Assert.Single(inheritedResult.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceInheritedProbe", StringComparison.Ordinal));
         Assert.Equal("Width", authoredDerived.ContentProperty);
         Assert.DoesNotContain(inheritedResult.Property.AuthoredTargets!, candidate => candidate.Type == "System.Windows.FrameworkElement");
         var runtimeOnly = await session.ValidateSourcePropertyAsync(Request(inherited, Property(inherited, "RuntimeOnly"), "Revised"), timeout.Token);
@@ -151,9 +151,9 @@ public sealed class LiveSourceValidationTests
         Assert.True(valid.Success, valid.Error);
         Assert.False(valid.Property!.IsAttached);
         Assert.EndsWith("SourceRedeclaredValueProbe", valid.Property.OwnerType);
-        Assert.Contains(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceRedeclaredValueProbe"));
-        Assert.Contains(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceValueBaseProbe"));
-        Assert.DoesNotContain(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceHidingValueProbe"));
+        Assert.Contains(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceRedeclaredValueProbe", StringComparison.Ordinal));
+        Assert.Contains(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceValueBaseProbe", StringComparison.Ordinal));
+        Assert.DoesNotContain(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceHidingValueProbe", StringComparison.Ordinal));
         await session.DisconnectAsync(timeout.Token);
     }
 

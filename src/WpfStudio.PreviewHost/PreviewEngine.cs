@@ -223,7 +223,9 @@ public sealed class PreviewEngine : IPreviewRpc, IDisposable
         if (_scene.IsClosed) return;
         _scene.IsClosed = true;
         if (_dispatcher.CheckAccess()) ClearPreview();
+#pragma warning disable RS0030 // Dispose is synchronous, and the preview must clear on its thread before the log and inspector below go. Program bounds a blocked dispatcher with its exit deadline.
         else if (!_dispatcher.HasShutdownStarted) _dispatcher.Invoke(ClearPreview);
+#pragma warning restore RS0030
         _log.Dispose();
         _inspector.Dispose();
         _assemblies.Dispose();

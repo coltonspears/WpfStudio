@@ -95,7 +95,7 @@ public sealed partial class NativePreviewSurface
     private static bool OwnedNativeWindow(nint handle, int processId)
     {
         if (processId <= 0 || handle == 0 || !Native.IsWindow(handle)) return false;
-        NavigationNative.GetWindowThreadProcessId(handle, out uint owner);
+        _ = NavigationNative.GetWindowThreadProcessId(handle, out uint owner);
         return owner == (uint)processId;
     }
 

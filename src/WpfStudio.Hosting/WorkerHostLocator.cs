@@ -1,5 +1,3 @@
-using System.IO;
-
 namespace WpfStudio.Hosting;
 
 /// <summary>Finds a worker's executable: packaged beside the application, or under a source checkout for development and test runs.</summary>

@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Data;
@@ -240,22 +239,6 @@ internal sealed partial class RunningInspector(BindingTraceBuffer traces, Wpf.Di
             current = current is Visual or Visual3D ? VisualTreeHelper.GetParent(current) ?? LogicalTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current);
         }
         return false;
-    }
-
-    private static IReadOnlyList<DependencyProperty> Properties(DependencyObject target)
-    {
-        var result = new HashSet<DependencyProperty>();
-        var local = target.GetLocalValueEnumerator();
-        while (local.MoveNext() && result.Count < 512) result.Add(local.Current.Property);
-        for (Type? current = target.GetType(); current is not null && result.Count < 512; current = current.BaseType)
-            foreach (var field in current.GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly))
-            {
-                if (field.FieldType != typeof(DependencyProperty)) continue;
-                try { if (field.GetValue(null) is DependencyProperty property) result.Add(property); }
-                catch (Exception) { }
-                if (result.Count == 512) break;
-            }
-        return result.ToArray();
     }
 
     private static string PropertyName(DependencyObject target, DependencyProperty property)

@@ -3,13 +3,11 @@ using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
 using AvalonDock;
 using AvalonDock.Controls;
 using AvalonDock.Core;
 using AvalonDock.Layout;
 using AvalonDock.Serializer.Xml;
-using AvalonDock.Themes;
 using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
@@ -22,7 +20,7 @@ public static class DockingBehavior
 {
     public static readonly DependencyProperty ShellProperty = DependencyProperty.RegisterAttached("Shell", typeof(ShellViewModel), typeof(DockingBehavior), new PropertyMetadata(null, ShellChanged));
     private static readonly DependencyProperty ContextProperty = DependencyProperty.RegisterAttached("Context", typeof(Context), typeof(DockingBehavior));
-    public static void SetShell(DependencyObject target, ShellViewModel value) => target.SetValue(ShellProperty, value);
+    public static void SetShell(DependencyObject target, ShellViewModel? value) => target.SetValue(ShellProperty, value);
     public static ShellViewModel? GetShell(DependencyObject target) => (ShellViewModel?)target.GetValue(ShellProperty);
     public static void RestoreLayout(DockingManager manager) => (manager.GetValue(ContextProperty) as Context)?.Restore();
     private static void ShellChanged(DependencyObject target, DependencyPropertyChangedEventArgs args)

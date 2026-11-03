@@ -1,4 +1,3 @@
-using System.Text;
 using System.Xml;
 using Microsoft.CodeAnalysis;
 using WpfStudio.Contracts;

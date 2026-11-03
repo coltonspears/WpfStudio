@@ -107,7 +107,7 @@ public sealed class ResourceStyleReaderTests(PreviewFixture fixture)
         var result = ResourceStyleReader.Capture(inner, Control.BackgroundProperty);
         Assert.Contains(result.Declarations, item => item.Kind == "ControlTemplate" && item.Description == "Current ControlTemplate");
         Assert.Contains(result.Declarations, item => item.Kind == "ControlTemplate" && item.Description == "Templated parent's ControlTemplate");
-        Assert.Contains(result.Declarations, item => item.Kind == "Setter" && item.TargetName == "Inner" && item.Property!.EndsWith(".Background"));
+        Assert.Contains(result.Declarations, item => item.Kind == "Setter" && item.TargetName == "Inner" && item.Property!.EndsWith(".Background", StringComparison.Ordinal));
         return true;
     });
 

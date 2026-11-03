@@ -1,5 +1,4 @@
 using WpfStudio.App.Features.Inspection;
-using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 

@@ -127,7 +127,7 @@ public sealed class LayoutReaderTests(PreviewFixture fixture)
         var snapshot = LayoutReader.Capture(child, root);
 
         Assert.True(snapshot.Available, snapshot.Status);
-        var ancestor = Assert.Single(snapshot.Overlays, overlay => overlay.Kind == "clip-bounds" && overlay.Label.StartsWith("Ancestor"));
+        var ancestor = Assert.Single(snapshot.Overlays, overlay => overlay.Kind == "clip-bounds" && overlay.Label.StartsWith("Ancestor", StringComparison.Ordinal));
         Assert.Contains("approximation", ancestor.Label);
         AssertRectangle(ancestor, new Rect(0, 0, 320, 180));
         Assert.Contains(snapshot.Notices, notice => notice.Contains("exact visible region"));
@@ -181,7 +181,7 @@ public sealed class LayoutReaderTests(PreviewFixture fixture)
         var snapshot = LayoutReader.Capture(child, root);
         Assert.True(snapshot.Available);
         Assert.Equal(visibility.ToString(), Fact(snapshot, "Visibility"));
-        Assert.Contains(snapshot.Notices, notice => notice.StartsWith(visibility.ToString()));
+        Assert.Contains(snapshot.Notices, notice => notice.StartsWith(visibility.ToString(), StringComparison.Ordinal));
         if (visibility == Visibility.Collapsed) Assert.Empty(snapshot.Overlays);
         return true;
     });

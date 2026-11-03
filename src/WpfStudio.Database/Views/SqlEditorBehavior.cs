@@ -20,8 +20,8 @@ public static class SqlEditorBehavior
     public static readonly DependencyProperty SelectionProperty = DependencyProperty.RegisterAttached("Selection", typeof(string), typeof(SqlEditorBehavior), new FrameworkPropertyMetadata("", FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
     public static readonly DependencyProperty SelectionLineProperty = DependencyProperty.RegisterAttached("SelectionLine", typeof(int), typeof(SqlEditorBehavior), new FrameworkPropertyMetadata(1, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
     public static readonly DependencyProperty CompletionsProperty = DependencyProperty.RegisterAttached("Completions", typeof(IEnumerable), typeof(SqlEditorBehavior));
-    public static string GetText(DependencyObject value) => (string)value.GetValue(TextProperty);
-    public static void SetText(DependencyObject value, string text) => value.SetValue(TextProperty, text);
+    public static string? GetText(DependencyObject value) => (string?)value.GetValue(TextProperty);
+    public static void SetText(DependencyObject value, string? text) => value.SetValue(TextProperty, text);
     public static string GetSelection(DependencyObject value) => (string)value.GetValue(SelectionProperty);
     public static void SetSelection(DependencyObject value, string text) => value.SetValue(SelectionProperty, text);
     public static int GetSelectionLine(DependencyObject value) => (int)value.GetValue(SelectionLineProperty);
