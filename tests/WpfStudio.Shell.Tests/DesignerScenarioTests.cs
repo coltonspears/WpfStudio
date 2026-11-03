@@ -227,7 +227,8 @@ public sealed class DesignerScenarioTests
         await context.WriteScenariosAsync(Data("Populated"));
         await context.Dispatcher.WaitForPostAsync();
         context.Dispatcher.Drain();
-        for (int attempt = 0; context.Model.IsCurrent && attempt < 100; attempt++) await Task.Delay(10);
+        // The two change one after the other on another thread, so wait for both.
+        for (int attempt = 0; (context.Model.IsCurrent || context.Model.Image is not null) && attempt < 100; attempt++) await Task.Delay(10);
         Assert.False(context.Model.IsCurrent);
         Assert.Null(context.Model.Image);
         await context.Model.CloseAsync();

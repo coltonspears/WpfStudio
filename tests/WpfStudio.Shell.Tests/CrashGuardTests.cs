@@ -109,7 +109,8 @@ public sealed class CrashGuardTests
             var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
             void Answer()
             {
-                var prompt = System.Windows.PresentationSource.CurrentSources.OfType<System.Windows.Interop.HwndSource>()
+                // CurrentSources spans every thread, so a window another test owns can be listed here.
+                var prompt = System.Windows.PresentationSource.CurrentSources.OfType<System.Windows.Interop.HwndSource>().Where(source => source.CheckAccess())
                     .Select(source => source.RootVisual).OfType<System.Windows.Window>().FirstOrDefault(window => window.Title == "No theme");
                 if (prompt is null) { dispatcher.BeginInvoke(Answer, System.Windows.Threading.DispatcherPriority.Background); return; }
                 prompt.DialogResult = true;
