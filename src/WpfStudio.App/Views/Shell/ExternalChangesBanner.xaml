@@ -1,0 +1,71 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.ExternalChangesBanner"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff">
+  <Border Margin="6,0,6,6" Padding="14,10,12,10" CornerRadius="6" BorderThickness="1"
+          Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource WarningBrush}" AutomationProperties.Name="Files changed outside WpfStudio">
+    <StackPanel>
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button Content="Load all disk versions" Command="{Binding ExternalChanges.LoadAllDiskVersionsCommand}" Margin="0,0,6,0"
+                  ToolTip="Every listed editor shows its file as it is on disk now. Unsaved edits in those files are discarded; deleted files' tabs close." />
+          <Button Content="Keep all my versions" Command="{Binding ExternalChanges.KeepAllEditorVersionsCommand}" Margin="0,0,6,0"
+                  ToolTip="Every listed editor keeps its text and is marked unsaved (•). Saving replaces the disk versions with yours." />
+          <Button Style="{StaticResource ToolbarButton}" Content="{Binding ExternalChanges.ToggleText}" Command="{Binding ExternalChanges.ToggleCommand}" />
+        </StackPanel>
+        <c:Glyph Kind="Warning" Width="18" Height="18" Margin="0,1,10,0" VerticalAlignment="Top" Foreground="{DynamicResource WarningBrush}" />
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock Text="{Binding ExternalChanges.Title}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{Binding ExternalChanges.Hint}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,12,0" />
+        </StackPanel>
+      </DockPanel>
+      <StackPanel Visibility="{Binding ExternalChanges.IsExpanded, Converter={StaticResource BooleanToVisibility}}" Margin="28,8,0,0">
+        <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto">
+          <ItemsControl ItemsSource="{Binding ExternalChanges.Changes}" Focusable="False">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,8,0,8">
+                  <StackPanel>
+                    <DockPanel>
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button Style="{StaticResource AccentButton}" Content="{Binding LoadLabel}" ToolTip="{Binding LoadConsequence}" Margin="0,0,6,0"
+                                Command="{Binding DataContext.ExternalChanges.LoadDiskVersionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                        <Button Content="Keep my version" ToolTip="{Binding KeepConsequence}" Margin="0,0,6,0"
+                                Command="{Binding DataContext.ExternalChanges.KeepEditorVersionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                        <ToggleButton Style="{StaticResource ToolbarToggle}" Content="Compare" IsChecked="{Binding IsComparing}" IsEnabled="{Binding CanCompare}"
+                                      ToolTip="Show what loading the disk version would change in the editor" />
+                      </StackPanel>
+                      <StackPanel>
+                        <TextBlock TextTrimming="CharacterEllipsis">
+                          <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" />
+                          <Run Text="{Binding Summary, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}" />
+                        </TextBlock>
+                        <TextBlock Text="{Binding Situation}" Margin="0,2,0,0" />
+                        <TextBlock Text="{Binding Path}" FontSize="11" Foreground="{DynamicResource SubtleBrush}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0" ToolTip="{Binding Path}" />
+                      </StackPanel>
+                    </DockPanel>
+                    <!-- Both choices are spelled out, not hidden behind Yes and No. -->
+                    <Border Margin="0,6,0,0" Padding="8,5" CornerRadius="4" Background="{DynamicResource SurfaceBrush}">
+                      <StackPanel>
+                        <TextBlock Text="{Binding LoadConsequence}" TextWrapping="Wrap" FontSize="11.5" />
+                        <TextBlock Text="{Binding KeepConsequence}" TextWrapping="Wrap" FontSize="11.5" Margin="0,2,0,0" />
+                      </StackPanel>
+                    </Border>
+                    <diff:DiffView Height="280" Margin="0,8,0,0"
+                                   Visibility="{Binding IsComparing, Converter={StaticResource BooleanToVisibility}}"
+                                   Before="{Binding CompareBefore, Mode=OneWay}" After="{Binding CompareAfter, Mode=OneWay}" FilePath="{Binding Path}"
+                                   OldLabel="In WpfStudio (your version)" NewLabel="On disk (changed outside)" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+        <CheckBox IsChecked="{Binding ExternalChanges.AutoReloadUnchangedFiles}" Margin="0,6,0,0"
+                  Content="Load files without unsaved edits automatically. Only files you have edited will be listed here."
+                  ToolTip="When this is on, a file you have not edited in WpfStudio simply shows its new disk version, as after a Git checkout." />
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

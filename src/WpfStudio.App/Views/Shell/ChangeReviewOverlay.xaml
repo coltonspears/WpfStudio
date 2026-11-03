@@ -1,0 +1,98 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.ChangeReviewOverlay"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:review="clr-namespace:WpfStudio.App.Features.Review"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff">
+  <!-- Near full-window review: a file list with per-file line counts and a syntax-highlighted
+       split or inline diff focused on the changed lines. -->
+  <Grid Background="{DynamicResource OverlayBrush}">
+    <Grid.InputBindings>
+      <KeyBinding Key="Escape" Command="{Binding ChangeReview.CancelCommand}" />
+      <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding ChangeReview.AcceptCommand}" />
+    </Grid.InputBindings>
+    <Border Style="{StaticResource OverlayCard}" Margin="20,16" Padding="0" AutomationProperties.Name="Change review">
+      <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="22,14,14,12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+          <StackPanel>
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding ChangeReview.CancelCommand}" ToolTip="Cancel (Esc)" VerticalAlignment="Top" />
+              <Border DockPanel.Dock="Right" Style="{StaticResource Badge}" Margin="12,0,10,0" Padding="8,2">
+                <TextBlock Text="{Binding ChangeReview.Summary}" Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold" FontSize="11" />
+              </Border>
+              <c:Glyph DockPanel.Dock="Left" Kind="Diff" Width="20" Height="20" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Center" />
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="{Binding ChangeReview.Title}" FontSize="18" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="Nothing changes until you apply. Applying edits the open buffers as one undoable step; save normally to write files." Style="{StaticResource Caption}" Margin="0,2,0,0" />
+              </StackPanel>
+            </DockPanel>
+            <Border Background="{DynamicResource WarningSoftBrush}" CornerRadius="6" Padding="10,7" Margin="0,10,0,0" Visibility="{Binding ChangeReview.Warnings, Converter={StaticResource Presence}}">
+              <DockPanel>
+                <c:Glyph DockPanel.Dock="Left" Kind="Warning" Width="16" Height="16" Margin="0,0,8,0" Foreground="{DynamicResource WarningBrush}" VerticalAlignment="Top" />
+                <ScrollViewer MaxHeight="72" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <TextBlock Text="{Binding ChangeReview.Warnings}" TextWrapping="Wrap" />
+                </ScrollViewer>
+              </DockPanel>
+            </Border>
+          </StackPanel>
+        </Border>
+        <Border DockPanel.Dock="Bottom" Padding="22,10,16,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+              <Button Content="Cancel" Command="{Binding ChangeReview.CancelCommand}" ToolTip="Esc" />
+              <Button Content="Apply changes" c:Ui.Icon="Check" Command="{Binding ChangeReview.AcceptCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" ToolTip="Ctrl+Enter" />
+            </StackPanel>
+            <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource SubtleBrush}" FontSize="11" TextTrimming="CharacterEllipsis"
+                       Text="F8 / Shift+F8 moves between changes · click a collapsed region to expand it · Ctrl+Enter applies" />
+          </DockPanel>
+        </Border>
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Width="280" Visibility="{Binding ChangeReview.HasManyFiles, Converter={StaticResource BooleanToVisibility}}">
+            <DockPanel>
+              <TextBlock DockPanel.Dock="Top" Text="FILES" Style="{StaticResource SectionLabel}" Margin="14,10,0,4" />
+              <ListBox ItemsSource="{Binding ChangeReview.Files}" SelectedItem="{Binding ChangeReview.SelectedFile}" AutomationProperties.Name="Changed files">
+                <ListBox.ItemTemplate>
+                  <DataTemplate DataType="{x:Type review:ChangeReviewFile}">
+                    <DockPanel ToolTip="{Binding Change.Path}">
+                      <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Change.Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="6,1,0,0">
+                        <TextBlock Text="{Binding AddedText}" Foreground="{DynamicResource SuccessBrush}" FontSize="11" FontWeight="SemiBold" Margin="0,0,4,0" />
+                        <TextBlock Text="{Binding RemovedText}" Foreground="{DynamicResource DangerBrush}" FontSize="11" FontWeight="SemiBold" />
+                      </StackPanel>
+                      <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                          <Border Style="{StaticResource Badge}" Margin="6,0,0,0" Padding="5,0">
+                            <Border.Visibility><Binding Path="IsNew" Converter="{StaticResource BooleanToVisibility}" /></Border.Visibility>
+                            <TextBlock Text="New" FontSize="10" Foreground="{DynamicResource AccentBrush}" />
+                          </Border>
+                        </StackPanel>
+                        <TextBlock Text="{Binding Folder}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                      </StackPanel>
+                    </DockPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
+          </Border>
+          <diff:DiffView Grid.Column="1" x:Name="ReviewDiff"
+                         Before="{Binding ChangeReview.SelectedChange.Before}" After="{Binding ChangeReview.SelectedChange.After}" FilePath="{Binding ChangeReview.SelectedChange.Path}"
+                         OldLabel="Current" NewLabel="After applying" AutomationProperties.Name="Change diff">
+            <diff:DiffView.Header>
+              <StackPanel Orientation="Horizontal" DataContext="{Binding ChangeReview.SelectedFile}">
+                <c:StudioIcon Kind="{Binding Change.Path, Converter={StaticResource FileIconKind}}" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Folder}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="8,1,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="360" />
+                <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="12,1,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="320" />
+              </StackPanel>
+            </diff:DiffView.Header>
+          </diff:DiffView>
+        </Grid>
+      </DockPanel>
+    </Border>
+  </Grid>
+</UserControl>

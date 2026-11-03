@@ -1,0 +1,99 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.CommandPaletteOverlay"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:b="clr-namespace:WpfStudio.App.Behaviors">
+  <Grid Background="{DynamicResource OverlayBrush}">
+    <Border Style="{StaticResource OverlayCard}" Width="660" MaxHeight="560" VerticalAlignment="Top" Margin="0,72,0,0" Padding="0">
+      <DockPanel>
+        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,6,12,6">
+          <DockPanel>
+            <c:Glyph DockPanel.Dock="Left" Width="18" Height="18" Margin="0,0,6,0" Foreground="{DynamicResource MutedBrush}">
+              <c:Glyph.Style>
+                <Style TargetType="c:Glyph">
+                  <Setter Property="Kind" Value="Search" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding Palette.IsCommandMode}" Value="True"><Setter Property="Kind" Value="Command" /></DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </c:Glyph.Style>
+            </c:Glyph>
+            <Border DockPanel.Dock="Right" Style="{StaticResource Badge}">
+              <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}">
+                <TextBlock.Style>
+                  <Style TargetType="TextBlock">
+                    <Setter Property="Text" Value="Files" />
+                    <Style.Triggers>
+                      <DataTrigger Binding="{Binding Palette.IsCommandMode}" Value="True"><Setter Property="Text" Value="Commands" /></DataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </TextBlock.Style>
+              </TextBlock>
+            </Border>
+            <TextBox x:Name="PaletteBox" Text="{Binding Palette.Query, UpdateSourceTrigger=PropertyChanged}" FontSize="15" BorderThickness="0" Background="Transparent" MinHeight="40" Padding="4,0"
+                     c:Ui.Placeholder="{Binding Palette.Placeholder}" b:Interaction.FocusCaretEnd="True" AutomationProperties.Name="Quick open and command palette">
+              <TextBox.InputBindings>
+                <KeyBinding Key="Enter" Command="{Binding Palette.ExecuteCommand}" />
+                <KeyBinding Key="Escape" Command="{Binding Palette.CloseCommand}" />
+                <KeyBinding Key="Down" Command="{Binding Palette.NextCommand}" />
+                <KeyBinding Key="Up" Command="{Binding Palette.PreviousCommand}" />
+              </TextBox.InputBindings>
+            </TextBox>
+          </DockPanel>
+        </Border>
+        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,8" Background="{DynamicResource WindowBrush}" CornerRadius="0,0,10,10">
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+              <ItemsControl Style="{StaticResource KeyCaps}" ItemsSource="{Binding Source='Esc', Converter={StaticResource ToKeyCaps}}" />
+              <TextBlock Text="close" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="2,0,0,0" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+              <ItemsControl Style="{StaticResource KeyCaps}" ItemsSource="{Binding Source='↑+↓', Converter={StaticResource ToKeyCaps}}" />
+              <TextBlock Text="select" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="2,0,14,0" />
+              <ItemsControl Style="{StaticResource KeyCaps}" ItemsSource="{Binding Source='Enter', Converter={StaticResource ToKeyCaps}}" />
+              <TextBlock Text="open" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="2,0,14,0" />
+              <ItemsControl Style="{StaticResource KeyCaps}" ItemsSource="{Binding Source='&gt;', Converter={StaticResource ToKeyCaps}}" />
+              <TextBlock Text="commands" Foreground="{DynamicResource SubtleBrush}" FontSize="11" VerticalAlignment="Center" Margin="2,0,0,0" />
+            </StackPanel>
+          </DockPanel>
+        </Border>
+        <Grid>
+          <ListBox x:Name="PaletteList" ItemsSource="{Binding Palette.Results}" SelectedItem="{Binding Palette.Selected}" b:Interaction.ActivateCommand="{Binding Palette.ExecuteCommand}" b:Interaction.ActivateOnClick="True" b:Interaction.FollowSelection="True" Padding="0,6" Focusable="False">
+            <ListBox.InputBindings>
+              <KeyBinding Key="Escape" Command="{Binding Palette.CloseCommand}" />
+            </ListBox.InputBindings>
+            <ListBox.ItemContainerStyle>
+              <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                <Setter Property="Margin" Value="6,1" />
+                <Setter Property="Padding" Value="10,6" />
+                <Style.Triggers>
+                  <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{DynamicResource SelectionBrush}" /></Trigger>
+                </Style.Triggers>
+              </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <c:StudioIcon Kind="{Binding IconKind}" Width="16" Height="16" HorizontalAlignment="Left" Visibility="{Binding IsFile, Converter={StaticResource BooleanToVisibility}}" />
+                  <c:Glyph Kind="{Binding Icon}" Width="16" Height="16" HorizontalAlignment="Left" Foreground="{DynamicResource MutedBrush}" />
+                  <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="2" Text="{Binding Detail}" Foreground="{DynamicResource SubtleBrush}" FontSize="11.5" Margin="10,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Grid.Column="3" Text="{Binding Category}" Foreground="{DynamicResource SubtleBrush}" FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center" />
+                  <ItemsControl Grid.Column="4" Style="{StaticResource KeyCaps}" ItemsSource="{Binding Shortcut, Converter={StaticResource ToKeyCaps}}" Margin="12,0,0,0" Visibility="{Binding HasShortcut, Converter={StaticResource BooleanToVisibility}}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Text="No matches" Foreground="{DynamicResource SubtleBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24" Visibility="{Binding Palette.Results.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}" />
+        </Grid>
+      </DockPanel>
+    </Border>
+  </Grid>
+</UserControl>

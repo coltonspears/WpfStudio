@@ -1,0 +1,63 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.AboutOverlay"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:b="clr-namespace:WpfStudio.App.Behaviors">
+  <Grid Background="{DynamicResource OverlayBrush}">
+    <Grid.InputBindings>
+      <KeyBinding Key="Escape" Command="{Binding CloseAboutCommand}" />
+    </Grid.InputBindings>
+    <Border Style="{StaticResource OverlayCard}" Width="620" MaxHeight="640" VerticalAlignment="Center" Padding="28,24">
+      <DockPanel>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+          <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CloseAboutCommand}" ToolTip="Close (Esc)" b:Interaction.FocusWhenVisible="True" />
+          <StackPanel Orientation="Horizontal">
+            <Button Style="{StaticResource QuietButton}" Content="About" Command="{Binding ShowAboutCommand}" FontWeight="SemiBold" />
+            <Button Style="{StaticResource QuietButton}" Content="What's new" Command="{Binding ShowWhatsNewCommand}" FontWeight="SemiBold" Margin="4,0,0,0" />
+          </StackPanel>
+        </DockPanel>
+        <!-- About -->
+        <StackPanel Visibility="{Binding IsWhatsNewPage, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+          <TextBlock Text="WpfStudio" FontSize="22" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" />
+          <TextBlock Text="A native IDE for WPF, C#, CommunityToolkit.Mvvm and SQL Server." Style="{StaticResource Caption}" FontSize="12" Margin="0,2,0,18" />
+          <TextBlock Text="VERSION" Style="{StaticResource SectionLabel}" />
+          <TextBlock Margin="0,0,0,12"><Run Text="{Binding ProductVersion, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding BuildCommit, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" /></TextBlock>
+          <TextBlock Text="RUNTIME" Style="{StaticResource SectionLabel}" />
+          <TextBlock Text="{Binding RuntimeDescription}" Margin="0,0,0,2" />
+          <TextBlock Text="{Binding OperatingSystemDescription}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12" />
+          <TextBlock Text="DATA FOLDER" Style="{StaticResource SectionLabel}" />
+          <TextBlock Text="{Binding DataFolder}" FontFamily="{StaticResource CodeFont}" TextTrimming="CharacterEllipsis" ToolTip="{Binding DataFolder}" Margin="0,0,0,4" />
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
+            <Button Content="Open data folder" c:Ui.Icon="FolderOpen" Command="{Binding OpenDataFolderCommand}" />
+            <Button Content="Copy version info" c:Ui.Icon="Copy" Command="{Binding CopyAboutTextCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" />
+          </StackPanel>
+        </StackPanel>
+        <!-- What's new -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsWhatsNewPage, Converter={StaticResource BooleanToVisibility}}">
+          <ItemsControl ItemsSource="{Binding ReleaseNotes}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Margin="0,0,0,18">
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding Date}" Style="{StaticResource Caption}" VerticalAlignment="Bottom" />
+                    <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
+                  </DockPanel>
+                  <ItemsControl ItemsSource="{Binding Highlights}" Margin="0,6,0,0">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <DockPanel Margin="0,2">
+                          <TextBlock DockPanel.Dock="Left" Text="•" Foreground="{DynamicResource AccentBrush}" Margin="2,0,8,0" />
+                          <TextBlock Text="{Binding}" TextWrapping="Wrap" />
+                        </DockPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+  </Grid>
+</UserControl>

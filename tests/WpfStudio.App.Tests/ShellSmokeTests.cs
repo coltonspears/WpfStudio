@@ -86,6 +86,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var clock = Stopwatch.StartNew();
             window = new MainWindow { DataContext = shell, ShowInTaskbar = false, ShowActivated = false, Opacity = 0 };
             var manager = (DockingManager)window.FindName("DockManager");
+            Assert.True(System.Windows.Shell.WindowChrome.GetIsHitTestVisibleInChrome((Button)window.FindName("MaximizeButton")));
             window.Show(); await Idle();
             var startup = clock.Elapsed;
             output.WriteLine($"Shell construction to rendered idle: {startup.TotalMilliseconds:N0} ms");
