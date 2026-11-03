@@ -6,7 +6,6 @@ var scenario = Environment.GetEnvironmentVariable("WPFSTUDIO_FAKE_DAP_SCENARIO")
 var input = Console.OpenStandardInput();
 var output = Console.OpenStandardOutput();
 var continues = 0;
-var applied = 0;
 
 void Raw(string text) { output.Write(Encoding.ASCII.GetBytes(text)); output.Flush(); }
 void Frame(string json) => Raw($"Content-Length: {Encoding.UTF8.GetByteCount(json)}\r\n\r\n{json}");
@@ -22,9 +21,9 @@ while (ReadFrame(input) is { } request)
     if (Canned(scenario, command, request) is { } canned)
     {
         Answer(sequence, canned);
-        // The view model applies breakpoints again after attaching. An event sent after that answer reaches it after the id does.
-        if (scenario == "debug-events" && command == "setBreakpoints" && ++applied == 2)
-            EventWith("breakpoint", """{"reason":"changed","breakpoint":{"id":100,"verified":false,"message":"moved away","line":40,"source":{"path":"C:/src/Program.cs"}}}""");
+        // On request, so a test can wait until the view model holds the adapter's id first.
+        if (scenario == "debug-events" && command == "evaluate" && request.GetProperty("arguments").GetProperty("expression").GetString() == "send-breakpoint-change")
+            EventWith("breakpoint", """{"reason":"changed","breakpoint":{"id":100,"verified":false,"message":"moved away","line":40,"source":{"path":"C:\\src\\Program.cs"}}}""");
         continue;
     }
     switch (scenario, command)
@@ -73,6 +72,11 @@ while (ReadFrame(input) is { } request)
             EventWith("output", """{"category":"stdout","output":"hello from the debuggee\n"}""");
             EventWith("stopped", """{"reason":"pause","threadId":7}""");
             break;
+        // On request: a session that ends while it is still starting races the view model's own start-up, and that is not what these tests check.
+        case ("debug-terminate", "pause"):
+            Reply(sequence);
+            Event("terminated");
+            return;
         case ("partial", "configurationDone"):
             Reply(sequence);
             EventWith("stopped", """{"threadId":7}""");
@@ -82,10 +86,13 @@ while (ReadFrame(input) is { } request)
             EventWith("breakpoint", """{"breakpoint":[1]}""");
             EventWith("stopped", """{"reason":"exception","threadId":"seven","hitBreakpointIds":"none"}""");
             break;
-        case ("empty", "configurationDone"):
+        case ("no-body-events", "configurationDone"):
             Reply(sequence);
             Event("breakpoint");
             Event("stopped");
+            break;
+        case ("refuse-queries", "evaluate"):
+            Reply(sequence, success: false, message: "cannot evaluate");
             break;
         default:
             Reply(sequence);
@@ -112,7 +119,7 @@ static string? Canned(string? scenario, string? command, JsonElement request) =>
     ("malformed", "exceptionInfo") => """[1,2]""",
     ("malformed", "setBreakpoints") => """{"breakpoints":[7,{"id":"x","verified":"yes","line":"ten"}]}""",
     (_, "threads") when IsDebug(scenario) => """{"threads":[{"id":7,"name":"Main Thread"},{"id":8,"name":"Worker"}]}""",
-    (_, "stackTrace") when IsDebug(scenario) => """{"stackFrames":[{"id":1,"name":"Program.Main","line":12,"source":{"path":"C:/src/Program.cs"}},{"id":2,"name":"[External Code]","line":0}]}""",
+    (_, "stackTrace") when IsDebug(scenario) => """{"stackFrames":[{"id":1,"name":"Program.Main","line":12,"source":{"path":"C:\\src\\Program.cs"}},{"id":2,"name":"[External Code]","line":0}]}""",
     (_, "scopes") when IsDebug(scenario) => """{"scopes":[{"name":"Locals","variablesReference":1000},{"name":"Empty","variablesReference":0}]}""",
     (_, "variables") when IsDebug(scenario) => Variables(request.GetProperty("arguments")),
     (_, "evaluate") when IsDebug(scenario) => $$"""{"result":"value of {{request.GetProperty("arguments").GetProperty("expression").GetString()}}","type":"int","variablesReference":0}""",

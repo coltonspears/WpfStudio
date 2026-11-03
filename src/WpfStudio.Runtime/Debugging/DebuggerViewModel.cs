@@ -1,7 +1,5 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,88 +7,25 @@ using WpfStudio.Contracts;
 
 namespace WpfStudio.Runtime.Debugging;
 
-public sealed record DebugThread(int Id, string Name);
-public sealed record DebugFrame(int Id, string Name, string? Path, int Line);
-
-public sealed partial class BreakpointViewModel : ObservableObject
-{
-    public required string Path { get; init; }
-    public required int Line { get; init; }
-    [ObservableProperty] public partial string Condition { get; set; } = "";
-    [ObservableProperty] public partial bool Enabled { get; set; } = true;
-    [ObservableProperty] public partial string Status { get; set; } = "Pending";
-    /// <summary>Breaks by hit count, for example 5, &gt;=5 or %5. Empty breaks on every hit.</summary>
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(Summary))] public partial string HitCondition { get; set; } = "";
-    /// <summary>A tracepoint message. When set, a hit writes the message to Output and execution continues.</summary>
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(Summary), nameof(IsTracepoint))] public partial string LogMessage { get; set; } = "";
-    /// <summary>Hits counted in the current session, after any condition was true.</summary>
-    [ObservableProperty] public partial int HitCount { get; set; }
-    /// <summary>The adapter's identifier and resolved line; a breakpoint can bind to the next statement.</summary>
-    public int? AdapterId { get; set; }
-    public int? BoundLine { get; set; }
-    public bool IsTracepoint => LogMessage.Length > 0;
-    public bool HasClientBehavior => HitCondition.Length > 0 || LogMessage.Length > 0;
-    public string Summary
-    {
-        get
-        {
-            var parts = new List<string>();
-            if (HitCondition.Length > 0) parts.Add(WpfStudio.Contracts.HitCondition.TryParse(HitCondition, out var hit, out _) ? "Breaks " + hit.Describe() : "Invalid hit count");
-            if (LogMessage.Length > 0) parts.Add("Logs: " + LogMessage);
-            return string.Join(" · ", parts);
-        }
-    }
-    public SourceBreakpoint ToModel() => new(Path, Line, Condition, Enabled, HitCondition.Length == 0 ? null : HitCondition, LogMessage.Length == 0 ? null : LogMessage);
-}
-
-public sealed partial class DebugVariableViewModel : ObservableObject
-{
-    private readonly Func<int, Task<IReadOnlyList<DebugVariableViewModel>>>? loader;
-    private bool loaded;
-    public DebugVariableViewModel(string name, string value, string? type, int reference, Func<int, Task<IReadOnlyList<DebugVariableViewModel>>>? loader = null)
-    {
-        Name = name; Value = value; Type = type; Reference = reference; this.loader = loader;
-        if (reference > 0) Children.Add(new DebugVariableViewModel("Expand to load", "", null, 0));
-    }
-    public string Name { get; }
-    public string Value { get; }
-    public string? Type { get; }
-    public int Reference { get; }
-    public ObservableCollection<DebugVariableViewModel> Children { get; } = [];
-    [ObservableProperty] public partial bool IsExpanded { get; set; }
-    partial void OnIsExpandedChanged(bool value) { if (value && !loaded && Reference > 0) LoadAsync().Forget(); }
-    private async Task LoadAsync()
-    {
-        loaded = true;
-        try
-        {
-            var values = loader is null ? [] : await loader(Reference);
-            Children.Clear(); foreach (var value in values) Children.Add(value);
-        }
-        catch (Exception ex) { Children.Clear(); Children.Add(new DebugVariableViewModel("Error", ex.Message, null, 0)); loaded = false; }
-    }
-}
-
 public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly DebugSession session;
     private readonly IUiDispatcher dispatcher;
     private readonly IDebugAdapterProvider adapters;
-    private readonly object outputGate = new();
-    private readonly StringBuilder pendingOutput = new();
-    private bool outputScheduled;
-    private bool disposed;
-    private string? statePath;
+    private readonly DapClient client;
+    private readonly BreakpointStore store = new();
+    private readonly OutputBuffer output;
     private int threadId;
     private int stopVersion;
     private int watchRefresh;
-    private readonly List<string> watchExpressions = [];
     public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters)
     {
         this.session = session; this.dispatcher = dispatcher; this.adapters = adapters;
+        client = new DapClient(session);
+        output = new OutputBuffer(dispatcher, text => Output = text);
         if (adapters.Locate() is { } adapter) session.AdapterPath = adapter;
         session.EventReceived += OnDebugEvent;
-        session.Output += AppendOutput;
+        session.Output += output.Append;
         session.Error += OnError;
     }
     public event Action<string, int>? SourceRequested;
@@ -119,7 +54,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         await InstallAdapterAsync();
         return !IsAdapterMissing;
     }
-    public ObservableCollection<BreakpointViewModel> Breakpoints { get; } = [];
+    public ObservableCollection<BreakpointViewModel> Breakpoints => store.Breakpoints;
     public ObservableCollection<DebugThread> Threads { get; } = [];
     public ObservableCollection<DebugFrame> Frames { get; } = [];
     public ObservableCollection<DebugVariableViewModel> Locals { get; } = [];
@@ -145,17 +80,11 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
 
     public async Task SetWorkspaceAsync(string workspacePath)
     {
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(workspacePath).ToUpperInvariant())))[..20];
-        statePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "debugging", hash + ".json");
-        Breakpoints.Clear(); watchExpressions.Clear(); ResetWatchRows();
-        if (!File.Exists(statePath)) return;
+        ResetWatchRows();
         try
         {
-            var state = JsonSerializer.Deserialize<DebugWorkspaceState>(await File.ReadAllTextAsync(statePath));
-            if (state is null) return;
-            foreach (var item in state.Breakpoints) Breakpoints.Add(new BreakpointViewModel { Path = item.Path, Line = item.Line, Condition = item.Condition ?? "", Enabled = item.Enabled, HitCondition = item.HitCondition ?? "", LogMessage = item.LogMessage ?? "" });
-            watchExpressions.AddRange(state.Watches);
-            foreach (var expression in watchExpressions) Watches.Add(new DebugVariableViewModel(expression, "Run to evaluate", null, 0));
+            await store.LoadAsync(workspacePath);
+            foreach (var expression in store.WatchExpressions) Watches.Add(new DebugVariableViewModel(expression, "Run to evaluate", null, 0));
         }
         catch (Exception ex) when (ex is IOException or JsonException) { Error = "Could not load debug settings: " + ex.Message; }
     }
@@ -163,12 +92,12 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     public async Task LaunchAsync(DebugLaunchConfiguration configuration, CancellationToken cancellationToken = default)
     {
         Error = ""; ExceptionDetails = ""; Status = "Starting debugger…";
-        ResetHitCounts();
+        store.ResetForSession();
         try
         {
-            await session.LaunchAsync(configuration, Breakpoints.Select(x => x.ToModel()).ToArray(), BreakOnThrown, cancellationToken);
+            await session.LaunchAsync(configuration, store.ToModels(), BreakOnThrown, cancellationToken);
             IsActive = true; if (!IsStopped) Status = "Running";
-            foreach (var path in Breakpoints.Select(x => x.Path).Distinct(StringComparer.OrdinalIgnoreCase)) await ApplyFileBreakpointsAsync(path);
+            foreach (var path in store.Files) await ApplyFileBreakpointsAsync(path);
         }
         catch (Exception ex) { Error = ex.Message; Status = "Debug launch failed"; IsActive = false; throw; }
     }
@@ -177,19 +106,18 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     {
         if (line < 1) return;
         path = Path.GetFullPath(path);
-        var existing = Breakpoints.FirstOrDefault(x => x.Line == line && string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase));
-        if (existing is null) Breakpoints.Add(new BreakpointViewModel { Path = path, Line = line }); else Breakpoints.Remove(existing);
-        await GuardAsync(async () => { await SaveStateAsync(); if (IsActive) await ApplyFileBreakpointsAsync(path); });
+        store.Toggle(path, line);
+        await GuardAsync(async () => { await store.SaveAsync(); if (IsActive) await ApplyFileBreakpointsAsync(path); });
     }
 
     [RelayCommand] private Task AttachAsync() => GuardAsync(async () =>
     {
         if (IsAdapterMissing) { Error = "Install the debugger first: choose Install debugger above."; return; }
         Status = "Attaching…";
-        ResetHitCounts();
-        await session.AttachAsync(AttachProcessId, Breakpoints.Select(x => x.ToModel()).ToArray(), BreakOnThrown);
+        store.ResetForSession();
+        await session.AttachAsync(AttachProcessId, store.ToModels(), BreakOnThrown);
         IsActive = true; if (!IsStopped) Status = "Running";
-        foreach (var path in Breakpoints.Select(x => x.Path).Distinct(StringComparer.OrdinalIgnoreCase)) await ApplyFileBreakpointsAsync(path);
+        foreach (var path in store.Files) await ApplyFileBreakpointsAsync(path);
     });
     [RelayCommand] private Task ContinueAsync() => GuardAsync(async () => { await session.ContinueAsync(threadId); IsStopped = false; Status = "Running"; });
     [RelayCommand] private Task PauseAsync() => GuardAsync(() => session.PauseAsync(threadId));
@@ -200,13 +128,13 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     [RelayCommand(CanExecute = nameof(CanDetach))] private Task DetachAsync() => GuardAsync(async () => { await session.StopAsync(false); EndSession(); });
     [RelayCommand] private Task ApplyBreakpointsAsync() => GuardAsync(async () =>
     {
-        await SaveStateAsync();
-        if (IsActive) foreach (var path in Breakpoints.Select(x => x.Path).Distinct(StringComparer.OrdinalIgnoreCase)) await ApplyFileBreakpointsAsync(path);
+        await store.SaveAsync();
+        if (IsActive) foreach (var path in store.Files) await ApplyFileBreakpointsAsync(path);
     });
     [RelayCommand] private Task RemoveBreakpointAsync() => GuardAsync(async () =>
     {
         if (SelectedBreakpoint is not { } selected) return;
-        Breakpoints.Remove(selected); await SaveStateAsync(); if (IsActive) await ApplyFileBreakpointsAsync(selected.Path);
+        Breakpoints.Remove(selected); await store.SaveAsync(); if (IsActive) await ApplyFileBreakpointsAsync(selected.Path);
     });
     [RelayCommand] private void NavigateBreakpoint() { if (SelectedBreakpoint is { } selected) SourceRequested?.Invoke(selected.Path, selected.Line); }
     [RelayCommand] private Task EnableAllBreakpointsAsync() => SetAllBreakpointsAsync(true);
@@ -214,77 +142,61 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private Task SetAllBreakpointsAsync(bool enabled) => GuardAsync(async () =>
     {
         foreach (var breakpoint in Breakpoints) breakpoint.Enabled = enabled;
-        await SaveStateAsync();
-        if (IsActive) foreach (var path in Breakpoints.Select(b => b.Path).Distinct(StringComparer.OrdinalIgnoreCase)) await ApplyFileBreakpointsAsync(path);
+        await store.SaveAsync();
+        if (IsActive) foreach (var path in store.Files) await ApplyFileBreakpointsAsync(path);
     });
     [RelayCommand] private Task AddWatchAsync() => GuardAsync(async () =>
     {
         if (string.IsNullOrWhiteSpace(WatchExpression)) return;
-        var expression = WatchExpression.Trim(); if (!watchExpressions.Contains(expression)) watchExpressions.Add(expression);
-        WatchExpression = ""; await SaveStateAsync();
+        var expression = WatchExpression.Trim(); if (!store.WatchExpressions.Contains(expression)) store.WatchExpressions.Add(expression);
+        WatchExpression = ""; await store.SaveAsync();
         if (SelectedFrame is not null && IsStopped) await RefreshWatchesAsync(SelectedFrame.Id);
-        else { ResetWatchRows(); foreach (var value in watchExpressions) Watches.Add(new DebugVariableViewModel(value, "Run to evaluate", null, 0)); }
+        else { ResetWatchRows(); foreach (var value in store.WatchExpressions) Watches.Add(new DebugVariableViewModel(value, "Run to evaluate", null, 0)); }
     });
-    [RelayCommand] private Task ClearWatchesAsync() => GuardAsync(async () => { watchExpressions.Clear(); ResetWatchRows(); await SaveStateAsync(); });
-    [RelayCommand] private void ClearOutput() { lock (outputGate) pendingOutput.Clear(); Output = ""; }
+    [RelayCommand] private Task ClearWatchesAsync() => GuardAsync(async () => { store.WatchExpressions.Clear(); ResetWatchRows(); await store.SaveAsync(); });
+    [RelayCommand] private void ClearOutput() => output.Clear();
 
     private async Task ApplyFileBreakpointsAsync(string path)
     {
-        var items = Breakpoints.Where(x => string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase) && x.Enabled).ToArray();
-        var result = await session.SetBreakpointsAsync(path, items.Select(x => x.ToModel()));
-        if (!result.TryGetProperty("breakpoints", out var values)) return;
-        var index = 0;
-        foreach (var value in values.EnumerateArray())
-        {
-            if (index >= items.Length) break;
-            var item = items[index++];
-            item.Status = value.TryGetProperty("verified", out var verified) && verified.GetBoolean() ? "Bound" : Text(value, "message", "Unbound · symbols not loaded");
-            item.AdapterId = value.TryGetProperty("id", out _) ? Int(value, "id") : null;
-            item.BoundLine = Int(value, "line") is > 0 and var bound ? bound : null;
-        }
+        var items = store.EnabledIn(path);
+        var answers = await client.SetBreakpointsAsync(path, items.Select(x => x.ToModel()));
+        foreach (var (item, answer) in items.Zip(answers)) item.Apply(answer);
     }
 
     private void OnDebugEvent(DebugEvent message) => dispatcher.Post(() =>
     {
         if (message.Name == "stopped")
         {
+            var stopped = DapMessages.Stopped(message.Body);
             // Hit counts and tracepoints decide whether this stop is shown or silently resumed.
-            if (Text(message.Body, "reason") == "breakpoint" && Breakpoints.Any(b => b.Enabled && b.HasClientBehavior))
+            if (stopped.Reason == "breakpoint" && Breakpoints.Any(b => b.Enabled && b.HasClientBehavior))
             {
                 var version = ++stopVersion;
-                _ = GuardAsync(() => HandleBreakpointStopAsync(message, Int(message.Body, "threadId"), version));
+                _ = GuardAsync(() => HandleBreakpointStopAsync(stopped, version));
                 return;
             }
-            EnterStopped(message);
+            EnterStopped(stopped);
         }
         else if (message.Name == "continued") { IsStopped = false; Status = "Running"; stopVersion++; Locals.Clear(); }
         else if (message.Name is "terminated" or "exited") { EndSession(); _ = GuardAsync(async () => await session.DisposeAsync()); }
-        else if (message.Name == "breakpoint" && message.Body.TryGetProperty("breakpoint", out var changed) && changed.TryGetProperty("source", out var source))
-        {
-            var path = Text(source, "path"); var line = Int(changed, "line");
-            var id = changed.TryGetProperty("id", out _) ? Int(changed, "id") : (int?)null;
-            foreach (var item in Breakpoints.Where(x => id is not null && x.AdapterId == id || x.Line == line && string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase)))
-            {
-                item.Status = changed.TryGetProperty("verified", out var verified) && verified.GetBoolean() ? "Bound" : Text(changed, "message", "Unbound");
-                if (line > 0) item.BoundLine = line;
-            }
-        }
+        else if (message.Name == "breakpoint" && DapMessages.ChangedBreakpoint(message.Body) is { SourcePath: not null } changed)
+            foreach (var item in store.Matching(changed)) item.ApplyChange(changed);
     });
 
-    private void EnterStopped(DebugEvent message)
+    private void EnterStopped(DapStopped stopped)
     {
-        IsActive = true; IsStopped = true; threadId = Int(message.Body, "threadId"); stopVersion++;
-        Status = "Paused · " + Text(message.Body, "reason", "breakpoint");
+        IsActive = true; IsStopped = true; threadId = stopped.ThreadId; stopVersion++;
+        Status = "Paused · " + (stopped.Reason ?? "breakpoint");
         _ = GuardAsync(async () =>
         {
-            var response = await session.RequestAsync("threads");
+            var threads = await client.GetThreadsAsync();
             SelectedThread = null;
-            Threads.Clear(); if (response.TryGetProperty("threads", out var threads)) foreach (var thread in threads.EnumerateArray()) Threads.Add(new DebugThread(Int(thread, "id"), Text(thread, "name")));
+            Threads.Clear(); foreach (var thread in threads) Threads.Add(thread);
             SelectedThread = Threads.FirstOrDefault(x => x.Id == threadId) ?? Threads.FirstOrDefault();
-            if (Text(message.Body, "reason") == "exception")
+            if (stopped.Reason == "exception")
             {
-                var info = await session.RequestAsync("exceptionInfo", new { threadId });
-                ExceptionDetails = Text(info, "exceptionId") + "\n" + Text(info, "description") + (info.TryGetProperty("details", out var details) ? "\n" + details.ToString() : "");
+                var info = await client.GetExceptionInfoAsync(threadId);
+                ExceptionDetails = info.ExceptionId + "\n" + info.Description + (info.Details is { } details ? "\n" + details : "");
             }
         });
     }
@@ -293,41 +205,34 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     /// Applies a breakpoint's hit count and log message. The adapter stops on every hit whose condition is true;
     /// stops that do not reach the hit count, and every tracepoint hit, continue without showing a paused state.
     /// </summary>
-    private async Task HandleBreakpointStopAsync(DebugEvent message, int stoppedThread, int version)
+    private async Task HandleBreakpointStopAsync(DapStopped stopped, int version)
     {
-        var trace = await session.RequestAsync("stackTrace", new { threadId = stoppedThread, startFrame = 0, levels = 1 });
+        var stoppedThread = stopped.ThreadId;
+        var top = (await client.GetStackTraceAsync(stoppedThread, levels: 1)).FirstOrDefault();
         if (version != stopVersion) return;
-        JsonElement? top = trace.TryGetProperty("stackFrames", out var frames) && frames.GetArrayLength() > 0 ? frames[0] : null;
-        var path = top is { } frame && frame.TryGetProperty("source", out var source) ? Text(source, "path") : "";
-        var line = top is { } current ? Int(current, "line") : 0;
-        var ids = message.Body.TryGetProperty("hitBreakpointIds", out var hit) && hit.ValueKind == JsonValueKind.Array
-            ? hit.EnumerateArray().Where(value => value.TryGetInt32(out _)).Select(value => value.GetInt32()).ToHashSet() : [];
-        var breakpoint = Breakpoints.FirstOrDefault(b => b.Enabled && b.AdapterId is { } id && ids.Contains(id))
-            ?? Breakpoints.FirstOrDefault(b => b.Enabled && (b.BoundLine ?? b.Line) == line && string.Equals(b.Path, path, StringComparison.OrdinalIgnoreCase));
-        if (breakpoint is null || !breakpoint.HasClientBehavior) { EnterStopped(message); return; }
+        var path = top?.Path ?? "";
+        var line = top?.Line ?? 0;
+        var breakpoint = store.FindHit(stopped.HitBreakpointIds, path, line);
+        if (breakpoint is null || !breakpoint.HasClientBehavior) { EnterStopped(stopped); return; }
         breakpoint.HitCount++;
         if (!WpfStudio.Contracts.HitCondition.TryParse(breakpoint.HitCondition, out var condition, out _)) condition = WpfStudio.Contracts.HitCondition.Always;
         if (condition.ShouldBreak(breakpoint.HitCount) && breakpoint.IsTracepoint && top is { } logged)
         {
-            var frameId = Int(logged, "id");
+            var frameId = logged.Id;
             var keywords = new Dictionary<string, string>
             {
-                ["FUNCTION"] = Text(logged, "name"), ["TID"] = stoppedThread.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["FUNCTION"] = logged.Name, ["TID"] = stoppedThread.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["FILEPOS"] = $"{Path.GetFileName(path)}({line})", ["HITCOUNT"] = breakpoint.HitCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
             };
             var text = await WpfStudio.Contracts.TracepointMessage.FormatAsync(breakpoint.LogMessage, expression => EvaluateValueAsync(expression, frameId), keywords);
-            AppendOutput(text + Environment.NewLine);
+            output.Append(text + Environment.NewLine);
         }
-        else if (condition.ShouldBreak(breakpoint.HitCount)) { EnterStopped(message); return; }
+        else if (condition.ShouldBreak(breakpoint.HitCount)) { EnterStopped(stopped); return; }
         if (version != stopVersion) return;
         await session.ContinueAsync(stoppedThread);
     }
 
-    private async Task<string> EvaluateValueAsync(string expression, int frameId)
-    {
-        var value = await session.RequestAsync("evaluate", new { expression, frameId, context = "watch" });
-        return Text(value, "result");
-    }
+    private async Task<string> EvaluateValueAsync(string expression, int frameId) => (await client.EvaluateAsync(expression, frameId, "watch")).Result;
 
     /// <summary>Evaluates a hovered expression in the selected frame for an editor DataTip; null when not paused or not evaluable.</summary>
     public async Task<string?> EvaluateDataTipAsync(string expression, CancellationToken cancellationToken = default)
@@ -336,10 +241,9 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         var version = stopVersion;
         try
         {
-            var value = await session.RequestAsync("evaluate", new { expression, frameId = frame.Id, context = "hover" }, cancellationToken);
+            var value = await client.EvaluateAsync(expression, frame.Id, "hover", cancellationToken);
             if (version != stopVersion || !IsStopped) return null;
-            var type = Text(value, "type");
-            return expression + " = " + Text(value, "result") + (type.Length > 0 ? "  (" + type + ")" : "");
+            return expression + " = " + value.Result + (value.Type.Length > 0 ? "  (" + value.Type + ")" : "");
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
     }
@@ -351,28 +255,25 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         return AddWatchCommand.ExecuteAsync(null);
     }
 
-    private void ResetHitCounts() { foreach (var breakpoint in Breakpoints) { breakpoint.HitCount = 0; breakpoint.AdapterId = null; breakpoint.BoundLine = null; } }
-
     private async Task RefreshFramesAsync()
     {
         var version = stopVersion;
-        var response = await session.RequestAsync("stackTrace", new { threadId, startFrame = 0, levels = 100 });
+        var frames = await client.GetStackTraceAsync(threadId, levels: 100);
         if (version != stopVersion || !IsStopped) return;
         SelectedFrame = null; Frames.Clear();
-        if (response.TryGetProperty("stackFrames", out var frames)) foreach (var frame in frames.EnumerateArray())
-            Frames.Add(new DebugFrame(Int(frame, "id"), Text(frame, "name"), frame.TryGetProperty("source", out var source) ? Text(source, "path") : null, Int(frame, "line")));
+        foreach (var frame in frames) Frames.Add(frame);
         SelectedFrame = Frames.FirstOrDefault();
     }
     private async Task RefreshFrameAsync(DebugFrame frame)
     {
         if (!string.IsNullOrWhiteSpace(frame.Path) && frame.Line > 0) SourceRequested?.Invoke(frame.Path, frame.Line);
         var version = stopVersion;
-        var result = await session.RequestAsync("scopes", new { frameId = frame.Id });
+        var scopes = await client.GetScopesAsync(frame.Id);
         if (version != stopVersion || SelectedFrame?.Id != frame.Id || !IsStopped) return;
         Locals.Clear();
-        if (result.TryGetProperty("scopes", out var scopes)) foreach (var scope in scopes.EnumerateArray())
+        foreach (var scope in scopes)
         {
-            var variables = await LoadVariablesAsync(Int(scope, "variablesReference"));
+            var variables = await LoadVariablesAsync(scope.VariablesReference);
             if (version != stopVersion || SelectedFrame?.Id != frame.Id) return;
             foreach (var item in variables) Locals.Add(item);
         }
@@ -381,8 +282,8 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private Task<IReadOnlyList<DebugVariableViewModel>> LoadVariablesAsync(int reference) => LoadVariablesPageAsync(reference, 0);
     private async Task<IReadOnlyList<DebugVariableViewModel>> LoadVariablesPageAsync(int reference, int start)
     {
-        var result = await session.RequestAsync("variables", new { variablesReference = reference, start, count = 200 });
-        var items = result.TryGetProperty("variables", out var variables) ? variables.EnumerateArray().Select(value => new DebugVariableViewModel(Text(value, "name"), Text(value, "value"), Text(value, "type"), Int(value, "variablesReference"), LoadVariablesAsync)).ToList() : [];
+        var variables = await client.GetVariablesAsync(reference, start, 200);
+        var items = variables.Select(value => new DebugVariableViewModel(value.Name, value.Value, value.Type, value.VariablesReference, LoadVariablesAsync)).ToList();
         if (items.Count == 200) items.Add(new DebugVariableViewModel("Next 200 values…", "Expand to load", null, reference, _ => LoadVariablesPageAsync(reference, start + 200)));
         return items;
     }
@@ -391,74 +292,21 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         var version = stopVersion;
         var refresh = ResetWatchRows();
         bool Current() => refresh == watchRefresh && version == stopVersion && IsStopped && SelectedFrame?.Id == frameId;
-        foreach (var expression in watchExpressions.ToArray())
+        foreach (var expression in store.WatchExpressions.ToArray())
         {
             try
             {
-                var value = await session.RequestAsync("evaluate", new { expression, frameId, context = "watch" });
+                var value = await client.EvaluateAsync(expression, frameId, "watch");
                 if (!Current()) return;
-                Watches.Add(new DebugVariableViewModel(expression, Text(value, "result"), Text(value, "type"), Int(value, "variablesReference"), LoadVariablesAsync));
+                Watches.Add(new DebugVariableViewModel(expression, value.Result, value.Type, value.VariablesReference, LoadVariablesAsync));
             }
             catch (Exception ex) { if (!Current()) return; Watches.Add(new DebugVariableViewModel(expression, ex.Message, null, 0)); }
         }
     }
     /// <summary>Empties the rows and supersedes any refresh still awaiting the adapter, whose answers would land on top of the newer rows.</summary>
     private int ResetWatchRows() { Watches.Clear(); return ++watchRefresh; }
-    private async Task SaveStateAsync()
-    {
-        if (statePath is null) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
-        // A unique temporary name lets overlapping saves (rapid breakpoint toggles) each complete; the last move wins.
-        var temporary = statePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new DebugWorkspaceState(Breakpoints.Select(x => x.ToModel()).ToArray(), watchExpressions.ToArray())));
-            File.Move(temporary, statePath, true);
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
-    }
-    private void EndSession() { IsActive = false; IsStopped = false; Status = "Session ended"; foreach (var breakpoint in Breakpoints) breakpoint.Status = "Pending"; stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
-    private void AppendOutput(string value)
-    {
-        lock (outputGate)
-        {
-            if (disposed) return;
-            const int limit = 250_000;
-            if (value.Length >= limit) { pendingOutput.Clear(); pendingOutput.Append(value.AsSpan(value.Length - limit)); }
-            else
-            {
-                int excess = pendingOutput.Length + value.Length - limit;
-                if (excess > 0) pendingOutput.Remove(0, excess);
-                pendingOutput.Append(value);
-            }
-            if (outputScheduled) return;
-            outputScheduled = true;
-        }
-        ScheduleOutputAsync().Forget();
-    }
-    private async Task ScheduleOutputAsync()
-    {
-        // One bounded batch per interval keeps high-volume debug output off the dispatcher queue.
-        await Task.Delay(50).ConfigureAwait(false);
-        lock (outputGate) { if (disposed) return; }
-        dispatcher.Post(() =>
-        {
-            string batch;
-            lock (outputGate)
-            {
-                outputScheduled = false;
-                if (disposed) return;
-                batch = pendingOutput.ToString(); pendingOutput.Clear();
-            }
-            if (batch.Length == 0) return;
-            var next = Output + batch;
-            Output = next.Length > 250_000 ? next[^200_000..] : next;
-        });
-    }
+    private void EndSession() { IsActive = false; IsStopped = false; Status = "Session ended"; store.MarkPending(); stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
     private void OnError(string value) => dispatcher.Post(() => { Error = value; EndSession(); });
     private async Task GuardAsync(Func<Task> action) { try { Error = ""; await action(); } catch (Exception ex) { Error = ex.Message; } }
-    private static string Text(JsonElement value, string property, string fallback = "") => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(property, out var result) ? result.ToString() : fallback;
-    private static int Int(JsonElement value, string property) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(property, out var result) && result.TryGetInt32(out var number) ? number : 0;
-    public async ValueTask DisposeAsync() { lock (outputGate) { disposed = true; pendingOutput.Clear(); } session.EventReceived -= OnDebugEvent; session.Output -= AppendOutput; session.Error -= OnError; await session.DisposeAsync(); }
-    private sealed record DebugWorkspaceState(SourceBreakpoint[] Breakpoints, string[] Watches);
+    public async ValueTask DisposeAsync() { output.Close(); session.EventReceived -= OnDebugEvent; session.Output -= output.Append; session.Error -= OnError; await session.DisposeAsync(); }
 }

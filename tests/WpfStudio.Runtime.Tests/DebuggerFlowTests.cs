@@ -8,7 +8,7 @@ namespace WpfStudio.Runtime.Tests;
 [Collection(AdapterRun.Collection)]
 public sealed class DebuggerFlowTests
 {
-    private const string Source = "C:/src/Program.cs";
+    private const string Source = @"C:\src\Program.cs";
 
     [Fact]
     public Task AStopFillsThreadsFramesLocalsAndWatches() => WithAttachedModelAsync("debug-step", async model =>
@@ -47,7 +47,7 @@ public sealed class DebuggerFlowTests
         await Until(() => breakpoint.Status == "Bound");
         await Until(() => breakpoint.AdapterId == 100);
         Assert.Equal(13, breakpoint.BoundLine);
-        Assert.Equal(Source.Replace('/', '\\'), breakpoint.Path);
+        Assert.Equal(Source, breakpoint.Path);
     });
 
     [Fact]
@@ -111,15 +111,63 @@ public sealed class DebuggerFlowTests
     {
         var breakpoint = model.Breakpoints.Single();
         await Until(() => model.Output.Contains("hello from the debuggee", StringComparison.Ordinal));
-        await Until(() => model.Frames.Count == 2);
+        await Until(() => model.SelectedFrame is not null && breakpoint.AdapterId == 100);
         Assert.Equal("Paused · pause", model.Status);
+        await model.EvaluateDataTipAsync("send-breakpoint-change");
         await Until(() => breakpoint.Status == "moved away");
         Assert.Equal(40, breakpoint.BoundLine);
     });
 
     [Fact]
-    public Task TerminationEndsTheSession() => WithAttachedModelAsync("terminated", async model =>
+    public Task ClearingOutputEmptiesTheShownText() => WithAttachedModelAsync("debug-events", async model =>
     {
+        await Until(() => model.Output.Length > 0);
+        model.ClearOutputCommand.Execute(null);
+        Assert.Empty(model.Output);
+    });
+
+    [Fact]
+    public Task AnAdapterThatOmitsFieldsStillPauses() => WithAttachedModelAsync("partial", async model =>
+    {
+        await Until(() => model.Watches.Count == 1 && model.Watches[0].Value == "");
+        Assert.True(model.IsStopped);
+        Assert.Equal("Paused · breakpoint", model.Status);
+        Assert.Equal("", model.Error);
+        Assert.Equal(new DebugThread(7, ""), Assert.Single(model.Threads));
+        Assert.Equal(new DebugFrame(1, "", null, 0), Assert.Single(model.Frames));
+        Assert.Equal("x", Assert.Single(model.Locals).Name);
+        await Until(() => model.Breakpoints.Single().Status != "Pending");
+        var breakpoint = model.Breakpoints.Single();
+        Assert.Equal(("Unbound · symbols not loaded", null, null), (breakpoint.Status, breakpoint.AdapterId, breakpoint.BoundLine));
+    });
+
+    [Fact]
+    public Task AnAdapterThatSendsTheWrongKindsStillPauses() => WithAttachedModelAsync("malformed", async model =>
+    {
+        await Until(() => model.ExceptionDetails.Length > 0);
+        Assert.True(model.IsStopped);
+        Assert.Equal("Paused · exception", model.Status);
+        Assert.Equal("", model.Error);
+        Assert.Equal(["9", "Main"], model.Threads.Select(thread => thread.Name));
+        Assert.Empty(model.Frames);
+        Assert.Equal("\n", model.ExceptionDetails);
+    });
+
+    [Fact]
+    public Task EventsAndResponsesWithoutABodyStillPause() => WithAttachedModelAsync("no-body-events", async model =>
+    {
+        await Until(() => model.IsStopped);
+        Assert.Equal("Paused · breakpoint", model.Status);
+        await Until(() => model.SelectedThread is null);
+        Assert.Empty(model.Threads);
+        Assert.Equal("", model.Error);
+        Assert.Equal("Pending", model.Breakpoints.Single().Status);
+    });
+
+    [Fact]
+    public Task TerminationEndsTheSession() => WithAttachedModelAsync("debug-terminate", async model =>
+    {
+        await model.PauseCommand.ExecuteAsync(null);
         await Until(() => model.Status == "Session ended");
         Assert.False(model.IsActive);
         Assert.False(model.IsStopped);
@@ -151,7 +199,7 @@ public sealed class DebuggerFlowTests
                 {
                     AdapterRun.UseScenario(scenario);
                     await using var model = new DebuggerViewModel(new DebugSession { AdapterPath = AdapterRun.LocateAdapter() }, new DispatcherPost(dispatcher), new NoDebugAdapter());
-                    var item = new BreakpointViewModel { Path = Path.GetFullPath(Source), Line = 12 };
+                    var item = new BreakpointViewModel { Path = Source, Line = 12 };
                     breakpoint?.Invoke(item);
                     model.Breakpoints.Add(item);
                     await model.AddWatchAsync("a");
