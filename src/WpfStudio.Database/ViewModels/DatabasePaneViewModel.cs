@@ -55,7 +55,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
     {
         if (value is null) return;
         ProfileName = value.Name; Server = value.Server; DatabaseName = value.Database; WindowsAuthentication = value.WindowsAuthentication;
-        UserName = value.UserName; Password = value.Password; RememberPassword = value.RememberPassword; TrustServerCertificate = value.TrustServerCertificate;
+        UserName = value.UserName; Password = _profiles.UnlockPassword(value); RememberPassword = value.RememberPassword; TrustServerCertificate = value.TrustServerCertificate;
         // Saving the connected profile re-selects its new record; the schema tree loaded from that same connection stays.
         if (_schemaProfile is { } loaded && SameConnection(loaded, value)) return;
         ClearSchema();

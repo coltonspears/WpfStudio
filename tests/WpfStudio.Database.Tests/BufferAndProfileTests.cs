@@ -126,8 +126,9 @@ public sealed class BufferAndProfileTests
             Assert.DoesNotContain(remembered.Password, disk);
             Assert.DoesNotContain(ephemeral.Password, disk);
             var loaded = await store.LoadAsync();
-            Assert.Equal(remembered.Password, loaded[0].Password);
-            Assert.Equal("", loaded[1].Password);
+            Assert.Equal("", loaded[0].Password); // Plaintext stays out of memory until a profile is opened.
+            Assert.Equal(remembered.Password, store.UnlockPassword(loaded[0]));
+            Assert.Equal("", store.UnlockPassword(loaded[1]));
         }
         finally { File.Delete(path); }
     }
