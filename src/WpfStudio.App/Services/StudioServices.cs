@@ -18,6 +18,7 @@ using WpfStudio.Runtime.Design;
 using WpfStudio.Runtime.Profiling;
 using WpfStudio.Runtime.Terminal;
 using WpfStudio.Workspace;
+using WpfStudio.Workspace.Xaml;
 
 namespace WpfStudio.App.Services;
 
@@ -50,6 +51,7 @@ public static class StudioServices
         services.AddSingleton<WpfIndexService>();
         services.AddSingleton<ScaffoldingService>();
         services.AddSingleton<XamlCompletionService>();
+        services.AddSingleton<XamlFormattingService>();
         return services;
     }
 
@@ -86,6 +88,7 @@ public static class StudioServices
     public static IServiceCollection AddProfiling(this IServiceCollection services)
     {
         services.AddSingleton<IMemoryProfiler, MemoryProfilerClient>();
+        services.AddSingleton<IProcessMemorySampler, ProcessMemorySampler>();
         services.AddSingleton<MemoryProfilerViewModel>();
         return services;
     }
@@ -94,6 +97,12 @@ public static class StudioServices
     {
         services.AddSingleton<FontCatalog>();
         services.AddSingleton<EditorPreferences>();
+        services.AddSingleton(sp => new WorkspaceStateStore<UserTaskItem>("tasks", DataDirectory(sp)));
+        services.AddSingleton(sp => new WorkspaceStateStore<FileGroup>("file-groups", DataDirectory(sp)));
+        // Factories, not instances: a watcher holds the paths of one workspace or one set of open files.
+        services.AddSingleton<OpenDocumentWatcherFactory>(changed => new OpenDocumentWatcher(changed));
+        services.AddSingleton<KnownSourceWatcherFactory>((paths, changed, reconcile, contextFiles, failed) => new KnownSourceFileWatcher(paths, changed, null, reconcile, contextFiles, failed));
+        services.AddSingleton<ShellToolServices>();
         services.AddSingleton<StudioFeatures>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();

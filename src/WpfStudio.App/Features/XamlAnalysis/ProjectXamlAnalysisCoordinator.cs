@@ -28,7 +28,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
     private readonly ILogger _logger;
     private readonly CancellationToken _lifetime;
     private readonly ProjectXamlAnalysisScheduler _scheduler;
-    private KnownSourceFileWatcher? _sourceWatcher;
+    private readonly KnownSourceWatcherFactory _watchSources;
+    private IKnownSourceWatcher? _sourceWatcher;
     private WorkspaceSnapshot? _diagnosticWorkspace;
     private IReadOnlyList<XamlFileAnalysisResult> _projectXamlFiles = [];
     private readonly HashSet<DocumentState> _trackedDocuments = [];
@@ -46,9 +47,9 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
     private long _sourceEpoch;
     private bool _disposed;
 
-    public ProjectXamlAnalysisCoordinator(IProjectXamlAnalysisHost host, DocumentStore store, WorkspaceClient workspace, IUiDispatcher dispatcher, ILogger logger, CancellationToken lifetime)
+    public ProjectXamlAnalysisCoordinator(IProjectXamlAnalysisHost host, DocumentStore store, WorkspaceClient workspace, IUiDispatcher dispatcher, ILogger logger, CancellationToken lifetime, KnownSourceWatcherFactory watchSources)
     {
-        _host = host; _store = store; _workspace = workspace; _dispatcher = dispatcher; _logger = logger; _lifetime = lifetime;
+        _host = host; _store = store; _workspace = workspace; _dispatcher = dispatcher; _logger = logger; _lifetime = lifetime; _watchSources = watchSources;
         _scheduler = new(async (generation, token) =>
         {
             Task work = Task.CompletedTask;
@@ -104,7 +105,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
         var files = workspace.Projects.SelectMany(project => project.Files)
             .Where(file => !file.IsGenerated && Path.GetExtension(file.Path).ToLowerInvariant() is ".cs" or ".xaml")
             .Select(file => file.Path).Concat(workspace.Projects.Select(project => project.ProjectPath)).Append(workspace.Path);
-        _sourceWatcher = new(files, change =>
+        _sourceWatcher = _watchSources(files, change =>
         {
             // Invalidate before dispatching: a completed scan must not race a
             // queued UI notification about changed source bytes.

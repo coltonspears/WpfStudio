@@ -63,10 +63,36 @@ public sealed class CompositionTests
             await provider.GetRequiredService<IQueryRecoveryStore>().SaveAsync([new(Guid.NewGuid(), "Query", "SELECT 1;", "", null)]);
             await provider.GetRequiredService<AssistantSettingsStore>().SaveAsync(new());
             foreach (var file in new[] { "settings.json", "sql-connections.json", "sql-recovery.json", "coltongpt.json" }) Assert.True(File.Exists(Path.Combine(data, file)), file);
+            await provider.GetRequiredService<WorkspaceStateStore<UserTaskItem>>().SaveAsync(Path.Combine(data, "App.sln"), [new("Item")]);
+            await provider.GetRequiredService<WorkspaceStateStore<FileGroup>>().SaveAsync(Path.Combine(data, "App.sln"), [new("Group", [])]);
+            foreach (var folder in new[] { "tasks", "file-groups" }) Assert.NotEmpty(Directory.GetFiles(Path.Combine(data, folder)));
             var installer = Assert.IsType<DebuggerInstaller>(provider.GetRequiredService<IDebugAdapterProvider>());
             Assert.StartsWith(data, installer.InstallDirectory);
         }
         finally { Directory.Delete(data, true); }
+    }
+
+    [Fact]
+    public async Task EachWorkspaceGetsItsOwnSourceWatcher()
+    {
+        var watchers = new List<FakeSourceWatcher>();
+        await using var context = new ShellTestContext(configure: services =>
+            services.AddSingleton<KnownSourceWatcherFactory>((_, _, _, _, _) => { var watcher = new FakeSourceWatcher(); watchers.Add(watcher); return watcher; }));
+        context.Shell.Workspace = new(Path.Combine(context.Root, "First.sln"), "10.0", [], []);
+        context.Shell.Workspace = new(Path.Combine(context.Root, "Second.sln"), "10.0", [], []);
+        Assert.Equal(2, watchers.Count);
+        Assert.True(watchers[0].IsDisposed);
+        Assert.False(watchers[1].IsDisposed);
+    }
+
+    [Fact]
+    public async Task OpenFilesAreWatchedThroughTheRegisteredFactory()
+    {
+        var watcher = new FakeDocumentWatcher();
+        await using var context = new ShellTestContext(configure: services => services.AddSingleton<OpenDocumentWatcherFactory>(_ => watcher));
+        var file = await context.CreateFileAsync("Watched.cs", "class C { }");
+        await context.Shell.OpenDocumentAsync(file);
+        Assert.Contains(file, watcher.Paths);
     }
 
     [Fact]
@@ -90,5 +116,19 @@ public sealed class CompositionTests
         notified.Clear();
         assistant.Settings.HasApiKey = false;
         Assert.DoesNotContain(nameof(ShellViewModel.IsColtonGptReady), notified);
+    }
+
+    private sealed class FakeSourceWatcher : IKnownSourceWatcher
+    {
+        public bool IsDisposed { get; private set; }
+        public string? Status => null;
+        public void Dispose() => IsDisposed = true;
+    }
+
+    private sealed class FakeDocumentWatcher : IOpenDocumentWatcher
+    {
+        public IReadOnlyList<string> Paths { get; private set; } = [];
+        public void Watch(IEnumerable<string> paths) => Paths = paths.ToArray();
+        public void Dispose() { }
     }
 }

@@ -2,12 +2,21 @@ using System.IO;
 
 namespace WpfStudio.App.Services;
 
+/// <summary>Follows the set of open files, reporting when one of them changes on disk.</summary>
+public interface IOpenDocumentWatcher : IDisposable
+{
+    void Watch(IEnumerable<string> paths);
+}
+
+/// <summary>Creates the watcher for one shell's open files, which is its own state and never shared.</summary>
+public delegate IOpenDocumentWatcher OpenDocumentWatcherFactory(Action changed);
+
 /// <summary>
 /// Notices when open files change on disk while WpfStudio has focus, for example from Git in the built-in terminal.
 /// One non-recursive watcher per folder of open files; bursts of events are combined into one notification.
 /// Window activation still checks every open file, so a missed or overflowed event only delays the prompt.
 /// </summary>
-public sealed class OpenDocumentWatcher(Action changed) : IDisposable
+public sealed class OpenDocumentWatcher(Action changed) : IOpenDocumentWatcher
 {
     public const int MaximumDirectories = 64;
     private static readonly TimeSpan Quiet = TimeSpan.FromMilliseconds(400);

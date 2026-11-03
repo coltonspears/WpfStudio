@@ -31,6 +31,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly ScaffoldingService _scaffolding;
     private readonly WorkspaceEditTransaction _edits;
     private readonly XamlCompletionService _xaml;
+    private readonly WpfStudio.Workspace.Xaml.XamlFormattingService _xamlFormatter;
     private readonly XamlResourceContext _xamlResources = new();
     private readonly IFileDialogService _files;
     private readonly IUserDialogService _dialogs;
@@ -49,17 +50,17 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler, EditorPreferences editor)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler, EditorPreferences editor, WpfStudio.Workspace.Xaml.XamlFormattingService xamlFormatter, ShellToolServices tools)
     {
-        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value;
+        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value; _xamlFormatter = xamlFormatter;
         Debugger = debugger; Terminal = terminal; Database = database; Features = features; MemoryProfiler = memoryProfiler; Designer = designer; Editor = editor;
         Designer.SourceEditRequested += PreviewDesignerEditAsync;
         Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
         Designer.SelectionSourceChanged += RevealDesignerSelection;
-        TaskList = new(this, new("tasks", _paths.DataDirectory)); FileGroups = new(this, new("file-groups", _paths.DataDirectory)); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
+        TaskList = new(this, tools.Tasks); FileGroups = new(this, tools.FileGroups); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher, tools.WatchOpenDocuments);
         Palette = new(this); ChangeReview = new(this, dispatcher);
-        XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token);
+        XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
         Explorer = new(this, Projects); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
         ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) OnPropertyChanged(nameof(IsPreviewOpen)); };

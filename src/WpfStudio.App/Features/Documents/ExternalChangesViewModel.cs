@@ -18,19 +18,19 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
 {
     private readonly IExternalChangesHost _host;
     private readonly DocumentStore _store;
-    private readonly OpenDocumentWatcher _watcher;
+    private readonly IOpenDocumentWatcher _watcher;
     private Task? _check;
     private bool _recheckFiles, _recheckFromApp;
     private bool _disposed;
 
     private readonly Action<Exception> _report;
 
-    public ExternalChangesViewModel(IExternalChangesHost host, DocumentStore store, IUiDispatcher dispatcher)
+    public ExternalChangesViewModel(IExternalChangesHost host, DocumentStore store, IUiDispatcher dispatcher, OpenDocumentWatcherFactory watchDocuments)
     {
         _host = host; _store = store;
         Changes.CollectionChanged += ChangesChanged;
         _report = fault => dispatcher.Post(() => _host.AppendOutput("Checking files changed outside WpfStudio: " + fault.Message));
-        _watcher = new OpenDocumentWatcher(() => dispatcher.Post(() => CheckAsync().Forget(_report)));
+        _watcher = watchDocuments(() => dispatcher.Post(() => CheckAsync().Forget(_report)));
         host.DocumentsChanged += () =>
         {
             _watcher.Watch(host.Documents.Select(document => document.State.Path));
