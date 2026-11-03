@@ -4,10 +4,12 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
+using WpfStudio.App.Services;
 
 namespace WpfStudio.App.Features.ColtonGpt;
 
-public sealed partial class AssistantSettingsViewModel(AssistantSettingsStore store, OpenRouterClient client) : ObservableObject
+public sealed partial class AssistantSettingsViewModel(AssistantSettingsStore store, OpenRouterClient client, IMessenger messenger) : ObservableObject
 {
     private AssistantConfiguration _saved = new();
     private bool _loaded;
@@ -118,6 +120,7 @@ public sealed partial class AssistantSettingsViewModel(AssistantSettingsStore st
         OnPropertyChanged(nameof(IsReady)); OnPropertyChanged(nameof(SavedModelId));
         OnPropertyChanged(nameof(SavedMaxOutputTokens)); OnPropertyChanged(nameof(SavedTemperature));
         Saved?.Invoke();
+        messenger.Send(new AssistantSettingsSavedMessage());
     }
 
     internal static bool IsRecoverable(Exception ex) => ex is AssistantException or HttpRequestException or IOException or UnauthorizedAccessException or CryptographicException or System.Text.Json.JsonException;

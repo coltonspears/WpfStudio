@@ -72,6 +72,5 @@ public sealed class ProblemsViewModelTests
         public Task NavigateAsync(string path, int line, int column) => Task.CompletedTask;
         public Task OpenDocumentAsync(string path) => Task.CompletedTask;
         public Task<bool> CloseDocumentAsync(string path) => Task.FromResult(true);
-        public void ShowTool(string toolId) { }
     }
 }

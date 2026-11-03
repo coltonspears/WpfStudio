@@ -1,3 +1,4 @@
+using WpfStudio.Contracts;
 using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.App.Features.Designer;
@@ -14,4 +15,6 @@ public interface IDesignerSourceHost
     Task<bool> ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit);
     /// <summary>Opens a verified binding declaration and returns the status to show.</summary>
     Task<string> NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken);
+    /// <summary>The user chose this element in the designer: show its markup in the editor.</summary>
+    void RevealSelection(SourceLocation source);
 }

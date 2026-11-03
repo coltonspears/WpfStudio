@@ -1,28 +1,26 @@
 using System.Windows;
 using System.Windows.Media;
+using CommunityToolkit.Mvvm.Messaging;
 using ICSharpCode.AvalonEdit.Highlighting;
 using ICSharpCode.AvalonEdit.Rendering;
 
 namespace WpfStudio.App.Services;
 
-/// <summary>The current theme: recolours the application's brushes, its window frames and the syntax colours.</summary>
+/// <summary>The current theme: recolours the application's brushes, its window frames and the syntax colours, then announces <see cref="ThemeChangedMessage"/> so views can refresh non-brush theme state.</summary>
 public interface IThemeService
 {
     Palette Palette { get; }
-    /// <summary>Raised after brushes and frames have been updated, so views can refresh non-brush theme state.</summary>
-    event Action<Palette>? Applied;
     void Apply(string name);
     /// <summary>Colours a window's frame with the current palette once it has a handle.</summary>
     void Track(Window window);
 }
 
 /// <summary>Application palette and dynamic syntax brushes shared by source and SQL editors.</summary>
-public sealed class ThemeService : IThemeService
+public sealed class ThemeService(IMessenger messenger) : IThemeService
 {
     private bool _syntaxConfigured;
 
     public Palette Palette { get; private set; } = Palette.Dark;
-    public event Action<Palette>? Applied;
 
     public void Track(Window window)
     {
@@ -34,7 +32,7 @@ public sealed class ThemeService : IThemeService
     {
         Palette = Palette.For(name);
         if (Application.Current is { } app) ApplyResources(app);
-        Applied?.Invoke(Palette);
+        messenger.Send(new ThemeChangedMessage(Palette));
     }
 
     private void ApplyResources(Application app)

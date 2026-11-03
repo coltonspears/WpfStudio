@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WpfStudio.App.Features.Debugging;
@@ -53,38 +54,32 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IDesktopService desktop, IClipboardService clipboard, IThemeService theme, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler, EditorPreferences editor, WpfStudio.Workspace.Xaml.XamlFormattingService xamlFormatter, ShellToolServices tools)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, ShellLanguageServices language, ShellDesktopServices desktop, ShellPanes panes, StudioFeatures features, EditorPreferences editor, ShellToolServices tools, IUiDispatcher dispatcher, IMessenger messenger, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths)
     {
         _operations = new(busy => IsBusy = busy, _lifetime.Token);
-        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _desktop = desktop; _clipboard = clipboard; Theme = theme; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value; _xamlFormatter = xamlFormatter;
-        Debugger = debugger; Terminal = terminal; Database = database; Features = features; MemoryProfiler = memoryProfiler; Designer = designer; Editor = editor;
+        _store = store; _settings = settings; _workspace = language.Workspace; _build = language.Build; _indexer = language.Indexer; _scaffolding = language.Scaffolding; _edits = language.Edits; _xaml = language.Xaml; _xamlFormatter = language.XamlFormatter;
+        _files = desktop.Files; _dialogs = desktop.Dialogs; _desktop = desktop.Desktop; _clipboard = desktop.Clipboard; Theme = desktop.Theme;
+        _dispatcher = dispatcher; Messenger = messenger; _logger = logger; _paths = paths.Value;
+        Debugger = panes.Debugger; Terminal = panes.Terminal; Database = panes.Database; MemoryProfiler = panes.MemoryProfiler; Designer = panes.Designer; Features = features; Editor = editor;
         // System colours and syntax highlighting are not set until a theme is applied.
-        theme.Apply(ThemeName);
+        Theme.Apply(ThemeName);
         Designer.AttachSourceHost(this);
-        Designer.SelectionSourceChanged += RevealDesignerSelection;
-        TaskList = new(this, tools.Tasks); FileGroups = new(this, tools.FileGroups); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher, tools.WatchOpenDocuments);
+        TaskList = new(this, tools.Tasks, messenger); FileGroups = new(this, tools.FileGroups, messenger); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher, tools.WatchOpenDocuments);
         Palette = new(this); ChangeReview = new(this, dispatcher);
-        XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
-        Explorer = new(this, Projects, desktop, clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
+        XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
+        Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
-        ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) { OnPropertyChanged(nameof(IsPreviewOpen)); UpdateDesignerOverlay(); } };
-        Palette.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Palette.IsOpen)) UpdateDesignerOverlay(); };
         LiveInspection = new(dispatcher);
         LiveInspection.AttachHost(this);
         features.Attach(this);
         InitializeExperience();
         InitializeWorkbench();
         InitializeSettings();
-        debugger.SourceRequested += (path, line) => _ = GuardAsync(() => NavigateAsync(path, line, 1, true));
-        debugger.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName != nameof(DebuggerViewModel.IsStopped)) return;
-            LiveInspection.SetDebuggerState(debugger.IsStopped);
-            DebugCommand.NotifyCanExecuteChanged();
-            if (!debugger.IsStopped) foreach (var doc in Documents) doc.ExecutionLine = -1;
-        };
-        workspace.WorkerExited += (_, reason) => dispatcher.Post(() => { Status = "Language worker stopped. Use Restart language service to reconnect."; AppendOutput(reason); });
+        RegisterMessages();
+        _workspace.WorkerExited += WorkerExited;
     }
+    /// <summary>The application's message bus, for views that reach the rest of the application through the shell.</summary>
+    public IMessenger Messenger { get; }
     public IThemeService Theme { get; }
     public DebuggerViewModel Debugger { get; }
     public TerminalViewModel Terminal { get; }
@@ -147,7 +142,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public string WindowTitle => Workspace == null ? "WpfStudio" : $"{Path.GetFileNameWithoutExtension(Workspace.Path)} — WpfStudio";
     public bool HasWorkspace => Workspace != null;
     public bool IsWelcomeVisible => Documents.Count == 0;
-    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { Features.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); XamlAnalysis.Reset(value); }
+    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { Messenger.Send(new WorkspaceChangedMessage(value)); NotifyWorkspaceSummary(); XamlAnalysis.Reset(value); }
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
     partial void OnConfigurationChanged(string value) { if (!string.IsNullOrWhiteSpace(value)) ScheduleContextReload(); }
     partial void OnTargetFrameworkChanged(string? value) { if (value != null) ScheduleContextReload(); }
@@ -507,8 +502,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             TidyBeforeSave(doc);
             await _store.SaveAsync(doc.State);
-            TaskList.UpdateComments(doc.State.Path, doc.State.Content);
-            if (doc.IsXaml) _xamlResources.Invalidate();
+            Messenger.Send(new DocumentSavedMessage(doc.State));
             XamlAnalysis.Request();
             Status = doc.State.IsDirty ? "The document changed while saving. Save again to include the latest edits." : "Saved " + doc.State.Name;
             return !doc.State.IsDirty;
@@ -517,7 +511,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             if (!await _dialogs.ConfirmAsync("File changed outside WpfStudio", $"Overwrite the external changes to {doc.State.Name} with the editor content?")) return false;
             await _store.SaveAsync(doc.State, true);
-            if (doc.IsXaml) _xamlResources.Invalidate();
+            Messenger.Send(new DocumentSavedMessage(doc.State));
             XamlAnalysis.Request();
             if (doc.State.IsDirty) Status = "The document changed while saving. Save again to include the latest edits.";
             return !doc.State.IsDirty;
@@ -930,6 +924,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        Messenger.UnregisterAll(this); _workspace.WorkerExited -= WorkerExited;
         XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Palette.Dispose();
         _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
         Breakpoints.Dispose();

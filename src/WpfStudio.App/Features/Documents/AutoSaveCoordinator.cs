@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
@@ -17,8 +18,6 @@ public interface IAutoSaveHost
     bool IsReviewOpen { get; }
     void ReportStatus(string status);
     void AppendOutput(string line);
-    /// <summary>The timer wrote this document to disk.</summary>
-    void DocumentAutoSaved(EditorViewModel document);
     /// <summary>A pass wrote at least one document, so analysis that reads disk should run again.</summary>
     void AutoSaveCompleted();
     /// <summary>A save found the file changed on disk since it was loaded; the external-changes review should look.</summary>
@@ -36,14 +35,15 @@ public sealed class AutoSaveCoordinator : IDisposable
     private readonly DocumentStore _store;
     private readonly EditorPreferences _preferences;
     private readonly IUiDispatcher _dispatcher;
+    private readonly IMessenger _messenger;
     private CancellationTokenSource? _timer;
     private int _suspensions;
     private bool _stopped, _disposed;
     private Task _run = Task.CompletedTask;
 
-    public AutoSaveCoordinator(IAutoSaveHost host, DocumentStore store, EditorPreferences preferences, IUiDispatcher dispatcher)
+    public AutoSaveCoordinator(IAutoSaveHost host, DocumentStore store, EditorPreferences preferences, IUiDispatcher dispatcher, IMessenger messenger)
     {
-        _host = host; _store = store; _preferences = preferences; _dispatcher = dispatcher;
+        _host = host; _store = store; _preferences = preferences; _dispatcher = dispatcher; _messenger = messenger;
         _preferences.PropertyChanged += PreferencesChanged;
     }
 
@@ -120,7 +120,7 @@ public sealed class AutoSaveCoordinator : IDisposable
             try
             {
                 await _store.SaveAsync(document.State, cancellationToken: lifetime);
-                _host.DocumentAutoSaved(document);
+                _messenger.Send(new DocumentSavedMessage(document.State));
                 saved++;
             }
             catch (OperationCanceledException) { break; } // The write is atomic, so the file keeps its last saved content.

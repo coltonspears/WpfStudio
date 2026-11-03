@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Features.ColtonGpt;
 
 namespace WpfStudio.Shell.Tests;
@@ -129,7 +130,7 @@ public sealed class ColtonGptTests
         string saved = await File.ReadAllTextAsync(Path.Combine(fixture.Directory, "coltongpt.json"));
         Assert.DoesNotContain("sk-or-private-key", saved);
         Assert.Equal("", vm.PendingApiKey);
-        var restored = new AssistantSettingsViewModel(fixture.Store, fixture.Client);
+        var restored = new AssistantSettingsViewModel(fixture.Store, fixture.Client, new WeakReferenceMessenger());
         await restored.LoadAsync();
         Assert.Equal("sk-or-private-key", restored.GetApiKey());
         Assert.True(restored.IsReady);
@@ -150,7 +151,7 @@ public sealed class ColtonGptTests
             Assert.Equal("unsaved-key", request.Headers.Authorization?.Parameter);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"data\":[{\"id\":\"test/model\",\"name\":\"Test\"}]}") });
         }));
-        var settings = new AssistantSettingsViewModel(new AssistantSettingsStore(directory), new OpenRouterClient(http));
+        var settings = new AssistantSettingsViewModel(new AssistantSettingsStore(directory), new OpenRouterClient(http), new WeakReferenceMessenger());
         await settings.RefreshModelsCommand.ExecuteAsync(null);
         Assert.Equal(0, requests);
         settings.PendingApiKey = "unsaved-key";
@@ -260,7 +261,7 @@ public sealed class ColtonGptTests
                 return Sse("data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
             }));
             Client = new OpenRouterClient(_http); Store = new AssistantSettingsStore(Directory);
-            Settings = new AssistantSettingsViewModel(Store, Client);
+            Settings = new AssistantSettingsViewModel(Store, Client, new WeakReferenceMessenger());
         }
         public async Task ConfigureAsync()
         {

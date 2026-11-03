@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Features.Debugging;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Documents;
@@ -9,11 +10,12 @@ using WpfStudio.Core.Wpf;
 using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
+using WpfStudio.Runtime.Debugging;
 
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -36,6 +38,28 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     /// <summary>Raised when the active tab changes.</summary>
     private void NotifyActiveDocumentChanged() => _documentsChanged?.Invoke();
 
+    // ------------------------------------------------------------------ Messages
+    private void RegisterMessages()
+    {
+        Messenger.Register<ShellViewModel, ShowToolMessage>(this, static (shell, message) => shell.ShowToolCommand.Execute(message.ToolId));
+        Messenger.Register<ShellViewModel, DocumentSavedMessage>(this, static (shell, message) => { if (message.Document.Extension == ".xaml") shell._xamlResources.Invalidate(); });
+        Messenger.Register<ShellViewModel, AssistantSettingsSavedMessage>(this, static (shell, _) => shell.OnPropertyChanged(nameof(IsColtonGptReady)));
+        Messenger.Register<ShellViewModel, DebuggerSourceMessage>(this, static (shell, message) => shell.GuardAsync(() => shell.NavigateAsync(message.Path, message.Line, 1, true)).Forget(shell.ReportBackgroundFault));
+        Messenger.Register<ShellViewModel, DebuggerStateMessage>(this, static (shell, message) =>
+        {
+            shell.LiveInspection.SetDebuggerState(message.IsStopped);
+            shell.DebugCommand.NotifyCanExecuteChanged();
+            if (!message.IsStopped) foreach (var document in shell.Documents) document.ExecutionLine = -1;
+        });
+    }
+    // The client raises this on its worker's exit thread, and its one audience is this shell, so a message would add nothing.
+    private void WorkerExited(object? sender, string reason) => _dispatcher.Post(() =>
+    {
+        if (_disposed) return;
+        Status = "Language worker stopped. Use Restart language service to reconnect.";
+        AppendOutput(reason);
+    });
+
     // ------------------------------------------------------------------ IWorkbenchHost
     string? IWorkbenchHost.WorkspacePath => Workspace?.Path;
     IReadOnlyList<string> IWorkbenchHost.WorkspaceFiles => _allFiles;
@@ -52,7 +76,6 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     Task IWorkbenchHost.OpenDocumentAsync(string path) => OpenDocumentAsync(path);
     Task<bool> IWorkbenchHost.CloseDocumentAsync(string path) =>
         Documents.FirstOrDefault(d => d.State.Path.Equals(path, StringComparison.OrdinalIgnoreCase)) is { } document ? CloseDocumentAsync(document) : Task.FromResult(true);
-    void IWorkbenchHost.ShowTool(string toolId) => ShowToolCommand.Execute(toolId);
 
     // ------------------------------------------------------------------ ICommandPaletteHost
     IEnumerable<PaletteEntry> ICommandPaletteHost.CommandEntries() => CommandEntries();
@@ -60,6 +83,10 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     string ICommandPaletteHost.WorkspaceRoot => WorkspaceRoot;
     bool ICommandPaletteHost.IsSymbolSearchAvailable => _workspace.IsConnected;
     Task<IReadOnlyList<SymbolSearchResult>> ICommandPaletteHost.SearchSymbolsAsync(string query, CancellationToken token) => _workspace.SearchSymbolsAsync(new(query, 80), token);
+    void ICommandPaletteHost.PaletteOpenChanged() => UpdateDesignerOverlay();
+
+    // ------------------------------------------------------------------ IChangeReviewHost
+    void IChangeReviewHost.ReviewOpenChanged() { OnPropertyChanged(nameof(IsPreviewOpen)); UpdateDesignerOverlay(); }
 
     // ------------------------------------------------------------------ IExternalChangesHost
     IReadOnlyList<EditorViewModel> IExternalChangesHost.Documents => Documents;
@@ -96,7 +123,6 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     bool IAutoSaveHost.IsReviewOpen => IsPreviewOpen;
     void IAutoSaveHost.ReportStatus(string status) => Status = status;
     void IAutoSaveHost.AppendOutput(string line) => AppendOutput(line);
-    void IAutoSaveHost.DocumentAutoSaved(EditorViewModel document) { if (document.IsXaml) _xamlResources.Invalidate(); }
     void IAutoSaveHost.AutoSaveCompleted() => XamlAnalysis.Request();
     void IAutoSaveHost.ExternalChangeDetected() => CheckExternalChangesAsync().Forget(ReportBackgroundFault);
 
@@ -106,7 +132,6 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     IUserDialogService IBreakpointEditingHost.Dialogs => _dialogs;
     Task IBreakpointEditingHost.GuardAsync(Func<Task> action) => GuardAsync(action);
     void IBreakpointEditingHost.ReportStatus(string status) => Status = status;
-    void IBreakpointEditingHost.ShowTool(string toolId) => ShowToolCommand.Execute(toolId);
 
     // ------------------------------------------------------------------ ISolutionExplorerHost / IStudioToolsHost
     string? ISolutionExplorerHost.StartupProjectPath => StartupProject?.ProjectPath;
@@ -125,7 +150,6 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     void IStudioToolsHost.GitWorkspaceFilesChanged() => GuardAsync(WorkspaceMutatedAsync).Forget(ReportBackgroundFault);
     void IStudioToolsHost.OpenAssistantSettings() => OpenSettingsCommand.ExecuteAsync(AssistantPage).Forget(ReportBackgroundFault);
     void IStudioToolsHost.RefreshAssistantContext() => UpdateAssistantContext();
-    void IStudioToolsHost.AssistantReadinessChanged() => OnPropertyChanged(nameof(IsColtonGptReady));
     private void RefreshEditorGit() { foreach (var document in Documents) document.RefreshGitAsync(Features.GitService, _lifetime.Token).Forget(document.ReportFault); }
 
     WorkspaceSnapshot? IInspectionSourceHost.Workspace => Workspace;
@@ -134,6 +158,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     Task<bool> IDesignerSourceHost.ReviewPropertyEditAsync(XamlPropertyEditResult proposal) => PreviewDesignerEditAsync(proposal);
     Task<bool> IDesignerSourceHost.ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit) => PreviewDesignerLayoutEditAsync(edit);
     Task<string> IDesignerSourceHost.NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigatePreviewBindingSourceAsync(navigation, cancellationToken);
+    void IDesignerSourceHost.RevealSelection(SourceLocation source) => RevealDesignerSelection(source);
 
     // ------------------------------------------------------------------ IInspectionRequestHost
     Task IInspectionRequestHost.LaunchAsync(bool debug) => ExecuteWhenAvailableAsync(debug ? DebugWithInspectionCommand : RunWithInspectionCommand);

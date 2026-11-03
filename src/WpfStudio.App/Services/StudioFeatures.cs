@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Features.ColtonGpt;
 using WpfStudio.App.Features.Git;
 using WpfStudio.App.Features.Packages;
@@ -27,17 +28,17 @@ public interface IStudioToolsHost : IWorkspaceMutationHost
     void GitWorkspaceFilesChanged();
     void OpenAssistantSettings();
     void RefreshAssistantContext();
-    /// <summary>The assistant gained or lost its API key.</summary>
-    void AssistantReadinessChanged();
 }
 
 /// <summary>Composition and workspace coordination for optional tools.</summary>
 public sealed class StudioFeatures : IDisposable
 {
+    private readonly IMessenger _messenger;
     private IStudioToolsHost? _host;
     private bool _disposed;
-    public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs, IDesktopService desktop)
+    public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs, IDesktopService desktop, IMessenger messenger)
     {
+        _messenger = messenger;
         Assistant = assistant;
         GitService = git;
         Packages = new(packages, dialogs, () => Git?.IsBusy == true ? Task.FromException<bool>(new InvalidOperationException("Wait for the Git operation to finish.")) : Host.SaveBeforeMutationAsync(), () => Host.WorkspaceChangedAsync());
@@ -47,7 +48,7 @@ public sealed class StudioFeatures : IDisposable
         Git.WorkspaceFilesChanged += () => _host?.GitWorkspaceFilesChanged();
         assistant.SettingsRequested += () => _host?.OpenAssistantSettings();
         assistant.RefreshContextRequested += () => _host?.RefreshAssistantContext();
-        assistant.Settings.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(AssistantSettingsViewModel.HasApiKey)) _host?.AssistantReadinessChanged(); };
+        messenger.Register<StudioFeatures, WorkspaceChangedMessage>(this, static (features, message) => features.Packages.SetWorkspace(message.Workspace));
     }
     private IStudioToolsHost Host => _host ?? throw new InvalidOperationException("The shell has not attached to the workspace tools yet.");
     /// <summary>Connects the tools to the shell that owns the documents and the project model; the shell calls this once.</summary>
@@ -61,6 +62,7 @@ public sealed class StudioFeatures : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _messenger.UnregisterAll(this);
         _host = null;
         Packages.Dispose(); Git.Dispose(); Assistant.Dispose();
     }

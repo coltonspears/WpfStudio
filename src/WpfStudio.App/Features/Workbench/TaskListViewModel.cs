@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
+using WpfStudio.App.Services;
 using WpfStudio.Core;
 using WpfStudio.Core.Text;
 
@@ -26,14 +28,17 @@ public sealed partial class TaskListViewModel : ObservableObject, IDisposable
     private const StringComparison IgnoreCase = StringComparison.OrdinalIgnoreCase;
     private readonly IWorkbenchHost _host;
     private readonly WorkspaceStateStore<UserTaskItem> _store;
+    private readonly IMessenger _messenger;
     private CancellationTokenSource? _scan;
     private List<TaskComment> _comments = [];
     private bool _disposed;
 
-    public TaskListViewModel(IWorkbenchHost host, WorkspaceStateStore<UserTaskItem> store)
+    public TaskListViewModel(IWorkbenchHost host, WorkspaceStateStore<UserTaskItem> store, IMessenger messenger)
     {
         _host = host;
         _store = store;
+        _messenger = messenger;
+        messenger.Register<TaskListViewModel, DocumentSavedMessage>(this, static (list, message) => list.UpdateComments(message.Document.Path, message.Document.Content));
     }
 
     /// <summary>The comments matching <see cref="Filter"/>, high priority first.</summary>
@@ -146,6 +151,7 @@ public sealed partial class TaskListViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _messenger.UnregisterAll(this);
         _scan?.Cancel(); _scan?.Dispose(); _scan = null;
     }
 }

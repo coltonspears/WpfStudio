@@ -48,7 +48,6 @@ public sealed partial class DesignerViewModel
     [ObservableProperty] public partial bool IsZoomToFit { get; set; } = true;
     [ObservableProperty] public partial double CanvasViewportWidth { get; set; }
     [ObservableProperty] public partial double CanvasViewportHeight { get; set; }
-    public event Action<SourceLocation>? SelectionSourceChanged;
 
     public int ArtboardWidth { get; private set; }
     public int ArtboardHeight { get; private set; }
@@ -227,6 +226,6 @@ public sealed partial class DesignerViewModel
     {
         if (_suppressSourceSync > 0 || node?.Node.Source is not { } source || !IsCurrent || _document is not { } document
             || document.Version != _sourceVersion || !string.Equals(source.Path, document.Path, StringComparison.OrdinalIgnoreCase)) return;
-        SelectionSourceChanged?.Invoke(source);
+        _sourceHost?.RevealSelection(source);
     }
 }

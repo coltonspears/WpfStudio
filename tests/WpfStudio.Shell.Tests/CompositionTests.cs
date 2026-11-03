@@ -109,12 +109,12 @@ public sealed class CompositionTests
 
         var notified = new List<string?>();
         shell.PropertyChanged += (_, args) => notified.Add(args.PropertyName);
-        assistant.Settings.HasApiKey = true;
+        await assistant.Settings.ClearKeyCommand.ExecuteAsync(null);
         Assert.Contains(nameof(ShellViewModel.IsColtonGptReady), notified);
 
         await shell.DisposeAsync();
         notified.Clear();
-        assistant.Settings.HasApiKey = false;
+        await assistant.Settings.ClearKeyCommand.ExecuteAsync(null);
         Assert.DoesNotContain(nameof(ShellViewModel.IsColtonGptReady), notified);
     }
 

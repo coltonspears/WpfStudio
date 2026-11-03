@@ -161,7 +161,7 @@ public sealed partial class DesignerTests
         Serve(client, version => Nodes(version, document.Path, (Grid, "Root", -1, true), (Text, "Greeting", 0, true)));
         await model.OpenAsync(document);
         var revealed = new List<SourceLocation>();
-        model.SelectionSourceChanged += revealed.Add;
+        model.StubHost().Revealed = revealed.Add;
 
         model.SelectedNode = Flatten(model.Tree).Single(node => node.Node.Name == "Greeting");
         Assert.Equal(10, Assert.Single(revealed).Start);
