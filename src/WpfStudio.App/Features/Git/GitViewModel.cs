@@ -3,6 +3,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts;
+using WpfStudio.Core.Git;
 
 namespace WpfStudio.App.Features.Git;
 

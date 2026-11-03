@@ -13,21 +13,6 @@ namespace WpfStudio.Shell.Tests;
 public sealed class GitIntegrationTests
 {
     [Fact]
-    public void PorcelainParserPreservesSpacesUnicodeAndRenameOrder()
-    {
-        var changes = GitService.ParseStatus(" M folder/space λ.cs\0R  new name.cs\0old name.cs\0?? note[1].txt\0UU conflict.cs\0");
-        Assert.Equal(4, changes.Count);
-        Assert.Equal("folder/space λ.cs", changes[0].Path);
-        Assert.True(changes[0].IsUnstaged);
-        Assert.False(changes[0].IsStaged);
-        Assert.Equal("new name.cs", changes[1].Path);
-        Assert.Equal("old name.cs", changes[1].OriginalPath);
-        Assert.True(changes[1].IsStaged);
-        Assert.True(changes[2].IsUnstaged);
-        Assert.True(changes[3].IsConflict);
-    }
-
-    [Fact]
     public async Task UnbornStageAndUnstageOnlyChangeIndexAndUseLiteralPaths()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -269,18 +254,6 @@ public sealed class GitIntegrationTests
         var rootDiff = await fixture.Service.GetCommitFileDiffAsync(fixture.Root, root, first);
         Assert.Null(rootDiff.Before);
         Assert.Equal("original\n", rootDiff.After);
-    }
-
-    [Fact]
-    public void CommitFileRecordsJoinStatusesWithLineCounts()
-    {
-        var files = GitService.ParseCommitFiles("M\0src/a b.cs\0R087\0old.cs\0new.cs\0A\0logo.png\0",
-            "3\t1\tsrc/a b.cs\0" + "2\t2\t\0old.cs\0new.cs\0" + "-\t-\tlogo.png\0");
-        Assert.Equal(3, files.Count);
-        Assert.Equal<(string, char, int?, int?)>(("src/a b.cs", 'M', 3, 1), (files[0].Path, files[0].Status, files[0].Added, files[0].Deleted));
-        Assert.Equal<(string, string?, char, int?)>(("new.cs", "old.cs", 'R', 2), (files[1].Path, files[1].OriginalPath, files[1].Status, files[1].Added));
-        Assert.True(files[2].IsBinary);
-        Assert.Equal("binary", files[2].AddedText);
     }
 
     [Fact]

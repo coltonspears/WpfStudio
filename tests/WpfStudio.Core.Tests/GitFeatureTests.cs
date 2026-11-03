@@ -4,6 +4,70 @@ namespace WpfStudio.Core.Tests;
 
 public sealed class GitFeatureTests
 {
+    [Fact]
+    public void PorcelainParserPreservesSpacesUnicodeAndRenameOrder()
+    {
+        var changes = GitOutput.ParseStatus(" M folder/space λ.cs\0R  new name.cs\0old name.cs\0?? note[1].txt\0UU conflict.cs\0");
+        Assert.Equal(4, changes.Count);
+        Assert.Equal("folder/space λ.cs", changes[0].Path);
+        Assert.True(changes[0].IsUnstaged);
+        Assert.False(changes[0].IsStaged);
+        Assert.Equal("new name.cs", changes[1].Path);
+        Assert.Equal("old name.cs", changes[1].OriginalPath);
+        Assert.True(changes[1].IsStaged);
+        Assert.True(changes[2].IsUnstaged);
+        Assert.True(changes[3].IsConflict);
+    }
+
+    [Fact]
+    public void CommitFileRecordsJoinStatusesWithLineCounts()
+    {
+        var files = GitOutput.ParseCommitFiles("M\0src/a b.cs\0R087\0old.cs\0new.cs\0A\0logo.png\0",
+            "3\t1\tsrc/a b.cs\0" + "2\t2\t\0old.cs\0new.cs\0" + "-\t-\tlogo.png\0");
+        Assert.Equal(3, files.Count);
+        Assert.Equal<(string, char, int?, int?)>(("src/a b.cs", 'M', 3, 1), (files[0].Path, files[0].Status, files[0].Added, files[0].Deleted));
+        Assert.Equal<(string, string?, char, int?)>(("new.cs", "old.cs", 'R', 2), (files[1].Path, files[1].OriginalPath, files[1].Status, files[1].Added));
+        Assert.True(files[2].IsBinary);
+        Assert.Equal("binary", files[2].AddedText);
+    }
+
+    [Fact]
+    public void AStatusRecordThatIsNotPorcelainIsRejected()
+    {
+        Assert.Throws<InvalidOperationException>(() => GitOutput.ParseStatus("M\0"));
+        Assert.Throws<InvalidOperationException>(() => GitOutput.ParseStatus("MM_a.cs\0"));
+        Assert.Throws<InvalidOperationException>(() => GitOutput.ParseStatus("R  new.cs\0"));
+        Assert.Empty(GitOutput.ParseStatus(""));
+    }
+
+    [Fact]
+    public void HistoryRecordsCountParentsAndSurviveGitsLineBreakBetweenRecords()
+    {
+        var history = GitOutput.ParseHistory("aaa\0a\0Ada\02026-01-02T03:04:05+00:00\0First\0HEAD -> main, tag: v1\0ppp qqq\0\nbbb\0b\0Linus\02026-01-01T00:00:00+00:00\0Second\0\0\0\n");
+        Assert.Equal(2, history.Count);
+        Assert.Equal(("aaa", "a", "Ada", "First"), (history[0].Id, history[0].ShortId, history[0].Author, history[0].Subject));
+        Assert.True(history[0].IsMerge);
+        Assert.Equal(["main", "v1"], history[0].RefList.Select(reference => reference.Name));
+        Assert.True(history[0].RefList[0].IsHead); Assert.True(history[0].RefList[1].IsTag);
+        Assert.Equal("bbb", history[1].Id);
+        Assert.Equal(0, history[1].ParentCount);
+        Assert.Empty(GitOutput.ParseHistory(""));
+    }
+
+    [Theory]
+    [InlineData("fatal: Authentication failed for 'https://example.invalid/r.git/'")]
+    [InlineData("fatal: could not read Username for 'https://github.com': terminal prompts disabled")]
+    [InlineData("git@github.com: PERMISSION DENIED (PUBLICKEY).")]
+    [InlineData("remote: TF401019: The Git repository does not exist or you do not have permissions")]
+    [InlineData("The requested URL returned error: 403")]
+    public void CredentialFailuresAreRecognizedWhateverTheirCase(string message) => Assert.True(GitOutput.IsAuthenticationFailure(message));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("fatal: Not possible to fast-forward, aborting.")]
+    [InlineData("fatal: unable to access 'https://example.invalid/': Could not resolve host: example.invalid")]
+    public void OtherFailuresAreNotCredentialFailures(string message) => Assert.False(GitOutput.IsAuthenticationFailure(message));
+
     [Theory]
     [InlineData("https://dev.azure.com/contoso/Shop/_git/Web", "https://dev.azure.com/contoso/Shop/_git/Web", "Web")]
     [InlineData("https://contoso@dev.azure.com/contoso/Shop%20Team/_git/Web", "https://dev.azure.com/contoso/Shop%20Team/_git/Web", "Web")]

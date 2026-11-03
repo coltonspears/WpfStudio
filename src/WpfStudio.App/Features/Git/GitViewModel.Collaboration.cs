@@ -118,7 +118,7 @@ public sealed partial class GitViewModel
         return MutateAsync(label, async token =>
         {
             try { return await action(false, token); }
-            catch (InvalidOperationException ex) when (GitService.IsAuthenticationFailure(ex.Message))
+            catch (InvalidOperationException ex) when (GitOutput.IsAuthenticationFailure(ex.Message))
             {
                 _signInRetry = new(label, retryToken => action(true, retryToken), save, changesWorkspaceFiles);
                 CanSignIn = true;

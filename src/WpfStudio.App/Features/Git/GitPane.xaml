@@ -46,7 +46,7 @@
    <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
   </Style>
 
-  <DataTemplate x:Key="WorkingChangeTemplate" DataType="{x:Type local:GitChange}">
+  <DataTemplate x:Key="WorkingChangeTemplate" DataType="{x:Type git:GitChange}">
    <DockPanel ToolTip="{Binding DisplayPath}" Background="Transparent" MinHeight="22">
     <TextBlock DockPanel.Dock="Left" Style="{StaticResource StatusLetter}" Margin="0,0,6,0" ToolTip="{Binding Status}"/>
     <Button DockPanel.Dock="Right" Style="{StaticResource RowAction}" c:Ui.Icon="Plus" ToolTip="Stage file" AutomationProperties.Name="Stage file"
@@ -58,7 +58,7 @@
     <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center"><Run Text="{Binding Name, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Folder, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="11"/></TextBlock>
    </DockPanel>
   </DataTemplate>
-  <DataTemplate x:Key="StagedChangeTemplate" DataType="{x:Type local:GitChange}">
+  <DataTemplate x:Key="StagedChangeTemplate" DataType="{x:Type git:GitChange}">
    <DockPanel ToolTip="{Binding DisplayPath}" Background="Transparent" MinHeight="22">
     <TextBlock DockPanel.Dock="Left" Style="{StaticResource StatusLetter}" Margin="0,0,6,0" ToolTip="{Binding Status}"/>
     <Button DockPanel.Dock="Right" Style="{StaticResource RowAction}" c:Ui.Icon="Minus" ToolTip="Unstage file" AutomationProperties.Name="Unstage file"
@@ -69,7 +69,7 @@
   </DataTemplate>
 
   <!-- Branch and tag decorations: the checked-out branch is filled, tags are amber, remote branches are muted. -->
-  <DataTemplate x:Key="RefChip" DataType="{x:Type local:GitRef}">
+  <DataTemplate x:Key="RefChip" DataType="{x:Type git:GitRef}">
    <Border x:Name="Chip" CornerRadius="4" Padding="5,0,6,1" Margin="0,0,4,0" BorderThickness="1" BorderBrush="{DynamicResource AccentBrush}"
            TextElement.Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" ToolTip="{Binding Name}">
     <StackPanel Orientation="Horizontal">
@@ -96,7 +96,7 @@
   </DataTemplate>
   <ItemsPanelTemplate x:Key="ChipPanel"><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
 
-  <DataTemplate x:Key="CommitTemplate" DataType="{x:Type local:GitCommit}">
+  <DataTemplate x:Key="CommitTemplate" DataType="{x:Type git:GitCommit}">
    <Grid Margin="0,3" ToolTip="{Binding DisplayDate}">
     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <Border Width="26" Height="26" CornerRadius="13" Background="{Binding AvatarIndex, Converter={StaticResource AvatarBrush}}" VerticalAlignment="Top" Margin="0,1,10,0" ToolTip="{Binding Author}">
@@ -119,7 +119,7 @@
    </Grid>
   </DataTemplate>
 
-  <DataTemplate x:Key="CommitFileTemplate" DataType="{x:Type local:GitCommitFile}">
+  <DataTemplate x:Key="CommitFileTemplate" DataType="{x:Type git:GitCommitFile}">
    <DockPanel ToolTip="{Binding Path}" Background="Transparent" MinHeight="22">
     <TextBlock DockPanel.Dock="Left" Style="{StaticResource StatusLetter}" Margin="0,0,6,0"/>
     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
