@@ -15,6 +15,8 @@ using WpfStudio.Core.Text;
 
 namespace WpfStudio.App.Controls.Diff;
 
+public enum DiffViewMode { SideBySide, Inline }
+
 /// <summary>
 /// Read-only, syntax-highlighted diff of two texts. Split view aligns the sides with fillers and scrolls them
 /// together; inline view interleaves removed and added lines. Unchanged regions beyond a few lines of context
@@ -28,7 +30,9 @@ public partial class DiffView : UserControl
     public static readonly DependencyProperty FilePathProperty = DependencyProperty.Register(nameof(FilePath), typeof(string), typeof(DiffView), new PropertyMetadata(null, (d, _) => ((DiffView)d).ApplyHighlighting()));
     public static readonly DependencyProperty MessageProperty = DependencyProperty.Register(nameof(Message), typeof(string), typeof(DiffView), new PropertyMetadata(null, ContentChanged));
     public static readonly DependencyProperty EmptyTextProperty = DependencyProperty.Register(nameof(EmptyText), typeof(string), typeof(DiffView), new PropertyMetadata("Select a file to see its changes.", ContentChanged));
-    public static readonly DependencyProperty IsSideBySideProperty = DependencyProperty.Register(nameof(IsSideBySide), typeof(bool), typeof(DiffView), new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, (d, _) => ((DiffView)d).ModeChanged()));
+    public static readonly DependencyProperty ModeProperty = DependencyProperty.Register(nameof(Mode), typeof(DiffViewMode), typeof(DiffView), new FrameworkPropertyMetadata(DiffViewMode.SideBySide, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, (d, _) => ((DiffView)d).ModeChanged()));
+    private static readonly DependencyPropertyKey EffectiveModePropertyKey = DependencyProperty.RegisterReadOnly(nameof(EffectiveMode), typeof(DiffViewMode), typeof(DiffView), new PropertyMetadata(DiffViewMode.SideBySide));
+    public static readonly DependencyProperty EffectiveModeProperty = EffectiveModePropertyKey.DependencyProperty;
     public static readonly DependencyProperty ShowWholeFileProperty = DependencyProperty.Register(nameof(ShowWholeFile), typeof(bool), typeof(DiffView), new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, (d, _) => ((DiffView)d).Rebuild(scrollToFirst: true)));
     public static readonly DependencyProperty HeaderProperty = DependencyProperty.Register(nameof(Header), typeof(object), typeof(DiffView), new PropertyMetadata(null, (d, _) => ((DiffView)d).Adapt()));
     public static readonly DependencyProperty OldLabelProperty = DependencyProperty.Register(nameof(OldLabel), typeof(string), typeof(DiffView), new PropertyMetadata("Before", (d, _) => ((DiffView)d).UpdateLabels()));
@@ -41,7 +45,10 @@ public partial class DiffView : UserControl
     /// <summary>Shown instead of a diff, for example for binary files.</summary>
     public string? Message { get => (string?)GetValue(MessageProperty); set => SetValue(MessageProperty, value); }
     public string EmptyText { get => (string)GetValue(EmptyTextProperty); set => SetValue(EmptyTextProperty, value); }
-    public bool IsSideBySide { get => (bool)GetValue(IsSideBySideProperty); set => SetValue(IsSideBySideProperty, value); }
+    /// <summary>The presentation asked for. A view too narrow for two columns keeps it for when it widens.</summary>
+    public DiffViewMode Mode { get => (DiffViewMode)GetValue(ModeProperty); set => SetValue(ModeProperty, value); }
+    /// <summary>The presentation the toolbar shows: <see cref="Mode"/>, or inline when there is no room for a split.</summary>
+    public DiffViewMode EffectiveMode => (DiffViewMode)GetValue(EffectiveModeProperty);
     public bool ShowWholeFile { get => (bool)GetValue(ShowWholeFileProperty); set => SetValue(ShowWholeFileProperty, value); }
     /// <summary>Content at the left of the toolbar, typically the file name.</summary>
     public object? Header { get => GetValue(HeaderProperty); set => SetValue(HeaderProperty, value); }
@@ -68,7 +75,6 @@ public partial class DiffView : UserControl
     private CancellationTokenSource? _compute;
     private bool _syncing;
     private bool _recomputeQueued;
-    private bool _updatingMode;
     private bool _compact;
     private bool _roomForSplit = true;
 
@@ -84,8 +90,8 @@ public partial class DiffView : UserControl
         InputBindings.Add(new KeyBinding(PreviousChangeCommand, Key.F8, ModifierKeys.Shift));
         string group = "DiffMode" + Guid.NewGuid().ToString("N");
         SideBySideOption.GroupName = group; InlineOption.GroupName = group;
-        SideBySideOption.Checked += (_, _) => { if (!_updatingMode) IsSideBySide = true; };
-        InlineOption.Checked += (_, _) => { if (!_updatingMode) IsSideBySide = false; };
+        SideBySideOption.Checked += (_, _) => Choose(DiffViewMode.SideBySide);
+        InlineOption.Checked += (_, _) => Choose(DiffViewMode.Inline);
         SizeChanged += (_, args) => { if (args.WidthChanged) Adapt(); };
         _left = CreateEditor(() => _leftLines, DiffNumberColumns.Old);
         _right = CreateEditor(() => _rightLines, DiffNumberColumns.New);
@@ -216,7 +222,7 @@ public partial class DiffView : UserControl
         _layout = DiffLayout.Build(diff, ShowWholeFile, _expanded);
         _leftLines = _layout.Left; _rightLines = _layout.Right; _inlineLines = _layout.Inline;
         // A new or deleted file has only one side worth showing.
-        ShowsSplit = IsSideBySide && _roomForSplit && diff.OldLineCount > 0 && diff.NewLineCount > 0;
+        ShowsSplit = EffectiveMode == DiffViewMode.SideBySide && diff.OldLineCount > 0 && diff.NewLineCount > 0;
         if (ShowsSplit)
         {
             SetText(_left, _leftLines);
@@ -367,15 +373,12 @@ public partial class DiffView : UserControl
         if (room != _roomForSplit) { _roomForSplit = room; ModeChanged(); }
     }
 
+    // The options follow EffectiveMode, so an option checked to match it says nothing about the mode asked for.
+    private void Choose(DiffViewMode mode) { if (mode != EffectiveMode) Mode = mode; }
+
     private void ModeChanged()
     {
-        _updatingMode = true;
-        try
-        {
-            SideBySideOption.IsChecked = IsSideBySide && _roomForSplit;
-            InlineOption.IsChecked = !(IsSideBySide && _roomForSplit);
-        }
-        finally { _updatingMode = false; }
+        SetValue(EffectiveModePropertyKey, _roomForSplit ? Mode : DiffViewMode.Inline);
         SideBySideOption.IsEnabled = _roomForSplit;
         SideBySideOption.ToolTip = _roomForSplit ? "Side by side" : "Side by side needs a wider view, so changes are shown inline";
         if (_diff is not null)

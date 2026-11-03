@@ -291,6 +291,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await VerifySelectionAndFocusRequestsAsync(window, shell);
             await VerifyEditorPopupsAsync(root);
             await VerifyLargeDiffsAsync();
+            await VerifyDiffModeAsync();
             var performanceFixture = Path.Combine(root, "artifacts/performance/fixture/Performance.slnx");
             if (File.Exists(performanceFixture))
             {
