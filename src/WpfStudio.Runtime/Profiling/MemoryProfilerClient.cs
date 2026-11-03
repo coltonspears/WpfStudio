@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using StreamJsonRpc;
+using WpfStudio.Contracts;
 using WpfStudio.Contracts.Profiling;
 
 namespace WpfStudio.Runtime.Profiling;
@@ -84,17 +85,28 @@ public sealed class MemoryProfilerClient(string? hostPath = null) : IMemoryProfi
             if (path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) start.ArgumentList.Add(path);
             start.ArgumentList.Add("--pipe"); start.ArgumentList.Add(pipeName);
             var process = Process.Start(start) ?? throw new InvalidOperationException("The profiling worker could not start.");
-            _ = process.Handle;
-            OwnedWorkers[process.Id] = process.StartTime.ToUniversalTime().Ticks;
             var error = "";
             process.ErrorDataReceived += (_, e) => { if (e.Data is not null) error = (error + e.Data + Environment.NewLine)[^Math.Min(4000, error.Length + e.Data.Length + Environment.NewLine.Length)..]; };
             process.BeginErrorReadLine();
             var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             try
             {
+                _ = process.Handle;
+                OwnedWorkers[process.Id] = process.StartTime.ToUniversalTime().Ticks;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(20));
-                await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
+                var connected = pipe.ConnectAsync(timeout.Token);
+                // A worker that exits, on a missing runtime say, can never connect: report that now rather than after the timeout.
+                var exited = process.WaitForExitAsync(timeout.Token);
+                await Task.WhenAny(connected, exited).ConfigureAwait(false);
+                var gone = exited.IsCompletedSuccessfully && !connected.IsCompletedSuccessfully;
+                await timeout.CancelAsync().ConfigureAwait(false);
+                if (gone)
+                {
+                    connected.Forget();
+                    throw new InvalidOperationException($"The profiling worker exited with code {process.ExitCode} before connecting. {error}");
+                }
+                await connected.ConfigureAwait(false);
                 // Must match the worker's formatter (WpfStudio.ProfilingHost).
                 var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(pipe, pipe, new SystemTextJsonFormatter()));
                 var proxy = rpc.Attach<IMemoryProfilerRpc>(); rpc.StartListening();

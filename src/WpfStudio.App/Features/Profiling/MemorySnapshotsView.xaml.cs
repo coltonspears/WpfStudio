@@ -18,6 +18,6 @@ public partial class MemorySnapshotsView : UserControl
 
     private void OpenSelected()
     {
-        if (DataContext is MemoryProfilerViewModel model && ComparisonList.SelectedItem is ComparisonRow row && !row.IsGone) model.OpenTypeCommand.Execute(row.Key);
+        if (DataContext is MemoryProfilerViewModel model && ComparisonList.SelectedItem is ComparisonRow row && !row.IsGone && model.OpenTypeCommand.CanExecute(row.Key)) model.OpenTypeCommand.Execute(row.Key);
     }
 }

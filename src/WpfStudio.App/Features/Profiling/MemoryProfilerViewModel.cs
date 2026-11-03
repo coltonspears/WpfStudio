@@ -39,8 +39,10 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     [ObservableProperty, NotifyPropertyChangedFor(nameof(IsBrowserVisible))] public partial bool ShowBrowser { get; set; } = true;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(IsIdle)), NotifyCanExecuteChangedFor(nameof(OpenDumpCommand), nameof(CaptureCommand),
         nameof(RefreshProcessesCommand), nameof(SetBaselineCommand), nameof(ClearBaselineCommand), nameof(CloseCaptureCommand),
-        nameof(EstimateObjectCommand), nameof(EstimateReferenceCommand), nameof(ExportReportCommand))]
+        nameof(EstimateObjectCommand), nameof(EstimateReferenceCommand), nameof(ExportReportCommand), nameof(OpenTypeCommand))]
     public partial bool IsBusy { get; set; }
+    /// <summary>A new capture is open and filling its first views. Another load has to wait for them.</summary>
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(OpenDumpCommand), nameof(CaptureCommand))] public partial bool IsLoadingFirstViews { get; set; }
     public bool IsIdle => !IsBusy;
     public bool IsBrowserVisible => ShowBrowser && !FocusGraph && HasCapture;
     public string GraphFocusLabel => FocusGraph ? "Show inspector" : "Focus graph";
@@ -70,11 +72,12 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     partial void OnFocusGraphChanged(bool value) { if (value) SelectedView = GraphView; }
 
     private bool CanLoad() => !_disposed && !IsBusy;
-    private bool CanCapture() => CanLoad() && SelectedProcess is not null;
+    private bool CanStartLoad() => CanLoad() && !IsLoadingFirstViews;
+    private bool CanCapture() => CanStartLoad() && SelectedProcess is not null;
     private bool CanUseCapture() => CanLoad() && _session is not null;
     private bool CanClearBaseline() => CanLoad() && HasBaseline;
 
-    [RelayCommand(CanExecute = nameof(CanLoad), IncludeCancelCommand = true)]
+    [RelayCommand(CanExecute = nameof(CanStartLoad), IncludeCancelCommand = true)]
     private async Task OpenDumpAsync(CancellationToken token)
     {
         var path = await files.OpenFileAsync("Open managed memory dump", "Memory dumps|*.dmp;*.dump;*.core|All files|*.*");
@@ -93,6 +96,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     {
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
         IMemorySession? pending = null;
+        var opened = false;
         IsBusy = true; BusyMessage = request.DumpPath is null ? "Capturing an immutable heap snapshot…" : "Reading objects, references, and GC roots…";
         PrepareSnapshotSource(request);
         Status = "Analyzing memory in an isolated worker. Cancel stops this analysis.";
@@ -100,7 +104,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         {
             pending = await profiler.OpenAsync(request, operation.Token);
             if (_disposed) return;
-            var old = _session; _session = pending; pending = null;
+            var old = _session; _session = pending; pending = null; opened = true;
             _revision++; CancelSelection(); ResetHistory(); _skip = 0;
             _updating = true;
             try
@@ -122,18 +126,33 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
             if (pending is not null) await pending.DisposeAsync();
             IsBusy = false; BusyMessage = "";
         }
-        if (_session is not null && !_disposed && Summary is not null && SelectedType is null)
+        if (opened && !_disposed) await LoadFirstViewsAsync(operation.Token);
+    }
+
+    /// <summary>Runs after IsBusy clears: the capture is usable by now, and the guards on IsBusy would ignore what the user clicks
+    /// in it. Cancel still stops this, because the load's command stays running until it ends.</summary>
+    private async Task LoadFirstViewsAsync(CancellationToken token)
+    {
+        IsLoadingFirstViews = true;
+        try
         {
-            _ = LoadDominatorRootsAsync(_lifetime.Token);
-            _updating = true; SelectedType = Types.FirstOrDefault(); _updating = false;
-            if (SelectedType is not null) _ = LoadFlowAsync(SelectedType.Key, _lifetime.Token);
-            if (IsGrouped) _ = LoadGroupsAsync(_lifetime.Token);
-            await QueryObjectsAsync(_lifetime.Token);
+            List<Task> background = [LoadDominatorRootsAsync(token)];
+            _updating = true;
+            try { SelectedType = Types.FirstOrDefault(); }
+            finally { _updating = false; }
+            if (SelectedType is not null) background.Add(LoadFlowAsync(SelectedType.Key, token));
+            if (IsGrouped) background.Add(LoadGroupsAsync(token));
+            await QueryObjectsAsync(token);
             // Start the browser on the biggest owner rather than an arbitrary instance of the largest type.
             // Prefer an application type: a runtime cache is rarely what someone opening a snapshot wants to see first.
             if (Summary?.TopRetainers is { Count: > 0 } owners && _session is not null)
-                await NavigateAsync((owners.FirstOrDefault(o => !MemoryLabels.IsFrameworkModule(o.Module)) ?? owners[0]).Id, Navigation.Replace, _lifetime.Token);
+                await NavigateAsync((owners.FirstOrDefault(o => !MemoryLabels.IsFrameworkModule(o.Module)) ?? owners[0]).Id, Navigation.Replace, token);
+            await Task.WhenAll(background);
         }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { if (!_disposed) Status = "The capture is open, but its first views failed to load: " + ex.Message; }
+        finally { IsLoadingFirstViews = false; }
+        if (token.IsCancellationRequested && !_disposed) Status = "The capture is open. Loading its first views was cancelled; choose a type or object to continue.";
     }
 
     [RelayCommand(CanExecute = nameof(CanLoad), IncludeCancelCommand = true)]

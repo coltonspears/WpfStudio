@@ -254,6 +254,83 @@ public sealed class MemoryProfilerViewModelTests
     }
 
     [Fact]
+    public async Task OpeningATypeIsUnavailableWhileACaptureLoads()
+    {
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(new Session(Summary([Type("Page", 1, 10)])));
+        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        Assert.True(model.OpenTypeCommand.CanExecute("Page"));
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        profiler.Open = async token => { started.SetResult(); await Task.Delay(Timeout.Infinite, token); throw new InvalidOperationException(); };
+        var opening = model.OpenDumpCommand.ExecuteAsync(null); await started.Task;
+        Assert.False(model.OpenTypeCommand.CanExecute("Page"));
+        model.OpenDumpCancelCommand.Execute(null); await opening;
+        Assert.True(model.OpenTypeCommand.CanExecute("Page"));
+    }
+
+    [Fact]
+    public async Task FailedGraphLeavesTheObjectItsFieldsAndWhatItRetains()
+    {
+        var session = new Session(Summary([Type("Page", 1, 10)]));
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
+        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        session.GraphLoad = _ => Task.FromException<MemoryGraph>(new InvalidOperationException("graph unavailable"));
+        await model.InspectObjectCommand.ExecuteAsync(7);
+        Assert.Equal(7, model.Details!.Object.Id);
+        Assert.Null(model.Graph);
+        Assert.Equal(2, model.FieldNodes.Count);
+        Assert.NotNull(model.RetainedComposition);
+        Assert.Contains("graph unavailable", model.Status);
+        Assert.False(model.IsInspecting);
+    }
+
+    [Fact]
+    public async Task FailedDetailsLeaveTheGraphAndStillObserveTheOtherParts()
+    {
+        var session = new Session(Summary([Type("Page", 1, 10)]));
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
+        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        session.Inspection = _ => Task.FromException<MemoryObjectDetails>(new InvalidOperationException("details unavailable"));
+        session.ChildrenLoad = _ => Task.FromException<MemoryObjectChildren>(new InvalidOperationException("fields unavailable"));
+        await model.InspectObjectCommand.ExecuteAsync(7);
+        Assert.Null(model.Details);
+        Assert.Equal(7, model.Graph!.Nodes.Single().Object.Id);
+        Assert.Contains("details unavailable", model.Status);
+        Assert.Contains("fields unavailable", model.ObjectPreview);
+        Assert.NotNull(model.RetainedComposition);
+    }
+
+    [Fact]
+    public async Task CancelStopsTheFirstViewsOfANewCaptureAndASecondLoadWaitsForThem()
+    {
+        var summary = Summary([Type("Page", 1, 10)]) with { TopRetainers = [new(5, "0x5", "Page", "Page", "fixture", 10, 10, true, "Generation2", false)] };
+        var session = new Session(summary);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.CancellableInspection = async (id, token) =>
+        {
+            if (id == 5) entered.SetResult();
+            await Task.Delay(Timeout.Infinite, token);
+            throw new InvalidOperationException();
+        };
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
+        await using var model = new MemoryProfilerViewModel(profiler, new Files());
+        await model.RefreshProcessesCommand.ExecuteAsync(null);
+        Assert.True(model.CaptureCommand.CanExecute(null));
+        var opening = model.OpenDumpCommand.ExecuteAsync(null);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(model.IsBusy); Assert.True(model.HasCapture);
+        Assert.False(model.CaptureCommand.CanExecute(null));
+        model.OpenDumpCancelCommand.Execute(null);
+        await opening.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Same(summary, model.Summary); Assert.False(session.Disposed);
+        Assert.Null(model.Details); Assert.False(model.IsInspecting);
+        Assert.Contains("cancelled", model.Status);
+        Assert.True(model.CaptureCommand.CanExecute(null));
+    }
+
+    [Fact]
     public void MergedGraphsKeepOneFocusAndOnlyConnectedReferences()
     {
         MemoryObjectInfo Obj(int id) => new(id, "0x1", "T", "T", "m", 1, 1, true, "Generation2", false);
@@ -289,13 +366,16 @@ public sealed class MemoryProfilerViewModelTests
         public bool Disposed { get; private set; }
         public MemoryReleaseRequest? LastRelease { get; private set; }
         public Func<int, Task<MemoryObjectDetails>>? Inspection { get; set; }
+        public Func<int, CancellationToken, Task<MemoryObjectDetails>>? CancellableInspection { get; set; }
+        public Func<MemoryGraphRequest, Task<MemoryGraph>>? GraphLoad { get; set; }
+        public Func<MemoryChildrenRequest, Task<MemoryObjectChildren>>? ChildrenLoad { get; set; }
         public Func<MemoryObjectQuery, Task<MemoryObjectPage>>? Query { get; set; }
         public MemoryReferenceInfo Reference { get; } = new(3, 1, 0, "owner", "page", "field", "Strong", false, false);
         public MemoryObjectDetails Detail(int id) => new(Object(id), "value", [], [Reference], [], [], [], [], 1, 0, false, false);
         public MemoryObjectInfo Object(int id) => new(id, "0x123", "Page", "Page", "fixture", 10, 10, true, "Generation2", false);
         public Task<MemoryObjectPage> GetObjectsAsync(MemoryObjectQuery query, CancellationToken cancellationToken = default) => Query?.Invoke(query) ?? Task.FromResult(new MemoryObjectPage(1, [Object(0)]));
-        public Task<MemoryObjectDetails> InspectAsync(int objectId, CancellationToken cancellationToken = default) => Inspection?.Invoke(objectId) ?? Task.FromResult(Detail(objectId));
-        public Task<MemoryGraph> GetGraphAsync(MemoryGraphRequest request, CancellationToken cancellationToken = default) => Task.FromResult(new MemoryGraph([new(Object(request.ObjectId), 0, true, true)], [], false, "fixture"));
+        public Task<MemoryObjectDetails> InspectAsync(int objectId, CancellationToken cancellationToken = default) => CancellableInspection?.Invoke(objectId, cancellationToken) ?? Inspection?.Invoke(objectId) ?? Task.FromResult(Detail(objectId));
+        public Task<MemoryGraph> GetGraphAsync(MemoryGraphRequest request, CancellationToken cancellationToken = default) => GraphLoad?.Invoke(request) ?? Task.FromResult(new MemoryGraph([new(Object(request.ObjectId), 0, true, true)], [], false, "fixture"));
         public Task<MemoryReleaseEstimate> EstimateReleaseAsync(MemoryReleaseRequest request, CancellationToken cancellationToken = default)
         { LastRelease = request; return Task.FromResult(new MemoryReleaseEstimate(10, 1, true, false, "model", [], [0], null)); }
         public List<MemoryNeighborRequest> NeighborRequests { get; } = [];
@@ -319,7 +399,7 @@ public sealed class MemoryProfilerViewModelTests
                 [new(1, 0, "", 1, 10)], 1, 1, 0, false));
         }
         public Task<MemoryObjectChildren> GetChildrenAsync(MemoryChildrenRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new MemoryObjectChildren(request.ObjectId, "Object", "{Page}", 2, request.Skip,
+            ChildrenLoad?.Invoke(request) ?? Task.FromResult(new MemoryObjectChildren(request.ObjectId, "Object", "{Page}", 2, request.Skip,
                 [new("Name", "System.String", "\"page\"", "Field"), new("Owner", "Owner", "{Owner}", "Field", request.ObjectId + 1, 20, 10, HasChildren: true)]));
         public List<MemoryGroupRequest> GroupRequests { get; } = [];
         public Task<MemoryInstanceGroups> GetInstanceGroupsAsync(MemoryGroupRequest request, CancellationToken cancellationToken = default)
