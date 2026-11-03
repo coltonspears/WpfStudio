@@ -14,8 +14,8 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
     private readonly IDatabaseService _database;
     private readonly IConnectionProfileStore _profiles;
     private readonly IFileDialogService _files;
-    private readonly IUserDialogService? _dialogs;
-    private readonly IQueryRecoveryStore? _recovery;
+    private readonly IUserDialogService _dialogs;
+    private readonly IQueryRecoveryStore _recovery;
     private readonly CancellationTokenSource _databaseLifetime = new();
     private readonly HashSet<QueryDocumentViewModel> _observedDocuments = [];
     private CancellationTokenSource? _recoveryDelay;
@@ -26,7 +26,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
     private bool _initialized;
     private int _queryNumber;
     private ConnectionProfile? _schemaProfile;
-    public DatabasePaneViewModel(IDatabaseService database, IConnectionProfileStore profiles, IFileDialogService files, IUserDialogService? dialogs = null, IQueryRecoveryStore? recovery = null)
+    public DatabasePaneViewModel(IDatabaseService database, IConnectionProfileStore profiles, IFileDialogService files, IUserDialogService dialogs, IQueryRecoveryStore recovery)
     {
         _database = database; _profiles = profiles; _files = files; _dialogs = dialogs; _recovery = recovery;
         Documents.CollectionChanged += DocumentsChanged;
@@ -79,13 +79,11 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
             SelectedProfile = Profiles.FirstOrDefault();
         }
         catch (Exception exception) { Status = "Could not load saved connections: " + exception.Message; }
-        if (_recovery is null) return;
         try
         {
             var documents = await _recovery.LoadAsync(cancellationToken);
             if (documents.Count > 0)
             {
-                if (_dialogs is null) { Status = "SQL recovery data is available; a recovery dialog service is required to restore it."; return; }
                 if (await _dialogs.ConfirmAsync("Recover SQL scripts", $"Recover {documents.Count} unsaved SQL script(s) from the previous session? Choose No to discard their recovery copies."))
                 {
                     if (Documents.Count == 1 && !Documents[0].IsDirty && Documents[0].FilePath is null) Documents.Clear();
@@ -120,7 +118,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
     }
     private void ScheduleRecovery()
     {
-        if (!_recoveryReady || _recoveryClosed || _recovery is null) return;
+        if (!_recoveryReady || _recoveryClosed) return;
         _recoveryDelay?.Cancel(); _recoveryDelay?.Dispose();
         _recoveryDelay = new CancellationTokenSource();
         _pendingRecovery = PersistAfterDelayAsync(_recoveryDelay.Token);
@@ -130,7 +128,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await Task.Delay(750, token);
-            if (!_recoveryClosed) await _recovery!.SaveAsync(RecoverySnapshot(), token);
+            if (!_recoveryClosed) await _recovery.SaveAsync(RecoverySnapshot(), token);
         }
         catch (OperationCanceledException) { }
         catch (Exception exception) { Status = "Could not save SQL recovery: " + exception.Message; }
@@ -140,7 +138,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
 
     public async Task FlushRecoveryAsync()
     {
-        if (!_recoveryReady || _recoveryClosed || _recovery is null) return;
+        if (!_recoveryReady || _recoveryClosed) return;
         _recoveryDelay?.Cancel();
         await _pendingRecovery;
         await _recovery.SaveAsync(RecoverySnapshot());
@@ -152,7 +150,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
         _recoveryClosed = true;
         _recoveryDelay?.Cancel();
         await _pendingRecovery;
-        try { if (_recoveryReady && _recovery is not null) await _recovery.SaveAsync([]); }
+        try { if (_recoveryReady) await _recovery.SaveAsync([]); }
         catch { _recoveryClosed = false; ScheduleRecovery(); throw; }
     }
 
@@ -261,7 +259,6 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
     private async Task<bool> ConfirmCloseAsync(QueryDocumentViewModel document)
     {
         if (!document.IsDirty) return true;
-        if (_dialogs is null) { Status = "Save the modified query before closing it."; return false; }
         SaveDecision decision = await _dialogs.AskSaveAsync(document.Title);
         if (decision == SaveDecision.Cancel) return false;
         return decision != SaveDecision.Save || await SaveDocumentAsync(document, CancellationToken.None);
@@ -352,7 +349,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
             if (document.FilePath is not null && Path.GetFullPath(path).Equals(Path.GetFullPath(document.FilePath), StringComparison.OrdinalIgnoreCase)
                 && await Task.Run(() => File.Exists(path), cancellationToken) && await File.ReadAllTextAsync(path, cancellationToken) != document.SavedText)
             {
-                if (_dialogs is null || !await _dialogs.ConfirmAsync("SQL script changed outside WpfStudio", $"Overwrite the external changes to {Path.GetFileName(path)} with the editor content?"))
+                if (!await _dialogs.ConfirmAsync("SQL script changed outside WpfStudio", $"Overwrite the external changes to {Path.GetFileName(path)} with the editor content?"))
                 {
                     Status = "Save cancelled: the SQL script has external changes.";
                     return false;
