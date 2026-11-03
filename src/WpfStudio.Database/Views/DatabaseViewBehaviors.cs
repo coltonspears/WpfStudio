@@ -68,8 +68,8 @@ public static class DatabaseViewBehaviors
     }
 
     public static readonly DependencyProperty PasswordProperty = DependencyProperty.RegisterAttached("Password", typeof(string), typeof(DatabaseViewBehaviors), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnPassword));
-    public static string GetPassword(DependencyObject value) => (string)value.GetValue(PasswordProperty);
-    public static void SetPassword(DependencyObject value, string password) => value.SetValue(PasswordProperty, password);
+    public static string? GetPassword(DependencyObject value) => (string?)value.GetValue(PasswordProperty);
+    public static void SetPassword(DependencyObject value, string? password) => value.SetValue(PasswordProperty, password);
     private static void OnPassword(DependencyObject value, DependencyPropertyChangedEventArgs args)
     {
         if (value is not PasswordBox box) return;

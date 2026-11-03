@@ -9,8 +9,8 @@ public static class AssistantViewBehavior
     public static readonly DependencyProperty PasswordProperty = DependencyProperty.RegisterAttached("Password", typeof(string), typeof(AssistantViewBehavior),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, PasswordChanged));
     private static readonly DependencyProperty UpdatingProperty = DependencyProperty.RegisterAttached("Updating", typeof(bool), typeof(AssistantViewBehavior), new PropertyMetadata(false));
-    public static string GetPassword(DependencyObject value) => (string?)value.GetValue(PasswordProperty) ?? "";
-    public static void SetPassword(DependencyObject value, string password) => value.SetValue(PasswordProperty, password);
+    public static string? GetPassword(DependencyObject value) => (string?)value.GetValue(PasswordProperty);
+    public static void SetPassword(DependencyObject value, string? password) => value.SetValue(PasswordProperty, password);
     private static void PasswordChanged(DependencyObject value, DependencyPropertyChangedEventArgs args)
     {
         if (value is not PasswordBox box) return;

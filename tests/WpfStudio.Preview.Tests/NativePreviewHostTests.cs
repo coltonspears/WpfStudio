@@ -381,7 +381,7 @@ public sealed class DisposalHangPreviewControl : FrameworkElement
     private bool _overridden;
     public static readonly DependencyProperty MarkerPathProperty = DependencyProperty.Register(nameof(MarkerPath), typeof(string),
         typeof(DisposalHangPreviewControl), new PropertyMetadata(null));
-    public string MarkerPath { get => (string)GetValue(MarkerPathProperty); set => SetValue(MarkerPathProperty, value); }
+    public string? MarkerPath { get => (string?)GetValue(MarkerPathProperty); set => SetValue(MarkerPathProperty, value); }
     public static readonly DependencyProperty ProbeValueProperty = DependencyProperty.Register(nameof(ProbeValue), typeof(string),
         typeof(DisposalHangPreviewControl), new PropertyMetadata("original", (target, args) =>
         {
@@ -389,7 +389,7 @@ public sealed class DisposalHangPreviewControl : FrameworkElement
             if (Equals(args.NewValue, "override")) control._overridden = true;
             else if (control._overridden && Equals(args.NewValue, "original"))
             {
-                File.WriteAllText(control.MarkerPath, Environment.StackTrace);
+                File.WriteAllText(control.MarkerPath ?? throw new InvalidOperationException("MarkerPath must be set."), Environment.StackTrace);
                 Thread.Sleep(Timeout.Infinite);
             }
         }));

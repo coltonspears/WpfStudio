@@ -31,7 +31,7 @@ public static class Interaction
     }
     private static readonly HashSet<Window> ClosingWindows = [];
     public static readonly DependencyProperty ActivateCommandProperty = DependencyProperty.RegisterAttached("ActivateCommand", typeof(ICommand), typeof(Interaction), new PropertyMetadata(null, ActivateChanged));
-    public static void SetActivateCommand(DependencyObject target, ICommand value) => target.SetValue(ActivateCommandProperty, value);
+    public static void SetActivateCommand(DependencyObject target, ICommand? value) => target.SetValue(ActivateCommandProperty, value);
     public static ICommand? GetActivateCommand(DependencyObject target) => (ICommand?)target.GetValue(ActivateCommandProperty);
     private static void ActivateChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {
@@ -52,8 +52,8 @@ public static class Interaction
     private static void KeyActivate(object sender, KeyEventArgs args) { if (args.Key == Key.Enter && GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(Selected(sender))) { command.Execute(Selected(sender)); args.Handled = true; } }
     /// <summary>Where a tree publishes its selection. It only ever pushes: a tree cannot select an item it has not generated, so selecting from a view model goes through each item's IsSelected.</summary>
     public static readonly DependencyProperty SelectionSourceProperty = DependencyProperty.RegisterAttached("SelectionSource", typeof(object), typeof(Interaction), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
-    public static void SetSelectionSource(DependencyObject target, object value) => target.SetValue(SelectionSourceProperty, value);
-    public static object GetSelectionSource(DependencyObject target) => target.GetValue(SelectionSourceProperty);
+    public static void SetSelectionSource(DependencyObject target, object? value) => target.SetValue(SelectionSourceProperty, value);
+    public static object? GetSelectionSource(DependencyObject target) => target.GetValue(SelectionSourceProperty);
     /// <summary>Turns on <see cref="SelectionSourceProperty"/>. A separate switch because that property's change callback never runs while its source is null, which would leave the tree unobserved.</summary>
     public static readonly DependencyProperty TrackSelectionProperty = DependencyProperty.RegisterAttached("TrackSelection", typeof(bool), typeof(Interaction), new PropertyMetadata(false, TrackSelectionChanged));
     public static void SetTrackSelection(DependencyObject target, bool value) => target.SetValue(TrackSelectionProperty, value);
@@ -68,7 +68,7 @@ public static class Interaction
     /// <summary>Copies its string parameter. A command rather than Click handlers, which WPF cannot connect inside style-defined context menus.</summary>
     public static ICommand CopyCommand { get; } = new CommunityToolkit.Mvvm.Input.RelayCommand<string>(text => Services.ClipboardService.Shared.TrySetText(text!), text => !string.IsNullOrEmpty(text));
     public static readonly DependencyProperty CloseGuardProperty = DependencyProperty.RegisterAttached("CloseGuard", typeof(ShellViewModel), typeof(Interaction), new PropertyMetadata(null, CloseGuardChanged));
-    public static void SetCloseGuard(DependencyObject target, ShellViewModel value) => target.SetValue(CloseGuardProperty, value);
+    public static void SetCloseGuard(DependencyObject target, ShellViewModel? value) => target.SetValue(CloseGuardProperty, value);
     public static ShellViewModel? GetCloseGuard(DependencyObject target) => (ShellViewModel?)target.GetValue(CloseGuardProperty);
     private static void CloseGuardChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {
@@ -98,7 +98,7 @@ public static class Interaction
     }
     /// <summary>Runs a command when a combo box's list opens, for lists that refresh themselves on demand.</summary>
     public static readonly DependencyProperty OpenedCommandProperty = DependencyProperty.RegisterAttached("OpenedCommand", typeof(ICommand), typeof(Interaction), new PropertyMetadata(null, OpenedCommandChanged));
-    public static void SetOpenedCommand(DependencyObject target, ICommand value) => target.SetValue(OpenedCommandProperty, value);
+    public static void SetOpenedCommand(DependencyObject target, ICommand? value) => target.SetValue(OpenedCommandProperty, value);
     public static ICommand? GetOpenedCommand(DependencyObject target) => (ICommand?)target.GetValue(OpenedCommandProperty);
     private static void OpenedCommandChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {

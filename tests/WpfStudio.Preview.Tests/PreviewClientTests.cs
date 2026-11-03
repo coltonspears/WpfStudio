@@ -390,10 +390,11 @@ public sealed class SignaledHangingPreviewControl : FrameworkElement
     public static readonly DependencyProperty MarkerPathProperty = DependencyProperty.Register(nameof(MarkerPath), typeof(string),
         typeof(SignaledHangingPreviewControl), new PropertyMetadata(null, (_, args) =>
         {
-            File.WriteAllText((string)args.NewValue, "entered");
+            if (args.NewValue is not string marker) return;
+            File.WriteAllText(marker, "entered");
             Thread.Sleep(Timeout.Infinite);
         }));
-    public string MarkerPath { get => (string)GetValue(MarkerPathProperty); set => SetValue(MarkerPathProperty, value); }
+    public string? MarkerPath { get => (string?)GetValue(MarkerPathProperty); set => SetValue(MarkerPathProperty, value); }
 }
 
 public sealed class ChildProcessPreviewControl : FrameworkElement
@@ -412,10 +413,10 @@ public sealed class ChildProcessPreviewControl : FrameworkElement
             start.ArgumentList.Add("WpfStudio.Preview.OwnershipTest." + Guid.NewGuid().ToString("N"));
             using var child = Process.Start(start)!;
             _ = child.Handle;
-            File.WriteAllLines((string)args.NewValue, [child.Id.ToString(CultureInfo.InvariantCulture),
+            File.WriteAllLines(args.NewValue as string ?? throw new InvalidOperationException("MarkerPath must be a path."), [child.Id.ToString(CultureInfo.InvariantCulture),
                 child.StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture)]);
         }));
-    public string MarkerPath { get => (string)GetValue(MarkerPathProperty); set => SetValue(MarkerPathProperty, value); }
+    public string? MarkerPath { get => (string?)GetValue(MarkerPathProperty); set => SetValue(MarkerPathProperty, value); }
 }
 
 public sealed class DesignAwareControl : System.Windows.Controls.TextBlock
