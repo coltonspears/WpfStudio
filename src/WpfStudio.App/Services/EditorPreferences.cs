@@ -53,7 +53,6 @@ public sealed partial class EditorPreferences : ObservableObject
     public static IReadOnlyList<int> AutoSaveDelays { get; } = [1, 2, 5, 10, 30, 60];
     public static IReadOnlyList<double> FontSizes { get; } = [9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24];
 
-    private IReadOnlyList<string>? _families;
     private bool _listingFamilies;
     /// <summary>
     /// Installed font families, fixed-width ones first since code is aligned in columns. Measuring every installed
@@ -63,13 +62,14 @@ public sealed partial class EditorPreferences : ObservableObject
     {
         get
         {
-            if (_families is null && !_listingFamilies)
+            if (field is null && !_listingFamilies)
             {
                 _listingFamilies = true;
                 LoadFamiliesAsync().Forget();
             }
-            return _families ?? [];
+            return field ?? [];
         }
+        private set;
     }
 
     private async Task LoadFamiliesAsync()
@@ -77,7 +77,7 @@ public sealed partial class EditorPreferences : ObservableObject
         IReadOnlyList<string> families;
         try { families = await Task.Run(ListFamilies).ConfigureAwait(false); }
         catch (Exception) { families = [EditorSettings.DefaultFontFamily]; } // The settings page only needs something to offer.
-        _families = families;
+        FontFamilies = families;
         // Not through the first reader's dispatcher: that reader may be on a thread that never runs one.
         if (Application.Current?.Dispatcher is { } ui) _ = ui.BeginInvoke(() => OnPropertyChanged(nameof(FontFamilies)));
         else OnPropertyChanged(nameof(FontFamilies));

@@ -5,8 +5,7 @@ namespace WpfStudio.App.Features.Designer;
 
 public sealed partial class DesignerViewModel
 {
-    private LayoutInspectorViewModel? _layoutDetails;
-    public LayoutInspectorViewModel LayoutDetails => _layoutDetails ??= new(NotifyLayoutChanged);
+    public LayoutInspectorViewModel LayoutDetails => field ??= new(NotifyLayoutChanged);
     public LayoutSnapshot? Layout => LayoutDetails.Snapshot;
     public bool HasLayout => LayoutDetails.Available;
     public string LayoutStatus => LayoutDetails.Status;

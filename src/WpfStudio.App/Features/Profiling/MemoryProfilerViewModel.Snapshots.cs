@@ -60,8 +60,8 @@ public sealed partial class MemoryProfilerViewModel
     }
 
     partial void OnComparisonFilterChanged(string value) => RefreshComparison();
-    private RefreshThrottle? _comparisonSearchThrottle;
-    partial void OnComparisonSearchChanged(string value) => (_comparisonSearchThrottle ??= new(RefreshComparison)).Request();
+    private RefreshThrottle ComparisonSearchThrottle => field ??= new(RefreshComparison);
+    partial void OnComparisonSearchChanged(string value) => ComparisonSearchThrottle.Request();
     partial void OnComparisonOnlyMyCodeChanged(bool value) => RefreshComparison();
     partial void OnIsMonitorActiveChanged(bool value) => UpdateMonitor();
     partial void OnMonitorMemoryChanged(bool value) => UpdateMonitor();
