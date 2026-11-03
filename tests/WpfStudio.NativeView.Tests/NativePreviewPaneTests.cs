@@ -30,7 +30,7 @@ public sealed partial class NativePreviewPaneTests
             string token = pane.Surface.BridgeToken;
             Assert.NotEqual(nint.Zero, bridge);
             Assert.Equal(new nint(1), GetProp(bridge, "WpfStudio.PreviewBridge." + token));
-            GetWindowThreadProcessId(bridge, out uint owner);
+            _ = GetWindowThreadProcessId(bridge, out uint owner);
             Assert.Equal((uint)Environment.ProcessId, owner);
             Assert.True(session.Requests.All(request => request.ParentHandle == bridge.ToInt64()
                 && request.ParentProcessId == Environment.ProcessId && request.BridgeToken == token));

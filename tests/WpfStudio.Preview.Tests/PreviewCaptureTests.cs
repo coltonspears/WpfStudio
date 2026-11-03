@@ -228,8 +228,8 @@ public sealed class PreviewCaptureProcessTests
 
 public sealed class CaptureStateControl : StackPanel
 {
-    public static int Constructions;
-    public static CaptureStateControl? LastInstance;
+    internal static int Constructions;
+    internal static CaptureStateControl? LastInstance;
     public TextBox Source { get; }
     public TextBlock Removable { get; } = new() { Name = "Removable", Text = "Before interaction" };
 

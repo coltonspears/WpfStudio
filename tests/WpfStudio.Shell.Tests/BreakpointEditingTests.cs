@@ -45,7 +45,7 @@ public sealed class BreakpointEditingTests
         test.Dialogs.Prompts.Enqueue("not a number");
         await test.Shell.Breakpoints.HitCountCommand.ExecuteAsync(null);
         Assert.Empty(test.Shell.Debugger.Breakpoints);
-        Assert.Contains(test.Dialogs.Errors, error => error.StartsWith("Breakpoint hit count"));
+        Assert.Contains(test.Dialogs.Errors, error => error.StartsWith("Breakpoint hit count", StringComparison.Ordinal));
 
         test.Shell.Breakpoints.ShowCommand.Execute(null);
         Assert.Equal(2, test.Shell.Debugger.SelectedTab);

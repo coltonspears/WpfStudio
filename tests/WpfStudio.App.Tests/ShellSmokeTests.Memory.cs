@@ -101,7 +101,7 @@ public sealed partial class ShellSmokeTests
             model.SelectedView = MemoryProfilerViewModel.GraphView; await Idle();
             var graph = Descendants<MemoryGraphSurface>(pane).Single();
             Assert.True(graph.ActualWidth > 300 && graph.ActualHeight > 200, $"Graph is {graph.ActualWidth} × {graph.ActualHeight}");
-            Assert.Contains(model.Graph!.References, r => r.Label.StartsWith("Static "));
+            Assert.Contains(model.Graph!.References, r => r.Label.StartsWith("Static ", StringComparison.Ordinal));
             Screenshot(pane, Path.Combine(root, "artifacts/screenshots/memory-graph.png"));
             var owners = model.Graph.Nodes.Count;
             var focusNode = model.Graph.Nodes.Single(n => n.IsFocus);

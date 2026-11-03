@@ -29,7 +29,7 @@ public class ScaffoldingTests
         var project = Path.Combine(directory, "Generated.csproj");
         await File.WriteAllTextAsync(project, $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>{framework}</TargetFramework><LangVersion>{language}</LangVersion><UseWPF>true</UseWPF><ImplicitUsings>disable</ImplicitUsings><EnableDefaultCompileItems>{(!explicitItems).ToString().ToLowerInvariant()}</EnableDefaultCompileItems><EnableDefaultPageItems>{(!explicitItems).ToString().ToLowerInvariant()}</EnableDefaultPageItems></PropertyGroup></Project>");
         var changes = await new ScaffoldingService().CreateAsync(project, directory, "CustomerView", ScaffoldKind.ViewAndViewModel, true);
-        var viewModel = changes.Single(c => c.Path.EndsWith("ViewModel.cs")).After;
+        var viewModel = changes.Single(c => c.Path.EndsWith("ViewModel.cs", StringComparison.Ordinal)).After;
         Assert.Contains("using System.Threading.Tasks;", viewModel);
         if (language == "14.0") Assert.Contains("public partial string Title", viewModel);
         else Assert.DoesNotContain("public partial string Title", viewModel);

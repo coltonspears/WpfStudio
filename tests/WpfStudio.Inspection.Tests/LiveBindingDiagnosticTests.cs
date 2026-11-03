@@ -75,7 +75,7 @@ public sealed class LiveBindingDiagnosticTests
         var conversion = await ReadAsync(session, tree, "DiagnosticConversionValidation", "Text", timeout.Token);
         Assert.True(conversion.HasValidationError);
         Assert.True(conversion.Category == "Conversion", JsonSerializer.Serialize(conversion));
-        Assert.Contains(conversion.Details!.ValidationErrors, error => error.Kind == "Conversion" && error.RuleType.EndsWith("ConversionValidationRule"));
+        Assert.Contains(conversion.Details!.ValidationErrors, error => error.Kind == "Conversion" && error.RuleType.EndsWith("ConversionValidationRule", StringComparison.Ordinal));
         var exceptionValidation = await ReadAsync(session, tree, "DiagnosticExceptionValidation", "Text", timeout.Token);
         Assert.Equal("Validation", exceptionValidation.Category);
         Assert.Contains(exceptionValidation.Details!.ValidationErrors, error => error.Kind == "SourceUpdateException" && error.ExceptionType is not null);

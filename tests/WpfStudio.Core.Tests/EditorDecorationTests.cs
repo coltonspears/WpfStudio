@@ -63,7 +63,7 @@ public sealed class EditorDecorationTests
         var regions = CSharpFolding.Find(text);
         string Folded(FoldRegion region) => text[region.Start..region.End];
         Assert.Contains(regions, r => r.Title == "using …" && Folded(r) == "using System;\nusing System.Linq;");
-        Assert.Contains(regions, r => r.Title == "Model" && Folded(r).StartsWith("#region Model") && Folded(r).EndsWith("#endregion"));
+        Assert.Contains(regions, r => r.Title == "Model" && Folded(r).StartsWith("#region Model", StringComparison.Ordinal) && Folded(r).EndsWith("#endregion", StringComparison.Ordinal));
         Assert.Contains(regions, r => r.Title == "/// A customer. …");
         Assert.Contains(regions, r => r.Title == "/* … */");
         var blocks = regions.Where(r => r.Title == "{ … }").Select(Folded).ToArray();

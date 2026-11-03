@@ -82,7 +82,7 @@ public class WorkspaceIntegrationTests
         Assert.Single(snapshot.Projects);
         Assert.Contains("QA", snapshot.Configurations!);
         Assert.DoesNotContain(snapshot.Issues, i => i.Severity == "Error");
-        Assert.Contains(snapshot.Projects[0].Files, f => f.Path.EndsWith(".xaml"));
+        Assert.Contains(snapshot.Projects[0].Files, f => f.Path.EndsWith(".xaml", StringComparison.Ordinal));
         Assert.Contains(snapshot.Projects[0].Files, f => f.IsGenerated);
         var update = await client.UpdateDocumentAsync(new UpdateDocumentRequest(view, source, 1));
         Assert.True(update.Accepted);
@@ -102,7 +102,7 @@ public class WorkspaceIntegrationTests
         var rename = await client.RenameAsync(new RenameRequest(view, invocation + 1, 1, "Repeat"));
         Assert.Contains(rename.Documents.SelectMany(d => d.Edits), e => e.NewText.Contains("Repeat"));
         Assert.NotEmpty(rename.Warnings);
-        Assert.Contains(rename.Documents, d => d.Path.EndsWith("Other.cs") && d.Version == 0 && d.ExpectedTextHash is { Length: 64 });
+        Assert.Contains(rename.Documents, d => d.Path.EndsWith("Other.cs", StringComparison.Ordinal) && d.Version == 0 && d.ExpectedTextHash is { Length: 64 });
         var generatedDefinition = await client.GetDefinitionAsync(new DocumentPositionRequest(view, source.IndexOf(".Name", StringComparison.Ordinal) + 2, 1));
         Assert.NotEmpty(generatedDefinition);
         Assert.All(generatedDefinition, d => Assert.True(File.Exists(d.Path)));

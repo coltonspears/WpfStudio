@@ -152,7 +152,7 @@ public sealed class NativePreviewHostTests
         var open = await Observation();
         Assert.True(open.PopupOpen);
         Assert.NotEqual(0, open.PopupHandle);
-        HostNativeTestMethods.GetWindowThreadProcessId(new nint(open.PopupHandle), out uint popupOwner);
+        _ = HostNativeTestMethods.GetWindowThreadProcessId(new nint(open.PopupHandle), out uint popupOwner);
         Assert.Equal((uint)host.Process.Id, popupOwner);
         Assert.True((await host.Rpc.UpdateSurfaceAsync(attach with { Sequence = 2, Action = PreviewSurfaceAction.Detach }, default)).Success);
         await Command("observe-again");
@@ -627,9 +627,9 @@ internal sealed class HostNativeTestBridge : IDisposable
     public nint ChildFor(int pid)
     {
         nint result = 0;
-        HostNativeTestMethods.EnumChildWindows(Handle, (child, _) =>
+        HostNativeTestMethods.EnumChildWindows(Handle, (child, parameter) =>
         {
-            HostNativeTestMethods.GetWindowThreadProcessId(child, out uint owner);
+            _ = HostNativeTestMethods.GetWindowThreadProcessId(child, out uint owner);
             if (owner != pid) return true;
             result = child;
             return false;

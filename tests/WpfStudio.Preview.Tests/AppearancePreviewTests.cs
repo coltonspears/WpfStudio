@@ -33,14 +33,14 @@ public sealed class AppearancePreviewTests
         Assert.Contains(snapshot.Declarations, declaration => declaration.Kind == "BasedOn");
         Assert.Contains(snapshot.Declarations, declaration => declaration.Kind == "Trigger");
         Assert.Contains(snapshot.Declarations, declaration => declaration.Kind == "DataTrigger");
-        Assert.Contains(snapshot.Declarations, declaration => declaration.Kind == "Setter" && declaration.Property!.EndsWith(".Background"));
+        Assert.Contains(snapshot.Declarations, declaration => declaration.Kind == "Setter" && declaration.Property!.EndsWith(".Background", StringComparison.Ordinal));
         Assert.Contains(snapshot.ResourceScopes, scope => scope.Keys.Contains("\"NeverConstructed\""));
         Assert.Contains(snapshot.ResourceScopes, scope => scope.Keys.Contains("(WpfStudio.PreviewFixture.AppearanceKey)"));
         Assert.Contains(snapshot.ResourceScopes, scope => scope.ParentId is not null && scope.Keys.Contains("\"AppearanceAccent\""));
 
         // Reading the hidden Tag setter's Value would instantiate NeverConstructed.
         var tag = await client.GetAppearanceAsync(await PropertyRequest(client, render, target, "Tag"));
-        Assert.Contains(tag.Snapshot.Declarations, declaration => declaration.Kind == "Setter" && declaration.Property!.EndsWith(".Tag"));
+        Assert.Contains(tag.Snapshot.Declarations, declaration => declaration.Kind == "Setter" && declaration.Property!.EndsWith(".Tag", StringComparison.Ordinal));
         var dynamic = Assert.Single(render.Nodes, node => node.Name == "DynamicTarget");
         var dynamicSnapshot = (await client.GetAppearanceAsync(await PropertyRequest(client, render, dynamic, "Background"))).Snapshot;
         Assert.Contains(dynamicSnapshot.Facts, fact => fact.Name == "Local DynamicResource key" && fact.Value == "\"AppearanceAccent\"");
@@ -57,7 +57,7 @@ public sealed class AppearancePreviewTests
         var request = await PropertyRequest(client, render, target, "Background");
         var before = (await client.GetAppearanceAsync(request)).Snapshot;
         Assert.Contains(before.ResourceEvents, entry => entry.Key == "\"AppearanceAccent\"" &&
-            entry.Property.EndsWith(".Background") && entry.DictionaryUri?.Contains("Appearance.xaml", StringComparison.OrdinalIgnoreCase) == true);
+            entry.Property.EndsWith(".Background", StringComparison.Ordinal) && entry.DictionaryUri?.Contains("Appearance.xaml", StringComparison.OrdinalIgnoreCase) == true);
         var edited = await client.SetPropertyAsync(new(render.Version, target.Id, request.Property, "Red",
             OwnerType: request.OwnerType, OwnerAssembly: request.OwnerAssembly));
         Assert.True(edited.Success, edited.Error);

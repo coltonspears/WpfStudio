@@ -185,6 +185,6 @@ public sealed class DesignSampleControl : System.Windows.Controls.ContentControl
 
 public sealed class MustNotConstruct
 {
-    public static int ConstructorCalls;
+    internal static int ConstructorCalls;
     public MustNotConstruct() { ConstructorCalls++; throw new InvalidOperationException("The default design shape must not invoke a constructor."); }
 }

@@ -48,7 +48,7 @@ public class WpfIndexTests
         });
         var service = new WpfIndexService();
         var index = await service.IndexAsync(fixture);
-        var usages = index.Usages.Where(u => u.Path.EndsWith("View.xaml")).ToArray();
+        var usages = index.Usages.Where(u => u.Path.EndsWith("View.xaml", StringComparison.Ordinal)).ToArray();
         Assert.Equal(2, usages.Length);
         Assert.EndsWith("Last.xaml", usages[0].ResolvedPath);
         Assert.EndsWith("View.xaml", usages[1].ResolvedPath);
@@ -57,7 +57,7 @@ public class WpfIndexTests
         var content = await File.ReadAllTextAsync(app);
         await File.WriteAllTextAsync(app, content.Replace("</ResourceDictionary.MergedDictionaries>", "</ResourceDictionary.MergedDictionaries><SolidColorBrush x:Key=\"Accent\" Color=\"Purple\"/>"));
         index = await service.IndexAsync(fixture);
-        Assert.EndsWith("App.xaml", index.Usages.First(u => u.Path.EndsWith("View.xaml")).ResolvedPath);
+        Assert.EndsWith("App.xaml", index.Usages.First(u => u.Path.EndsWith("View.xaml", StringComparison.Ordinal)).ResolvedPath);
     }
 
     [Fact]

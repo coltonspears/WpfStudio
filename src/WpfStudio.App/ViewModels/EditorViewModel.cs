@@ -310,7 +310,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 if (State.Extension == ".xaml") Diagnostics.Clear();
                 LanguageStatus = "Language service unavailable";
                 _report(ex.Message);
-            });
+            }, CancellationToken.None);
         }
     }
     public async Task SyncAsync(CancellationToken token = default)
