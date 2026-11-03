@@ -32,8 +32,8 @@ public sealed partial class ConflictItem(int number, ConflictBlock block, Action
 /// <summary>Remote hosting links, sign-in, merging and the conflict resolver.</summary>
 public sealed partial class GitViewModel
 {
-    private Func<CancellationToken, Task<string>>? _retryWithSignIn;
-    private string _retryLabel = "";
+    private sealed record SignInRetry(string Label, Func<CancellationToken, Task<string>> Action, bool Save, bool ChangesWorkspaceFiles);
+    private SignInRetry? _signInRetry;
 
     /// <summary>Raised after any successful Git action, so editors can refresh their change margins and blame.</summary>
     public event Action? RepositoryChanged;
@@ -123,20 +123,19 @@ public sealed partial class GitViewModel
             try { return await action(false, token); }
             catch (InvalidOperationException ex) when (GitService.IsAuthenticationFailure(ex.Message))
             {
-                _retryLabel = label;
-                _retryWithSignIn = retryToken => action(true, retryToken);
+                _signInRetry = new(label, retryToken => action(true, retryToken), save, changesWorkspaceFiles);
                 CanSignIn = true;
                 throw new InvalidOperationException($"{(Remote?.HostName is { } host && Remote is not null ? host : "The remote")} needs you to sign in. Choose Sign in and retry. " + ex.Message);
             }
         }, save, changesWorkspaceFiles);
     }
-    private bool CanRetryWithSignIn() => CanOperate() && CanSignIn && _retryWithSignIn is not null;
+    private bool CanRetryWithSignIn() => CanOperate() && CanSignIn && _signInRetry is not null;
     [RelayCommand(CanExecute = nameof(CanRetryWithSignIn))]
     private Task SignInAndRetryAsync()
     {
-        var retry = _retryWithSignIn!;
-        _retryWithSignIn = null; CanSignIn = false;
-        return MutateAsync(_retryLabel + " (signed in)", retry, save: _retryLabel.StartsWith("Pull", StringComparison.Ordinal), changesWorkspaceFiles: _retryLabel.StartsWith("Pull", StringComparison.Ordinal));
+        var retry = _signInRetry!;
+        _signInRetry = null; CanSignIn = false;
+        return MutateAsync(retry.Label + " (signed in)", retry.Action, retry.Save, retry.ChangesWorkspaceFiles);
     }
     partial void OnCanSignInChanged(bool value) => SignInAndRetryCommand.NotifyCanExecuteChanged();
 
