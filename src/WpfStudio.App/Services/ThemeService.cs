@@ -106,7 +106,7 @@ public static class ThemeService
         app.Resources[SystemColors.GrayTextBrushKey] = app.FindResource("SubtleBrush");
         if (!syntaxConfigured)
         {
-            foreach (var language in new[] { "C#", "XML", "JavaScript", "SQL" })
+            foreach (var language in new[] { "C#", "XML", "JavaScript" })
             {
                 var definition = HighlightingManager.Instance.GetDefinition(language);
                 if (definition is null) continue;

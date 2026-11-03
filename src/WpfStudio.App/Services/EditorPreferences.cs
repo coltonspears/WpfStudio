@@ -65,12 +65,13 @@ public sealed partial class EditorPreferences : ObservableObject
             if (_families is null && !_listingFamilies)
             {
                 _listingFamilies = true;
-                var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
-                _ = Task.Run(ListFamilies).ContinueWith(listed => dispatcher.BeginInvoke(() =>
+                _ = Task.Run(ListFamilies).ContinueWith(listed =>
                 {
+                    // Not through the reader's dispatcher: the first reader may be on a thread that never runs one.
                     _families = listed.Status == TaskStatus.RanToCompletion ? listed.Result : [EditorSettings.DefaultFontFamily];
-                    OnPropertyChanged(nameof(FontFamilies));
-                }), TaskScheduler.Default);
+                    if (Application.Current?.Dispatcher is { } ui) ui.BeginInvoke(() => OnPropertyChanged(nameof(FontFamilies)));
+                    else OnPropertyChanged(nameof(FontFamilies));
+                }, TaskScheduler.Default);
             }
             return _families ?? [];
         }
