@@ -101,6 +101,45 @@ public sealed partial class InteractionBehaviorTests
         finally { window.Close(); }
     });
 
+    [Fact]
+    public Task OpenedCommandRunsWhenTheListOpensIfItCan() => OnDispatcherAsync(async () =>
+    {
+        var runs = 0;
+        var allowed = false;
+        var box = new ComboBox { ItemsSource = new[] { "one" } };
+        Interaction.SetOpenedCommand(box, new RelayCommand(() => runs++, () => allowed));
+        var window = new Window { ShowInTaskbar = false, ShowActivated = false, Opacity = 0, Width = 200, Height = 120, Content = box };
+        window.Show();
+        try
+        {
+            await Dispatcher.Yield(DispatcherPriority.ContextIdle); // A combo box cannot open before it has loaded.
+            box.IsDropDownOpen = true; box.IsDropDownOpen = false;
+            Assert.Equal(0, runs);
+
+            allowed = true;
+            box.IsDropDownOpen = true; box.IsDropDownOpen = false;
+            Assert.Equal(1, runs);
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
+    public Task GroupByGroupsTheItemsAndNullRemovesTheGroups() => OnDispatcherAsync(() =>
+    {
+        var list = new ListBox { ItemsSource = new[] { "one", "two" } };
+        var view = CollectionViewSource.GetDefaultView(list.ItemsSource);
+
+        Interaction.SetGroupBy(list, "Length");
+        Assert.Equal("Length", Assert.IsType<PropertyGroupDescription>(Assert.Single(view.GroupDescriptions)).PropertyName);
+
+        Interaction.SetGroupBy(list, "Other");
+        Assert.Equal("Other", Assert.IsType<PropertyGroupDescription>(Assert.Single(view.GroupDescriptions)).PropertyName);
+
+        Interaction.SetGroupBy(list, null);
+        Assert.Empty(view.GroupDescriptions);
+        return Task.CompletedTask;
+    });
+
     private static Task OnDispatcherAsync(Func<Task> action)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

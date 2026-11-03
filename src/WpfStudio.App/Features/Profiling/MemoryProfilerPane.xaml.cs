@@ -4,8 +4,8 @@ using System.Windows.Controls;
 
 namespace WpfStudio.App.Features.Profiling;
 
-/// <summary>Hosts the five profiler views and the docked object browser. View switching and the browser column are
-/// handled here because they are pure layout; all state lives in <see cref="MemoryProfilerViewModel"/>.</summary>
+/// <summary>Hosts the five profiler views and the docked object browser. The browser column is handled here because
+/// it remembers the width the reader dragged it to; all state lives in <see cref="MemoryProfilerViewModel"/>.</summary>
 public partial class MemoryProfilerPane : UserControl
 {
     private MemoryProfilerViewModel? _model;
@@ -15,7 +15,7 @@ public partial class MemoryProfilerPane : UserControl
     {
         InitializeComponent();
         DataContextChanged += (_, e) => Attach(e.NewValue as MemoryProfilerViewModel);
-        Loaded += (_, _) => { Attach(DataContext as MemoryProfilerViewModel); Apply(); };
+        Loaded += (_, _) => { Attach(DataContext as MemoryProfilerViewModel); UpdateBrowserColumn(); };
         // Live memory sampling runs only while the profiler is on screen.
         IsVisibleChanged += (_, _) => { if (_model is not null) _model.IsMonitorActive = IsVisible; };
         PreviewKeyDown += (_, e) =>
@@ -31,43 +31,28 @@ public partial class MemoryProfilerPane : UserControl
         };
     }
 
-    private void ProcessesOpened(object? sender, EventArgs e)
-    {
-        // Keep the list current without a separate click; the selection is preserved by process identity.
-        if (_model is { IsBusy: false } model && model.RefreshProcessesCommand.CanExecute(null) && !model.RefreshProcessesCommand.IsRunning)
-            model.RefreshProcessesCommand.Execute(null);
-    }
-
     private void Attach(MemoryProfilerViewModel? model)
     {
         if (ReferenceEquals(model, _model)) return;
         if (_model is not null) { _model.PropertyChanged -= ModelChanged; _model.IsMonitorActive = false; }
         _model = model;
         if (_model is not null) { _model.PropertyChanged += ModelChanged; _model.IsMonitorActive = IsVisible; }
-        Apply();
+        UpdateBrowserColumn();
     }
 
     private void ModelChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(MemoryProfilerViewModel.SelectedView) or nameof(MemoryProfilerViewModel.IsBrowserVisible) or nameof(MemoryProfilerViewModel.HasCapture))
-            OnUiThread(Apply);
+        if (e.PropertyName == nameof(MemoryProfilerViewModel.IsBrowserVisible)) OnUiThread(UpdateBrowserColumn);
     }
 
     // On the UI thread this runs at once, as before; a change raised elsewhere queues instead of blocking that thread.
     private void OnUiThread(Action action) { if (Dispatcher.CheckAccess()) action(); else _ = Dispatcher.BeginInvoke(action); }
 
-    private void Apply()
+    private void UpdateBrowserColumn()
     {
         if (_model is null) return;
-        var view = _model.SelectedView;
-        OverviewView.Visibility = view == MemoryProfilerViewModel.OverviewView ? Visibility.Visible : Visibility.Collapsed;
-        TypesView.Visibility = view == MemoryProfilerViewModel.TypesView ? Visibility.Visible : Visibility.Collapsed;
-        RetentionView.Visibility = view == MemoryProfilerViewModel.RetentionView ? Visibility.Visible : Visibility.Collapsed;
-        GraphView.Visibility = view == MemoryProfilerViewModel.GraphView ? Visibility.Visible : Visibility.Collapsed;
-        SnapshotsView.Visibility = view == MemoryProfilerViewModel.SnapshotsView ? Visibility.Visible : Visibility.Collapsed;
         var showBrowser = _model.IsBrowserVisible;
         if (showBrowser && BrowserColumn.Width.Value == 0) BrowserColumn.Width = _browserWidth;
         else if (!showBrowser && BrowserColumn.Width.Value > 0) { _browserWidth = BrowserColumn.Width; BrowserColumn.Width = new GridLength(0); }
-        Browser.Visibility = BrowserSplitter.Visibility = showBrowser ? Visibility.Visible : Visibility.Collapsed;
     }
 }

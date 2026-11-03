@@ -40,7 +40,7 @@
     </StackPanel>
     <TextBlock Grid.Column="1" Text="Choose a running .NET process…" Foreground="{DynamicResource SubtleBrush}" VerticalAlignment="Center" Margin="10,0,30,0" IsHitTestVisible="False" Panel.ZIndex="1"
      Visibility="{Binding SelectedProcess, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
-    <ComboBox Grid.Column="1" ItemsSource="{Binding Processes}" SelectedItem="{Binding SelectedProcess}" IsEnabled="{Binding IsIdle}" MinWidth="170" DropDownOpened="ProcessesOpened"
+    <ComboBox Grid.Column="1" ItemsSource="{Binding Processes}" SelectedItem="{Binding SelectedProcess}" IsEnabled="{Binding IsIdle}" MinWidth="170" b:Interaction.OpenedCommand="{Binding RefreshProcessesCommand}"
      AutomationProperties.Name="Memory profiling process" ToolTip="Running .NET processes. The list refreshes when you open it." VerticalAlignment="Center">
      <ComboBox.ItemTemplate>
       <DataTemplate>
@@ -77,7 +77,7 @@
      <RadioButton Content="{Binding SnapshotsTabText}" c:Ui.Icon="Timeline" Style="{StaticResource ViewTab}" GroupName="MemoryView" IsChecked="{Binding SelectedView, Converter={StaticResource EqualsText}, ConverterParameter=4, Mode=OneWay}" Command="{Binding ShowViewCommand}" CommandParameter="4" ToolTip="Live memory, snapshot history and what changed between snapshots (Ctrl+5)" AutomationProperties.Name="Snapshots"/>
     </StackPanel>
     <TextBox DockPanel.Dock="Left" Width="230" Margin="12,0,0,0" VerticalAlignment="Center" Padding="7,3" MinHeight="26" Text="{Binding GoToText, UpdateSourceTrigger=PropertyChanged}"
-     c:Ui.Placeholder="Go to type or 0x address" ToolTip="Type a name to filter types, or a hexadecimal address to open that object (Ctrl+G)" AutomationProperties.Name="Go to type or address" x:Name="GoToBox" b:Interaction.FocusWhenTrue="{Binding IsGoToFocusRequested}">
+     c:Ui.Placeholder="Go to type or 0x address" ToolTip="Type a name to filter types, or a hexadecimal address to open that object (Ctrl+G)" AutomationProperties.Name="Go to type or address" b:Interaction.FocusWhenTrue="{Binding IsGoToFocusRequested}">
      <TextBox.InputBindings><KeyBinding Key="Enter" Command="{Binding GoToCommand}"/></TextBox.InputBindings>
     </TextBox>
     <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Sidebar" IsChecked="{Binding IsBrowserVisible, Mode=OneWay}" Command="{Binding ToggleBrowserCommand}" ToolTip="Show or hide the object browser" AutomationProperties.Name="Toggle object browser" Margin="6,0,0,0"/>
@@ -183,14 +183,14 @@
     <ColumnDefinition x:Name="BrowserColumn" Width="360" MinWidth="0"/>
    </Grid.ColumnDefinitions>
    <Grid>
-    <p:MemoryOverviewView x:Name="OverviewView"/>
-    <p:MemoryTypesView x:Name="TypesView" Visibility="Collapsed"/>
-    <p:MemoryRetentionView x:Name="RetentionView" Visibility="Collapsed"/>
-    <p:MemoryGraphView x:Name="GraphView" Visibility="Collapsed"/>
-    <p:MemorySnapshotsView x:Name="SnapshotsView" Visibility="Collapsed"/>
+    <p:MemoryOverviewView Visibility="{Binding SelectedView, Converter={StaticResource EqualsVisibility}, ConverterParameter=0, FallbackValue=Collapsed}"/>
+    <p:MemoryTypesView Visibility="{Binding SelectedView, Converter={StaticResource EqualsVisibility}, ConverterParameter=1, FallbackValue=Collapsed}"/>
+    <p:MemoryRetentionView Visibility="{Binding SelectedView, Converter={StaticResource EqualsVisibility}, ConverterParameter=2, FallbackValue=Collapsed}"/>
+    <p:MemoryGraphView Visibility="{Binding SelectedView, Converter={StaticResource EqualsVisibility}, ConverterParameter=3, FallbackValue=Collapsed}"/>
+    <p:MemorySnapshotsView Visibility="{Binding SelectedView, Converter={StaticResource EqualsVisibility}, ConverterParameter=4, FallbackValue=Collapsed}"/>
    </Grid>
-   <GridSplitter Grid.Column="1" Style="{StaticResource SplitterH}" x:Name="BrowserSplitter"/>
-   <p:MemoryObjectBrowser Grid.Column="2" x:Name="Browser"/>
+   <GridSplitter Grid.Column="1" Style="{StaticResource SplitterH}" Visibility="{Binding IsBrowserVisible, Converter={StaticResource BooleanToVisibility}}"/>
+   <p:MemoryObjectBrowser Grid.Column="2" Visibility="{Binding IsBrowserVisible, Converter={StaticResource BooleanToVisibility}}"/>
   </Grid>
 
   <!-- Status -->

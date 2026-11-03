@@ -102,6 +102,30 @@ public static class Interaction
         try { await vm.CheckExternalChangesAsync(); }
         catch (Exception ex) { vm.Status = "Could not check for external changes: " + ex.Message; vm.AppendOutput(ex.ToString()); }
     }
+    /// <summary>Runs a command when a combo box's list opens, for lists that refresh themselves on demand.</summary>
+    public static readonly DependencyProperty OpenedCommandProperty = DependencyProperty.RegisterAttached("OpenedCommand", typeof(ICommand), typeof(Interaction), new PropertyMetadata(null, OpenedCommandChanged));
+    public static void SetOpenedCommand(DependencyObject target, ICommand value) => target.SetValue(OpenedCommandProperty, value);
+    public static ICommand? GetOpenedCommand(DependencyObject target) => (ICommand?)target.GetValue(OpenedCommandProperty);
+    private static void OpenedCommandChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not ComboBox box) return;
+        box.DropDownOpened -= DropDownOpened;
+        if (args.NewValue != null) box.DropDownOpened += DropDownOpened;
+    }
+    private static void DropDownOpened(object? sender, EventArgs args)
+    {
+        if (sender is ComboBox box && GetOpenedCommand(box) is { } command && command.CanExecute(null)) command.Execute(null);
+    }
+    /// <summary>Groups an items control by this property of its items; null shows them ungrouped.</summary>
+    public static readonly DependencyProperty GroupByProperty = DependencyProperty.RegisterAttached("GroupBy", typeof(string), typeof(Interaction), new PropertyMetadata(null, GroupByChanged));
+    public static void SetGroupBy(DependencyObject target, string? value) => target.SetValue(GroupByProperty, value);
+    public static string? GetGroupBy(DependencyObject target) => (string?)target.GetValue(GroupByProperty);
+    private static void GroupByChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not ItemsControl items) return;
+        items.Items.GroupDescriptions.Clear();
+        if (args.NewValue is string property) items.Items.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(property));
+    }
     /// <summary>Runs <see cref="ActivateCommandProperty"/> on a single click of a list item (palette-style lists).</summary>
     public static readonly DependencyProperty ActivateOnClickProperty = DependencyProperty.RegisterAttached("ActivateOnClick", typeof(bool), typeof(Interaction), new PropertyMetadata(false, ActivateOnClickChanged));
     public static void SetActivateOnClick(DependencyObject target, bool value) => target.SetValue(ActivateOnClickProperty, value);

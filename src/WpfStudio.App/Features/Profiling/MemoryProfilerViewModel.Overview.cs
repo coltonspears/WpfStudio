@@ -169,6 +169,9 @@ public sealed partial class MemoryProfilerViewModel
         InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault);
     }
 
+    private bool CanOpenComparisonRow(ComparisonRow? row) => row is { IsGone: false } && OpenTypeCommand.CanExecute(row.Key);
+    [RelayCommand(CanExecute = nameof(CanOpenComparisonRow))] private void OpenComparisonRow(ComparisonRow? row) => OpenType(row?.Key);
+
     [RelayCommand(CanExecute = nameof(CanLoad))]
     private void OpenType(string? typeKey)
     {
