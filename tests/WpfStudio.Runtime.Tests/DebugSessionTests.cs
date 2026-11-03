@@ -5,6 +5,7 @@ using WpfStudio.Runtime.Debugging;
 namespace WpfStudio.Runtime.Tests;
 
 /// <summary>Drives the real process and transport handling against a scripted adapter; netcoredbg itself is not involved.</summary>
+[Collection(AdapterRun.Collection)]
 public sealed class DebugSessionTests
 {
     [Fact]
@@ -80,46 +81,5 @@ public sealed class DebugSessionTests
         run.Session.Error += message => reported.TrySetResult(message);
         await run.AttachAsync(seconds: 10);
         Assert.Equal("The debugger connection closed.", await reported.Task.WaitAsync(TimeSpan.FromSeconds(10)));
-    }
-
-    private sealed class AdapterRun : IAsyncDisposable
-    {
-        private Process? _adapter;
-        public DebugSession Session { get; } = new() { AdapterPath = LocateAdapter() };
-        public ConcurrentBag<string> Errors { get; } = [];
-
-        public AdapterRun(string scenario)
-        {
-            // The adapter inherits this. The tests in this class run one at a time.
-            Environment.SetEnvironmentVariable("WPFSTUDIO_FAKE_DAP_SCENARIO", scenario);
-            Session.Error += Errors.Add;
-        }
-
-        public async Task AttachAsync(int seconds)
-        {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
-            var attach = Session.AttachAsync(Environment.ProcessId, [], cancellationToken: deadline.Token);
-            // The process starts before the session's first real await.
-            if (Session.AdapterProcessId is { } id) _adapter = Process.GetProcessById(id);
-            await attach;
-        }
-
-        public bool AdapterEnded() => _adapter?.WaitForExit(10_000) == true;
-
-        public async ValueTask DisposeAsync()
-        {
-            await Session.DisposeAsync();
-            if (_adapter is null) return;
-            try { if (!_adapter.HasExited) _adapter.Kill(); } catch (InvalidOperationException) { }
-            _adapter.Dispose();
-        }
-
-        private static string LocateAdapter()
-        {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            var configuration = directory.Parent!.Name;
-            while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "WpfStudio.Runtime.Tests.csproj"))) directory = directory.Parent;
-            return Path.Combine(directory!.FullName, "Fixtures", "FakeDapAdapter", "bin", configuration, "net10.0", "WpfStudio.FakeDapAdapter.exe");
-        }
     }
 }
