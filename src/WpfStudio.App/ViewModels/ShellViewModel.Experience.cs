@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Controls;
+using WpfStudio.App.Features.ColtonGpt;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
 using WpfStudio.Core;
@@ -24,12 +25,11 @@ public sealed partial class ShellViewModel
         Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
         if (Features?.Assistant.Settings is INotifyPropertyChanged settings) settings.PropertyChanged += AssistantSettingsChanged;
     }
-    private void AssistantSettingsChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == "HasApiKey") OnPropertyChanged(nameof(IsColtonGptReady)); }
+    private void AssistantSettingsChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(AssistantSettingsViewModel.HasApiKey)) OnPropertyChanged(nameof(IsColtonGptReady)); }
 
     // ------------------------------------------------------------------ Theme
     public bool IsLightTheme => ThemeName.Equals("Light", IgnoreCase);
     public bool IsDarkTheme => !IsLightTheme;
-    partial void OnThemeNameChanged(string value) { OnPropertyChanged(nameof(IsLightTheme)); OnPropertyChanged(nameof(IsDarkTheme)); }
     [RelayCommand]
     private void SetTheme(string? name)
     {

@@ -14,7 +14,7 @@ public sealed partial class MemoryProfilerViewModel
     private long _groupsRevision;
     public IReadOnlyList<string> InstanceGroupings { get; } = ["None", "Retention", "Owner", "Generation", "Value"];
     public ObservableCollection<InstanceGroupViewModel> GroupRows { get; } = [];
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsGrouped))] public partial string InstanceGrouping { get; set; } = "None";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsGrouped), nameof(GroupingHint))] public partial string InstanceGrouping { get; set; } = "None";
     [ObservableProperty] public partial MemoryInstanceGroups? InstanceGroups { get; set; }
     [ObservableProperty] public partial bool IsLoadingGroups { get; set; }
     [ObservableProperty] public partial string GroupDescription { get; set; } = "";
@@ -28,11 +28,7 @@ public sealed partial class MemoryProfilerViewModel
         _ => ""
     };
 
-    partial void OnInstanceGroupingChanged(string value)
-    {
-        OnPropertyChanged(nameof(GroupingHint));
-        if (value == "None") ResetGroups(); else LoadGroupsAsync(_lifetime.Token).Forget(ReportFault);
-    }
+    partial void OnInstanceGroupingChanged(string value) { if (value == "None") ResetGroups(); else LoadGroupsAsync(_lifetime.Token).Forget(ReportFault); }
 
     internal void ResetGroups()
     {

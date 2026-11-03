@@ -35,7 +35,7 @@ public sealed partial class SolutionExplorerViewModel : ObservableObject
     public ObservableCollection<ExplorerNode> Nodes { get; } = [];
     [ObservableProperty] public partial ExplorerNode? SelectedNode { get; set; }
     /// <summary>Shows only files whose name contains this text, with their folders expanded.</summary>
-    [ObservableProperty] public partial string Filter { get; set; } = "";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsFiltered))] public partial string Filter { get; set; } = "";
     /// <summary>Nests code-behind under its XAML (MainWindow.xaml.cs under MainWindow.xaml) and partial files under their main file.</summary>
     [ObservableProperty] public partial bool NestRelatedFiles { get; set; } = true;
     public bool IsFiltered => Filter.Trim().Length > 0;
@@ -48,7 +48,7 @@ public sealed partial class SolutionExplorerViewModel : ObservableObject
     {
         var filtering = value.Trim().Length > 0;
         if (filtering && _stateBeforeFilter == null) _stateBeforeFilter = ExplorerNode.CaptureState(Nodes);
-        OnPropertyChanged(nameof(IsFiltered)); NotifyPlaceholders();
+        NotifyPlaceholders();
         if (_host.WorkspacePath == null) return;
         if (filtering) { Rebuild(keepState: false); return; }
         var state = _stateBeforeFilter; _stateBeforeFilter = null;

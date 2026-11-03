@@ -76,17 +76,17 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     public ObservableCollection<PreviewDiagnostic> Diagnostics { get; } = [];
     public event Action<SourceLocation>? SourceRequested;
     public string? SourcePath => _document?.Path;
-    [ObservableProperty] public partial string DocumentName { get; set; } = "Open a XAML document and choose Preview";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(ArtboardTitle))] public partial string DocumentName { get; set; } = "Open a XAML document and choose Preview";
     [ObservableProperty] public partial string Status { get; set; } = "Preview has not started";
     [ObservableProperty] public partial byte[]? Image { get; set; }
-    [ObservableProperty] public partial bool IsBusy { get; set; }
-    [ObservableProperty] public partial bool IsCurrent { get; set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(ShowBindingDiagnosticCommand), nameof(UpdateSnapshotCommand))] public partial bool IsBusy { get; set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(UpdateSnapshotCommand))] public partial bool IsCurrent { get; set; }
     [ObservableProperty] public partial bool AutoRefresh { get; set; } = true;
     [ObservableProperty] public partial bool ShowLogicalTree { get; set; }
     [ObservableProperty] public partial double PreviewWidth { get; set; } = 960;
     [ObservableProperty] public partial double PreviewHeight { get; set; } = 640;
-    [ObservableProperty] public partial double Zoom { get; set; } = 0.65;
-    [ObservableProperty] public partial string? AssemblyPath { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(ZoomText))] public partial double Zoom { get; set; } = 0.65;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(UsesApplicationResources), nameof(SessionDescription))] public partial string? AssemblyPath { get; set; }
     [ObservableProperty] public partial string? ProjectDirectory { get; set; }
     [ObservableProperty] public partial DesignerNode? SelectedNode { get; set; }
     [ObservableProperty] public partial PreviewProperty? SelectedProperty { get; set; }
@@ -258,10 +258,8 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     partial void OnShowLogicalTreeChanged(bool value) => RebuildTree();
     partial void OnAssemblyPathChanged(string? value)
     {
-        OnPropertyChanged(nameof(UsesApplicationResources));
         _scenarioSelectionPending = true;
         Invalidate();
-        OnPropertyChanged(nameof(SessionDescription));
         Status = "Preview assembly changed. Refresh to load it.";
     }
     partial void OnProjectDirectoryChanged(string? value)
@@ -283,7 +281,6 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     {
         NotifyCanvasState();
         if (!value) ForgetInteraction();
-        UpdateSnapshotCommand.NotifyCanExecuteChanged();
         NotifyInteractionState();
         NotifySourceCommands();
         if (!value) LayoutDetails.Clear("Preview unavailable. Refresh to inspect current layout.");

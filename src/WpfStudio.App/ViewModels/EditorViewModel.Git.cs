@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.ComponentModel;
 using WpfStudio.App.Features.Git;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Git;
@@ -19,12 +20,13 @@ public sealed partial class EditorViewModel
     public long BlameVersion { get; private set; } = -1;
     public event Action? GitChanged;
     public event Action<BlameLine>? BlameCommitRequested;
-    public bool ShowInlineBlame
+    [ObservableProperty] public partial bool ShowInlineBlame { get; set; } = true;
+    partial void OnShowInlineBlameChanged(bool value)
     {
-        get => _showInlineBlame;
-        set { if (_showInlineBlame == value) return; _showInlineBlame = value; OnPropertyChanged(); if (value) ScheduleBlame(); else { Blame = []; GitChanged?.Invoke(); } UpdateLensRows(); }
+        if (value) ScheduleBlame();
+        else { Blame = []; GitChanged?.Invoke(); }
+        UpdateLensRows();
     }
-    private bool _showInlineBlame = true;
 
     /// <summary>Connects the editor to Git and reads the committed text; call again after commits, checkouts and saves.</summary>
     public async Task RefreshGitAsync(GitService git, CancellationToken token = default)
@@ -84,7 +86,7 @@ public sealed partial class EditorViewModel
     {
         _gitBlame?.Cancel(); _gitBlame?.Dispose(); _gitBlame = null;
         // Blame is shown above C# declarations only.
-        if (!_showInlineBlame || !IsCSharp || _git is not { } git || GitBase is not { IsTracked: true, HeadCommit: not null } gitBase) return;
+        if (!ShowInlineBlame || !IsCSharp || _git is not { } git || GitBase is not { IsTracked: true, HeadCommit: not null } gitBase) return;
         _gitBlame = new();
         var token = _gitBlame.Token;
         var text = State.Content;

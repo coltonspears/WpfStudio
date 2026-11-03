@@ -420,8 +420,7 @@ public sealed partial class HeapAnalysis
         return (seen, parent);
     }
 
-    private int[]? _rootOrder;
-    private int[] RootOrder => _rootOrder ??= Enumerable.Range(0, _graph.Roots.Length)
+    private int[] RootOrder => field ??= Enumerable.Range(0, _graph.Roots.Length)
         .OrderBy(i => MemoryLabels.RootPriority(_graph.Roots[i].Kind, _graph.Roots[i].Label)).ToArray();
 
     /// <summary>Reachability with some root kinds ignored (e.g. the finalizer queue), cached per kind set.</summary>
