@@ -25,7 +25,7 @@ public sealed record GitCommit(string Id, string ShortId, string Author, string 
     public string DisplayDate => DateTimeOffset.TryParse(Date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date.LocalDateTime.ToString("MMM d, yyyy · HH:mm") : Date;
     public string RelativeDate => DateTimeOffset.TryParse(Date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? GitText.Relative(date) : Date;
     public string Initials => GitText.Initials(Author);
-    public System.Windows.Media.Brush AvatarBrush => GitText.Avatar(Author);
+    public int AvatarIndex => GitText.AvatarIndex(Author);
     public bool IsMerge => ParentCount > 1;
     /// <summary>Branch and tag names decorating this commit; the checked-out branch is marked with HEAD.</summary>
     public IReadOnlyList<GitRef> RefList => Refs.Split(", ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(GitRef.Parse).ToArray();
@@ -63,7 +63,7 @@ public sealed record GitCommitDetails(string Id, IReadOnlyList<string> Parents, 
         ? $"{date.LocalDateTime:dddd, MMM d, yyyy · HH:mm} ({GitText.Relative(date)})" : AuthorDate;
     public string ParentText => Parents.Count == 0 ? "Root commit" : (Parents.Count > 1 ? "Merge of " : "Parent ") + string.Join(", ", Parents.Select(p => p[..Math.Min(8, p.Length)]));
     public string Initials => GitText.Initials(Author);
-    public System.Windows.Media.Brush AvatarBrush => GitText.Avatar(Author);
+    public int AvatarIndex => GitText.AvatarIndex(Author);
     public int Added => Files.Sum(file => file.Added ?? 0);
     public int Deleted => Files.Sum(file => file.Deleted ?? 0);
     public string Stats => $"{Files.Count} file{(Files.Count == 1 ? "" : "s")} changed" + (Added > 0 ? $" · +{Added}" : "") + (Deleted > 0 ? $" −{Deleted}" : "");
@@ -101,23 +101,15 @@ public sealed record GitConflictFile(string Root, string RelativePath, string Fu
 
 internal static class GitText
 {
-    // Mid-tone avatar colours that keep white initials readable in both themes.
-    private static readonly System.Windows.Media.Brush[] Avatars = new[]
-    {
-        "#5B7FE0", "#D46F4D", "#3F9E78", "#9A6BD6", "#C08A2E", "#3B98AD", "#C95A8A", "#7A8A45"
-    }.Select(hex =>
-    {
-        var brush = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex));
-        brush.Freeze();
-        return (System.Windows.Media.Brush)brush;
-    }).ToArray();
+    /// <summary>How many avatar colours <see cref="GitAvatarBrushConverter"/> offers.</summary>
+    public const int AvatarCount = 8;
 
-    /// <summary>A stable colour per author name (string.GetHashCode is randomised per process, so hash by hand).</summary>
-    public static System.Windows.Media.Brush Avatar(string author)
+    /// <summary>A stable colour slot per author name (string.GetHashCode is randomised per process, so hash by hand).</summary>
+    public static int AvatarIndex(string author)
     {
         var hash = 17u;
         foreach (var c in author.Trim().ToLowerInvariant()) hash = hash * 31 + c;
-        return Avatars[hash % (uint)Avatars.Length];
+        return (int)(hash % AvatarCount);
     }
 
     public static string Folder(string path)
