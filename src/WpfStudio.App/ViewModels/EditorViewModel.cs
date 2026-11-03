@@ -66,6 +66,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         ContentChanged(this, EventArgs.Empty);
     }
     public DocumentState State { get; }
+    /// <summary>The editor settings its surface follows; without any, the surface keeps its defaults.</summary>
+    public EditorPreferences? Preferences { get; init; }
     public string Title => State.Title;
     public string ContentId => State.Path;
     public bool IsReadOnly => State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);

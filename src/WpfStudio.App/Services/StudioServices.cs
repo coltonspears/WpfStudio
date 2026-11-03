@@ -92,6 +92,8 @@ public static class StudioServices
 
     public static IServiceCollection AddShell(this IServiceCollection services)
     {
+        services.AddSingleton<FontCatalog>();
+        services.AddSingleton<EditorPreferences>();
         services.AddSingleton<StudioFeatures>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();

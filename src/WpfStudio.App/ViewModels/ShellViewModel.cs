@@ -49,10 +49,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler, EditorPreferences editor)
     {
         _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value;
-        Debugger = debugger; Terminal = terminal; Database = database; Features = features; MemoryProfiler = memoryProfiler; Designer = designer;
+        Debugger = debugger; Terminal = terminal; Database = database; Features = features; MemoryProfiler = memoryProfiler; Designer = designer; Editor = editor;
         Designer.SourceEditRequested += PreviewDesignerEditAsync;
         Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
@@ -394,6 +394,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (existing != null) { ActiveDocument = existing; return; }
         var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources)
         {
+            Preferences = Editor,
             DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
             ShowInlayHints = ShowInlayHints,
             ShowInlineBlame = ShowInlineBlame,

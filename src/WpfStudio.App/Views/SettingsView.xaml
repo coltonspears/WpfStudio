@@ -157,7 +157,7 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="150" /></Grid.ColumnDefinitions>
                 <StackPanel>
                   <TextBlock Text="Font family" Style="{StaticResource RowName}" Margin="0,0,0,6" />
-                  <ComboBox IsEditable="True" ItemsSource="{Binding Editor.FontFamilies}" Text="{Binding Editor.FontFamily, UpdateSourceTrigger=LostFocus}"
+                  <ComboBox IsEditable="True" ItemsSource="{Binding Editor.Fonts.Families}" Text="{Binding Editor.FontFamily, UpdateSourceTrigger=LostFocus}"
                             MaxDropDownHeight="360" AutomationProperties.Name="Editor font family" ToolTip="Fixed-width fonts are listed first. Type a list such as 'JetBrains Mono, Consolas' to fall back when a font is missing.">
                     <ComboBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate></ComboBox.ItemsPanel>
                     <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" FontFamily="{Binding}" FontSize="13" /></DataTemplate></ComboBox.ItemTemplate>
