@@ -429,7 +429,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
     {
         await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         _ = GetDocument(request.Path, request.Version);
-        if (!_completions.TryGetValue(request.ItemId, out var entry) || entry.Version != request.Version || !string.Equals(entry.Document.FilePath, request.Path, StringComparison.OrdinalIgnoreCase)) return null;
+        if (!_completions.TryGetValue(request.ItemId, out var entry) || entry.Version != request.Version || !string.Equals(entry.Document.FilePath, Path.GetFullPath(request.Path), StringComparison.OrdinalIgnoreCase)) return null;
         var service = CompletionService.GetService(entry.Document)!;
         var change = await service.GetChangeAsync(entry.Document, entry.Item, cancellationToken: cancellationToken).ConfigureAwait(false);
         lock (_gate)

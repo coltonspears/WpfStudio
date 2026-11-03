@@ -66,6 +66,22 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
         Assert.Null(await engine.GetQuickInfoAsync(new(Source, text.IndexOf("    public decimal Total", StringComparison.Ordinal) + 1, 1)));
     }
 
+    [Fact]
+    public async Task CompletionCommitAcceptsEveryPathSpellingTheWorkerAccepts()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "namespace Shop;\npublic class Lookup { public int Total; public int Read() => To; }\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        var position = text.IndexOf("=> To;", StringComparison.Ordinal) + "=> To".Length;
+        var forwardSlashes = Source.Replace('\\', '/');
+        var completions = await engine.GetCompletionsAsync(new DocumentPositionRequest(forwardSlashes, position, 1));
+        var total = Assert.Single(completions.Items, item => item.DisplayText == "Total");
+        var edit = await engine.GetCompletionEditAsync(new CompletionEditRequest(forwardSlashes, 1, total.Id));
+        Assert.NotNull(edit);
+        Assert.Equal("Total", edit.NewText);
+    }
+
     private static string Apply(string text, IReadOnlyList<TextEdit> edits) =>
         edits.OrderByDescending(edit => edit.Start).Aggregate(text, (current, edit) => current.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.NewText));
 
