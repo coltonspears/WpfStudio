@@ -48,8 +48,6 @@ public partial class DiffView : UserControl
     public string OldLabel { get => (string)GetValue(OldLabelProperty); set => SetValue(OldLabelProperty, value); }
     public string NewLabel { get => (string)GetValue(NewLabelProperty); set => SetValue(NewLabelProperty, value); }
 
-    public IRelayCommand NextChangeCommand { get; }
-    public IRelayCommand PreviousChangeCommand { get; }
     public TextDiff? Diff => _diff;
     public DiffLayout? Layout => _layout;
     internal TextEditor LeftEditor => _left;
@@ -81,8 +79,6 @@ public partial class DiffView : UserControl
 
     public DiffView()
     {
-        NextChangeCommand = new RelayCommand(() => GoToChange(_current + 1), () => Changes.Count > 0 && _current < Changes.Count - 1);
-        PreviousChangeCommand = new RelayCommand(() => GoToChange(_current - 1), () => Changes.Count > 0 && _current > 0);
         InitializeComponent();
         InputBindings.Add(new KeyBinding(NextChangeCommand, Key.F8, ModifierKeys.None));
         InputBindings.Add(new KeyBinding(PreviousChangeCommand, Key.F8, ModifierKeys.Shift));
@@ -282,6 +278,11 @@ public partial class DiffView : UserControl
         Rebuild(scrollToFirst: false);
         _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => editor.ScrollToVerticalOffset(offset));
     }
+
+    private bool CanGoToNextChange() => Changes.Count > 0 && _current < Changes.Count - 1;
+    [RelayCommand(CanExecute = nameof(CanGoToNextChange))] private void NextChange() => GoToChange(_current + 1);
+    private bool CanGoToPreviousChange() => Changes.Count > 0 && _current > 0;
+    [RelayCommand(CanExecute = nameof(CanGoToPreviousChange))] private void PreviousChange() => GoToChange(_current - 1);
 
     private void GoToChange(int index)
     {
