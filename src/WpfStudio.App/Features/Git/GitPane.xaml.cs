@@ -1,33 +1,11 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 
 namespace WpfStudio.App.Features.Git;
 
 public partial class GitPane : UserControl
 {
     public GitPane() => InitializeComponent();
-
-    private GitViewModel? Model => DataContext as GitViewModel;
-
-    private void OpenChangeOnDoubleClick(object sender, MouseButtonEventArgs args)
-    {
-        if (ItemUnderMouse<GitChange>(args) is { } change && Model?.OpenFileCommand.CanExecute(change) == true) Model.OpenFileCommand.Execute(change);
-    }
-
-    private void OpenCommitFileOnDoubleClick(object sender, MouseButtonEventArgs args)
-    {
-        if (ItemUnderMouse<GitCommitFile>(args) is { } file && Model?.OpenCommitFileCommand.CanExecute(file) == true) Model.OpenCommitFileCommand.Execute(file);
-    }
-
-    private void SwitchOnDoubleClick(object sender, MouseButtonEventArgs args)
-    {
-        if (ItemUnderMouse<string>(args) is null || Model is not { } model || !model.SwitchBranchCommand.CanExecute(null)) return;
-        BranchPicker.IsChecked = false;
-        model.SwitchBranchCommand.Execute(null);
-    }
-
-    private void CloseBranchPicker(object sender, RoutedEventArgs args) => BranchPicker.IsChecked = false;
 
     private double _commitFilesWidth = -1;
 
@@ -63,28 +41,5 @@ public partial class GitPane : UserControl
         CommitDivider.VerticalAlignment = wide ? VerticalAlignment.Stretch : VerticalAlignment.Center;
         Grid.SetRow(CommitDiffView, wide ? 0 : 2);
         Grid.SetColumn(CommitDiffView, wide ? 2 : 0);
-    }
-
-    /// <summary>Copies its string parameter. A command rather than Click handlers, which WPF cannot connect inside style-defined context menus.</summary>
-    public static ICommand CopyCommand { get; } = new CommunityToolkit.Mvvm.Input.RelayCommand<string>(Copy, text => !string.IsNullOrEmpty(text));
-
-    /// <summary>A double-click on the list's empty area or scroll bar must not act on the selected row.</summary>
-    private static T? ItemUnderMouse<T>(MouseButtonEventArgs args) where T : class =>
-        FindContainer(args.OriginalSource as DependencyObject)?.DataContext as T;
-
-    private static ListBoxItem? FindContainer(DependencyObject? element)
-    {
-        while (element is not null and not ListBoxItem)
-            element = element is System.Windows.Media.Visual or System.Windows.Media.Media3D.Visual3D
-                ? System.Windows.Media.VisualTreeHelper.GetParent(element)
-                : LogicalTreeHelper.GetParent(element);
-        return element as ListBoxItem;
-    }
-
-    private static void Copy(string? text)
-    {
-        if (string.IsNullOrEmpty(text)) return;
-        try { Clipboard.SetText(text); }
-        catch (System.Runtime.InteropServices.ExternalException) { }
     }
 }

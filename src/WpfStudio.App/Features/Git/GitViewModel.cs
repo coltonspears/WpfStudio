@@ -90,6 +90,9 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         ? $"{VisibleHistory.Count} of {History.Count} loaded commits match"
         : $"{History.Count}{(HasMoreHistory ? "+" : "")} commit{(History.Count == 1 ? "" : "s")} on {Branch}";
 
+    /// <summary>The branch popup; the actions in it close it as they start.</summary>
+    [ObservableProperty] public partial bool IsBranchPickerOpen { get; set; }
+
     partial void OnIsBusyChanged(bool value) => NotifyCommands();
     partial void OnRepositoryRootChanged(string? value) { OnPropertyChanged(nameof(HasRepository)); NotifyCommands(); }
     partial void OnErrorChanged(string value) => OnPropertyChanged(nameof(HasError));
@@ -204,15 +207,23 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
     private Task PushAsync() => NetworkAsync("Push", (signIn, token) => _service.PushAsync(RepositoryRoot!, token, signIn));
 
     [RelayCommand(CanExecute = nameof(CanSwitch))]
-    private Task SwitchBranchAsync() => MutateAsync("Switch branch", token => _service.SwitchBranchAsync(RepositoryRoot!, SelectedBranch!, cancellationToken: token), save: true, changesWorkspaceFiles: true);
+    private Task SwitchBranchAsync()
+    {
+        IsBranchPickerOpen = false;
+        return MutateAsync("Switch branch", token => _service.SwitchBranchAsync(RepositoryRoot!, SelectedBranch!, cancellationToken: token), save: true, changesWorkspaceFiles: true);
+    }
 
     [RelayCommand(CanExecute = nameof(CanCreateBranch))]
-    private Task CreateBranchAsync() => MutateAsync("Create branch", async token =>
+    private Task CreateBranchAsync()
     {
-        var result = await _service.SwitchBranchAsync(RepositoryRoot!, NewBranchName.Trim(), create: true, cancellationToken: token);
-        NewBranchName = "";
-        return result;
-    }, save: true, changesWorkspaceFiles: true);
+        IsBranchPickerOpen = false;
+        return MutateAsync("Create branch", async token =>
+        {
+            var result = await _service.SwitchBranchAsync(RepositoryRoot!, NewBranchName.Trim(), create: true, cancellationToken: token);
+            NewBranchName = "";
+            return result;
+        }, save: true, changesWorkspaceFiles: true);
+    }
 
     [RelayCommand(CanExecute = nameof(CanUseChange))]
     private Task ViewWorkingDiffAsync(GitChange? change) => ShowChangeAsync(change, staged: false);

@@ -142,7 +142,11 @@ public sealed partial class GitViewModel
     // ------------------------------------------------------------------ Merge and conflicts
     private bool CanMerge() => CanOperate() && !HasOperation && !string.IsNullOrWhiteSpace(MergeSource) && MergeSource != Branch;
     [RelayCommand(CanExecute = nameof(CanMerge))]
-    private Task MergeBranchAsync() => MutateAsync($"Merge {MergeSource} into {Branch}", token => _service.MergeAsync(RepositoryRoot!, MergeSource!, token), save: true, changesWorkspaceFiles: true);
+    private Task MergeBranchAsync()
+    {
+        IsBranchPickerOpen = false;
+        return MutateAsync($"Merge {MergeSource} into {Branch}", token => _service.MergeAsync(RepositoryRoot!, MergeSource!, token), save: true, changesWorkspaceFiles: true);
+    }
     private bool CanEndOperation() => CanOperate() && HasOperation;
     [RelayCommand(CanExecute = nameof(CanEndOperation))]
     private Task AbortOperationAsync() => MutateAsync("Abort " + Operation.ToString().ToLowerInvariant(), token => _service.AbortOperationAsync(RepositoryRoot!, token), save: true, changesWorkspaceFiles: true);

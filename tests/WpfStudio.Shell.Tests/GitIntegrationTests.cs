@@ -459,6 +459,30 @@ public sealed class GitIntegrationTests
     }
 
     [Fact]
+    public async Task BranchActionsCloseTheBranchPicker()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        using var model = new GitViewModel(fixture.Service);
+        await model.SetWorkspaceAsync(fixture.Root);
+
+        model.IsBranchPickerOpen = true;
+        model.NewBranchName = "feature/picker";
+        await model.CreateBranchCommand.ExecuteAsync(null);
+        Assert.False(model.IsBranchPickerOpen);
+
+        model.IsBranchPickerOpen = true;
+        model.SelectedBranch = "main";
+        await model.SwitchBranchCommand.ExecuteAsync(null);
+        Assert.False(model.IsBranchPickerOpen);
+
+        model.IsBranchPickerOpen = true;
+        model.MergeSource = "feature/picker";
+        await model.MergeBranchCommand.ExecuteAsync(null);
+        Assert.False(model.IsBranchPickerOpen);
+    }
+
+    [Fact]
     public async Task WorkspaceSwitchCancelsPendingActionsAndDisablesOldRepositoryCommands()
     {
         using var first = await Fixture.CreateAsync();

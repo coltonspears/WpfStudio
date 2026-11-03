@@ -4,6 +4,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Behaviors;
 
 namespace WpfStudio.Shell.Tests;
@@ -66,6 +67,36 @@ public sealed partial class InteractionBehaviorTests
                 Assert.Equal("query", box.SelectedText);
                 Assert.False(model.WantsFocus); // Cleared, so that the next request raises a change.
             }
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
+    public Task ActivateCommandRunsForTheRowUnderTheMouseAndNotForTheListAroundIt() => OnDispatcherAsync(async () =>
+    {
+        var opened = new List<string?>();
+        var list = new ListBox { ItemsSource = new[] { "first", "second", "locked" }, Width = 200, Height = 120 };
+        Interaction.SetActivateCommand(list, new RelayCommand<string>(opened.Add, item => item != "locked"));
+        var window = new Window { ShowInTaskbar = false, ShowActivated = false, Opacity = 0, SizeToContent = SizeToContent.WidthAndHeight, Content = list };
+        window.Show();
+        try
+        {
+            await Dispatcher.Yield(DispatcherPriority.ContextIdle);
+            list.SelectedIndex = 0;
+            ListBoxItem Row(int index) => (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(index);
+            void DoubleClick(object source) => list.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Control.MouseDoubleClickEvent, Source = source });
+
+            DoubleClick(list);
+            Assert.Empty(opened); // The selected row stays put when the click was beside it.
+
+            DoubleClick(Row(1));
+            Assert.Equal(["second"], opened);
+
+            DoubleClick(Row(2));
+            Assert.Equal(["second"], opened); // The command said no.
+
+            list.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(list), Environment.TickCount, Key.Enter) { RoutedEvent = Keyboard.KeyDownEvent });
+            Assert.Equal(["second", "first"], opened);
         }
         finally { window.Close(); }
     });

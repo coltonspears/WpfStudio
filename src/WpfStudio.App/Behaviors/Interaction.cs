@@ -38,7 +38,17 @@ public static class Interaction
         if (owner is Control control) { control.MouseDoubleClick -= Activate; control.KeyDown -= KeyActivate; if (args.NewValue != null) { control.MouseDoubleClick += Activate; control.KeyDown += KeyActivate; } }
     }
     private static object? Selected(object source) => source switch { TreeView tree => tree.SelectedItem, System.Windows.Controls.Primitives.Selector selector => selector.SelectedItem, FrameworkElement element => element.DataContext, _ => null };
-    private static void Activate(object sender, MouseButtonEventArgs args) { if (GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(Selected(sender))) command.Execute(Selected(sender)); }
+    private static void Activate(object sender, MouseButtonEventArgs args)
+    {
+        var target = Selected(sender);
+        // A double-click on a list's empty area or scroll bar must not act on the selected row.
+        if (sender is ListBox list)
+        {
+            if (args.OriginalSource is not DependencyObject source || ItemsControl.ContainerFromElement(list, source) is not { } row) return;
+            target = list.ItemContainerGenerator.ItemFromContainer(row);
+        }
+        if (GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(target)) command.Execute(target);
+    }
     private static void KeyActivate(object sender, KeyEventArgs args) { if (args.Key == Key.Enter && GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(Selected(sender))) { command.Execute(Selected(sender)); args.Handled = true; } }
     /// <summary>Where a tree publishes its selection. It only ever pushes: a tree cannot select an item it has not generated, so selecting from a view model goes through each item's IsSelected.</summary>
     public static readonly DependencyProperty SelectionSourceProperty = DependencyProperty.RegisterAttached("SelectionSource", typeof(object), typeof(Interaction), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
@@ -55,6 +65,14 @@ public static class Interaction
         if ((bool)args.NewValue) tree.SelectedItemChanged += TreeSelection;
     }
     private static void TreeSelection(object sender, RoutedPropertyChangedEventArgs<object> args) => ((TreeView)sender).SetCurrentValue(SelectionSourceProperty, args.NewValue);
+    /// <summary>Copies its string parameter. A command rather than Click handlers, which WPF cannot connect inside style-defined context menus.</summary>
+    public static ICommand CopyCommand { get; } = new CommunityToolkit.Mvvm.Input.RelayCommand<string>(Copy, text => !string.IsNullOrEmpty(text));
+    private static void Copy(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        try { Clipboard.SetText(text); }
+        catch (System.Runtime.InteropServices.ExternalException) { }
+    }
     public static readonly DependencyProperty CloseGuardProperty = DependencyProperty.RegisterAttached("CloseGuard", typeof(ShellViewModel), typeof(Interaction), new PropertyMetadata(null, CloseGuardChanged));
     public static void SetCloseGuard(DependencyObject target, ShellViewModel value) => target.SetValue(CloseGuardProperty, value);
     public static ShellViewModel? GetCloseGuard(DependencyObject target) => (ShellViewModel?)target.GetValue(CloseGuardProperty);

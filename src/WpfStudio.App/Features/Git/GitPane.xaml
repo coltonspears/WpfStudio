@@ -1,7 +1,7 @@
 <UserControl x:Class="WpfStudio.App.Features.Git.GitPane"
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:local="clr-namespace:WpfStudio.App.Features.Git" xmlns:c="clr-namespace:WpfStudio.App.Controls"
- xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff" xmlns:git="clr-namespace:WpfStudio.Core.Git;assembly=WpfStudio.Core" x:Name="Pane" MinWidth="420">
+ xmlns:diff="clr-namespace:WpfStudio.App.Controls.Diff" xmlns:git="clr-namespace:WpfStudio.Core.Git;assembly=WpfStudio.Core" xmlns:b="clr-namespace:WpfStudio.App.Behaviors" x:Name="Pane" MinWidth="420">
  <UserControl.Resources>
   <!-- One-letter status coloured by kind: added/new green, deleted/conflict red, renamed accent, modified amber. -->
   <Style x:Key="StatusLetter" TargetType="TextBlock">
@@ -137,7 +137,7 @@
      <MenuItem Header="Stage file" c:Ui.Icon="Plus" Command="{Binding StageFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
      <MenuItem Header="Open file" c:Ui.Icon="File" Command="{Binding OpenFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
      <Separator/>
-     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static b:Interaction.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
     </ContextMenu>
    </Setter.Value></Setter>
   </Style>
@@ -148,15 +148,15 @@
      <MenuItem Header="Unstage file" c:Ui.Icon="Minus" Command="{Binding UnstageFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
      <MenuItem Header="Open file" c:Ui.Icon="File" Command="{Binding OpenFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
      <Separator/>
-     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static b:Interaction.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
     </ContextMenu>
    </Setter.Value></Setter>
   </Style>
   <Style x:Key="CommitItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
    <Setter Property="ContextMenu"><Setter.Value>
     <ContextMenu>
-     <MenuItem Header="Copy commit ID" c:Ui.Icon="Copy" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding Id}"/>
-     <MenuItem Header="Copy subject" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding Subject}"/>
+     <MenuItem Header="Copy commit ID" c:Ui.Icon="Copy" Command="{x:Static b:Interaction.CopyCommand}" CommandParameter="{Binding Id}"/>
+     <MenuItem Header="Copy subject" Command="{x:Static b:Interaction.CopyCommand}" CommandParameter="{Binding Subject}"/>
     </ContextMenu>
    </Setter.Value></Setter>
   </Style>
@@ -165,7 +165,7 @@
    <Setter Property="ContextMenu"><Setter.Value>
     <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
      <MenuItem Header="Open current version" c:Ui.Icon="File" Command="{Binding OpenCommitFileCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     <MenuItem Header="Copy path" c:Ui.Icon="Copy" Command="{x:Static b:Interaction.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Path, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
     </ContextMenu>
    </Setter.Value></Setter>
   </Style>
@@ -190,7 +190,7 @@
      <Button Style="{StaticResource IconButton}" c:Ui.Icon="Restart" Command="{Binding RefreshCommand}" ToolTip="Refresh" AutomationProperties.Name="Refresh Git repository"/>
      <Button Content="Cancel" Command="{Binding CancelCommand}" Margin="6,0,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}"/>
     </StackPanel>
-    <ToggleButton x:Name="BranchPicker" DockPanel.Dock="Left" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Git" Height="32" Padding="8,0,8,0"
+    <ToggleButton x:Name="BranchPicker" IsChecked="{Binding IsBranchPickerOpen}" DockPanel.Dock="Left" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Git" Height="32" Padding="8,0,8,0"
                   IsEnabled="{Binding HasRepository}" ToolTip="Switch or create a branch" AutomationProperties.Name="Branch">
      <StackPanel Orientation="Horizontal">
       <TextBlock Text="{Binding Branch}" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" MaxWidth="320" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
@@ -203,7 +203,7 @@
              Width="320" Effect="{StaticResource PopupShadow}">
       <StackPanel>
        <TextBlock Text="SWITCH BRANCH" Style="{StaticResource SectionLabel}"/>
-       <ListBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" MaxHeight="220" AutomationProperties.Name="Local branches" MouseDoubleClick="SwitchOnDoubleClick">
+       <ListBox ItemsSource="{Binding Branches}" SelectedItem="{Binding SelectedBranch}" MaxHeight="220" AutomationProperties.Name="Local branches" b:Interaction.ActivateCommand="{Binding SwitchBranchCommand}">
         <ListBox.ItemTemplate>
          <DataTemplate>
           <StackPanel Orientation="Horizontal">
@@ -213,15 +213,15 @@
          </DataTemplate>
         </ListBox.ItemTemplate>
        </ListBox>
-       <Button Content="Switch to selected branch" Command="{Binding SwitchBranchCommand}" HorizontalAlignment="Stretch" Margin="0,8,0,0" Click="CloseBranchPicker"/>
+       <Button Content="Switch to selected branch" Command="{Binding SwitchBranchCommand}" HorizontalAlignment="Stretch" Margin="0,8,0,0"/>
        <TextBlock Text="NEW BRANCH" Style="{StaticResource SectionLabel}" Margin="0,16,0,8"/>
        <DockPanel>
-        <Button DockPanel.Dock="Right" Content="Create" c:Ui.Icon="Plus" Command="{Binding CreateBranchCommand}" Style="{StaticResource AccentButton}" Margin="8,0,0,0" Click="CloseBranchPicker"/>
+        <Button DockPanel.Dock="Right" Content="Create" c:Ui.Icon="Plus" Command="{Binding CreateBranchCommand}" Style="{StaticResource AccentButton}" Margin="8,0,0,0"/>
         <TextBox Text="{Binding NewBranchName, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="feature/my-change" AutomationProperties.Name="New branch name"/>
        </DockPanel>
        <TextBlock Text="MERGE INTO CURRENT BRANCH" Style="{StaticResource SectionLabel}" Margin="0,16,0,8"/>
        <DockPanel>
-        <Button DockPanel.Dock="Right" Content="Merge" Command="{Binding MergeBranchCommand}" Margin="8,0,0,0" Click="CloseBranchPicker"
+        <Button DockPanel.Dock="Right" Content="Merge" Command="{Binding MergeBranchCommand}" Margin="8,0,0,0"
                 ToolTip="Merge the chosen branch into the current one. Conflicts open in the resolver; Abort returns the branch to where it was."/>
         <ComboBox ItemsSource="{Binding Branches}" SelectedItem="{Binding MergeSource}" AutomationProperties.Name="Branch to merge"/>
        </DockPanel>
@@ -296,7 +296,7 @@
       </DockPanel>
       <Grid Grid.Row="2">
        <ListBox ItemsSource="{Binding Staged}" SelectedItem="{Binding SelectedStaged}" ItemTemplate="{StaticResource StagedChangeTemplate}" ItemContainerStyle="{StaticResource StagedItem}"
-                MaxHeight="240" AutomationProperties.Name="Staged changes" MouseDoubleClick="OpenChangeOnDoubleClick"
+                MaxHeight="240" AutomationProperties.Name="Staged changes" b:Interaction.ActivateCommand="{Binding OpenFileCommand}"
                 Visibility="{Binding Staged.Count, Converter={StaticResource Presence}}"/>
        <TextBlock Text="Stage files to include them in the next commit." Style="{StaticResource EmptyHint}" Visibility="{Binding Staged.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
       </Grid>
@@ -306,7 +306,7 @@
       </DockPanel>
       <Grid Grid.Row="4">
        <ListBox ItemsSource="{Binding Unstaged}" SelectedItem="{Binding SelectedUnstaged}" ItemTemplate="{StaticResource WorkingChangeTemplate}" ItemContainerStyle="{StaticResource WorkingItem}"
-                AutomationProperties.Name="Working changes" MouseDoubleClick="OpenChangeOnDoubleClick" VerticalAlignment="Top"
+                AutomationProperties.Name="Working changes" b:Interaction.ActivateCommand="{Binding OpenFileCommand}" VerticalAlignment="Top"
                 Visibility="{Binding Unstaged.Count, Converter={StaticResource Presence}}"/>
        <TextBlock Text="No working changes." Style="{StaticResource EmptyHint}" Visibility="{Binding Unstaged.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
       </Grid>
@@ -444,7 +444,7 @@
            <TextBlock Foreground="{DynamicResource MutedBrush}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,12,0">
             <Run Text="{Binding Author, Mode=OneWay}" Foreground="{DynamicResource TextBrush}"/><Run Text=" "/><Run Text="{Binding AuthorEmail, Mode=OneWay, StringFormat='&lt;{0}&gt;'}"/><Run Text=" · "/><Run Text="{Binding DisplayDate, Mode=OneWay}"/>
            </TextBlock>
-           <Button Style="{StaticResource QuietButton}" Padding="6,1" Command="{x:Static local:GitPane.CopyCommand}" CommandParameter="{Binding Id}" ToolTip="Copy the full commit ID" AutomationProperties.Name="Copy commit ID" VerticalAlignment="Center">
+           <Button Style="{StaticResource QuietButton}" Padding="6,1" Command="{x:Static b:Interaction.CopyCommand}" CommandParameter="{Binding Id}" ToolTip="Copy the full commit ID" AutomationProperties.Name="Copy commit ID" VerticalAlignment="Center">
             <StackPanel Orientation="Horizontal">
              <c:Glyph Kind="Commit" Width="13" Height="13" Margin="0,0,5,0"/>
              <TextBlock Text="{Binding ShortId}" FontFamily="{StaticResource CodeFont}" FontSize="11"/>
@@ -500,7 +500,7 @@
                      Visibility="{Binding SelectedCommit.IsMerge, Converter={StaticResource BooleanToVisibility}, FallbackValue=Collapsed}"/>
          </StackPanel>
          <ListBox ItemsSource="{Binding CommitFiles}" SelectedItem="{Binding SelectedCommitFile}" ItemTemplate="{StaticResource CommitFileTemplate}" ItemContainerStyle="{StaticResource CommitFileItem}"
-                  AutomationProperties.Name="Files changed in commit" MouseDoubleClick="OpenCommitFileOnDoubleClick"/>
+                  AutomationProperties.Name="Files changed in commit" b:Interaction.ActivateCommand="{Binding OpenCommitFileCommand}"/>
         </DockPanel>
         <GridSplitter x:Name="CommitSplitter" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
         <Border x:Name="CommitDivider" Grid.Column="1" Width="1" HorizontalAlignment="Center" Background="{DynamicResource BorderBrush}" IsHitTestVisible="False"/>
