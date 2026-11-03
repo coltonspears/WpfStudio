@@ -208,7 +208,14 @@ public sealed partial class WpfIndexService
     {
         var info = (IXmlLineInfo)attribute;
         var offset = 0;
-        for (var line = 1; line < info.LineNumber; line++) { var next = text.IndexOf('\n', offset); if (next < 0) break; offset = next + 1; }
+        // XmlReader ends a line at \r\n, \n or a bare \r.
+        for (var line = 1; line < info.LineNumber; line++)
+        {
+            var next = text.AsSpan(offset).IndexOfAny('\r', '\n');
+            if (next < 0) break;
+            offset += next + 1;
+            if (text[offset - 1] == '\r' && offset < text.Length && text[offset] == '\n') offset++;
+        }
         offset += info.LinePosition - 1;
         var equal = text.IndexOf('=', offset);
         var quote = equal + 1;
