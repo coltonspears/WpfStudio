@@ -21,7 +21,7 @@ public partial class MemoryProfilerPane : UserControl
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == System.Windows.Input.Key.G && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control && _model?.HasCapture == true)
-            { GoToBox.Focus(); GoToBox.SelectAll(); e.Handled = true; }
+            { _model.FocusGoToCommand.Execute(null); e.Handled = true; }
         };
         SizeChanged += (_, e) =>
         {
@@ -30,8 +30,6 @@ public partial class MemoryProfilerPane : UserControl
                 BrowserColumn.Width = new GridLength(Math.Max(280, e.NewSize.Width * 0.45));
         };
     }
-
-    private void FocusGoTo() => _ = Dispatcher.BeginInvoke(() => { GoToBox.Focus(); GoToBox.SelectAll(); }, System.Windows.Threading.DispatcherPriority.Input);
 
     private void ProcessesOpened(object? sender, EventArgs e)
     {
@@ -43,9 +41,9 @@ public partial class MemoryProfilerPane : UserControl
     private void Attach(MemoryProfilerViewModel? model)
     {
         if (ReferenceEquals(model, _model)) return;
-        if (_model is not null) { _model.PropertyChanged -= ModelChanged; _model.FocusGoToRequested -= FocusGoTo; _model.IsMonitorActive = false; }
+        if (_model is not null) { _model.PropertyChanged -= ModelChanged; _model.IsMonitorActive = false; }
         _model = model;
-        if (_model is not null) { _model.PropertyChanged += ModelChanged; _model.FocusGoToRequested += FocusGoTo; _model.IsMonitorActive = IsVisible; }
+        if (_model is not null) { _model.PropertyChanged += ModelChanged; _model.IsMonitorActive = IsVisible; }
         Apply();
     }
 

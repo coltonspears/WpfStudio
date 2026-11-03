@@ -297,6 +297,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/change-preview.png"));
             shell.ChangeReview.CancelCommand.Execute(null);
             await VerifyDesignerPaneFilterAsync(provider.GetRequiredService<IUiDispatcher>());
+            await VerifySelectionAndFocusRequestsAsync(window, shell);
             await VerifyLargeDiffsAsync();
             var performanceFixture = Path.Combine(root, "artifacts/performance/fixture/Performance.slnx");
             if (File.Exists(performanceFixture))

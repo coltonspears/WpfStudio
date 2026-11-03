@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows.Input;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Controls;
 using WpfStudio.App.Features.Workbench;
@@ -17,7 +18,7 @@ public sealed partial class ShellViewModel
 {
     private static readonly StringComparison IgnoreCase = StringComparison.OrdinalIgnoreCase;
 
-    public event Action? SearchFocusRequested;
+    [ObservableProperty] public partial bool IsSearchFocusRequested { get; set; }
 
     private void InitializeExperience()
     {
@@ -62,7 +63,7 @@ public sealed partial class ShellViewModel
         }
         return null;
     }
-    [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke("Search"); SearchFocusRequested?.Invoke(); }
+    [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke("Search"); IsSearchFocusRequested = true; }
     [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(AppPaths.DataDirectory); DesktopNavigation.Reveal(AppPaths.DataDirectory); return Task.CompletedTask; });
     /// <summary>Opens the command palette on the snippets for the active editor's language.</summary>
     [RelayCommand] private void InsertSnippet()

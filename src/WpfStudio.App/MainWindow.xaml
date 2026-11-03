@@ -639,7 +639,7 @@
                   </DockPanel>
                   <Grid>
                     <TextBlock Text="No files match the filter" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Center" Margin="0,24,0,0" Visibility="{Binding Explorer.ShowNoMatches, Converter={StaticResource BooleanToVisibility}}" />
-                    <TreeView x:Name="ExplorerTree" b:Interaction.SelectOnRightClick="True" ItemsSource="{Binding Explorer.Nodes}" b:Interaction.ActivateCommand="{Binding OpenNodeCommand}" b:Interaction.SelectedNode="{Binding Explorer.SelectedNode, Mode=TwoWay}">
+                    <TreeView x:Name="ExplorerTree" b:Interaction.SelectOnRightClick="True" ItemsSource="{Binding Explorer.Nodes}" b:Interaction.ActivateCommand="{Binding OpenNodeCommand}" b:Interaction.TrackSelection="True" b:Interaction.SelectionSource="{Binding Explorer.SelectedNode, Mode=TwoWay}">
                       <TreeView.ContextMenu>
                         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                           <MenuItem Header="Build" c:Ui.Icon="Build" Command="{Binding BuildSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanBuild, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
@@ -1024,7 +1024,7 @@
                 <DockPanel DockPanel.Dock="Top" Margin="10,4,8,6">
                   <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Cancel" Command="{Binding SearchCancelCommand}" />
                   <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" c:Ui.Icon="Search" Content="Search" Command="{Binding SearchCommand}" />
-                  <TextBox x:Name="SearchBox" Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Find text in workspace files" ToolTip="Find text across source files (Enter)">
+                  <TextBox x:Name="SearchBox" b:Interaction.FocusWhenTrue="{Binding IsSearchFocusRequested}" Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Find text in workspace files" ToolTip="Find text across source files (Enter)">
                     <TextBox.InputBindings>
                       <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
                     </TextBox.InputBindings>

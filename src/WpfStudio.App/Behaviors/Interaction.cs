@@ -40,11 +40,21 @@ public static class Interaction
     private static object? Selected(object source) => source switch { TreeView tree => tree.SelectedItem, System.Windows.Controls.Primitives.Selector selector => selector.SelectedItem, FrameworkElement element => element.DataContext, _ => null };
     private static void Activate(object sender, MouseButtonEventArgs args) { if (GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(Selected(sender))) command.Execute(Selected(sender)); }
     private static void KeyActivate(object sender, KeyEventArgs args) { if (args.Key == Key.Enter && GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(Selected(sender))) { command.Execute(Selected(sender)); args.Handled = true; } }
-    public static readonly DependencyProperty SelectedNodeProperty = DependencyProperty.RegisterAttached("SelectedNode", typeof(object), typeof(Interaction), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, SelectedNodeChanged));
-    public static void SetSelectedNode(DependencyObject target, object value) => target.SetValue(SelectedNodeProperty, value);
-    public static object GetSelectedNode(DependencyObject target) => target.GetValue(SelectedNodeProperty);
-    private static void SelectedNodeChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args) { if (owner is TreeView tree) { tree.SelectedItemChanged -= TreeSelection; tree.SelectedItemChanged += TreeSelection; } }
-    private static void TreeSelection(object sender, RoutedPropertyChangedEventArgs<object> args) => ((TreeView)sender).SetCurrentValue(SelectedNodeProperty, args.NewValue);
+    /// <summary>Where a tree publishes its selection. It only ever pushes: a tree cannot select an item it has not generated, so selecting from a view model goes through each item's IsSelected.</summary>
+    public static readonly DependencyProperty SelectionSourceProperty = DependencyProperty.RegisterAttached("SelectionSource", typeof(object), typeof(Interaction), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+    public static void SetSelectionSource(DependencyObject target, object value) => target.SetValue(SelectionSourceProperty, value);
+    public static object GetSelectionSource(DependencyObject target) => target.GetValue(SelectionSourceProperty);
+    /// <summary>Turns on <see cref="SelectionSourceProperty"/>. A separate switch because that property's change callback never runs while its source is null, which would leave the tree unobserved.</summary>
+    public static readonly DependencyProperty TrackSelectionProperty = DependencyProperty.RegisterAttached("TrackSelection", typeof(bool), typeof(Interaction), new PropertyMetadata(false, TrackSelectionChanged));
+    public static void SetTrackSelection(DependencyObject target, bool value) => target.SetValue(TrackSelectionProperty, value);
+    public static bool GetTrackSelection(DependencyObject target) => (bool)target.GetValue(TrackSelectionProperty);
+    private static void TrackSelectionChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not TreeView tree) return;
+        tree.SelectedItemChanged -= TreeSelection;
+        if ((bool)args.NewValue) tree.SelectedItemChanged += TreeSelection;
+    }
+    private static void TreeSelection(object sender, RoutedPropertyChangedEventArgs<object> args) => ((TreeView)sender).SetCurrentValue(SelectionSourceProperty, args.NewValue);
     public static readonly DependencyProperty CloseGuardProperty = DependencyProperty.RegisterAttached("CloseGuard", typeof(ShellViewModel), typeof(Interaction), new PropertyMetadata(null, CloseGuardChanged));
     public static void SetCloseGuard(DependencyObject target, ShellViewModel value) => target.SetValue(CloseGuardProperty, value);
     public static ShellViewModel? GetCloseGuard(DependencyObject target) => (ShellViewModel?)target.GetValue(CloseGuardProperty);
@@ -161,6 +171,21 @@ public static class Interaction
     private static void KeepCaretAfterPrefix(object sender, TextChangedEventArgs args)
     {
         if (sender is TextBox { IsKeyboardFocused: true, CaretIndex: 0 } box && box.Text.Length == 1 && !char.IsLetterOrDigit(box.Text[0])) box.CaretIndex = 1;
+    }
+    /// <summary>Focuses a control when its view model asks, then clears the request so the next one is a change again.</summary>
+    public static readonly DependencyProperty FocusWhenTrueProperty = DependencyProperty.RegisterAttached("FocusWhenTrue", typeof(bool), typeof(Interaction), new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, FocusWhenTrueChanged));
+    public static void SetFocusWhenTrue(DependencyObject target, bool value) => target.SetValue(FocusWhenTrueProperty, value);
+    public static bool GetFocusWhenTrue(DependencyObject target) => (bool)target.GetValue(FocusWhenTrueProperty);
+    private static void FocusWhenTrueChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not UIElement element || args.NewValue is not true) return;
+        // After layout: the same request may have just brought this control's pane forward.
+        _ = element.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () =>
+        {
+            element.SetCurrentValue(FocusWhenTrueProperty, false);
+            element.Focus(); Keyboard.Focus(element);
+            if (element is TextBox box) box.SelectAll();
+        });
     }
     public static readonly DependencyProperty FocusWhenVisibleProperty = DependencyProperty.RegisterAttached("FocusWhenVisible", typeof(bool), typeof(Interaction), new PropertyMetadata(false, FocusChanged));
     public static void SetFocusWhenVisible(DependencyObject target, bool value) => target.SetValue(FocusWhenVisibleProperty, value);

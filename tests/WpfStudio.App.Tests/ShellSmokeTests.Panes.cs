@@ -1,6 +1,10 @@
+using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using WpfStudio.App.Controls.Diff;
 using WpfStudio.App.Features.Designer;
+using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Runtime.Design;
 
@@ -8,6 +12,20 @@ namespace WpfStudio.App.Tests;
 
 public sealed partial class ShellSmokeTests
 {
+    /// <summary>Selecting in the explorer reaches its view model, which starts with nothing selected, and a focus request lands once the pane is up.</summary>
+    private static async Task VerifySelectionAndFocusRequestsAsync(Window window, ShellViewModel shell)
+    {
+        var node = shell.Explorer.Nodes[0];
+        node.IsSelected = true; await Idle();
+        Assert.Same(node, shell.Explorer.SelectedNode);
+
+        var search = (TextBox)window.FindName("SearchBox");
+        shell.FindInWorkspaceCommand.Execute(null); await Idle();
+        Assert.True(search.IsVisible);
+        Assert.Same(search, FocusManager.GetFocusedElement(FocusManager.GetFocusScope(search)));
+        Assert.False(shell.IsSearchFocusRequested);
+    }
+
     private static async Task VerifyDesignerPaneFilterAsync(IUiDispatcher dispatcher)
     {
         await using var first = new DesignerViewModel(new PreviewClient(null), dispatcher);
