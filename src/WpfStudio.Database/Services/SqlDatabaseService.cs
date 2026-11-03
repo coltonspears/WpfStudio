@@ -124,59 +124,76 @@ public sealed class SqlDatabaseService : IDatabaseService
         {
             foreach (SqlError error in args.Errors) messages.Add(new QueryMessage(error.Message, error.LineNumber > 0 ? batchLine + error.LineNumber - 1 : null));
         };
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            foreach (SqlBatch batch in batches)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                batchLine = batch.StartLine;
-                await using var command = new SqlCommand(batch.Text, connection) { CommandTimeout = 0 };
-                using var registration = cancellationToken.Register(() => { try { command.Cancel(); } catch (ObjectDisposedException) { } });
-                await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
-                do
-                {
-                    if (reader.FieldCount <= 0) continue;
-                    var buffer = display.BeginResult(Enumerable.Range(0, reader.FieldCount).Select(reader.GetName));
-                    if (buffer is null)
-                    {
-                        // Keep consuming to preserve later statements, transactions and GO batches.
-                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) { }
-                        continue;
-                    }
-                    bool acceptingRows = true;
-                    int rowCount = 0;
-                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-                    {
-                        if (!acceptingRows || rowCount >= ResultSetBuffer.MaximumRows || buffer.RemainingBytes < buffer.RowOverheadBytes) { buffer.MarkTruncated(); acceptingRows = false; continue; }
-                        var values = new string?[reader.FieldCount];
-                        bool cellTruncated = false;
-                        long rowBytes = 0;
-                        for (int column = 0; column < reader.FieldCount; column++)
-                        {
-                            if (await reader.IsDBNullAsync(column, cancellationToken).ConfigureAwait(false)) continue;
-                            int maxChars = (int)Math.Min(65_536, Math.Max(0, (buffer.RemainingValueBytes - rowBytes) / 2));
-                            (values[column], bool clipped) = ReadValue(reader, column, maxChars);
-                            cellTruncated |= clipped;
-                            rowBytes += (values[column]?.Length ?? 0) * 2L;
-                        }
-                        acceptingRows = buffer.TryAdd(values, cellTruncated);
-                        rowCount++;
-                    }
-                    QueryResultSet result = buffer.Build($"Result {results.Count + 1}");
-                    display.Retain(result);
-                    results.Add(result);
-                } while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
-                if (reader.RecordsAffected >= 0) messages.Add(new QueryMessage($"{reader.RecordsAffected:N0} row(s) affected."));
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { cancelled = true; messages.Add(new QueryMessage("Query cancelled. Batches that completed before cancellation may have committed changes.")); }
-        catch (SqlException) when (cancellationToken.IsCancellationRequested) { cancelled = true; messages.Add(new QueryMessage("Query cancelled. Batches that completed before cancellation may have committed changes.")); }
-        catch (SqlException exception)
+        void AddErrors(SqlException exception)
         {
             foreach (SqlError error in exception.Errors)
                 messages.Add(new QueryMessage($"SQL {error.Number}: {error.Message}", error.LineNumber > 0 ? batchLine + error.LineNumber - 1 : null, true));
         }
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            for (int index = 0; index < batches.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                SqlBatch batch = batches[index];
+                batchLine = batch.StartLine;
+                try
+                {
+                    await using var command = new SqlCommand(batch.Text, connection) { CommandTimeout = 0 };
+                    using var registration = cancellationToken.Register(() => { try { command.Cancel(); } catch (ObjectDisposedException) { } });
+                    await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
+                    do
+                    {
+                        if (reader.FieldCount <= 0) continue;
+                        var buffer = display.BeginResult(Enumerable.Range(0, reader.FieldCount).Select(reader.GetName));
+                        if (buffer is null)
+                        {
+                            // Keep consuming to preserve later statements, transactions and GO batches.
+                            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) { }
+                            continue;
+                        }
+                        bool acceptingRows = true;
+                        int rowCount = 0;
+                        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                        {
+                            if (!acceptingRows || rowCount >= ResultSetBuffer.MaximumRows || buffer.RemainingBytes < buffer.RowOverheadBytes) { buffer.MarkTruncated(); acceptingRows = false; continue; }
+                            var values = new string?[reader.FieldCount];
+                            bool cellTruncated = false;
+                            long rowBytes = 0;
+                            for (int column = 0; column < reader.FieldCount; column++)
+                            {
+                                if (await reader.IsDBNullAsync(column, cancellationToken).ConfigureAwait(false)) continue;
+                                int maxChars = (int)Math.Min(65_536, Math.Max(0, (buffer.RemainingValueBytes - rowBytes) / 2));
+                                (values[column], bool clipped) = ReadValue(reader, column, maxChars);
+                                cellTruncated |= clipped;
+                                rowBytes += (values[column]?.Length ?? 0) * 2L;
+                            }
+                            acceptingRows = buffer.TryAdd(values, cellTruncated);
+                            rowCount++;
+                        }
+                        QueryResultSet result = buffer.Build($"Result {results.Count + 1}");
+                        display.Retain(result);
+                        results.Add(result);
+                    } while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
+                    if (reader.RecordsAffected >= 0) messages.Add(new QueryMessage($"{reader.RecordsAffected:N0} row(s) affected."));
+                }
+                // Like SSMS, a failed batch does not stop the script. Cancelling it does, and so does losing the connection.
+                catch (SqlException exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    AddErrors(exception);
+                    if (index == batches.Count - 1) break;
+                    if (connection.State != ConnectionState.Open)
+                    {
+                        messages.Add(new QueryMessage($"The connection closed when batch {index + 1} of {batches.Count} failed, so the remaining batches were not run.", null, true));
+                        break;
+                    }
+                    messages.Add(new QueryMessage($"Batch {index + 1} of {batches.Count} failed. Continuing with the next batch."));
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { cancelled = true; messages.Add(new QueryMessage("Query cancelled. Batches that completed before cancellation may have committed changes.")); }
+        catch (SqlException) when (cancellationToken.IsCancellationRequested) { cancelled = true; messages.Add(new QueryMessage("Query cancelled. Batches that completed before cancellation may have committed changes.")); }
+        catch (SqlException exception) { AddErrors(exception); }
         return new QueryExecutionResult(results, messages.Snapshot(display.Warning), clock.Elapsed, cancelled,
             display.HasOmittedResults || messages.IsTruncated || results.Any(result => result.IsTruncated));
     }

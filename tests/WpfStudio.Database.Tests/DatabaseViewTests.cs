@@ -73,6 +73,50 @@ public sealed class DatabaseViewTests
         });
     }
 
+    [Fact]
+    public async Task ResultGridShowsValuesForColumnNamesThatLookLikeBindingPaths()
+    {
+        string[] names = ["Total.Count", "a[1]", "a]b", "a[b", "a(b", "a)b", "x,y", "(0)", "(a)", "[a]", "a.", ".", "a/b", "/", "it's", "^caret", " padded ", "value", "value"];
+        await OnStaThread(() =>
+        {
+            var buffer = new ResultSetBuffer(names);
+            Assert.True(buffer.TryAdd(names.Select((_, index) => "cell" + index).ToArray()));
+            var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(), new NullDialogs());
+            var result = buffer.Build("Result 1");
+            model.SelectedDocument!.Results.Add(result);
+            model.SelectedDocument.SelectedResult = result;
+            var pane = new DatabasePane { DataContext = model };
+            pane.Measure(new Size(1000, 800));
+            pane.Arrange(new Rect(0, 0, 1000, 800));
+            pane.UpdateLayout();
+            var grid = Descendants(pane).OfType<DataGrid>().Single();
+            Assert.Equal(names.Length, grid.Columns.Count);
+            int sortable = 0;
+            foreach (var (column, index) in grid.Columns.Select((column, index) => (column, index)))
+            {
+                Assert.Equal(result.Table.Columns[index].ColumnName, column.Header);
+                var cell = new TextBlock { DataContext = result.Table.DefaultView[0] };
+                cell.SetBinding(TextBlock.TextProperty, ((DataGridBoundColumn)column).Binding);
+                Assert.Equal("cell" + index, cell.Text);
+                // A header click that throws would reach the unhandled-exception handler, so such columns must not offer it.
+                if (!column.CanUserSort) continue;
+                grid.Items.SortDescriptions.Add(new(column.SortMemberPath, System.ComponentModel.ListSortDirection.Ascending));
+                grid.Items.SortDescriptions.Clear();
+                sortable++;
+            }
+
+            Assert.True(sortable > names.Length / 2, sortable.ToString());
+            Assert.True(grid.Columns[0].CanUserSort);
+            Assert.False(grid.Columns[Array.IndexOf(names, "a]b")].CanUserSort);
+
+            var other = new ResultSetBuffer(["Only"]).Build("Result 2");
+            model.SelectedDocument.Results.Add(other);
+            model.SelectedDocument.SelectedResult = other;
+            pane.UpdateLayout();
+            Assert.Equal("Only", Assert.Single(Descendants(pane).OfType<DataGrid>().Single().Columns).Header);
+        });
+    }
+
     private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
     {
         for (int index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)

@@ -1,5 +1,8 @@
+using System.ComponentModel;
+using System.Data;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 
 namespace WpfStudio.Database.Views;
@@ -41,6 +44,28 @@ public static class DatabaseViewBehaviors
         if (args.NewValue is true) tree.SelectedItemChanged += SelectedChanged;
     }
     private static void SelectedChanged(object sender, RoutedPropertyChangedEventArgs<object> args) => ((TreeView)sender).SetCurrentValue(SelectedNodeProperty, args.NewValue);
+
+    /// <summary>Builds a result grid's columns from its table. A column name is data, but the DataGrid's own generator parses it
+    /// as a binding path: "Total.Count" shows empty cells, and "a]b" throws during layout before any event can intervene.</summary>
+    public static readonly DependencyProperty ResultColumnsProperty = DependencyProperty.RegisterAttached("ResultColumns", typeof(DataTable), typeof(DatabaseViewBehaviors), new PropertyMetadata(null, OnResultColumns));
+    public static DataTable? GetResultColumns(DependencyObject value) => (DataTable?)value.GetValue(ResultColumnsProperty);
+    public static void SetResultColumns(DependencyObject value, DataTable? table) => value.SetValue(ResultColumnsProperty, table);
+    private static void OnResultColumns(DependencyObject value, DependencyPropertyChangedEventArgs args)
+    {
+        if (value is not DataGrid grid) return;
+        grid.Columns.Clear();
+        if (args.NewValue is not DataTable table) return;
+        var properties = ((ITypedList)table.DefaultView).GetItemProperties(null);
+        foreach (DataColumn column in table.Columns)
+            grid.Columns.Add(new DataGridTextColumn { Header = column.ColumnName, SortMemberPath = column.ColumnName, CanUserSort = CanSortBy(column.ColumnName), Binding = new Binding { Path = new PropertyPath("(0)", properties[column.ColumnName]), Mode = BindingMode.OneWay } });
+    }
+    /// <summary>A sort has to go by name: the collection view parses it as a binding path, and DataView.Sort splits it at commas.</summary>
+    private static bool CanSortBy(string column)
+    {
+        if (column.Contains(',')) return false;
+        try { _ = new PropertyPath(column); return true; }
+        catch (InvalidOperationException) { return false; }
+    }
 
     public static readonly DependencyProperty PasswordProperty = DependencyProperty.RegisterAttached("Password", typeof(string), typeof(DatabaseViewBehaviors), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnPassword));
     public static string GetPassword(DependencyObject value) => (string)value.GetValue(PasswordProperty);

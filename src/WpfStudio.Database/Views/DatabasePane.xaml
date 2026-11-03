@@ -70,7 +70,7 @@
         <TabItem Header="Results">
          <TabControl ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}">
           <TabControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}"/></DataTemplate></TabControl.ItemTemplate>
-          <TabControl.ContentTemplate><DataTemplate><DockPanel><TextBlock DockPanel.Dock="Bottom" Text="{Binding Summary}" Margin="4" FontWeight="SemiBold"/><DataGrid ItemsSource="{Binding Table.DefaultView}" IsReadOnly="True" AutoGenerateColumns="True" EnableRowVirtualization="True" EnableColumnVirtualization="True" CanUserAddRows="False" CanUserDeleteRows="False" ClipboardCopyMode="IncludeHeader"/></DockPanel></DataTemplate></TabControl.ContentTemplate>
+          <TabControl.ContentTemplate><DataTemplate><DockPanel><TextBlock DockPanel.Dock="Bottom" Text="{Binding Summary}" Margin="4" FontWeight="SemiBold"/><DataGrid ItemsSource="{Binding Table.DefaultView}" behaviors:DatabaseViewBehaviors.ResultColumns="{Binding Table}" IsReadOnly="True" AutoGenerateColumns="False" EnableRowVirtualization="True" EnableColumnVirtualization="True" CanUserAddRows="False" CanUserDeleteRows="False" ClipboardCopyMode="IncludeHeader"/></DockPanel></DataTemplate></TabControl.ContentTemplate>
          </TabControl>
         </TabItem>
         <TabItem Header="Messages"><TextBox Text="{Binding Messages, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/></TabItem>
