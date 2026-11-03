@@ -40,10 +40,5 @@ internal static class ProcessRunner
         catch { Kill(process); throw; }
     }
 
-    internal static void Kill(Process process)
-    {
-        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-        catch (InvalidOperationException) { }
-        catch (System.ComponentModel.Win32Exception) { }
-    }
+    internal static void Kill(Process process) => WpfStudio.Hosting.ProcessLaunch.TryKill(process, entireProcessTree: true);
 }

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using WpfStudio.Contracts;
+using WpfStudio.Hosting;
 using WpfStudio.Inspection.Protocol;
 
 namespace WpfStudio.Runtime.Inspection;
@@ -90,14 +91,7 @@ public static class InspectionLaunch
         ArgumentNullException.ThrowIfNull(overrides);
         var program = Path.GetFullPath(launch.Program);
         if (!File.Exists(program)) throw new FileNotFoundException("Build the application before launching it with inspection.", program);
-        var managedDll = program.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
-        var start = new ProcessStartInfo(managedDll ? "dotnet" : program)
-        {
-            WorkingDirectory = Path.GetFullPath(launch.WorkingDirectory), UseShellExecute = false,
-            CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
-        };
-        if (managedDll) start.ArgumentList.Add(program);
-        foreach (var argument in launch.Arguments) start.ArgumentList.Add(argument);
+        var start = ProcessLaunch.Create(program, Path.GetFullPath(launch.WorkingDirectory), launch.Arguments);
         foreach (var pair in launch.Environment) start.Environment[pair.Key] = pair.Value;
         foreach (var pair in overrides) start.Environment[pair.Key] = pair.Value;
         return start;

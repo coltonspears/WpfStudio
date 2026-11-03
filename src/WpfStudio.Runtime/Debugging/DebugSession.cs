@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using WpfStudio.Contracts;
+using WpfStudio.Hosting;
 
 namespace WpfStudio.Runtime.Debugging;
 
@@ -36,7 +37,9 @@ public sealed class DebugSession : IAsyncDisposable
         if (!File.Exists(AdapterPath)) throw new FileNotFoundException("netcoredbg is not installed. Choose Install debugger in the Debugger pane, or run tools/Get-Debugger.ps1 and rebuild WpfStudio.", AdapterPath);
         closeExpected = false;
         initialized = NewCompletion();
-        process = new Process { StartInfo = new ProcessStartInfo(AdapterPath, "--interpreter=vscode") { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(AdapterPath)! } };
+        var start = ProcessLaunch.Create(AdapterPath, Path.GetDirectoryName(AdapterPath)!, ["--interpreter=vscode"]);
+        start.RedirectStandardInput = true;
+        process = new Process { StartInfo = start };
         if (isolateStartupHooks)
         {
             // netcoredbg appends inherited hooks to launch.env rather than replacing them.

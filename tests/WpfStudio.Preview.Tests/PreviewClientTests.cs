@@ -262,6 +262,25 @@ public sealed class PreviewClientTests
     }
 
     [Fact]
+    public async Task AHostThatExitsBeforeConnectingFailsAtOnceWithItsError()
+    {
+        string directory = Directory.CreateTempSubdirectory("WpfStudio.Preview.ExitingHost.").FullName;
+        string host = Path.Combine(directory, "host.cmd");
+        File.WriteAllText(host, "@echo off\r\necho no runtime was found 1>&2\r\nexit /b 3\r\n");
+        try
+        {
+            await using var client = new PreviewClient(host);
+            var clock = Stopwatch.StartNew();
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => client.RenderAsync(Request()));
+            Assert.Contains("could not connect", failure.Message);
+            Assert.Contains("no runtime was found", failure.Message);
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(12), clock.Elapsed.ToString());
+            Assert.Null(client.ProcessId);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task AutomaticDiscoverySkipsOrphanExecutableWithoutItsRuntimeFiles()
     {
         string orphanDirectory = Path.Combine(AppContext.BaseDirectory, "PreviewHost");

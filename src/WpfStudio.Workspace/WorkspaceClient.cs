@@ -1,8 +1,7 @@
-using System.Diagnostics;
-using System.IO.Pipes;
 using System.Reflection;
 using StreamJsonRpc;
 using WpfStudio.Contracts;
+using WpfStudio.Hosting;
 
 namespace WpfStudio.Workspace;
 
@@ -17,20 +16,15 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private readonly Dictionary<string, string> _acceptedDocumentTexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, XamlNameProjectionPlan> _nameProjections = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _bufferGate = new();
-    private Process? _process;
-    private NamedPipeClientStream? _pipe;
+    private WorkerProcessHost? _worker;
     private JsonRpc? _rpc;
     private IWorkspaceRpc? _proxy;
     private LoadWorkspaceRequest? _lastLoad;
     private bool _disposed;
-    private readonly Queue<string> _workerErrorLines = new();
-    private const int WorkerErrorTailLines = 20;
-    /// <summary>The last lines the worker wrote to stderr, so a crash report keeps its exception message, not only the final stack frame.</summary>
-    private string WorkerError { get { lock (_workerErrorLines) return string.Join(Environment.NewLine, _workerErrorLines); } }
-    private void RecordWorkerError(string line)
-    {
-        lock (_workerErrorLines) { _workerErrorLines.Enqueue(line); while (_workerErrorLines.Count > WorkerErrorTailLines) _workerErrorLines.Dequeue(); }
-    }
+    // The worker listens before resolving the SDK, so this only has to cover its start.
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
+    private string _stoppedWorkerError = "";
+    private string WorkerError => _worker?.ErrorTail ?? _stoppedWorkerError;
 
     /// <param name="disposeTimeout">How long shutdown waits for an in-flight call to let go of the lifecycle lock before the worker is stopped regardless.</param>
     public WorkspaceClient(string? hostPath = null, TimeSpan? disposeTimeout = null)
@@ -48,18 +42,8 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public event EventHandler<string>? CSharpModelChanged;
     /// <summary>A whole-project compilation contradicted an analysis reply. Nothing semantic changed, so same-version observations stay valid; subscribers must marshal to their UI dispatcher.</summary>
     public event EventHandler? ProjectDiagnosticsChanged;
-    public int? WorkerProcessId
-    {
-        get { try { return _process is { HasExited: false } process ? process.Id : null; } catch (InvalidOperationException) { return null; } }
-    }
-    public bool IsConnected
-    {
-        get
-        {
-            try { return _rpc is { IsDisposed: false } && _process is { HasExited: false }; }
-            catch (InvalidOperationException) { return false; } // A concurrent restart may have disposed the process.
-        }
-    }
+    public int? WorkerProcessId => _worker is { HasExited: false } worker ? worker.ProcessId : null;
+    public bool IsConnected => _rpc is { IsDisposed: false } && _worker is { HasExited: false };
 
     public async Task<WorkspaceSnapshot> LoadAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken = default)
     {
@@ -126,16 +110,16 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         cancellationToken = lifetime.Token;
         IWorkspaceRpc proxy;
-        Process? process;
+        WorkerProcessHost? worker;
         await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { ObjectDisposedException.ThrowIf(_disposed, this); proxy = Proxy; process = _process; }
+        try { ObjectDisposedException.ThrowIf(_disposed, this); proxy = Proxy; worker = _worker; }
         finally { _lifecycle.Release(); }
         request = request with { UseCache = false };
         await proxy.PrepareRefreshAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
         await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!ReferenceEquals(process, _process)) throw new OperationCanceledException("The language worker restarted while the project model was refreshing.");
+            if (!ReferenceEquals(worker, _worker)) throw new OperationCanceledException("The language worker restarted while the project model was refreshing.");
             var snapshot = await Proxy.CommitRefreshAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
             await ReplayBuffersAsync(cancellationToken).ConfigureAwait(false);
             return snapshot;
@@ -387,41 +371,34 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     {
         var hostPath = _hostPath ?? FindHost();
         if (!File.Exists(hostPath)) throw new FileNotFoundException("WorkspaceHost is missing. Build and package the WorkspaceHost output directory with the application.", hostPath);
-        var pipeName = $"wpfstudio-{Environment.ProcessId}-{Guid.NewGuid():N}";
-        var start = new ProcessStartInfo(hostPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? "dotnet" : hostPath)
+        var worker = new WorkerProcessHost(new(hostPath, $"wpfstudio-{Environment.ProcessId}-{Guid.NewGuid():N}", ConnectTimeout)
         {
-            WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(workspacePath))!, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardError = true, RedirectStandardOutput = true
-        };
-        ProcessRunner.ClearInheritedToolchain(start);
-        if (hostPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) start.ArgumentList.Add(hostPath);
-        start.ArgumentList.Add("--pipe"); start.ArgumentList.Add(pipeName);
-        start.ArgumentList.Add("--workspace"); start.ArgumentList.Add(Path.GetFullPath(workspacePath));
-        var process = new Process { StartInfo = start, EnableRaisingEvents = true };
-        lock (_workerErrorLines) _workerErrorLines.Clear();
-        process.ErrorDataReceived += (_, args) => { if (args.Data is { } line) RecordWorkerError(line); };
-        process.OutputDataReceived += (_, _) => { };
-        process.Exited += (_, _) =>
+            WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(workspacePath))!,
+            Arguments = ["--workspace", Path.GetFullPath(workspacePath)],
+            KillProcessTree = true,
+            ConfigureStart = ProcessRunner.ClearInheritedToolchain
+        });
+        worker.Exited += () =>
         {
-            if (ReferenceEquals(_process, process) && !_disposed)
+            if (ReferenceEquals(_worker, worker) && !_disposed)
             {
                 SemanticStateChanged?.Invoke(this, EventArgs.Empty);
                 NotifyNameProjectionChanged();
-                WorkerExited?.Invoke(this, WorkerError);
+                WorkerExited?.Invoke(this, worker.ErrorTail);
             }
         };
-        _process = process;
+        _stoppedWorkerError = "";
+        _worker = worker;
         try
         {
-            process.Start(); process.BeginErrorReadLine(); process.BeginOutputReadLine();
-            _pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            await _pipe.ConnectAsync(30_000, cancellationToken).ConfigureAwait(false);
-            _rpc = new JsonRpc(_pipe);
+            worker.Start();
+            await worker.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            _rpc = new JsonRpc(worker.Pipe);
             _proxy = _rpc.Attach<IWorkspaceRpc>();
             var rpc = _rpc;
             _proxy.SemanticStateChanged += (_, _) =>
             {
-                if (ReferenceEquals(_rpc, rpc) && ReferenceEquals(_process, process) && !_disposed)
+                if (ReferenceEquals(_rpc, rpc) && ReferenceEquals(_worker, worker) && !_disposed)
                 {
                     SemanticStateChanged?.Invoke(this, EventArgs.Empty);
                     NotifyNameProjectionChanged();
@@ -429,7 +406,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             };
             _proxy.ProjectDiagnosticsChanged += (_, _) =>
             {
-                if (ReferenceEquals(_rpc, rpc) && ReferenceEquals(_process, process) && !_disposed)
+                if (ReferenceEquals(_rpc, rpc) && ReferenceEquals(_worker, worker) && !_disposed)
                     ProjectDiagnosticsChanged?.Invoke(this, EventArgs.Empty);
             };
             _rpc.StartListening();
@@ -445,28 +422,21 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
 
     private static string FindHost()
     {
-        foreach (var candidate in new[] { Path.Combine(AppContext.BaseDirectory, "WorkspaceHost", "WpfStudio.WorkspaceHost.dll"), Path.Combine(AppContext.BaseDirectory, "WpfStudio.WorkspaceHost.dll") })
-            if (File.Exists(candidate)) return candidate;
-        // Development/test launches can locate the separately-built worker without changing runtime packaging.
-        var currentConfiguration = typeof(WorkspaceClient).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
-            foreach (var configuration in new[] { currentConfiguration, "Debug", "Release" }.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                var candidate = Path.Combine(directory.FullName, "src", "WpfStudio.WorkspaceHost", "bin", configuration, "net10.0", "WpfStudio.WorkspaceHost.dll");
-                if (File.Exists(candidate)) return candidate;
-            }
-        return Path.Combine(AppContext.BaseDirectory, "WorkspaceHost", "WpfStudio.WorkspaceHost.dll");
+        // Development and test launches can locate the separately-built worker without changing runtime packaging.
+        var current = typeof(WorkspaceClient).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
+        return WorkerHostLocator.Find("WpfStudio.WorkspaceHost", "WorkspaceHost", "net10.0", [current, "Debug", "Release"], [".dll"], []);
     }
 
     private void StopWorker()
     {
-        var process = _process; _process = null;
+        var worker = _worker;
+        if (worker is not null) _stoppedWorkerError = worker.ErrorTail;
+        _worker = null;
         _proxy = null;
         _rpc?.Dispose(); _rpc = null;
-        _pipe?.Dispose(); _pipe = null;
         lock (_bufferGate) _acceptedDocumentTexts.Clear();
-        if (process is not null) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }
-        if (process is not null) { ProcessRunner.Kill(process); process.Dispose(); }
+        if (worker is not null) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }
+        worker?.Dispose();
     }
 
     public async ValueTask DisposeAsync()
