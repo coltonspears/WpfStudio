@@ -117,4 +117,28 @@ internal sealed class XamlPropertySourceDocument
         }
         return (line, offset - lineStart + 1);
     }
+
+    /// <summary>The inverse of <see cref="Position"/>; false when the line or column lies outside <paramref name="text"/>.</summary>
+    public static bool TryOffset(string text, int line, int column, out int offset)
+    {
+        offset = 0;
+        if (line < 1 || column < 1) return false;
+        int currentLine = 1;
+        while (offset < text.Length && currentLine < line)
+        {
+            char character = text[offset++];
+            if (character == '\r')
+            {
+                if (offset < text.Length && text[offset] == '\n') offset++;
+                currentLine++;
+            }
+            else if (character == '\n') currentLine++;
+        }
+        if (currentLine != line) return false;
+        int end = offset;
+        while (end < text.Length && text[end] is not ('\r' or '\n')) end++;
+        if (column > end - offset) return false;
+        offset += column - 1;
+        return true;
+    }
 }

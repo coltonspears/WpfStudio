@@ -15,7 +15,7 @@ public static class XamlBindingSourceLocator
         if (string.IsNullOrWhiteSpace(path) || text is null || kind is not ("Binding" or "MultiBinding" or "PriorityBinding"))
             return Fail("The exact source text and a supported binding kind are required.");
         if (text.Length > 8 * 1024 * 1024) return Fail("The source exceeds the navigation parsing limit.");
-        if (!TryOffset(text, line, column, out int offset)) return Fail("The binding source position is outside the document.");
+        if (!XamlPropertySourceDocument.TryOffset(text, line, column, out int offset)) return Fail("The binding source position is outside the document.");
         try
         {
             var document = XamlPropertySourceDocument.Parse(text);
@@ -79,29 +79,6 @@ public static class XamlBindingSourceLocator
             else if (character == '}' && --depth == 0) return i == value.Length - 1;
         }
         return false;
-    }
-
-    private static bool TryOffset(string text, int line, int column, out int offset)
-    {
-        offset = 0;
-        if (line < 1 || column < 1) return false;
-        int currentLine = 1;
-        while (offset < text.Length && currentLine < line)
-        {
-            char character = text[offset++];
-            if (character == '\r')
-            {
-                if (offset < text.Length && text[offset] == '\n') offset++;
-                currentLine++;
-            }
-            else if (character == '\n') currentLine++;
-        }
-        if (currentLine != line) return false;
-        int end = offset;
-        while (end < text.Length && text[end] is not ('\r' or '\n')) end++;
-        if (column > end - offset) return false;
-        offset += column - 1;
-        return true;
     }
 
     private static XamlRuntimeSourceResult Fail(string status) => new(null, status);
