@@ -77,13 +77,13 @@ public class ScaffoldingTests
         await File.WriteAllTextAsync(project, projectText);
         var asset = Path.Combine(directory, "my image.png");
         await File.WriteAllBytesAsync(asset, [1, 2, 3]);
-        var resourceChange = ScaffoldingService.SetBuildAction(project, projectText, asset, "Resource");
+        var resourceChange = ProjectFileEditor.SetBuildAction(project, projectText, asset, "Resource");
         await File.WriteAllTextAsync(project, resourceChange.After);
         await AssertBuildsAsync(project);
-        var noneChange = ScaffoldingService.SetBuildAction(project, resourceChange.After, asset, "None");
+        var noneChange = ProjectFileEditor.SetBuildAction(project, resourceChange.After, asset, "None");
         await File.WriteAllTextAsync(project, noneChange.After);
         await AssertBuildsAsync(project);
-        Assert.Equal("pack://application:,,,/Actual.Assembly;component/my%20image.png", ScaffoldingService.PackUri(project, asset));
+        Assert.Equal("pack://application:,,,/Actual.Assembly;component/my%20image.png", ProjectFileEditor.PackUri(project, asset));
     }
 
     [Theory]
@@ -106,7 +106,7 @@ public class ScaffoldingTests
         await File.WriteAllBytesAsync(asset, [1, 2, 3]);
         var project = Path.Combine(projectDirectory, "App.csproj");
         var text = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><Content Include=\"../Shared/icon.png\" Link=\"Images/icon.png\"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory><CustomMetadata>keep me</CustomMetadata></Content></ItemGroup><ItemGroup Condition=\"'$(Configuration)' == 'QA'\"><Content Update=\"..\\Shared\\icon.png\"><CopyToOutputDirectory>Always</CopyToOutputDirectory></Content></ItemGroup></Project>";
-        var change = ScaffoldingService.SetBuildAction(project, text, asset, "Resource");
+        var change = ProjectFileEditor.SetBuildAction(project, text, asset, "Resource");
         var xml = XDocument.Parse(change.After);
         Assert.DoesNotContain(xml.Descendants("Content"), item => item.Attribute("Include") != null || item.Attribute("Update") != null);
         Assert.Single(xml.Descendants("Resource"), item => item.Attribute("Include") != null);

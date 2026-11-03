@@ -780,7 +780,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var owners = Projects.Where(p => p.Files.Any(f => f.Path.Equals(document.State.Path, StringComparison.OrdinalIgnoreCase))).ToArray();
         var owner = owners.Length == 1 ? owners[0] : null;
         var context = owner == null ? null : await ScaffoldProjectContext.TryEvaluateAsync(owner.ProjectPath, _lifetime.Token);
-        var state = document.State; var template = ScaffoldingService.PropertyTemplate(name, context?.SupportsPartialProperties == true).Replace("[ObservableProperty]", "[CommunityToolkit.Mvvm.ComponentModel.ObservableProperty]", StringComparison.Ordinal);
+        var state = document.State; var template = ScaffoldTemplates.Property(name, context?.SupportsPartialProperties == true).Replace("[ObservableProperty]", "[CommunityToolkit.Mvvm.ComponentModel.ObservableProperty]", StringComparison.Ordinal);
         var changes = new[] { new FileChange(state.Path, state.Content, state.Content.Insert(state.CaretOffset, template), "Insert an observable property") };
         if (await PreviewAsync("Insert observable property", changes, "Place inside a view model derived from ObservableObject. Partial properties require a partial class and the CommunityToolkit.Mvvm namespace.")) await ApplyChangesAsync(changes);
     });
@@ -802,19 +802,19 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var destination = Path.Combine(Path.GetDirectoryName(targetProject.ProjectPath)!, "Assets", Path.GetFileName(source));
         if (File.Exists(destination)) throw new IOException("An asset with that name already exists.");
         var project = await _store.OpenAsync(targetProject.ProjectPath);
-        var change = ScaffoldingService.SetBuildAction(project.Path, project.Content, destination, "Resource");
+        var change = ProjectFileEditor.SetBuildAction(project.Path, project.Content, destination, "Resource");
         if (!await PreviewAsync("Import asset", [change], $"Copy {source} to {destination}")) return;
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.Copy(source, destination, false);
         try { await ApplyChangesAsync([change]); }
         catch { File.Delete(destination); throw; }
-        Status = ScaffoldingService.PackUri(project.Path, destination, targetProject.AssemblyName);
+        Status = ProjectFileEditor.PackUri(project.Path, destination, targetProject.AssemblyName);
     });
     [RelayCommand] private Task SetBuildActionAsync() => GuardAsync(async () =>
     {
         var path = WpfExplorer.SelectedItem?.Path ?? Explorer.SelectedNode?.Path; if (path == null) return;
         var owner = ResolveAssetOwner(path);
         var project = await _store.OpenAsync(owner.ProjectPath);
-        var change = ScaffoldingService.SetBuildAction(project.Path, project.Content, path, SelectedBuildAction);
+        var change = ProjectFileEditor.SetBuildAction(project.Path, project.Content, path, SelectedBuildAction);
         if (await PreviewAsync("Change build action", [change], "")) await ApplyChangesAsync([change]);
     });
     private WorkspaceProject ResolveAssetOwner(string path)
@@ -827,7 +827,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task ShowPackUriAsync() => GuardAsync(() =>
     {
         var path = WpfExplorer.SelectedItem?.Path ?? Explorer.SelectedNode?.Path;
-        if (path != null) { var owner = ResolveAssetOwner(path); var logicalPath = owner.Files.First(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).LogicalPath; var uri = ScaffoldingService.PackUri(owner.ProjectPath, path, owner.AssemblyName, logicalPath); AppendOutput(uri); ToolRequested?.Invoke(Workbenches.Output); Status = uri; }
+        if (path != null) { var owner = ResolveAssetOwner(path); var logicalPath = owner.Files.First(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)).LogicalPath; var uri = ProjectFileEditor.PackUri(owner.ProjectPath, path, owner.AssemblyName, logicalPath); AppendOutput(uri); ToolRequested?.Invoke(Workbenches.Output); Status = uri; }
         return Task.CompletedTask;
     });
     private Task<bool> PreviewAsync(string title, IReadOnlyList<FileChange> changes, string warnings) => ChangeReview.ShowAsync(title, changes, warnings);
