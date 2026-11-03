@@ -3,6 +3,7 @@ using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Core;
@@ -31,7 +32,7 @@ public partial class App : Application
             var builder = Host.CreateApplicationBuilder(e.Args);
             builder.Logging.ClearProviders();
             // By factory so the container owns it: disposing the host writes the last queued lines. An instance given to AddProvider is never disposed.
-            builder.Services.AddSingleton<ILoggerProvider>(_ => new StudioLogProvider());
+            builder.Services.AddSingleton<ILoggerProvider>(sp => new StudioLogProvider(sp.GetRequiredService<IOptions<StudioPaths>>().Value.DataDirectory));
             builder.Services.AddWpfStudio(new UiDispatcher(Dispatcher));
             _host = builder.Build(); await _host.StartAsync();
             var shell = _host.Services.GetRequiredService<ShellViewModel>();

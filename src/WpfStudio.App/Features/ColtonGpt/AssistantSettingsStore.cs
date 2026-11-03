@@ -16,9 +16,9 @@ public sealed record AssistantConfiguration
     public string? ProtectedApiKey { get; init; }
 }
 
-public sealed class AssistantSettingsStore(string? directory = null)
+public sealed class AssistantSettingsStore(string directory)
 {
-    private readonly string _path = Path.Combine(directory ?? AppPaths.DataDirectory, "coltongpt.json");
+    private readonly string _path = Path.Combine(directory, "coltongpt.json");
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("WpfStudio.ColtonGPT.OpenRouter.v1");
 
     public async Task<AssistantConfiguration> LoadAsync(CancellationToken token = default)

@@ -9,7 +9,7 @@ namespace WpfStudio.Core.Debugging;
 /// portable copy without <c>debugger/</c> can debug without rebuilding. The archive is verified against the same
 /// checksum as <c>tools/Get-Debugger.ps1</c> before anything is extracted.
 /// </summary>
-public sealed class DebuggerInstaller(HttpMessageHandler? handler = null, string? dataDirectory = null) : IDebugAdapterProvider
+public sealed class DebuggerInstaller(HttpMessageHandler? handler, string dataDirectory) : IDebugAdapterProvider
 {
     public const string Version = "3.2.0-1092";
     public const string ArchiveUrl = "https://github.com/Samsung/netcoredbg/releases/download/" + Version + "/netcoredbg-win64.zip";
@@ -22,7 +22,7 @@ public sealed class DebuggerInstaller(HttpMessageHandler? handler = null, string
     public string Description => "netcoredbg " + Version;
     public string Url { get; init; } = ArchiveUrl;
     public string ExpectedSha256 { get; init; } = ArchiveSha256;
-    public string InstallDirectory => Path.Combine(dataDirectory ?? AppPaths.DataDirectory, "debugger", Version);
+    public string InstallDirectory => Path.Combine(dataDirectory, "debugger", Version);
     public string InstalledExecutable => Path.Combine(InstallDirectory, ExecutableName);
 
     /// <summary>The bundled adapter next to the application, else a profile installation, else null.</summary>

@@ -65,19 +65,16 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         Directory.CreateDirectory(data);
         var services = new ServiceCollection();
         services.AddWpfStudio(new UiDispatcher(Dispatcher.CurrentDispatcher));
-        // Later registrations win: no real dialogs or profile, and hosts built by this configuration rather than located next to the test.
+        services.Configure<StudioPaths>(paths => paths.DataDirectory = data);
+        // Later registrations win: no real dialogs, and hosts built by this configuration rather than located next to the test.
         var dialogs = new TestDialogs();
         services.AddSingleton<IFileDialogService>(dialogs); services.AddSingleton<IUserDialogService>(dialogs);
-        services.AddSingleton(new DocumentStore(data)); services.AddSingleton(new SettingsStore(data));
         var configuration = typeof(ShellSmokeTests).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
         services.AddSingleton(new WorkspaceClient(Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_WORKSPACE_HOST") ?? Path.Combine(root, $"src/WpfStudio.WorkspaceHost/bin/{configuration}/net10.0/WpfStudio.WorkspaceHost.dll")));
-        services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(data, "connections.json")));
-        services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(data, "query-recovery.json")));
         services.AddSingleton<WpfStudio.Contracts.Profiling.IMemoryProfiler>(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(
             Path.Combine(root, $"src/WpfStudio.App/bin/{configuration}/net10.0-windows/ProfilingHost/WpfStudio.ProfilingHost.dll")));
         services.AddSingleton<WpfStudio.Runtime.Design.IPreviewClient>(_ => new WpfStudio.Runtime.Design.PreviewClient(
             Environment.GetEnvironmentVariable("WPFSTUDIO_PREVIEW_HOST_UNDER_TEST")));
-        services.AddSingleton(new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(data, "assistant")));
         await using var provider = services.BuildServiceProvider();
         var shell = provider.GetRequiredService<ShellViewModel>();
         var bindingErrors = new BindingErrors();
@@ -89,7 +86,6 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var clock = Stopwatch.StartNew();
             window = new MainWindow { DataContext = shell, ShowInTaskbar = false, ShowActivated = false, Opacity = 0 };
             var manager = (DockingManager)window.FindName("DockManager");
-            DockingBehavior.SetLayoutPath(manager, Path.Combine(data, "layout.xml"));
             window.Show(); await Idle();
             var startup = clock.Elapsed;
             output.WriteLine($"Shell construction to rendered idle: {startup.TotalMilliseconds:N0} ms");

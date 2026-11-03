@@ -21,11 +21,8 @@ public static class DockingBehavior
 {
     public static readonly DependencyProperty ShellProperty = DependencyProperty.RegisterAttached("Shell", typeof(ShellViewModel), typeof(DockingBehavior), new PropertyMetadata(null, ShellChanged));
     private static readonly DependencyProperty ContextProperty = DependencyProperty.RegisterAttached("Context", typeof(Context), typeof(DockingBehavior));
-    public static readonly DependencyProperty LayoutPathProperty = DependencyProperty.RegisterAttached("LayoutPath", typeof(string), typeof(DockingBehavior), new PropertyMetadata(null));
     public static void SetShell(DependencyObject target, ShellViewModel value) => target.SetValue(ShellProperty, value);
     public static ShellViewModel? GetShell(DependencyObject target) => (ShellViewModel?)target.GetValue(ShellProperty);
-    public static void SetLayoutPath(DependencyObject target, string value) => target.SetValue(LayoutPathProperty, value);
-    public static string? GetLayoutPath(DependencyObject target) => (string?)target.GetValue(LayoutPathProperty);
     public static void RestoreLayout(DockingManager manager) => (manager.GetValue(ContextProperty) as Context)?.Restore();
     private static void ShellChanged(DependencyObject target, DependencyPropertyChangedEventArgs args)
     {
@@ -43,7 +40,7 @@ public static class DockingBehavior
         private byte[]? defaultLayout;
         private object? welcomeContent;
         private bool restoring;
-        private string LayoutPath => GetLayoutPath(manager) ?? Path.Combine(AppPaths.DataDirectory, "layout.xml");
+        private string LayoutPath => Path.Combine(shell.DataFolder, "layout.xml");
         public Context(DockingManager manager, ShellViewModel shell)
         {
             this.manager = manager; this.shell = shell;

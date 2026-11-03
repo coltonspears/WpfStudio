@@ -77,7 +77,7 @@ public sealed partial class ShellViewModel
     public string BuildCommit { get; } = typeof(ShellViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+') is [_, var commit, ..] ? commit[..Math.Min(commit.Length, 10)] : "";
     public string RuntimeDescription { get; } = $"{RuntimeInformation.FrameworkDescription} · {RuntimeInformation.ProcessArchitecture}";
     public string OperatingSystemDescription { get; } = RuntimeInformation.OSDescription;
-    public string DataFolder => AppPaths.DataDirectory;
+    public string DataFolder => _paths.DataDirectory;
     public IReadOnlyList<ReleaseNote> ReleaseNotes => ReleaseNoteCatalog.All;
     /// <summary>Version, runtime and OS in one block for bug reports.</summary>
     public string AboutText => $"WpfStudio {ProductVersion}{(BuildCommit.Length > 0 ? " (" + BuildCommit + ")" : "")}\n{RuntimeDescription}\n{OperatingSystemDescription}\nSDK: {Workspace?.SdkVersion ?? "no workspace open"}";

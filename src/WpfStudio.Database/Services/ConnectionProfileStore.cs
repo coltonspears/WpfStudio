@@ -10,7 +10,6 @@ public sealed class ConnectionProfileStore : IConnectionProfileStore
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("WpfStudio.SqlConnections.v1");
-    public ConnectionProfileStore() : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "sql-connections.json")) { }
     public ConnectionProfileStore(string path) => _path = path;
 
     public async Task<IReadOnlyList<ConnectionProfile>> LoadAsync(CancellationToken cancellationToken = default)

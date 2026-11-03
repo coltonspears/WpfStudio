@@ -1,5 +1,5 @@
-using System.IO;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using WpfStudio.App.Features.ColtonGpt;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Git;
@@ -13,8 +13,6 @@ using WpfStudio.Core.Debugging;
 using WpfStudio.Core.Documents;
 using WpfStudio.Core.Wpf;
 using WpfStudio.Database;
-using WpfStudio.Database.Models;
-using WpfStudio.Database.Services;
 using WpfStudio.Runtime.Debugging;
 using WpfStudio.Runtime.Design;
 using WpfStudio.Runtime.Profiling;
@@ -26,18 +24,21 @@ namespace WpfStudio.App.Services;
 /// <summary>The application's composition root, one method per area. It does not depend on <see cref="App"/>, so tests build the same container.</summary>
 public static class StudioServices
 {
+    private static string DataDirectory(IServiceProvider services) => services.GetRequiredService<IOptions<StudioPaths>>().Value.DataDirectory;
+
     public static IServiceCollection AddWpfStudio(this IServiceCollection services, IUiDispatcher dispatcher) => services
-        .AddStudioCore(dispatcher).AddWorkspaceServices().AddDesigner().AddDebugging().AddTerminal().AddDatabase().AddGit().AddPackages().AddAssistant().AddProfiling().AddShell();
+        .AddStudioCore(dispatcher).AddWorkspaceServices().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddPackages().AddAssistant().AddProfiling().AddShell();
 
     public static IServiceCollection AddStudioCore(this IServiceCollection services, IUiDispatcher dispatcher)
     {
         services.AddLogging();
+        services.AddOptions<StudioPaths>();
         services.AddSingleton(dispatcher);
         services.AddSingleton<DesktopDialogs>();
         services.AddSingleton<IFileDialogService>(sp => sp.GetRequiredService<DesktopDialogs>());
         services.AddSingleton<IUserDialogService>(sp => sp.GetRequiredService<DesktopDialogs>());
-        services.AddSingleton<DocumentStore>();
-        services.AddSingleton<SettingsStore>();
+        services.AddSingleton(sp => new DocumentStore(DataDirectory(sp)));
+        services.AddSingleton(sp => new SettingsStore(DataDirectory(sp)));
         services.AddSingleton<WorkspaceEditTransaction>();
         return services;
     }
@@ -61,7 +62,7 @@ public static class StudioServices
 
     public static IServiceCollection AddDebugging(this IServiceCollection services)
     {
-        services.AddSingleton<IDebugAdapterProvider>(_ => new DebuggerInstaller());
+        services.AddSingleton<IDebugAdapterProvider>(sp => new DebuggerInstaller(null, DataDirectory(sp)));
         services.AddSingleton<DebugSession>();
         services.AddSingleton<DebuggerViewModel>();
         return services;
@@ -69,20 +70,13 @@ public static class StudioServices
 
     public static IServiceCollection AddTerminal(this IServiceCollection services) => services.AddSingleton<TerminalViewModel>();
 
-    public static IServiceCollection AddDatabase(this IServiceCollection services)
-    {
-        services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(AppPaths.DataDirectory, "sql-connections.json")));
-        services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(AppPaths.DataDirectory, "sql-recovery.json")));
-        return services.AddDatabaseFeature();
-    }
-
     public static IServiceCollection AddGit(this IServiceCollection services) => services.AddSingleton<GitService>();
 
     public static IServiceCollection AddPackages(this IServiceCollection services) => services.AddSingleton<INuGetPackageService, NuGetPackageService>();
 
     public static IServiceCollection AddAssistant(this IServiceCollection services)
     {
-        services.AddSingleton<AssistantSettingsStore>();
+        services.AddSingleton(sp => new AssistantSettingsStore(DataDirectory(sp)));
         services.AddHttpClient<OpenRouterClient>(client => client.Timeout = TimeSpan.FromMinutes(5));
         services.AddSingleton<AssistantSettingsViewModel>();
         services.AddSingleton<AssistantViewModel>();

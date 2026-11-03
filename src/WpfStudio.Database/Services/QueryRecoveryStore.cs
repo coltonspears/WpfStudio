@@ -15,7 +15,6 @@ public sealed class QueryRecoveryStore : IQueryRecoveryStore
 {
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    public QueryRecoveryStore() : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "sql-recovery.json")) { }
     public QueryRecoveryStore(string path) => _path = Path.GetFullPath(path);
 
     public async Task<IReadOnlyList<QueryRecoveryDocument>> LoadAsync(CancellationToken cancellationToken = default)

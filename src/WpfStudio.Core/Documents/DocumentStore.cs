@@ -15,9 +15,9 @@ public sealed class DocumentStore
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private readonly SemaphoreSlim _recoveryGate = new(1, 1);
     private readonly string _recoveryDirectory;
-    public DocumentStore(string? dataDirectory = null)
+    public DocumentStore(string dataDirectory)
     {
-        _recoveryDirectory = System.IO.Path.Combine(dataDirectory ?? AppPaths.DataDirectory, "Recovery");
+        _recoveryDirectory = System.IO.Path.Combine(dataDirectory, "Recovery");
     }
     public IReadOnlyList<DocumentState> Documents => _documents.Values.ToArray();
     public DocumentState? Find(string path) => _documents.GetValueOrDefault(System.IO.Path.GetFullPath(path));

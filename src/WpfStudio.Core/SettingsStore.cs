@@ -6,7 +6,7 @@ namespace WpfStudio.Core;
 public sealed class SettingsStore
 {
     private readonly string _path;
-    public SettingsStore(string? directory = null) => _path = Path.Combine(directory ?? AppPaths.DataDirectory, "settings.json");
+    public SettingsStore(string directory) => _path = Path.Combine(directory, "settings.json");
     public async Task<StudioSettings> LoadAsync(CancellationToken token = default)
     {
         try { return File.Exists(_path) ? JsonSerializer.Deserialize<StudioSettings>(await File.ReadAllTextAsync(_path, token)) ?? new() : new(); }

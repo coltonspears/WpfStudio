@@ -30,9 +30,9 @@ internal sealed class ShellTestContext : IAsyncDisposable
         Store = new DocumentStore(Path.Combine(Root, "state"));
         var settings = new SettingsStore(Path.Combine(Root, "state"));
         var database = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Root, "sql.json")), Dialogs, Dialogs, new QueryRecoveryStore(Path.Combine(Root, "sql-recovery.json")));
-        _debugger = new DebuggerViewModel(new DebugSession(), Dispatcher, new WpfStudio.Core.Debugging.DebuggerInstaller(dataDirectory: Root));
+        _debugger = new DebuggerViewModel(new DebugSession(), Dispatcher, new WpfStudio.Core.Debugging.DebuggerInstaller(null, Root));
         _terminal = new TerminalViewModel(Dispatcher);
-        Shell = new ShellViewModel(Store, settings, Workspace, new BuildService(), new WpfIndexService(), new ScaffoldingService(), new WorkspaceEditTransaction(Store), Xaml, Dialogs, Dialogs, Dispatcher, _debugger, _terminal, database, NullLogger<ShellViewModel>.Instance,
+        Shell = new ShellViewModel(Store, settings, Workspace, new BuildService(), new WpfIndexService(), new ScaffoldingService(), new WorkspaceEditTransaction(Store), Xaml, Dialogs, Dialogs, Dispatcher, _debugger, _terminal, database, NullLogger<ShellViewModel>.Instance, Microsoft.Extensions.Options.Options.Create(new StudioPaths { DataDirectory = Path.Combine(Root, "state") }),
             designer: previewClient == null ? null : new WpfStudio.App.Features.Designer.DesignerViewModel(previewClient, Dispatcher));
     }
     public async Task<string> CreateFileAsync(string name, string content)

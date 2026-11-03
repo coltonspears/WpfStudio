@@ -37,10 +37,10 @@ public sealed partial class FileGroupsViewModel : ObservableObject
     private readonly WorkspaceStateStore<FileGroup> _store;
     private string _lastGroupName = "";
 
-    public FileGroupsViewModel(IWorkbenchHost host, WorkspaceStateStore<FileGroup>? store = null)
+    public FileGroupsViewModel(IWorkbenchHost host, WorkspaceStateStore<FileGroup> store)
     {
         _host = host;
-        _store = store ?? new("file-groups");
+        _store = store;
     }
 
     public ObservableCollection<FileGroupViewModel> Groups { get; } = [];

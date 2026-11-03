@@ -3,6 +3,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using WpfStudio.App.Features.Debugging;
 using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.Review;
@@ -35,6 +36,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly IUserDialogService _dialogs;
     private readonly IUiDispatcher _dispatcher;
     private readonly ILogger<ShellViewModel> _logger;
+    private readonly StudioPaths _paths;
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _operation;
     private readonly List<WorkspaceDiagnostic> _buildDiagnostics = [];
@@ -47,9 +49,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null, Features.Profiling.MemoryProfilerViewModel? memoryProfiler = null)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null, Features.Profiling.MemoryProfilerViewModel? memoryProfiler = null)
     {
-        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger;
+        _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value;
         Debugger = debugger; Terminal = terminal; Database = database;
         MemoryProfiler = memoryProfiler ?? new(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(), files);
         Designer = designer ?? new(new WpfStudio.Runtime.Design.PreviewClient(), dispatcher);
@@ -58,7 +60,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
         Designer.SelectionSourceChanged += RevealDesignerSelection;
-        TaskList = new(this); FileGroups = new(this); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
+        TaskList = new(this, new("tasks", _paths.DataDirectory)); FileGroups = new(this, new("file-groups", _paths.DataDirectory)); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher);
         Palette = new(this); ChangeReview = new(this, dispatcher);
         XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token);
         Explorer = new(this, Projects); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
