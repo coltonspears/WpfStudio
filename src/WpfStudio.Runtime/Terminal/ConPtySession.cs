@@ -54,7 +54,8 @@ public sealed class ConPtySession : IAsyncDisposable
             finally { Native.CloseHandle(information.Process); Native.CloseHandle(information.Thread); }
             inputStream = new FileStream(writeInput, FileAccess.Write, 4096, false);
             outputStream = new FileStream(readOutput, FileAccess.Read, 16384, false);
-            reader = Task.Run(ReadOutputAsync);
+            // The pipe only offers blocking reads, and this one lasts as long as the session, so it gets its own thread rather than holding a pool thread.
+            reader = Task.Factory.StartNew(ReadOutput, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             writer = Task.Run(WriteInputAsync);
         }
         catch
@@ -76,7 +77,7 @@ public sealed class ConPtySession : IAsyncDisposable
         if (Volatile.Read(ref disposed) != 0 || pseudoConsole == 0) return;
         Marshal.ThrowExceptionForHR(Native.ResizePseudoConsole(pseudoConsole, new Coord((short)Math.Clamp(columns, 1, 500), (short)Math.Clamp(rows, 1, 300))));
     }
-    private async Task ReadOutputAsync()
+    private void ReadOutput()
     {
         var buffer = new byte[16384];
         try
@@ -85,7 +86,9 @@ public sealed class ConPtySession : IAsyncDisposable
             while ((count = outputStream.Read(buffer, 0, buffer.Length)) > 0)
             {
                 if (Volatile.Read(ref disposed) != 0) continue; // Drain the final ConPTY frame during teardown.
-                try { await output.Writer.WriteAsync(buffer.AsSpan(0, count).ToArray(), lifetime.Token).ConfigureAwait(false); }
+#pragma warning disable VSTHRD002 // This thread exists to block, and waits on nothing that needs it; a full channel is what pauses reading.
+                try { output.Writer.WriteAsync(buffer.AsSpan(0, count).ToArray(), lifetime.Token).AsTask().GetAwaiter().GetResult(); }
+#pragma warning restore VSTHRD002
                 catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             }
         }

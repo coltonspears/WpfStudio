@@ -287,6 +287,10 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await Idle();
             var reviewDiff = Descendants<WpfStudio.App.Controls.Diff.DiffView>(window).Single(view => view.Name == "ReviewDiff");
             Assert.True(reviewDiff.IsVisible);
+            // WPF can raise Loaded again without Unloaded between; the static theme event must still hold one subscription.
+            reviewDiff.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+            var themeHandlers = (Delegate)typeof(ThemeService).GetField(nameof(ThemeService.Applied), BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+            Assert.Single(themeHandlers.GetInvocationList(), handler => ReferenceEquals(handler.Target, reviewDiff));
             Assert.Equal(shell.ChangeReview.SelectedChange.After, reviewDiff.After);
             Assert.True(reviewDiff.ShowsSplit);
             Assert.Contains(reviewDiff.Layout!.Right, line => line.Kind == WpfStudio.App.Controls.Diff.DiffLineKind.Added && line.Text.Contains("Hello"));

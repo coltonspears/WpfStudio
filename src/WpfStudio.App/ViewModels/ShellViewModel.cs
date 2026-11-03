@@ -888,7 +888,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Palette.Dispose();
         _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
         Breakpoints.Dispose();
-        Features?.Dispose();
+        DetachFeatures(); Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
         foreach (var document in Documents) document.Dispose();
         // Dispose UI-bound commands while the shell still owns its dispatcher
