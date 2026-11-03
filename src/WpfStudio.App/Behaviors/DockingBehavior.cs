@@ -10,6 +10,7 @@ using AvalonDock.Core;
 using AvalonDock.Layout;
 using AvalonDock.Serializer.Xml;
 using AvalonDock.Themes;
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
@@ -54,7 +55,7 @@ public static class DockingBehavior
             shell.LayoutSaveRequested += Save;
             shell.LayoutRestoreRequested += Restore;
             shell.LayoutResetRequested += Reset;
-            shell.Theme.Applied += ApplyTheme;
+            shell.Messenger.Register<Context, ThemeChangedMessage>(this, static (context, message) => context.ApplyTheme(message.Palette));
             if (manager.IsLoaded) Capture();
         }
         private void Loaded(object sender, RoutedEventArgs args) => Capture();
@@ -249,7 +250,7 @@ public static class DockingBehavior
         {
             manager.Loaded -= Loaded; manager.DocumentClosing -= DocumentClosing; manager.ActiveContentChanged -= ActiveChanged;
             shell.PropertyChanged -= PropertyChanged; shell.Documents.CollectionChanged -= DocumentsChanged;
-            shell.ToolRequested -= ShowTool; shell.WorkbenchCloseRequested -= CloseWorkbench; shell.LayoutSaveRequested -= Save; shell.LayoutRestoreRequested -= Restore; shell.LayoutResetRequested -= Reset; shell.Theme.Applied -= ApplyTheme;
+            shell.ToolRequested -= ShowTool; shell.WorkbenchCloseRequested -= CloseWorkbench; shell.LayoutSaveRequested -= Save; shell.LayoutRestoreRequested -= Restore; shell.LayoutResetRequested -= Reset; shell.Messenger.UnregisterAll(this);
         }
     }
 }

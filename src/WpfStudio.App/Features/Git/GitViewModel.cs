@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Git;
 
@@ -15,7 +16,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
     private readonly IDesktopService _desktop;
     private readonly Func<CancellationToken, Task<bool>>? _saveBeforeOperation;
     private string? _workspacePath;
-    private CancellationTokenSource? _operation;
+    private readonly OperationGate _operations;
     private Task _activeTask = Task.CompletedTask;
     private int _workspaceVersion;
     private bool _switchingWorkspace;
@@ -30,6 +31,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
         _service = service;
         _desktop = desktop;
         _saveBeforeOperation = saveBeforeOperation;
+        _operations = new(busy => IsBusy = busy);
         CommitHistory = new(service, this);
         Resolver = new(service, this);
     }
@@ -56,7 +58,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SwitchBranchCommand))] public partial string? SelectedBranch { get; set; }
     [ObservableProperty] public partial GitChange? SelectedStaged { get; set; }
     [ObservableProperty] public partial GitChange? SelectedUnstaged { get; set; }
-    [ObservableProperty] public partial bool IsBusy { get; set; }
+    [ObservableProperty] public partial bool IsBusy { get; private set; }
     [ObservableProperty] public partial int SelectedTab { get; set; }
     /// <summary>The selected working or staged file's diff.</summary>
     [ObservableProperty] public partial GitDiff? CurrentDiff { get; set; }
@@ -106,7 +108,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
         NotifyCommands();
         try
         {
-            _operation?.Cancel();
+            _operations.Cancel();
             await _activeTask;
             await CancelLoadsAsync();
             if (version != _workspaceVersion) return;
@@ -141,52 +143,53 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
     private bool CanSwitch() => CanOperate() && !string.IsNullOrWhiteSpace(SelectedBranch) && SelectedBranch != Branch;
     private bool CanCreateBranch() => CanOperate() && !string.IsNullOrWhiteSpace(NewBranchName);
 
-    [RelayCommand(CanExecute = nameof(CanRefresh))]
-    private Task RefreshAsync() => RunAsync("Refresh", RefreshCoreAsync);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRefresh))]
+    private Task RefreshAsync(CancellationToken cancel) => RunAsync("Refresh", RefreshCoreAsync, cancel);
 
+    /// <summary>The pane's one Cancel button: it cancels whichever operation is running, including the refresh a workspace switch starts, which no command started.</summary>
     [RelayCommand]
-    private void Cancel() => _operation?.Cancel();
+    private void Cancel() => _operations.Cancel();
 
-    [RelayCommand(CanExecute = nameof(CanUseChange))]
-    private Task StageFileAsync(GitChange? change) => change is null ? Task.CompletedTask :
-        MutateAsync("Stage file", token => _service.StageAsync(RepositoryRoot!, change, token), save: true);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanUseChange))]
+    private Task StageFileAsync(GitChange? change, CancellationToken cancel) => change is null ? Task.CompletedTask :
+        MutateAsync("Stage file", token => _service.StageAsync(RepositoryRoot!, change, token), cancel, save: true);
 
-    [RelayCommand(CanExecute = nameof(CanStageAll))]
-    private Task StageAllAsync() => MutateAsync("Stage all", token => _service.StageAsync(RepositoryRoot!, null, token), save: true);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanStageAll))]
+    private Task StageAllAsync(CancellationToken cancel) => MutateAsync("Stage all", token => _service.StageAsync(RepositoryRoot!, null, token), cancel, save: true);
 
-    [RelayCommand(CanExecute = nameof(CanUseChange))]
-    private Task UnstageFileAsync(GitChange? change) => change is null ? Task.CompletedTask :
-        MutateAsync("Unstage file", token => _service.UnstageAsync(RepositoryRoot!, change, token));
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanUseChange))]
+    private Task UnstageFileAsync(GitChange? change, CancellationToken cancel) => change is null ? Task.CompletedTask :
+        MutateAsync("Unstage file", token => _service.UnstageAsync(RepositoryRoot!, change, token), cancel);
 
-    [RelayCommand(CanExecute = nameof(CanUnstageAll))]
-    private Task UnstageAllAsync() => MutateAsync("Unstage all", token => _service.UnstageAsync(RepositoryRoot!, null, token));
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanUnstageAll))]
+    private Task UnstageAllAsync(CancellationToken cancel) => MutateAsync("Unstage all", token => _service.UnstageAsync(RepositoryRoot!, null, token), cancel);
 
-    [RelayCommand(CanExecute = nameof(CanCommit))]
-    private Task CommitAsync() => MutateAsync("Commit staged changes", async token =>
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanCommit))]
+    private Task CommitAsync(CancellationToken cancel) => MutateAsync("Commit staged changes", async token =>
     {
         var result = await _service.CommitAsync(RepositoryRoot!, CommitMessage, token);
         CommitMessage = "";
         return result;
-    });
+    }, cancel);
 
-    [RelayCommand(CanExecute = nameof(CanOperate))]
-    private Task FetchAsync() => NetworkAsync("Fetch", (signIn, token) => _service.FetchAsync(RepositoryRoot!, token, signIn));
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanOperate))]
+    private Task FetchAsync(CancellationToken cancel) => NetworkAsync("Fetch", (signIn, token) => _service.FetchAsync(RepositoryRoot!, token, signIn), cancel);
 
-    [RelayCommand(CanExecute = nameof(CanOperate))]
-    private Task PullAsync() => NetworkAsync("Pull (fast-forward only)", (signIn, token) => _service.PullAsync(RepositoryRoot!, token, signIn), save: true, changesWorkspaceFiles: true);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanOperate))]
+    private Task PullAsync(CancellationToken cancel) => NetworkAsync("Pull (fast-forward only)", (signIn, token) => _service.PullAsync(RepositoryRoot!, token, signIn), cancel, save: true, changesWorkspaceFiles: true);
 
-    [RelayCommand(CanExecute = nameof(CanOperate))]
-    private Task PushAsync() => NetworkAsync("Push", (signIn, token) => _service.PushAsync(RepositoryRoot!, token, signIn));
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanOperate))]
+    private Task PushAsync(CancellationToken cancel) => NetworkAsync("Push", (signIn, token) => _service.PushAsync(RepositoryRoot!, token, signIn), cancel);
 
-    [RelayCommand(CanExecute = nameof(CanSwitch))]
-    private Task SwitchBranchAsync()
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanSwitch))]
+    private Task SwitchBranchAsync(CancellationToken cancel)
     {
         IsBranchPickerOpen = false;
-        return MutateAsync("Switch branch", token => _service.SwitchBranchAsync(RepositoryRoot!, SelectedBranch!, cancellationToken: token), save: true, changesWorkspaceFiles: true);
+        return MutateAsync("Switch branch", token => _service.SwitchBranchAsync(RepositoryRoot!, SelectedBranch!, cancellationToken: token), cancel, save: true, changesWorkspaceFiles: true);
     }
 
-    [RelayCommand(CanExecute = nameof(CanCreateBranch))]
-    private Task CreateBranchAsync()
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanCreateBranch))]
+    private Task CreateBranchAsync(CancellationToken cancel)
     {
         IsBranchPickerOpen = false;
         return MutateAsync("Create branch", async token =>
@@ -194,7 +197,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
             var result = await _service.SwitchBranchAsync(RepositoryRoot!, NewBranchName.Trim(), create: true, cancellationToken: token);
             NewBranchName = "";
             return result;
-        }, save: true, changesWorkspaceFiles: true);
+        }, cancel, save: true, changesWorkspaceFiles: true);
     }
 
     [RelayCommand(CanExecute = nameof(CanUseChange))]
@@ -289,7 +292,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
         if (SelectedTab == HistoryTab && CommitHistory.SelectedCommit is null && CommitHistory.VisibleHistory.FirstOrDefault() is { } newest) CommitHistory.SelectedCommit = newest;
     }
 
-    private Task MutateAsync(string label, Func<CancellationToken, Task<string>> action, bool save = false, bool changesWorkspaceFiles = false) => RunAsync(label, async token =>
+    private Task MutateAsync(string label, Func<CancellationToken, Task<string>> action, CancellationToken cancel, bool save = false, bool changesWorkspaceFiles = false) => RunAsync(label, async token =>
     {
         var version = _workspaceVersion;
         if (save && _saveBeforeOperation is not null && !await _saveBeforeOperation(token))
@@ -303,26 +306,23 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
             if (changesWorkspaceFiles && version == _workspaceVersion) WorkspaceFilesChanged?.Invoke();
             if (version == _workspaceVersion) RepositoryChanged?.Invoke();
         }
-    });
+    }, cancel);
 
-    private Task RunAsync(string label, Func<CancellationToken, Task> action, CancellationToken cancellationToken = default)
+    private Task RunAsync(string label, Func<CancellationToken, Task> action, CancellationToken cancellationToken)
     {
-        if (IsBusy || _switchingWorkspace || _disposed) return Task.CompletedTask;
-        _activeTask = RunCoreAsync(label, action, cancellationToken);
+        if (_switchingWorkspace || _disposed || _operations.TryEnter(cancellationToken) is not { } lease) return Task.CompletedTask;
+        _activeTask = RunCoreAsync(label, action, lease);
         return _activeTask;
     }
 
-    private async Task RunCoreAsync(string label, Func<CancellationToken, Task> action, CancellationToken cancellationToken)
+    private async Task RunCoreAsync(string label, Func<CancellationToken, Task> action, OperationGate.Lease lease)
     {
-        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _operation = operation;
         var version = _workspaceVersion;
-        IsBusy = true;
         Error = "";
         Status = label + "…";
         try
         {
-            await action(operation.Token);
+            await action(lease.Token);
             if (version == _workspaceVersion && label is not ("Refresh" or "Load more history")) AppendOutput(label + " completed.");
         }
         catch (OperationCanceledException) { if (version == _workspaceVersion) Status = "Git action cancelled. Refresh to see the current repository state."; }
@@ -335,7 +335,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
                 AppendOutput(Error);
             }
         }
-        finally { _operation = null; IsBusy = false; }
+        finally { lease.Dispose(); }
     }
 
     private async Task RefreshCoreAsync(CancellationToken cancellationToken)
@@ -423,7 +423,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
     public void Dispose()
     {
         _disposed = true;
-        _operation?.Cancel();
+        _operations.Cancel();
         _diffLoad?.Cancel();
         CommitHistory.CancelLoads();
         NotifyCommands();
@@ -433,9 +433,9 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
     int IGitOperationHost.WorkspaceVersion => _workspaceVersion;
     void IGitOperationHost.ReportStatus(string status) => Status = status;
     void IGitOperationHost.ReportError(string error) => Error = error;
-    Task IGitOperationHost.RunAsync(string label, Func<CancellationToken, Task> action) => RunAsync(label, action);
-    Task IGitOperationHost.MutateAsync(string label, Func<CancellationToken, Task<string>> action, bool changesWorkspaceFiles) =>
-        MutateAsync(label, action, changesWorkspaceFiles: changesWorkspaceFiles);
+    Task IGitOperationHost.RunAsync(string label, Func<CancellationToken, Task> action, CancellationToken cancel) => RunAsync(label, action, cancel);
+    Task IGitOperationHost.MutateAsync(string label, Func<CancellationToken, Task<string>> action, CancellationToken cancel, bool changesWorkspaceFiles) =>
+        MutateAsync(label, action, cancel, changesWorkspaceFiles: changesWorkspaceFiles);
     Task<bool> IGitOperationHost.SaveOpenDocumentsAsync(CancellationToken cancellationToken) =>
         _saveBeforeOperation is null ? Task.FromResult(true) : _saveBeforeOperation(cancellationToken);
     void IGitOperationHost.OpenFile(string path) => OpenFileRequested?.Invoke(path);

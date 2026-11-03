@@ -73,7 +73,7 @@ public sealed class ChangeReviewViewModelTests
         await decision;
     }
 
-    private sealed class Host : IWorkbenchHost
+    private sealed class Host : IChangeReviewHost
     {
         public string Status { get; private set; } = "";
         public event Action? DocumentsChanged;
@@ -91,6 +91,6 @@ public sealed class ChangeReviewViewModelTests
         public Task NavigateAsync(string path, int line, int column) => Task.CompletedTask;
         public Task OpenDocumentAsync(string path) => Task.CompletedTask;
         public Task<bool> CloseDocumentAsync(string path) => Task.FromResult(true);
-        public void ShowTool(string toolId) { }
+        public void ReviewOpenChanged() { }
     }
 }

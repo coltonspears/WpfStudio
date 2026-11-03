@@ -61,8 +61,8 @@ public sealed partial class CommitHistoryViewModel(GitService service, IGitOpera
     [RelayCommand(CanExecute = nameof(CanOpenCommitOnRemote))]
     private void OpenCommitOnRemote() => host.OpenUrl(host.Remote!.CommitUrl(CommitDetails!.Id));
 
-    [RelayCommand(CanExecute = nameof(CanLoadMoreHistory))]
-    private Task LoadMoreHistoryAsync() => host.RunAsync("Load more history", async token =>
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanLoadMoreHistory))]
+    private Task LoadMoreHistoryAsync(CancellationToken cancel) => host.RunAsync("Load more history", async token =>
     {
         var version = host.WorkspaceVersion;
         var more = await service.LoadHistoryAsync(host.RepositoryRoot!, History.Count, PageSize + 1, token);
@@ -71,7 +71,7 @@ public sealed partial class CommitHistoryViewModel(GitService service, IGitOpera
         HasMoreHistory = more.Count > PageSize;
         ApplyHistoryFilter();
         host.ReportStatus($"{History.Count} commits loaded");
-    });
+    }, cancel);
 
     [RelayCommand]
     private void ClearHistoryFilter() => HistoryFilter = "";

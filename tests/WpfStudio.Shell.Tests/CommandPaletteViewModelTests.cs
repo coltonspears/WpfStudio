@@ -83,6 +83,7 @@ public sealed class CommandPaletteViewModelTests
 
     private sealed class Host : ICommandPaletteHost
     {
+        public void PaletteOpenChanged() { }
         public List<string> Files { get; set; } = [];
         public List<string> OpenPaths { get; set; } = [];
         public List<PaletteEntry> Commands { get; set; } = [];
@@ -109,6 +110,5 @@ public sealed class CommandPaletteViewModelTests
         public Task NavigateAsync(string path, int line, int column) { Navigations.Add((path, line, column)); return Task.CompletedTask; }
         public Task OpenDocumentAsync(string path) => Task.CompletedTask;
         public Task<bool> CloseDocumentAsync(string path) => Task.FromResult(true);
-        public void ShowTool(string toolId) { }
     }
 }

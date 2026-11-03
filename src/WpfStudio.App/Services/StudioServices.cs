@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using WpfStudio.App.Features.ColtonGpt;
@@ -35,6 +36,8 @@ public static class StudioServices
         services.AddLogging();
         services.AddOptions<StudioPaths>();
         services.AddSingleton(dispatcher);
+        // Its own instance rather than WeakReferenceMessenger.Default: each container, and so each test, has its own recipients.
+        services.AddSingleton<IMessenger>(_ => new WeakReferenceMessenger());
         services.AddSingleton<DesktopDialogs>();
         services.AddSingleton<IFileDialogService>(sp => sp.GetRequiredService<DesktopDialogs>());
         services.AddSingleton<IUserDialogService>(sp => sp.GetRequiredService<DesktopDialogs>());
@@ -106,6 +109,9 @@ public static class StudioServices
         services.AddSingleton<OpenDocumentWatcherFactory>(changed => new OpenDocumentWatcher(changed));
         services.AddSingleton<KnownSourceWatcherFactory>((paths, changed, reconcile, contextFiles, failed) => new KnownSourceFileWatcher(paths, changed, null, reconcile, contextFiles, failed));
         services.AddSingleton<ShellToolServices>();
+        services.AddSingleton<ShellPanes>();
+        services.AddSingleton<ShellLanguageServices>();
+        services.AddSingleton<ShellDesktopServices>();
         services.AddSingleton<StudioFeatures>();
         services.AddSingleton<ShellViewModel>();
         services.AddSingleton<MainWindow>();

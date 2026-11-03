@@ -4,6 +4,7 @@ using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 
+using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.App.Features.Workbench;
 
@@ -170,20 +171,8 @@ public sealed partial class ShellViewModel
         await RenameResourceCommand.ExecuteAsync(null);
     }
 
-    internal async Task PreviewSymbolRenameAsync(EditorViewModel editor, WorkspaceEditResult result, Func<bool>? requestCurrent = null)
-    {
-        var existing = _store.Documents.ToHashSet();
-        try { await PreviewSymbolRenameCoreAsync(editor, result, requestCurrent); }
-        finally
-        {
-            // Preparing a diff opens closed files for validation. Do not retain
-            // clean, invisible snapshots as if they were user-owned buffers.
-            foreach (var document in _store.Documents.Where(document => !existing.Contains(document) && !document.IsDirty
-                && !Documents.Any(open => ReferenceEquals(open.State, document))
-                && result.Documents.Any(edit => Path.GetFullPath(edit.Path).Equals(document.Path, StringComparison.OrdinalIgnoreCase))).ToArray())
-                if (ReferenceEquals(_store.Find(document.Path), document)) _store.Close(document);
-        }
-    }
+    internal Task PreviewSymbolRenameAsync(EditorViewModel editor, WorkspaceEditResult result, Func<bool>? requestCurrent = null) =>
+        _verifiedEdits.ReleasingOpenedTargetsAsync(result.Documents.Select(edit => edit.Path), () => PreviewSymbolRenameCoreAsync(editor, result, requestCurrent));
 
     private async Task PreviewSymbolRenameCoreAsync(EditorViewModel editor, WorkspaceEditResult result, Func<bool>? requestCurrent)
     {
@@ -195,32 +184,30 @@ public sealed partial class ShellViewModel
             Status = "No symbol changes available" + SymbolWarnings(result.Warnings);
             return;
         }
-        if (result.Documents.Any(edit => string.IsNullOrEmpty(edit.ExpectedTextHash)))
-            throw new InvalidOperationException("Rename has no verified source snapshot. Request rename again.");
-        if (result.Documents.Select(edit => Path.GetFullPath(edit.Path)).Distinct(StringComparer.OrdinalIgnoreCase).Count() != result.Documents.Count)
-            throw new InvalidOperationException("Rename contains duplicate document targets. Request rename again.");
+        VerifiedEditPipeline.RequireVerifiedTargets(result.Documents, "Rename", "Request rename again.");
         foreach (var edit in result.Documents.Where(edit => edit.Edits.Count != 0)) EnsureCodeActionTargetEditable(edit.Path);
         var changes = new List<FileChange>();
-        var targets = new List<(DocumentState Document, long Version, string Content)>();
+        var targets = new List<Func<bool>>();
         foreach (var edit in result.Documents)
         {
             changes.AddRange(await _edits.PrepareAsync(new([edit], []), _lifetime.Token));
             var document = _store.Find(edit.Path) ?? throw new InvalidOperationException("A rename target was closed.");
-            targets.Add((document, document.Version, document.Content));
+            targets.Add(_verifiedEdits.Remember(document));
         }
         bool Current()
         {
-            if (!SourceCurrent() || targets.Any(target => _store.Find(target.Document.Path) != target.Document
-                || target.Document.Version != target.Version || target.Document.Content != target.Content)) return false;
+            if (!SourceCurrent() || !targets.All(unchanged => unchanged())) return false;
             foreach (var change in changes.Where(change => change.Before != change.After)) EnsureCodeActionTargetEditable(change.Path);
             return true;
         }
-        if (!Current()) throw new InvalidOperationException("The rename context changed. Request rename again.");
+        switch (await _verifiedEdits.ReviewAsync("Rename symbol", changes, string.Join(Environment.NewLine, result.Warnings), Current))
+        {
+            case VerifiedEditReview.Unchanged: Status = "No symbol changes required" + SymbolWarnings(result.Warnings); return;
+            case VerifiedEditReview.Declined: return;
+            case VerifiedEditReview.StaleBeforeReview or VerifiedEditReview.StaleAfterReview: throw new InvalidOperationException("The rename context changed. Request rename again.");
+        }
+        await _verifiedEdits.ApplyAsync(changes, Current, _lifetime.Token);
         var actualChanges = changes.Where(change => change.Before != change.After).ToArray();
-        if (actualChanges.Length == 0) { Status = "No symbol changes required" + SymbolWarnings(result.Warnings); return; }
-        if (!await PreviewAsync("Rename symbol", actualChanges, string.Join(Environment.NewLine, result.Warnings))) return;
-        await _edits.ApplyAsync(changes, _lifetime.Token, Current);
-        foreach (var change in actualChanges) AddDocument(_store.Find(change.Path)!);
         Status = $"Renamed symbol in {actualChanges.Length} file(s). Save All to write the changes." + SymbolWarnings(result.Warnings);
         if (result.NameProjection is { } plan)
         {

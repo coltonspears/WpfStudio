@@ -1,4 +1,6 @@
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Features.Workbench;
+using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
 
@@ -16,7 +18,7 @@ public sealed class WorkbenchToolTests
             var onDisk = Path.Combine(root, "Disk.cs"); await File.WriteAllTextAsync(onDisk, "// TODO disk work\nclass Disk { }");
             var open = Path.Combine(root, "Open.cs"); await File.WriteAllTextAsync(open, "// TODO stale text on disk");
             var host = new FakeHost(root) { Files = [onDisk, open], Buffers = { [open] = "// HACK buffered text" } };
-            var tasks = new TaskListViewModel(host, new WorkspaceStateStore<UserTaskItem>("tasks", root));
+            var tasks = new TaskListViewModel(host, new WorkspaceStateStore<UserTaskItem>("tasks", root), new WeakReferenceMessenger());
 
             await tasks.RefreshCommand.ExecuteAsync(null);
 
@@ -43,7 +45,7 @@ public sealed class WorkbenchToolTests
                 host.Files.Add(path);
                 host.Buffers[path] = "// TODO one";
             }
-            var tasks = new TaskListViewModel(host, new WorkspaceStateStore<UserTaskItem>("tasks", root));
+            var tasks = new TaskListViewModel(host, new WorkspaceStateStore<UserTaskItem>("tasks", root), new WeakReferenceMessenger());
 
             var superseded = tasks.RefreshCommand.ExecuteAsync(null);
             var latest = tasks.RefreshCommand.ExecuteAsync(null);
@@ -65,7 +67,7 @@ public sealed class WorkbenchToolTests
         {
             var host = new FakeHost(root) { Active = (Path.Combine(root, "Main.xaml"), 12) };
             var store = new WorkspaceStateStore<UserTaskItem>("tasks", root);
-            var tasks = new TaskListViewModel(host, store);
+            var tasks = new TaskListViewModel(host, store, new WeakReferenceMessenger());
             tasks.NewTaskText = "@ wire the button"; await tasks.AddCommand.ExecuteAsync(null);
             tasks.NewTaskText = "write docs"; await tasks.AddCommand.ExecuteAsync(null);
             Assert.Equal("", tasks.NewTaskText);
@@ -74,7 +76,7 @@ public sealed class WorkbenchToolTests
 
             tasks.UserTasks[1].IsDone = true;
             await tasks.ClearCompletedCommand.ExecuteAsync(null);
-            var reloaded = new TaskListViewModel(host, store);
+            var reloaded = new TaskListViewModel(host, store, new WeakReferenceMessenger());
             await reloaded.LoadUserTasksAsync();
             Assert.Equal("wire the button", Assert.Single(reloaded.UserTasks).Text);
         }
@@ -85,7 +87,7 @@ public sealed class WorkbenchToolTests
     public async Task AddingATaskWithoutAWorkspaceReportsThroughTheHost()
     {
         var host = new FakeHost(null);
-        var tasks = new TaskListViewModel(host, new WorkspaceStateStore<UserTaskItem>("tasks", Path.GetTempPath()));
+        var tasks = new TaskListViewModel(host, new WorkspaceStateStore<UserTaskItem>("tasks", Path.GetTempPath()), new WeakReferenceMessenger());
         tasks.NewTaskText = "anything"; await tasks.AddCommand.ExecuteAsync(null);
         Assert.Empty(tasks.UserTasks);
         Assert.Equal("Open a solution to keep a task list for it", host.Status);
@@ -102,13 +104,16 @@ public sealed class WorkbenchToolTests
             var other = Path.Combine(root, "Other.cs"); await File.WriteAllTextAsync(other, "class Other { }");
             var host = new FakeHost(root) { OpenPaths = [view, model] };
             host.Dialogs.Prompts.Enqueue("Invoices");
-            var groups = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root));
+            var messenger = new WeakReferenceMessenger();
+            string? shownTool = null;
+            messenger.Register<ShowToolMessage>(this, (_, message) => shownTool = message.ToolId);
+            var groups = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root), messenger);
 
             await groups.AddOpenTabsCommand.ExecuteAsync(null);
             var group = Assert.Single(groups.Groups);
             Assert.Equal("Invoices", group.Name);
             Assert.Equal("2 files", group.Summary);
-            Assert.Equal(Workbenches.FileGroups, host.ShownTool);
+            Assert.Equal(Workbenches.FileGroups, shownTool);
 
             host.OpenPaths = [other];
             await groups.SwitchToGroupCommand.ExecuteAsync(group);
@@ -116,7 +121,7 @@ public sealed class WorkbenchToolTests
             Assert.Equal([view, model], host.Opened);
             Assert.Equal("Opened Invoices", host.Status);
 
-            var reloaded = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root));
+            var reloaded = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root), messenger);
             await reloaded.LoadAsync();
             Assert.Equal(["InvoiceView.xaml", "InvoiceViewModel.cs"], Assert.Single(reloaded.Groups).Files.Select(f => f.Name));
         }
@@ -130,7 +135,7 @@ public sealed class WorkbenchToolTests
         try
         {
             var host = new FakeHost(root);
-            var groups = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root));
+            var groups = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root), new WeakReferenceMessenger());
             groups.Groups.Add(new("One", [Path.Combine(root, "a.cs")]));
             groups.Groups.Add(new("Two", [Path.Combine(root, "b.cs")]));
             host.Dialogs.Prompts.Enqueue("one");
@@ -152,7 +157,6 @@ public sealed class WorkbenchToolTests
         public string? SelectedFile { get; set; }
         public FakeDialogs Dialogs { get; } = new();
         public string Status { get; private set; } = "";
-        public string? ShownTool { get; private set; }
         public List<string> Opened { get; } = [];
         public List<string> Closed { get; } = [];
         public List<(string Path, int Line, int Column)> Navigations { get; } = [];
@@ -172,6 +176,5 @@ public sealed class WorkbenchToolTests
         public Task NavigateAsync(string path, int line, int column) { Navigations.Add((path, line, column)); return Task.CompletedTask; }
         public Task OpenDocumentAsync(string path) { Opened.Add(path); return Task.CompletedTask; }
         public Task<bool> CloseDocumentAsync(string path) { Closed.Add(path); OpenPaths.Remove(path); return Task.FromResult(true); }
-        public void ShowTool(string toolId) => ShownTool = toolId;
     }
 }

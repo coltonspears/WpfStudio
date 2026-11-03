@@ -12,6 +12,7 @@ using System.Xml.Linq;
 using System.Reflection;
 using AvalonDock;
 using AvalonDock.Layout;
+using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using WpfStudio.App;
 using WpfStudio.App.Behaviors;
@@ -76,6 +77,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         services.AddSingleton<WpfStudio.Runtime.Design.IPreviewClient>(_ => new WpfStudio.Runtime.Design.PreviewClient(
             Environment.GetEnvironmentVariable("WPFSTUDIO_PREVIEW_HOST_UNDER_TEST")));
         await using var provider = services.BuildServiceProvider();
+        var messages = new MessageProbe(provider.GetRequiredService<IMessenger>());
         var shell = provider.GetRequiredService<ShellViewModel>();
         var bindingErrors = new BindingErrors();
         PresentationTraceSources.DataBindingSource.Listeners.Add(bindingErrors);
@@ -98,6 +100,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_CODELENS_ONLY") == "1")
             {
                 await VerifyCodeLensThreadingAsync(root, shell, provider.GetRequiredService<WorkspaceClient>());
+                Assert.Empty(messages.OffThread);
+                Assert.Contains(nameof(WorkspaceChangedMessage), messages.Seen);
                 return;
             }
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_MEMORY_ONLY") == "1")
@@ -259,6 +263,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/studio.png"));
             shell.ToggleThemeCommand.Execute(null); await Idle();
             Assert.Equal(Color.FromRgb(255, 255, 255), ((SolidColorBrush)Application.Current.FindResource("EditorBrush")).Color);
+            Assert.Same(Palette.Light, Assert.IsType<StudioDockTheme>(manager.Theme).Palette);
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/studio-light.png"));
             shell.ToggleThemeCommand.Execute(null); await Idle();
             await VerifyExpandedToolsAsync(root, window, manager, shell);
@@ -346,7 +351,11 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await VerifyPreviewAppearanceAsync(root, data, window, manager, shell);
             await VerifyRuntimeInspectionAsync(root, data, window, manager, shell);
             await VerifyRetainedPanesAsync(Path.Combine(data, "layout.xml"), manager, shell);
+            Assert.Contains(nameof(WorkspaceChangedMessage), messages.Seen);
+            Assert.Contains(nameof(ThemeChangedMessage), messages.Seen);
+            await VerifySaveMessagesAsync(data, shell, messages);
             Assert.Empty(bindingErrors.Messages);
+            Assert.Empty(messages.OffThread);
         }
         catch (Exception exception)
         {
@@ -2034,7 +2043,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         using var http = new System.Net.Http.HttpClient();
         var client = new WpfStudio.App.Features.ColtonGpt.OpenRouterClient(http);
         var settings = new WpfStudio.App.Features.ColtonGpt.AssistantSettingsViewModel(
-            new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(Path.GetTempPath(), "ColtonGpt-View-" + Guid.NewGuid().ToString("N"))), client);
+            new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(Path.GetTempPath(), "ColtonGpt-View-" + Guid.NewGuid().ToString("N"))), client, new WeakReferenceMessenger());
         using var assistant = new WpfStudio.App.Features.ColtonGpt.AssistantViewModel(client, settings);
         await assistant.InitializeAsync();
         settings.Models.Add(new("example/wpf-model", "Example coding model", 128_000));
@@ -2146,6 +2155,44 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path); encoder.Save(stream);
+    }
+    /// <summary>A save resumes after file IO, so its message is the one most likely to leave the UI thread, explicit or timed.</summary>
+    private static async Task VerifySaveMessagesAsync(string data, ShellViewModel shell, MessageProbe messages)
+    {
+        var path = Path.Combine(data, "saved.cs");
+        await File.WriteAllTextAsync(path, "class Saved { }");
+        await shell.OpenDocumentAsync(path);
+        var document = shell.ActiveDocument!;
+        document.State.Content = "class Saved { int explicitSave; }";
+        await shell.SaveCommand.ExecuteAsync(null);
+        Assert.Contains(nameof(DocumentSavedMessage), messages.Seen);
+        messages.Seen.Clear();
+        document.State.Content = "class Saved { int timedSave; }";
+        await shell.AutoSave.RunNowAsync();
+        Assert.Contains(nameof(DocumentSavedMessage), messages.Seen);
+        await shell.CloseDocumentAsync(document, discardChanges: true);
+        await Idle();
+    }
+
+    /// <summary>Handlers run on the sender's thread, so every message has to arrive on the UI thread whichever feature sent it.</summary>
+    private sealed class MessageProbe
+    {
+        private readonly int _uiThread = Environment.CurrentManagedThreadId;
+        public HashSet<string> Seen { get; } = [];
+        public List<string> OffThread { get; } = [];
+        public MessageProbe(IMessenger messenger)
+        {
+            Listen<WorkspaceChangedMessage>(messenger); Listen<ShowToolMessage>(messenger); Listen<DocumentSavedMessage>(messenger); Listen<ThemeChangedMessage>(messenger);
+            Listen<AssistantSettingsSavedMessage>(messenger); Listen<DebuggerStateMessage>(messenger); Listen<DebuggerSourceMessage>(messenger);
+        }
+        private void Listen<TMessage>(IMessenger messenger) where TMessage : class => messenger.Register<TMessage>(this, (_, _) =>
+        {
+            lock (Seen)
+            {
+                Seen.Add(typeof(TMessage).Name);
+                if (Environment.CurrentManagedThreadId != _uiThread) OffThread.Add(typeof(TMessage).Name);
+            }
+        });
     }
     private sealed class BindingErrors : TraceListener
     {

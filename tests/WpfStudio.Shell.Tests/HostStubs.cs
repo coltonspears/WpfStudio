@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Inspection;
+using WpfStudio.Contracts;
 using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.Shell.Tests;
@@ -26,6 +27,8 @@ internal sealed class DesignerHostStub : IDesignerSourceHost
     public Func<XamlPropertyEditResult, Task<bool>>? PropertyEdit { get; set; }
     public Func<DesignerLayoutSourceEdit, Task<bool>>? LayoutEdit { get; set; }
     public Func<PreviewBindingSourceNavigation, CancellationToken, Task<string>>? BindingSource { get; set; }
+    public Action<SourceLocation>? Revealed { get; set; }
+    public void RevealSelection(SourceLocation source) => Revealed?.Invoke(source);
     public Task<bool> ReviewPropertyEditAsync(XamlPropertyEditResult proposal) =>
         (PropertyEdit ?? throw new InvalidOperationException("Unexpected property edit."))(proposal);
     public Task<bool> ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit) =>

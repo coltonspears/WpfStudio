@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using WpfStudio.Contracts;
 using WpfStudio.Core.Git;
 
 namespace WpfStudio.App.Features.Git;
@@ -433,7 +434,9 @@ public sealed class GitService
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
             catch (Exception kill) when (kill is InvalidOperationException or System.ComponentModel.Win32Exception) { /* Exited meanwhile; the original failure is what matters. */ }
             await process.WaitForExitAsync(CancellationToken.None);
-            await Task.WhenAll(outputTask, errorTask);
+            // A hook's MSYS children are not in the tree Kill walks, and they can hold these pipes until they finish. Cancelling does not wait for them.
+            try { await Task.WhenAll(outputTask, errorTask).WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (TimeoutException) { outputTask.Forget(); errorTask.Forget(); }
             throw;
         }
         var output = await outputTask;

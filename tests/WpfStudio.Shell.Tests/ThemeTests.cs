@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
+using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Services;
 
 namespace WpfStudio.Shell.Tests;
@@ -10,8 +11,7 @@ internal sealed class FakeTheme : IThemeService
 {
     public Palette Palette { get; private set; } = Palette.Dark;
     public List<string> Applications { get; } = [];
-    public event Action<Palette>? Applied;
-    public void Apply(string name) { Applications.Add(name); Palette = Palette.For(name); Applied?.Invoke(Palette); }
+    public void Apply(string name) { Applications.Add(name); Palette = Palette.For(name); }
     public void Track(Window window) { }
 }
 
@@ -71,13 +71,19 @@ public sealed class ThemeTests
     [Fact]
     public void ApplyingOwnsThePaletteAndNotifies()
     {
-        var theme = new ThemeService();
+        var messenger = new WeakReferenceMessenger();
+        var theme = new ThemeService(messenger);
         Assert.Same(Palette.Dark, theme.Palette);
         Palette? applied = null;
-        theme.Applied += palette => applied = palette;
+        messenger.Register<ThemeChangedMessage>(this, (_, message) => applied = message.Palette);
         theme.Apply("Light");
         Assert.Same(Palette.Light, theme.Palette);
         Assert.Same(Palette.Light, applied);
+
+        messenger.UnregisterAll(this);
+        applied = null;
+        theme.Apply("Dark");
+        Assert.Null(applied);
     }
 
     [Fact]

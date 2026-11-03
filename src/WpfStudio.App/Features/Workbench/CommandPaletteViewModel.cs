@@ -18,6 +18,7 @@ public interface ICommandPaletteHost : IWorkbenchHost
     string WorkspaceRoot { get; }
     bool IsSymbolSearchAvailable { get; }
     Task<IReadOnlyList<SymbolSearchResult>> SearchSymbolsAsync(string query, CancellationToken token);
+    void PaletteOpenChanged();
 }
 
 /// <summary>
@@ -35,6 +36,7 @@ public sealed partial class CommandPaletteViewModel : ObservableObject, IDisposa
     public ObservableCollection<PaletteEntry> Results { get; } = [];
     [ObservableProperty] public partial string Query { get; set; } = "";
     [ObservableProperty] public partial bool IsOpen { get; set; }
+    partial void OnIsOpenChanged(bool value) => _host.PaletteOpenChanged();
     [ObservableProperty, NotifyPropertyChangedFor(nameof(Placeholder))] public partial bool IsCommandMode { get; set; }
     [ObservableProperty] public partial PaletteEntry? Selected { get; set; }
     public string Placeholder => IsCommandMode ? "Type a command name" : "Go to file by name — # for a type or member, > to run a command";

@@ -33,5 +33,4 @@ public interface IWorkbenchHost
     Task OpenDocumentAsync(string path);
     /// <summary>Closes the tab for <paramref name="path"/>, asking about unsaved edits; false when the user cancelled.</summary>
     Task<bool> CloseDocumentAsync(string path);
-    void ShowTool(string toolId);
 }

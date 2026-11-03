@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
+using WpfStudio.App.Services;
 using WpfStudio.Core;
 
 namespace WpfStudio.App.Features.Workbench;
@@ -34,12 +36,14 @@ public sealed partial class FileGroupsViewModel : ObservableObject
 {
     private readonly IWorkbenchHost _host;
     private readonly WorkspaceStateStore<FileGroup> _store;
+    private readonly IMessenger _messenger;
     private string _lastGroupName = "";
 
-    public FileGroupsViewModel(IWorkbenchHost host, WorkspaceStateStore<FileGroup> store)
+    public FileGroupsViewModel(IWorkbenchHost host, WorkspaceStateStore<FileGroup> store, IMessenger messenger)
     {
         _host = host;
         _store = store;
+        _messenger = messenger;
     }
 
     public ObservableCollection<FileGroupViewModel> Groups { get; } = [];
@@ -73,7 +77,7 @@ public sealed partial class FileGroupsViewModel : ObservableObject
         foreach (var path in paths) group.Add(path);
         await SaveAsync();
         _host.ReportStatus($"{group.Name}: {group.Summary}");
-        _host.ShowTool(Workbenches.FileGroups);
+        _messenger.Send(new ShowToolMessage(Workbenches.FileGroups));
     }
     [RelayCommand] private Task AddActiveAsync() => _host.GuardAsync(() => AddToGroupAsync("Add file to group", _host.ActiveLocation is { } active ? [active.Path] : []));
     [RelayCommand] private Task AddOpenTabsAsync() => _host.GuardAsync(() => AddToGroupAsync("Pin open tabs as a group", _host.OpenDocumentPaths));

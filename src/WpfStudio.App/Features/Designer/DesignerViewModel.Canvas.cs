@@ -19,7 +19,6 @@ public sealed partial class DesignerViewModel
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasRenderError))] public partial string? RenderError { get; set; }
     [ObservableProperty] public partial int? RenderErrorLine { get; set; }
     [ObservableProperty] public partial int? RenderErrorColumn { get; set; }
-    public event Action<SourceLocation>? SelectionSourceChanged;
 
     public PreviewCanvasViewModel Canvas { get; }
     public bool HasCanvasContent => DisplayImage is not null;
@@ -114,6 +113,6 @@ public sealed partial class DesignerViewModel
     {
         if (_suppressSourceSync > 0 || node?.Node.Source is not { } source || !IsCurrent || _document is not { } document
             || document.Version != _sourceVersion || !string.Equals(source.Path, document.Path, StringComparison.OrdinalIgnoreCase)) return;
-        SelectionSourceChanged?.Invoke(source);
+        _sourceHost?.RevealSelection(source);
     }
 }

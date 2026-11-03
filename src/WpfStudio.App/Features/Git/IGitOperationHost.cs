@@ -18,9 +18,9 @@ public interface IGitOperationHost
     void ReportStatus(string status);
     void ReportError(string error);
     /// <summary>Runs a read as the one Git action, reporting a failure; does nothing while another action runs.</summary>
-    Task RunAsync(string label, Func<CancellationToken, Task> action);
+    Task RunAsync(string label, Func<CancellationToken, Task> action, CancellationToken cancel);
     /// <summary>As <see cref="RunAsync"/> for an action that changes the repository: logs its output and refreshes afterwards.</summary>
-    Task MutateAsync(string label, Func<CancellationToken, Task<string>> action, bool changesWorkspaceFiles);
+    Task MutateAsync(string label, Func<CancellationToken, Task<string>> action, CancellationToken cancel, bool changesWorkspaceFiles);
     /// <summary>False when open documents could not be saved, so Git must not touch their files.</summary>
     Task<bool> SaveOpenDocumentsAsync(CancellationToken cancellationToken);
     void OpenFile(string path);

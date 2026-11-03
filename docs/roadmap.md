@@ -116,7 +116,7 @@ This has the highest value of what remains: you would use it every day.
 - **Install:** copy the debugger installer's pattern (download, verify checksum, install per user), or run the official installer elevated. For .NET Framework targets, detect missing targeting packs and link the developer pack.
 
 ### 4. Split designer view
-The designer is its own document, so it can already be docked beside the XAML editor by hand. A one-click **Split** would open the XAML editor and designer as a side-by-side pair in one tab: a Grid with a splitter and orientation toggle, kept in sync by the existing selection sync (`SelectionSourceChanged`/`RevealDesignerSelection`). Remember the split ratio per file.
+The designer is its own document, so it can already be docked beside the XAML editor by hand. A one-click **Split** would open the XAML editor and designer as a side-by-side pair in one tab: a Grid with a splitter and orientation toggle, kept in sync by the existing selection sync (`IDesignerSourceHost.RevealSelection`/`RevealDesignerSelection`). Remember the split ratio per file.
 
 ## Later
 

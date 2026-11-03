@@ -2,13 +2,15 @@ using WpfStudio.App.Features.Workbench;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
+using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Runtime.Debugging;
 
 namespace WpfStudio.App.Features.Debugging;
 
-/// <summary>What breakpoint editing needs from the shell: the editors, dialogs, and a way to show the debugger pane.</summary>
+/// <summary>What breakpoint editing needs from the shell: the editors and dialogs.</summary>
 public interface IBreakpointEditingHost
 {
     EditorViewModel? ActiveDocument { get; }
@@ -17,7 +19,6 @@ public interface IBreakpointEditingHost
     /// <summary>Runs an operation, reporting a failure in the status bar and Output instead of faulting the caller.</summary>
     Task GuardAsync(Func<Task> action);
     void ReportStatus(string status);
-    void ShowTool(string toolId);
 }
 
 /// <summary>
@@ -29,12 +30,13 @@ public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisp
     private const int BreakpointsTab = 2, WatchesTab = 1;
     private readonly IBreakpointEditingHost _host;
     private readonly DebuggerViewModel _debugger;
+    private readonly IMessenger _messenger;
     private readonly HashSet<BreakpointViewModel> _observed = [];
     private bool _disposed;
 
-    public BreakpointEditingViewModel(IBreakpointEditingHost host, DebuggerViewModel debugger)
+    public BreakpointEditingViewModel(IBreakpointEditingHost host, DebuggerViewModel debugger, IMessenger messenger)
     {
-        _host = host; _debugger = debugger;
+        _host = host; _debugger = debugger; _messenger = messenger;
         _debugger.Breakpoints.CollectionChanged += BreakpointsChanged;
     }
 
@@ -61,7 +63,7 @@ public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisp
         }
     }
 
-    [RelayCommand] private void Show() { _debugger.SelectedTab = BreakpointsTab; _host.ShowTool(Workbenches.Debugger); }
+    [RelayCommand] private void Show() { _debugger.SelectedTab = BreakpointsTab; _messenger.Send(new ShowToolMessage(Workbenches.Debugger)); }
 
     [RelayCommand] private Task ToggleAsync() => _host.ActiveDocument is not { State.Extension: ".cs" } doc ? Task.CompletedTask
         : _host.GuardAsync(() => _debugger.ToggleBreakpointAsync(doc.State.Path, doc.State.CaretLine));
@@ -110,7 +112,7 @@ public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisp
         if (_host.ActiveDocument is not { IsCSharp: true } doc || doc.DebugExpressionAt(doc.State.CaretOffset) is not { } expression)
         { _host.ReportStatus("Place the caret on a variable or member, or select an expression, to add a watch"); return; }
         await _debugger.AddWatchAsync(expression);
-        _debugger.SelectedTab = WatchesTab; _host.ShowTool(Workbenches.Debugger);
+        _debugger.SelectedTab = WatchesTab; _messenger.Send(new ShowToolMessage(Workbenches.Debugger));
     });
 
     [RelayCommand] private Task DisableAsync() => _host.GuardAsync(async () =>

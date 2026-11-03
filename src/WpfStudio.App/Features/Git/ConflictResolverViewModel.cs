@@ -39,8 +39,8 @@ public sealed partial class ConflictResolverViewModel(GitService service, IGitOp
     public bool AllConflictsChosen => Conflicts.Count > 0 && Conflicts.All(c => c.IsResolved);
 
     private bool CanResolve(GitChange? change) => host.CanOperate && change is { IsConflict: true };
-    [RelayCommand(CanExecute = nameof(CanResolve))]
-    private Task ResolveConflictsAsync(GitChange? change) => host.RunAsync("Open conflicts", async token =>
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanResolve))]
+    private Task ResolveConflictsAsync(GitChange? change, CancellationToken cancel) => host.RunAsync("Open conflicts", async token =>
     {
         if (!await host.SaveOpenDocumentsAsync(token))
             throw new InvalidOperationException("Save open documents before resolving conflicts.");
@@ -52,11 +52,11 @@ public sealed partial class ConflictResolverViewModel(GitService service, IGitOp
         ConflictFile = file;
         UpdateResolution();
         host.ReportStatus($"{file.Blocks.Count} conflict{(file.Blocks.Count == 1 ? "" : "s")} in {file.RelativePath}");
-    });
+    }, cancel);
     [RelayCommand] private void ChooseAll(ConflictChoice choice) { foreach (var conflict in Conflicts) conflict.Choice = choice; }
     private bool CanApplyResolution() => host.CanOperate && ConflictFile is not null && AllConflictsChosen;
-    [RelayCommand(CanExecute = nameof(CanApplyResolution))]
-    private Task ApplyResolutionAsync()
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanApplyResolution))]
+    private Task ApplyResolutionAsync(CancellationToken cancel)
     {
         var file = ConflictFile!;
         var resolved = MergeConflicts.Apply(file.Text, [.. Conflicts.Select(c => c.Block)], [.. Conflicts.Select(c => c.Choice)]);
@@ -65,7 +65,7 @@ public sealed partial class ConflictResolverViewModel(GitService service, IGitOp
             var result = await service.ResolveConflictAsync(file, resolved, token);
             CloseResolver();
             return $"Resolved and staged {file.RelativePath}. " + result;
-        }, changesWorkspaceFiles: true);
+        }, cancel, changesWorkspaceFiles: true);
     }
     [RelayCommand] private void CloseResolver() { ConflictFile = null; Conflicts.Clear(); ResolvedPreview = ""; }
 
