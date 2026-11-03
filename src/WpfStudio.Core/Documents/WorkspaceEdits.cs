@@ -85,7 +85,8 @@ public sealed class WorkspaceEditTransaction
             if (applied.Created && document.DiskHash == null && !File.Exists(document.Path))
             {
                 _store.Close(document);
-                await _store.DeleteRecoveryAsync(document.Path, cancellationToken).ConfigureAwait(false);
+                // Stay on the caller's thread: the next change may write a document the UI is bound to.
+                await _store.DeleteRecoveryAsync(document.Path, cancellationToken);
                 removed.Add(document.Path);
             }
             else document.Content = applied.Change.Before;

@@ -44,6 +44,7 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 | C2 | `StudioFeatures` callbacks replaced by `IWorkspaceMutationHost` | ee4df56 |
 | S1 | `ShellViewModel` split in nine steps: Task List, file groups, Problems, external changes, command palette, change review, project XAML analysis, Solution Explorer, related-file locator, automatic saving, WPF Explorer, breakpoint editing, explorer commands, inspection source verifier, designer source tracker. 3,996 lines across 21 partials → 2,594 across 16 | 4019b98 … 2ddd448 |
 | Performance table, row 2 | `ErrorCount`/`WarningCount` recount once per rebuild (`ProblemsViewModel`) | 240f08b |
+| B69, B70, B71 | CodeLens, blame and change-margin requests observe their faults; the unhandled-fault handler touches UI state only on the UI thread; undo stays on the caller's thread | this change |
 
 ### Partly done
 
@@ -228,6 +229,9 @@ Ordered by impact. "Confirmed" means the code path was read end to end and the f
 | B11 | `Runtime/Debugging/DebuggerViewModel.cs:404-411` | Confirmed. `SaveStateAsync` writes a fixed `statePath + ".tmp"` then moves; callers don't await `ToggleBreakpointAsync`. | Rapid F9 toggles → second `WriteAllTextAsync` hits a sharing violation or the second `Move` finds the temp already gone → error shown, breakpoint state possibly lost. `SolutionCache.cs:233` uses a GUID suffix. |
 | B12 | `ShellViewModel.Inspection.cs:18-26` | Confirmed race (A10). | Start a build while the "Install the debugger?" dialog is open: the inspection launch overwrites `_operation`, and its `finally` disposes the inspection CTS, orphaning the build's cancellation. |
 | B13 | `Core/Wpf/XamlBuildSourceLease.cs:45` | **Possible.** Leased XAML sources are opened with `FileShare.Read`; `DocumentStore.AtomicWriteAsync:150` uses `File.Move(temp, path, overwrite: true)`. | Saving a XAML file while a preview/inspection lease is held raises a sharing-violation `IOException`. |
+| B69 | `ViewModels/EditorViewModel.cs:168`, `EditorViewModel.Git.cs:79,101` | Confirmed and reproduced. `Task.Run(…).ContinueWith(_ => { })` runs after a fault but never reads `task.Exception`, so a failed lens, blame or change-margin request stays unobserved until the finalizer publishes it. | Typing while a lens request runs ("Document version is stale"), or the worker exiting, leaves a faulted task; the next garbage collection raises `UnobservedTaskException`. |
+| B70 | `App.xaml.cs` `ReportUnhandled` | Confirmed. The handler added in the safety-net pass read `Application.MainWindow` and `DataContext` on the calling thread. `UnobservedTaskException` runs on the finalizer thread, where both throw "The calling thread cannot access this object". | B69's fault arrives on the finalizer thread, the handler throws there, and an exception on the finalizer thread ends the process: the last line of defence became the crash. |
+| B71 | `Core/Documents/WorkspaceEdits.cs` `UndoAsync` | Confirmed and reproduced. `ConfigureAwait(false)` on the recovery-gate await moved the rest of the loop off the caller's thread when the gate was contended, and the loop then wrote `document.Content`. | Undoing an edit that created one file and changed another while the recovery writer runs raises `ContentChanged` on a pool thread, which clears diagnostics bound to a collection view: "This type of CollectionView does not support changes to its SourceCollection from a thread different from the Dispatcher thread". |
 
 ### Wrong behaviour
 
@@ -391,3 +395,8 @@ Structural work (S1), step 9:
 - **Inspection source verification** moved to `Features/Inspection/InspectionSourceVerifier.cs` with the `VerifiedInspectionSource` lease record: the build inputs captured at launch, the checksum and file-hash checks, and the buffer comparison that lets navigation and source edits trust the running application's offsets. Its only shell dependency is the current workspace (`IInspectionSourceHost`); the navigation and edit flows in the shell call `InspectionSources.VerifyAsync`.
 - **Designer source tracking** moved to `Features/Designer/DesignerSourceTracker.cs`: it follows the editor the designer previews and closes the preview when that editor's XAML project context changes, releasing its subscriptions on dispose.
 - `ShellViewModel` is now 2,594 lines across 16 partials.
+
+CodeLens crash:
+
+- **B69** `TaskObservation.Forget` (in `WpfStudio.Contracts`) is the fire-and-forget primitive: it always reads the fault, optionally reports it, and ignores cancellation. The lens, blame and change-margin requests use it instead of an empty `ContinueWith`. **B70** the handler moved to `Services/UnhandledFaultReporter.cs`, which logs from any thread and runs everything that touches the window through the dispatcher, with a failure to display contained. **B71** `UndoAsync` no longer leaves the caller's thread.
+- `WPFSTUDIO_TEST_CODELENS_ONLY=1` runs a smoke scenario with a real window and worker: lenses are requested, clicked, toggled and interrupted by typing and by killing the worker, then the test forces finalization and asserts no thread-affinity exception and no unobserved fault. Before the fix it failed with the `ScheduleCodeLens` fault; `CrashGuardTests` and `WorkspaceEditGuardTests` cover the parts without a worker.

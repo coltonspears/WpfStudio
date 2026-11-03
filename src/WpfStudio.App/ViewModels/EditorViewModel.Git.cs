@@ -1,4 +1,5 @@
 using WpfStudio.App.Features.Git;
+using WpfStudio.Contracts;
 using WpfStudio.Core.Git;
 
 namespace WpfStudio.App.ViewModels;
@@ -64,7 +65,7 @@ public sealed partial class EditorViewModel
         var token = _gitChanges.Token;
         var gitBase = GitBase;
         var text = State.Content;
-        _ = Task.Run(async () =>
+        Task.Run(async () =>
         {
             if (!immediate) await Task.Delay(250, token);
             var changes = gitBase is null ? [] : gitBase.IsTracked && gitBase.HeadText is null && gitBase.HeadCommit is not null
@@ -76,7 +77,7 @@ public sealed partial class EditorViewModel
                 LineChanges = changes;
                 GitChanged?.Invoke();
             }, token);
-        }, token).ContinueWith(_ => { }, TaskScheduler.Default);
+        }, token).Forget();
     }
 
     private void ScheduleBlame()
@@ -88,7 +89,7 @@ public sealed partial class EditorViewModel
         var token = _gitBlame.Token;
         var text = State.Content;
         var version = State.Version;
-        _ = Task.Run(async () =>
+        Task.Run(async () =>
         {
             await Task.Delay(BlameVersion < 0 ? 0 : 1200, token); // Blame the first time at once, then after typing pauses.
             var blame = await git.BlameAsync(gitBase.Root, gitBase.RelativePath, text, token);
@@ -98,7 +99,7 @@ public sealed partial class EditorViewModel
                 Blame = blame; BlameVersion = version;
                 GitChanged?.Invoke();
             }, token);
-        }, token).ContinueWith(_ => { }, TaskScheduler.Default);
+        }, token).Forget();
     }
 
     private void DisposeGit()

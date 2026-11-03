@@ -104,6 +104,11 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.Contains(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Welcome");
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/welcome.png"));
             Application.Current.MainWindow = window;
+            if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_CODELENS_ONLY") == "1")
+            {
+                await VerifyCodeLensThreadingAsync(root, shell, provider.GetRequiredService<WorkspaceClient>());
+                return;
+            }
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_MEMORY_ONLY") == "1")
             {
                 await VerifyMemoryProfilerAsync(root, window, manager, shell);
