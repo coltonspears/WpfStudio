@@ -113,12 +113,12 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     void ISolutionExplorerHost.SetStartupProject(WorkspaceProject project) { StartupProject = project; Status = project.Name + " is the startup project"; }
     async Task<bool> IWorkspaceMutationHost.SaveBeforeMutationAsync()
     {
-        if (IsBusy || _loading || IsPreviewOpen || Debugger.IsActive) throw new InvalidOperationException("Finish the current build, debug session, or change preview before modifying the workspace.");
+        if (IsBusy || IsPreviewOpen || Debugger.IsActive) throw new InvalidOperationException("Finish the current build, debug session, or change preview before modifying the workspace.");
         return await SaveAllDocumentsAsync();
     }
     Task IWorkspaceMutationHost.WorkspaceChangedAsync() => WorkspaceMutatedAsync();
     /// <summary>After a tool changed workspace files: re-check open files against disk, then reload the project model.</summary>
-    private async Task WorkspaceMutatedAsync() { await CheckExternalChangesAsync(fromAppOperation: true); await ReloadWorkspaceAsync(); }
+    private async Task WorkspaceMutatedAsync() { await CheckExternalChangesAsync(fromAppOperation: true); await ReloadWhenFreeAsync(); }
     void IStudioToolsHost.OpenFile(string path) => GuardAsync(() => OpenDocumentAsync(path)).Forget(ReportBackgroundFault);
     // Commits, checkouts and merges change what each editor's change margin and blame compare with.
     void IStudioToolsHost.GitRepositoryChanged() => RefreshEditorGit();
@@ -136,7 +136,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     Task<string> IDesignerSourceHost.NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigatePreviewBindingSourceAsync(navigation, cancellationToken);
 
     // ------------------------------------------------------------------ IInspectionRequestHost
-    Task IInspectionRequestHost.LaunchAsync(bool debug) => LaunchWithInspectionAsync(debug);
+    Task IInspectionRequestHost.LaunchAsync(bool debug) => ExecuteWhenAvailableAsync(debug ? DebugWithInspectionCommand : RunWithInspectionCommand);
     Task<string> IInspectionRequestHost.NavigateSourceAsync(InspectionSourceRequest request, CancellationToken cancellationToken) => NavigateInspectionSourceAsync(request, cancellationToken);
     Task<string> IInspectionRequestHost.NavigateBindingSourceAsync(InspectionBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigateInspectionBindingSourceAsync(navigation, cancellationToken);
     Task<InspectionSourceEditOutcome> IInspectionRequestHost.EditSourceAsync(InspectionSourceEditRequest request, CancellationToken cancellationToken) => EditInspectionSourceAsync(request, cancellationToken);

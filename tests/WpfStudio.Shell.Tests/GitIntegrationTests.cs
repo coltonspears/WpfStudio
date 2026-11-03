@@ -432,6 +432,66 @@ public sealed class GitIntegrationTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.StageAsync(fixture.Root, new("../outside.cs", null, '?', '?')));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellingACommitEndsItsHookAndFreesThePane(bool paneButton)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        await File.WriteAllTextAsync(fixture.File(".git/hooks/pre-commit"), "#!/bin/sh\ntouch .git/hook-started\ncd /\nsleep 120\n");
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop());
+        await model.SetWorkspaceAsync(fixture.Root);
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "changed\n");
+        await model.RefreshCommand.ExecuteAsync(null);
+        await model.StageAllCommand.ExecuteAsync(null);
+        model.CommitMessage = "Never lands";
+
+        var commit = model.CommitCommand.ExecuteAsync(null);
+        using var patience = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        while (!File.Exists(fixture.File(".git/hook-started"))) await Task.Delay(50, patience.Token);
+
+        // The operations exclude each other, and ExecuteAsync skips CanExecute, so this reaches the gate itself.
+        Assert.True(model.IsBusy);
+        Assert.False(model.RefreshCommand.CanExecute(null));
+        var before = model.Status;
+        await model.RefreshCommand.ExecuteAsync(null);
+        Assert.Equal(before, model.Status);
+        Assert.False(commit.IsCompleted);
+
+        if (paneButton) model.CancelCommand.Execute(null); else model.CommitCancelCommand.Execute(null);
+        await commit.WaitAsync(TimeSpan.FromMinutes(1));
+
+        Assert.False(model.IsBusy);
+        Assert.Contains("cancelled", model.Status);
+        Assert.Equal("Never lands", model.CommitMessage);
+        Assert.True(commit.IsCompletedSuccessfully);
+        Assert.Empty(model.Error);
+    }
+
+    [Fact]
+    public async Task ChangingWorkspaceCancelsARunningOperationThenRefreshes()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        await File.WriteAllTextAsync(fixture.File(".git/hooks/pre-commit"), "#!/bin/sh\ntouch .git/hook-started\ncd /\nsleep 120\n");
+        using var model = new GitViewModel(fixture.Service, new FakeDesktop());
+        await model.SetWorkspaceAsync(fixture.Root);
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "changed\n");
+        await model.RefreshCommand.ExecuteAsync(null);
+        await model.StageAllCommand.ExecuteAsync(null);
+        model.CommitMessage = "Never lands";
+        var commit = model.CommitCommand.ExecuteAsync(null);
+        using var patience = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        while (!File.Exists(fixture.File(".git/hook-started"))) await Task.Delay(50, patience.Token);
+
+        await model.SetWorkspaceAsync(fixture.Root).WaitAsync(TimeSpan.FromMinutes(1));
+
+        Assert.True(commit.IsCompletedSuccessfully);
+        Assert.False(model.IsBusy);
+        Assert.Equal(fixture.Root, model.RepositoryRoot, ignoreCase: true);
+    }
+
     [Fact]
     public async Task SuccessfulWorkingFileOperationsNotifyTheWorkspaceButFailuresDoNot()
     {

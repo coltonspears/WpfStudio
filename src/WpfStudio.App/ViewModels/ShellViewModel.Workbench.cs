@@ -24,7 +24,7 @@ public sealed partial class ShellViewModel
     {
         var onlyLooseFiles = Workspace == null && Explorer.Nodes.Count == 0;
         if (onlyLooseFiles && Documents.Count == 0) { Status = "No solution is open"; return true; }
-        if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return false; }
+        if (IsBusy) { Status = "Wait for the current workspace operation to finish"; return false; }
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before closing the solution"; return false; }
         if (!await CloseAllDocumentsForWorkspaceAsync()) return false;
         if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);

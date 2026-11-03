@@ -42,7 +42,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly ILogger<ShellViewModel> _logger;
     private readonly StudioPaths _paths;
     private readonly CancellationTokenSource _lifetime = new();
-    private CancellationTokenSource? _operation;
+    private readonly OperationGate _operations;
     private readonly List<WorkspaceDiagnostic> _buildDiagnostics = [];
     private string[] _allFiles = [];
     private bool _initialized;
@@ -55,6 +55,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IDesktopService desktop, IClipboardService clipboard, IThemeService theme, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler, EditorPreferences editor, WpfStudio.Workspace.Xaml.XamlFormattingService xamlFormatter, ShellToolServices tools)
     {
+        _operations = new(busy => IsBusy = busy, _lifetime.Token);
         _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _desktop = desktop; _clipboard = clipboard; Theme = theme; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value; _xamlFormatter = xamlFormatter;
         Debugger = debugger; Terminal = terminal; Database = database; Features = features; MemoryProfiler = memoryProfiler; Designer = designer; Editor = editor;
         // System colours and syntax highlighting are not set until a theme is applied.
@@ -79,6 +80,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             if (e.PropertyName != nameof(DebuggerViewModel.IsStopped)) return;
             LiveInspection.SetDebuggerState(debugger.IsStopped);
+            DebugCommand.NotifyCanExecuteChanged();
             if (!debugger.IsStopped) foreach (var doc in Documents) doc.ExecutionLine = -1;
         };
         workspace.WorkerExited += (_, reason) => dispatcher.Post(() => { Status = "Language worker stopped. Use Restart language service to reconnect."; AppendOutput(reason); });
@@ -111,7 +113,11 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial NavigationResult? SelectedSearchResult { get; set; }
     [ObservableProperty] public partial string Status { get; set; } = "Ready";
     [ObservableProperty] public partial string Output { get; set; } = "";
-    [ObservableProperty] public partial bool IsBusy { get; set; }
+    /// <summary>True while a build, run, launch, load or reload holds the gate. A reload holds it too, so this alone answers "may another one start".</summary>
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CancelOperationCommand), nameof(BuildCommand), nameof(RestoreCommand), nameof(RebuildCommand), nameof(CleanCommand), nameof(RunCommand), nameof(TestCommand),
+        nameof(BuildSelectedCommand), nameof(RebuildSelectedCommand), nameof(CleanSelectedCommand), nameof(RestoreSelectedCommand), nameof(DebugCommand), nameof(RunWithInspectionCommand), nameof(DebugWithInspectionCommand), nameof(ReloadWorkspaceCommand))]
+    public partial bool IsBusy { get; private set; }
+    private bool CanRunWorkspaceOperation() => !IsBusy;
     [ObservableProperty] public partial string Configuration { get; set; } = "Debug";
     [ObservableProperty] public partial string? TargetFramework { get; set; }
     [ObservableProperty] public partial string? LaunchProfile { get; set; }
@@ -148,8 +154,22 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private void ScheduleContextReload()
     {
         if (!_initialized || Workspace == null || _updatingChoices) return;
+        ReloadWhenFreeAsync().Forget(ReportBackgroundFault);
+    }
+    /// <summary>Reloads now, or when the operation holding the gate ends.</summary>
+    private Task ReloadWhenFreeAsync()
+    {
+        if (Workspace == null || _disposed) return Task.CompletedTask;
         _contextReloadPending = true;
-        if (!_loading && !IsBusy) _ = ReloadWorkspaceAsync();
+        return ExecuteWhenAvailableAsync(ReloadWorkspaceCommand);
+    }
+    /// <summary>For internal callers: ExecuteAsync skips CanExecute, and on a running cancellable command it cancels that execution.</summary>
+    private static Task ExecuteWhenAvailableAsync(IAsyncRelayCommand command) => command.CanExecute(null) ? command.ExecuteAsync(null) : Task.CompletedTask;
+    /// <summary>Frees the gate, then runs the reload that was requested while it was held.</summary>
+    private void EndOperation(OperationGate.Lease lease)
+    {
+        lease.Dispose();
+        if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault);
     }
 
     public async Task InitializeAsync(string[] arguments)
@@ -209,15 +229,15 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private Task OpenFileAsync() => GuardAsync(async () => { var path = await _files.OpenFileAsync("Open file", "Source files|*.cs;*.xaml;*.sql;*.json;*.xml;*.props;*.targets;*.csproj;*.md;*.txt|All files|*.*"); if (path != null) await OpenDocumentAsync(path); });
     public async Task LoadWorkspaceAsync(string path)
     {
-        if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
+        if (IsBusy) { Status = "Wait for the current workspace operation to finish"; return; }
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before switching workspaces"; return; }
         if (!await CloseAllDocumentsForWorkspaceAsync()) return;
         if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
         if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(null);
-        // The awaits above let another operation start; claiming the operation token now would orphan its cancellation.
-        if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
-        IsBusy = true; _loading = true; _operation = new();
-        var token = _operation.Token;
+        // The awaits above let another operation start.
+        if (_operations.TryEnter() is not { } lease) { Status = "Wait for the current workspace operation to finish"; return; }
+        _loading = true;
+        var token = lease.Token;
         try
         {
             Status = "Loading " + Path.GetFileName(path) + "…";
@@ -250,7 +270,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
             await SaveSettingsAsync();
         }
-        finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; XamlAnalysis.Request(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
+        finally { _loading = false; lease.Dispose(); XamlAnalysis.Request(); if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); }
         if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
     }
     // Any other status written meanwhile is newer than the refresh's result and stays.
@@ -330,11 +350,18 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
     }
     [RelayCommand] private Task RestartWorkspaceAsync() => GuardAsync(async () => { Workspace = await _workspace.RestartAsync(_lifetime.Token); Status = "Language service restarted"; });
-    [RelayCommand] private Task ReloadWorkspaceAsync() => GuardAsync(async () =>
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task ReloadWorkspaceAsync(CancellationToken cancel) => GuardAsync(async () =>
     {
         if (Workspace == null) return;
         _contextReloadPending = true;
-        if (_loading) return;
+        // The operation holding the gate reloads when it ends.
+        if (_operations.TryEnter(cancel) is not { } lease) return;
+        try { await ReloadProjectModelAsync(lease.Token); }
+        finally { lease.Dispose(); }
+    });
+    /// <summary>The caller holds the gate. Only the load can be cancelled: the steps after it are short and leave the editors consistent with the new model.</summary>
+    private async Task ReloadProjectModelAsync(CancellationToken token)
+    {
         _loading = true;
         try
         {
@@ -345,15 +372,17 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var requestedFramework = TargetFramework;
             Status = "Updating project context…";
             var startupPath = StartupProject?.ProjectPath;
-            Workspace = await _workspace.LoadAsync(new(Workspace.Path, requestedConfiguration, Path.GetExtension(Workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? requestedFramework : null), _lifetime.Token);
+            Workspace = await _workspace.LoadAsync(new(Workspace!.Path, requestedConfiguration, Path.GetExtension(Workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? requestedFramework : null), token);
             ApplyWorkspaceProjects(startupPath);
             foreach (var doc in Documents) await doc.SyncAsync(_lifetime.Token);
             await RefreshWpfAsync(); Status = "Workspace refreshed";
             if (requestedConfiguration != Configuration || requestedFramework != TargetFramework) _contextReloadPending = true;
-          } while (_contextReloadPending && !_lifetime.IsCancellationRequested);
+          } while (_contextReloadPending && !token.IsCancellationRequested);
         }
+        // A load stops the old worker before starting the new one, so nothing keeps serving the previous model.
+        catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested) { Status = "Reload cancelled. Language services are off until you reload the workspace."; }
         finally { _loading = false; XamlAnalysis.Request(); }
-    });
+    }
     private async Task RefreshLaunchChoicesAsync()
     {
         if (StartupProject == null) return;
@@ -502,31 +531,32 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         return true;
     }
     [RelayCommand] private Task ReloadDocumentAsync() => GuardAsync(async () => { if (ActiveDocument == null) return; if (ActiveDocument.State.IsDirty && !await _dialogs.ConfirmAsync("Reload document", "Discard editor changes and reload this file from disk?")) return; await _store.ReloadAsync(ActiveDocument.State); ExternalChanges.Forget(ActiveDocument); });
-    [RelayCommand] private Task BuildAsync() => RunBuildAsync(BuildOperation.Build);
-    [RelayCommand] private Task RestoreAsync() => RunBuildAsync(BuildOperation.Restore);
-    [RelayCommand] private Task RebuildAsync() => RunBuildAsync(BuildOperation.Rebuild);
-    [RelayCommand] private Task CleanAsync() => RunBuildAsync(BuildOperation.Clean);
-    [RelayCommand] private Task RunAsync() => RunBuildAsync(BuildOperation.Run);
-    [RelayCommand] private Task TestAsync() => RunBuildAsync(BuildOperation.Test);
-    [RelayCommand] private Task BuildSelectedAsync() => RunSelectedBuildAsync(BuildOperation.Build);
-    [RelayCommand] private Task RebuildSelectedAsync() => RunSelectedBuildAsync(BuildOperation.Rebuild);
-    [RelayCommand] private Task CleanSelectedAsync() => RunSelectedBuildAsync(BuildOperation.Clean);
-    [RelayCommand] private Task RestoreSelectedAsync() => RunSelectedBuildAsync(BuildOperation.Restore);
-    [RelayCommand] private void CancelOperation() { _operation?.Cancel(); Status = "Cancelling…"; }
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task BuildAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Build, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RestoreAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Restore, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RebuildAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Rebuild, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task CleanAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Clean, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RunAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Run, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task TestAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Test, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task BuildSelectedAsync(CancellationToken cancel) => RunSelectedBuildAsync(BuildOperation.Build, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RebuildSelectedAsync(CancellationToken cancel) => RunSelectedBuildAsync(BuildOperation.Rebuild, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task CleanSelectedAsync(CancellationToken cancel) => RunSelectedBuildAsync(BuildOperation.Clean, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RestoreSelectedAsync(CancellationToken cancel) => RunSelectedBuildAsync(BuildOperation.Restore, cancel);
+    /// <summary>The toolbar's one Stop button: it cancels whichever operation holds the gate, including a workspace load, which no command started.</summary>
+    [RelayCommand(CanExecute = nameof(IsBusy))] private void CancelOperation() { _operations.Cancel(); Status = "Cancelling…"; }
     /// <summary>Builds the solution or project chosen in Solution Explorer instead of the whole workspace.</summary>
-    private Task RunSelectedBuildAsync(BuildOperation operation)
+    private Task RunSelectedBuildAsync(BuildOperation operation, CancellationToken cancel)
     {
-        if (Explorer.SelectedNode is { CanBuild: true } node) return RunBuildAsync(operation, node.Path);
+        if (Explorer.SelectedNode is { CanBuild: true } node) return RunBuildAsync(operation, cancel, node.Path);
         Status = "Select a solution or project in Solution Explorer";
         return Task.CompletedTask;
     }
     /// <summary>The opened solution, for a project built from it.</summary>
     private string? SolutionPathFor(string path) => Workspace is { } workspace && path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
         && !workspace.Path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? workspace.Path : null;
-    private Task RunBuildAsync(BuildOperation operation, string? target = null) => GuardAsync(async () =>
+    private Task RunBuildAsync(BuildOperation operation, CancellationToken cancel, string? target = null) => GuardAsync(async () =>
     {
-        if (Workspace == null || IsBusy || _loading) return;
-        IsBusy = true; _operation = new(); ToolRequested?.Invoke(Workbenches.Output); Output = "";
+        if (Workspace == null || _operations.TryEnter(cancel) is not { } lease) return;
+        ToolRequested?.Invoke(Workbenches.Output); Output = "";
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
@@ -537,29 +567,32 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var framework = Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase)
                 && (target == null || path.Equals(StartupProject?.ProjectPath, StringComparison.OrdinalIgnoreCase)) ? TargetFramework : null;
             using var progress = CreateBuildProgress();
-            var result = await _build.RunAsync(new(path, operation, Configuration, framework, LaunchProfile, SolutionPath: SolutionPathFor(path)), progress, _operation.Token);
+            var result = await _build.RunAsync(new(path, operation, Configuration, framework, LaunchProfile, SolutionPath: SolutionPathFor(path)), progress, lease.Token);
             progress.Flush();
             Status = result.Cancelled ? "Cancelled" : result.ExitCode == 0 ? label + " succeeded" : label + $" failed (exit {result.ExitCode})";
-            if (result.ExitCode == 0 && operation is BuildOperation.Build or BuildOperation.Rebuild or BuildOperation.Restore) await ReloadWorkspaceAsync();
+            if (result.ExitCode == 0 && operation is BuildOperation.Build or BuildOperation.Rebuild or BuildOperation.Restore) await ReloadProjectModelAsync(lease.Token);
         }
-        finally { _operation.Dispose(); _operation = null; IsBusy = false; if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
+        finally { EndOperation(lease); }
     });
-    [RelayCommand] private Task DebugAsync() => GuardAsync(async () =>
+    // Continue is not a workspace operation, so F5 keeps working while, say, a build runs beside a paused session.
+    private bool CanDebug() => !IsBusy || Debugger.IsStopped;
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanDebug))] private Task DebugAsync(CancellationToken cancel) => GuardAsync(async () =>
     {
         if (Debugger.IsStopped) { await Debugger.ContinueCommand.ExecuteAsync(null); return; }
         if (Debugger.IsActive) { Status = "The debugger is already running"; return; }
-        if (IsBusy || _loading || StartupProject == null) return;
+        if (IsBusy || StartupProject == null) return;
         if (ProjectDiscovery.TargetsNetFramework(StartupProject, TargetFramework))
         {
             // netcoredbg debugs .NET (Core) processes only; the .NET Framework runtime needs Visual Studio's debugger.
             if (await _dialogs.ConfirmAsync("Run without debugging", $"{StartupProject.Name} targets .NET Framework. The bundled debugger supports .NET 5 and later only. Run it without debugging instead?"))
-                await RunCommand.ExecuteAsync(null);
+                await ExecuteWhenAvailableAsync(RunCommand);
             else Status = "Debugging .NET Framework applications isn't supported. Use Run without debugging (Ctrl+F5).";
             return;
         }
         if (!await EnsureDebuggerAsync()) return;
-        if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
-        IsBusy = true; _operation = new(); ToolRequested?.Invoke(Workbenches.Debugger);
+        // The install prompt keeps the dispatcher running, so a build may have started behind it.
+        if (_operations.TryEnter(cancel) is not { } lease) { Status = "Wait for the current workspace operation to finish"; return; }
+        ToolRequested?.Invoke(Workbenches.Debugger);
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
@@ -569,14 +602,14 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var profile = LaunchProfile;
             Status = "Building for debug…";
             using var progress = CreateBuildProgress();
-            var result = await _build.RunAsync(new(project.ProjectPath, BuildOperation.Build, configuration, framework, SolutionPath: SolutionPathFor(project.ProjectPath)), progress, _operation.Token);
+            var result = await _build.RunAsync(new(project.ProjectPath, BuildOperation.Build, configuration, framework, SolutionPath: SolutionPathFor(project.ProjectPath)), progress, lease.Token);
             progress.Flush();
             if (result.ExitCode != 0 || result.Cancelled) { Status = "Debug launch cancelled: build did not succeed"; return; }
-            var launch = await _build.ResolveLaunchAsync(project.ProjectPath, configuration, framework, profile, _operation.Token);
-            await Debugger.LaunchAsync(new DebugLaunchConfiguration(launch.Program, launch.WorkingDirectory, launch.Arguments, launch.Environment), _operation.Token);
+            var launch = await _build.ResolveLaunchAsync(project.ProjectPath, configuration, framework, profile, lease.Token);
+            await Debugger.LaunchAsync(new DebugLaunchConfiguration(launch.Program, launch.WorkingDirectory, launch.Arguments, launch.Environment), lease.Token);
             Status = "Debugging " + project.Name;
         }
-        finally { _operation.Dispose(); _operation = null; IsBusy = false; if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
+        finally { EndOperation(lease); }
     });
     /// <summary>Offers to install the debug adapter when it is missing; false when debugging cannot start.</summary>
     private async Task<bool> EnsureDebuggerAsync()
@@ -873,7 +906,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
         // Closing for good: documents whose edits were discarded must never be saved afterwards.
         AutoSave.Stop();
-        _operation?.Cancel();
+        _operations.Cancel();
         LayoutSaveRequested?.Invoke(); await SaveSettingsAsync();
         await Database.CompleteCloseAsync();
         _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
@@ -901,7 +934,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
         Breakpoints.Dispose();
         Features.Dispose();
-        _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
+        _operations.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
         foreach (var document in Documents) document.Dispose();
         // Dispose UI-bound commands while the shell still owns its dispatcher
         // context; DI may continue its remaining asynchronous disposal off-thread.
@@ -910,6 +943,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         await Designer.DisposeAsync();
         await LiveInspection.DisposeAsync();
         await MemoryProfiler.DisposeAsync();
-        await _workspace.DisposeAsync(); _operation?.Dispose(); _lifetime.Dispose();
+        await _workspace.DisposeAsync(); _lifetime.Dispose();
     }
 }

@@ -112,7 +112,7 @@ public sealed partial class GitViewModel
     /// Runs a network action with stored credentials. When they are missing or rejected, offers Sign in and retry,
     /// which lets Git Credential Manager show its window (Microsoft Entra for Azure DevOps, a browser for GitHub).
     /// </summary>
-    private Task NetworkAsync(string label, Func<bool, CancellationToken, Task<string>> action, bool save = false, bool changesWorkspaceFiles = false)
+    private Task NetworkAsync(string label, Func<bool, CancellationToken, Task<string>> action, CancellationToken cancel, bool save = false, bool changesWorkspaceFiles = false)
     {
         CanSignIn = false;
         return MutateAsync(label, async token =>
@@ -124,34 +124,34 @@ public sealed partial class GitViewModel
                 CanSignIn = true;
                 throw new InvalidOperationException($"{(Remote?.HostName is { } host && Remote is not null ? host : "The remote")} needs you to sign in. Choose Sign in and retry. " + ex.Message);
             }
-        }, save, changesWorkspaceFiles);
+        }, cancel, save, changesWorkspaceFiles);
     }
     private bool CanRetryWithSignIn() => CanOperate() && CanSignIn && _signInRetry is not null;
-    [RelayCommand(CanExecute = nameof(CanRetryWithSignIn))]
-    private Task SignInAndRetryAsync()
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRetryWithSignIn))]
+    private Task SignInAndRetryAsync(CancellationToken cancel)
     {
         var retry = _signInRetry!;
         _signInRetry = null; CanSignIn = false;
-        return MutateAsync(retry.Label + " (signed in)", retry.Action, retry.Save, retry.ChangesWorkspaceFiles);
+        return MutateAsync(retry.Label + " (signed in)", retry.Action, cancel, retry.Save, retry.ChangesWorkspaceFiles);
     }
 
     // ------------------------------------------------------------------ Merge and conflicts
     private bool CanMerge() => CanOperate() && !HasOperation && !string.IsNullOrWhiteSpace(MergeSource) && MergeSource != Branch;
-    [RelayCommand(CanExecute = nameof(CanMerge))]
-    private Task MergeBranchAsync()
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanMerge))]
+    private Task MergeBranchAsync(CancellationToken cancel)
     {
         IsBranchPickerOpen = false;
-        return MutateAsync($"Merge {MergeSource} into {Branch}", token => _service.MergeAsync(RepositoryRoot!, MergeSource!, token), save: true, changesWorkspaceFiles: true);
+        return MutateAsync($"Merge {MergeSource} into {Branch}", token => _service.MergeAsync(RepositoryRoot!, MergeSource!, token), cancel, save: true, changesWorkspaceFiles: true);
     }
     private bool CanEndOperation() => CanOperate() && HasOperation;
-    [RelayCommand(CanExecute = nameof(CanEndOperation))]
-    private Task AbortOperationAsync() => MutateAsync("Abort " + Operation.ToString().ToLowerInvariant(), token => _service.AbortOperationAsync(RepositoryRoot!, token), save: true, changesWorkspaceFiles: true);
-    [RelayCommand(CanExecute = nameof(CanEndOperation))]
-    private Task ContinueOperationAsync() => MutateAsync("Continue " + Operation.ToString().ToLowerInvariant(), token => _service.ContinueOperationAsync(RepositoryRoot!, token), save: true, changesWorkspaceFiles: true);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanEndOperation))]
+    private Task AbortOperationAsync(CancellationToken cancel) => MutateAsync("Abort " + Operation.ToString().ToLowerInvariant(), token => _service.AbortOperationAsync(RepositoryRoot!, token), cancel, save: true, changesWorkspaceFiles: true);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanEndOperation))]
+    private Task ContinueOperationAsync(CancellationToken cancel) => MutateAsync("Continue " + Operation.ToString().ToLowerInvariant(), token => _service.ContinueOperationAsync(RepositoryRoot!, token), cancel, save: true, changesWorkspaceFiles: true);
 
     private bool CanResolve(GitChange? change) => CanOperate() && change is { IsConflict: true };
-    [RelayCommand(CanExecute = nameof(CanResolve))]
-    private Task ResolveConflictsAsync(GitChange? change) => RunAsync("Open conflicts", async token =>
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanResolve))]
+    private Task ResolveConflictsAsync(GitChange? change, CancellationToken cancel) => RunAsync("Open conflicts", async token =>
     {
         if (_saveBeforeOperation is not null && !await _saveBeforeOperation(token))
             throw new InvalidOperationException("Save open documents before resolving conflicts.");
@@ -163,11 +163,11 @@ public sealed partial class GitViewModel
         ConflictFile = file;
         UpdateResolution();
         Status = $"{file.Blocks.Count} conflict{(file.Blocks.Count == 1 ? "" : "s")} in {file.RelativePath}";
-    });
+    }, cancel);
     [RelayCommand] private void ChooseAll(ConflictChoice choice) { foreach (var conflict in Conflicts) conflict.Choice = choice; }
     private bool CanApplyResolution() => CanOperate() && ConflictFile is not null && AllConflictsChosen;
-    [RelayCommand(CanExecute = nameof(CanApplyResolution))]
-    private Task ApplyResolutionAsync()
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanApplyResolution))]
+    private Task ApplyResolutionAsync(CancellationToken cancel)
     {
         var file = ConflictFile!;
         var resolved = MergeConflicts.Apply(file.Text, [.. Conflicts.Select(c => c.Block)], [.. Conflicts.Select(c => c.Choice)]);
@@ -176,7 +176,7 @@ public sealed partial class GitViewModel
             var result = await _service.ResolveConflictAsync(file, resolved, token);
             CloseResolver();
             return $"Resolved and staged {file.RelativePath}. " + result;
-        }, changesWorkspaceFiles: true);
+        }, cancel, changesWorkspaceFiles: true);
     }
     [RelayCommand] private void CloseResolver() { ConflictFile = null; Conflicts.Clear(); ResolvedPreview = ""; }
 
