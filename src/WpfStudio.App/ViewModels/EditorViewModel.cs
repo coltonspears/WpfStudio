@@ -184,6 +184,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         UpdateSelection(start, length);
         SelectionRequested?.Invoke(new(caret, start, length));
     }
+    public void ReportCaret(int line, int column, int offset) { State.CaretOffset = offset; State.CaretLine = line; State.CaretColumn = column; }
+    /// <summary>The diagnostics covering an offset, most severe first, as many as the hover card has room for.</summary>
+    public IReadOnlyList<WorkspaceDiagnostic> DiagnosticsAt(int offset) =>
+        Diagnostics.Where(d => offset >= d.Start && offset < d.Start + Math.Max(1, d.Length)).OrderBy(d => d.Severity switch { "Error" => 0, "Warning" => 1, _ => 2 }).Take(4).ToArray();
     public void ToggleBreakpoint(int line) => BreakpointRequested?.Invoke(line);
     /// <summary>Asks the attached editor to expand a snippet at the caret, wrapping any selection the snippet supports.</summary>
     public event Action<WpfStudio.Core.Text.CodeSnippet>? SnippetRequested;
