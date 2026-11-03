@@ -554,7 +554,20 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var line = location.GetMappedLineSpan();
         var path = line.Path;
         var start = location.SourceSpan.Start;
-        if (!File.Exists(path) && location.SourceTree is { } tree)
+        var available = File.Exists(path);
+        if (available && !string.Equals(path, location.SourceTree?.FilePath, StringComparison.OrdinalIgnoreCase))
+        {
+            // #line maps generated WPF fields back to XAML. Their C# offsets are not XAML offsets.
+            try
+            {
+                var text = SourceText.From(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false));
+                var sourceLine = text.Lines[Math.Clamp(line.StartLinePosition.Line, 0, text.Lines.Count - 1)];
+                start = Math.Min(sourceLine.End, sourceLine.Start + line.StartLinePosition.Character);
+            }
+            // Locked, unreadable or just deleted: the C# declaration below is still somewhere to go.
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { available = false; }
+        }
+        if (!available && location.SourceTree is { } tree)
         {
             var text = await tree.GetTextAsync(cancellationToken).ConfigureAwait(false);
             path = await CacheGeneratedAsync(tree.FilePath, text, cancellationToken).ConfigureAwait(false);

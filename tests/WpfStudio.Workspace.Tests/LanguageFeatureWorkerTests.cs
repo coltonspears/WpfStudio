@@ -82,6 +82,40 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
         Assert.Equal("Total", edit.NewText);
     }
 
+    [Fact]
+    public async Task DefinitionMappedByLineDirectiveFallsBackWhenItsFileCannotBeRead()
+    {
+        var mapped = Path.Combine(_directory, "Mapped.xaml");
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = $"namespace Shop;\npublic class Page\n{{\n#line 1 \"{mapped}\"\n    public int Field;\n#line default\n    public int Read() => Field;\n}}\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        var usage = new DocumentPositionRequest(Source, text.LastIndexOf("Field", StringComparison.Ordinal) + 1, 1);
+
+        // Readable: the directive's target, with an offset in that file rather than the C#.
+        await File.WriteAllTextAsync(mapped, "<Grid />\n");
+        var target = Assert.Single(await engine.GetDefinitionAsync(usage));
+        Assert.Equal(mapped, target.Path, ignoreCase: true);
+        Assert.Equal(1, target.Line);
+        Assert.InRange(target.Start, 0, "<Grid />".Length);
+
+        // Renamed after the last build.
+        File.Delete(mapped);
+        AssertFallsBackToDeclaration(Assert.Single(await engine.GetDefinitionAsync(usage)));
+
+        // Exists but cannot be read: the worker must still answer, with the C# holding the declaration.
+        await File.WriteAllTextAsync(mapped, "<Grid />\n");
+        using var locked = new FileStream(mapped, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        AssertFallsBackToDeclaration(Assert.Single(await engine.GetDefinitionAsync(usage)));
+
+        void AssertFallsBackToDeclaration(SourceLocation location)
+        {
+            Assert.NotEqual(mapped, location.Path, StringComparer.OrdinalIgnoreCase);
+            Assert.True(File.Exists(location.Path));
+            Assert.Equal(text.IndexOf("Field;", StringComparison.Ordinal), location.Start);
+        }
+    }
+
     private static string Apply(string text, IReadOnlyList<TextEdit> edits) =>
         edits.OrderByDescending(edit => edit.Start).Aggregate(text, (current, edit) => current.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.NewText));
 
