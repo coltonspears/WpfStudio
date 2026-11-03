@@ -25,9 +25,9 @@ public sealed partial class DesignerViewModel
     private bool _scenariosLoaded;
     public ObservableCollection<DesignerScenario> Scenarios { get; } = [DefaultScenario];
     public ObservableCollection<string> ScenarioWarnings { get; } = [];
-    [ObservableProperty] public partial DesignerScenario? SelectedScenario { get; set; } = DefaultScenario;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(UsesApplicationResources))] public partial DesignerScenario? SelectedScenario { get; set; } = DefaultScenario;
     [ObservableProperty] public partial bool UseDesignTimeValues { get; set; } = true;
-    [ObservableProperty] public partial string? ScenarioConfigurationPath { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(ScenarioConfigurationDescription))] public partial string? ScenarioConfigurationPath { get; set; }
     public string ScenarioDescription => IsCurrent
         ? _snapshot?.Scenario is { } applied
             ? $"Active scenario: {applied.Configuration.Name} · {Path.GetFileName(applied.AssemblyPath)} · build {applied.AssemblySha256[..Math.Min(12, applied.AssemblySha256.Length)]}"
@@ -43,7 +43,6 @@ public sealed partial class DesignerViewModel
 
     partial void OnSelectedScenarioChanged(DesignerScenario? value)
     {
-        OnPropertyChanged(nameof(UsesApplicationResources));
         if (_updatingScenarios) return;
         _scenarioSelectionPending = true;
         Invalidate();
@@ -56,11 +55,7 @@ public sealed partial class DesignerViewModel
     {
         if (!IsCompiledPreview) { _scenarioSelectionPending = true; Invalidate(); Status = "Design-time values changed. Refresh the source preview."; }
     }
-    partial void OnScenarioConfigurationPathChanged(string? value)
-    {
-        OnPropertyChanged(nameof(ScenarioConfigurationDescription));
-        NotifyScenarioConfiguration();
-    }
+    partial void OnScenarioConfigurationPathChanged(string? value) => NotifyScenarioConfiguration();
     private void NotifyScenarioConfiguration()
     {
         OnPropertyChanged(nameof(CanOpenScenarioConfiguration));

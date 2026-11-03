@@ -22,7 +22,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     private bool _disposed, _updating;
     public ObservableCollection<ProfileProcess> Processes { get; } = [];
 
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CaptureCommand))] public partial ProfileProcess? SelectedProcess { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsLiveSource), nameof(TimelineTitle)), NotifyCanExecuteChangedFor(nameof(CaptureCommand))] public partial ProfileProcess? SelectedProcess { get; set; }
     [ObservableProperty] public partial HeapSummary? Summary { get; set; }
     [ObservableProperty] public partial string Status { get; set; } = "Open a full dump or capture a running .NET application to investigate memory.";
     [ObservableProperty] public partial string BusyMessage { get; set; } = "";
