@@ -17,6 +17,7 @@ using WpfStudio.Core.Documents;
 using WpfStudio.Core.Git;
 
 [assembly: InternalsVisibleTo("WpfStudio.Shell.Tests")]
+[assembly: InternalsVisibleTo("WpfStudio.App.Tests")]
 
 namespace WpfStudio.App.Controls;
 
@@ -35,6 +36,7 @@ public sealed partial class EditorSurface : TextEditor
     private readonly EditorFolding _folding;
     private readonly EditorHover _hover;
     private readonly EditorCompletion _completion;
+    private readonly EditorLineSuggestion _lineSuggestion;
     private TextDocument? _trackedDocument;
     public EditorSurface()
     {
@@ -62,8 +64,9 @@ public sealed partial class EditorSurface : TextEditor
         _folding = new EditorFolding(this);
         _hover = new EditorHover(this);
         _completion = new EditorCompletion(this, _hover, new EditorTyping(this));
+        _lineSuggestion = new EditorLineSuggestion(this, () => _completion.IsWindowOpen || _completion.IsPending); TextArea.TextView.ElementGenerators.Add(_lineSuggestion);
         TextChanged += OnEditorTextChanged;
-        TextArea.Caret.PositionChanged += (_, _) => { if (ViewModel is { } vm && !_syncing) vm.ReportCaret(TextArea.Caret.Line, TextArea.Caret.Column, CaretOffset); };
+        TextArea.Caret.PositionChanged += (_, _) => { _lineSuggestion.OnCaretMoved(); if (ViewModel is { } vm && !_syncing) vm.ReportCaret(TextArea.Caret.Line, TextArea.Caret.Column, CaretOffset); };
         TextArea.TextEntered += _completion.OnTextEntered;
         TextArea.SelectionChanged += (_, _) => ViewModel?.UpdateSelection(SelectionStart, SelectionLength);
         PreviewMouseRightButtonDown += (_, e) =>
@@ -73,7 +76,7 @@ public sealed partial class EditorSurface : TextEditor
         TextArea.TextEntering += _completion.OnTextEntering;
         CommandManager.AddPreviewExecutedHandler(TextArea, _completion.OnPreviewExecuted);
         PreviewMouseDown += (_, _) => { _completion.CancelPending(); _hover.Cancel(); };
-        LostKeyboardFocus += (_, _) => _completion.CancelPending();
+        LostKeyboardFocus += (_, _) => { _completion.CancelPending(); _lineSuggestion.Cancel(); };
         PreviewKeyDown += OnPreviewKeyDown;
         Loaded += (_, _) =>
         {
@@ -91,6 +94,7 @@ public sealed partial class EditorSurface : TextEditor
     public EditorViewModel? ViewModel { get => (EditorViewModel?)GetValue(ViewModelProperty); set => SetValue(ViewModelProperty, value); }
     /// <summary>The model this control is attached to. It differs from <see cref="ViewModel"/> while a change of tab is under way.</summary>
     internal EditorViewModel? AttachedModel => _attached;
+    internal EditorLineSuggestion LineSuggestion => _lineSuggestion;
     internal Task CommitCompletionAsync(Func<CancellationToken, Task<(long Version, TextEdit Edit)>> resolve, string? punctuation = null) => _completion.CommitAsync(resolve, punctuation);
     internal BlameHistoryCard? CreateHistoryCard(string name, int first, int last, BlameHistory history) => _annotations.CreateHistoryCard(name, first, last, history);
     internal LineChangeCard CreateChangeCard(LineChange change) => _annotations.CreateChangeCard(change);
@@ -130,6 +134,7 @@ public sealed partial class EditorSurface : TextEditor
     {
         _hover.Cancel();
         _annotations.ClosePopups();
+        _lineSuggestion.Cancel();
         _completion.CancelPending();
         _completion.CloseWindow(); _completion.CancelRequest();
         if (_attached != null)
@@ -154,7 +159,7 @@ public sealed partial class EditorSurface : TextEditor
     {
         if (args.PropertyName != nameof(DocumentState.Content)) return;
         _hover.Cancel();
-        if (!_syncing) SyncText();
+        if (!_syncing) { _lineSuggestion.Cancel(); SyncText(); }
     }
     private void ModelChanged(object? sender, PropertyChangedEventArgs args)
     {
@@ -190,6 +195,7 @@ public sealed partial class EditorSurface : TextEditor
     {
         if (_syncing || ViewModel == null) return;
         _syncing = true; try { ViewModel.State.Content = Text; } finally { _syncing = false; }
+        _lineSuggestion.OnTextChanged();
     }
     /// <summary>Runs a change the caller reports to the model itself, so the text and caret events do not report it too.</summary>
     internal void RunSynced(Action change)
@@ -216,7 +222,7 @@ public sealed partial class EditorSurface : TextEditor
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (_completion.IsPending && e.Key == Key.Escape) { _completion.CancelPending(); e.Handled = true; return; }
-        if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && TryExpandSnippet()) e.Handled = true;
+        if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && (TryExpandSnippet() || (!_completion.IsWindowOpen && _lineSuggestion.TryAccept()))) e.Handled = true;
         else if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _completion.Show(); }
         else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ViewModel is { IsCSharp: true } csharp)
         {
@@ -227,7 +233,7 @@ public sealed partial class EditorSurface : TextEditor
             if (ViewModel is { } vm) vm.RefreshQuickFixesAsync(CaretOffset).Forget(vm.ReportFault);
             ContextMenu.PlacementTarget = this; ContextMenu.IsOpen = true; e.Handled = true;
         }
-        else if (e.Key == Key.Escape) { _completion.CloseWindow(); _hover.Cancel(); }
+        else if (e.Key == Key.Escape) { _completion.CloseWindow(); _hover.Cancel(); _lineSuggestion.Cancel(); }
     }
     private void OnWindowDeactivated(object? sender, EventArgs e) => _hover.Cancel();
     /// <summary>Takes the view model's decorations when they describe the current text; later edits shift them.</summary>

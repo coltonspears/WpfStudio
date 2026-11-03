@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\WpfStudio.CodeAssist\WpfStudio.CodeAssist.csproj" />
     <ProjectReference Include="..\WpfStudio.Contracts\WpfStudio.Contracts.csproj" />
     <ProjectReference Include="..\WpfStudio.Core\WpfStudio.Core.csproj" />
     <ProjectReference Include="..\WpfStudio.Workspace\WpfStudio.Workspace.csproj" />

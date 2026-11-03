@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.CodeAssist;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 using WpfStudio.App.Services;
@@ -66,6 +67,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public DocumentState State { get; }
     /// <summary>The editor settings its surface follows; without any, the surface keeps its defaults.</summary>
     public EditorPreferences? Preferences { get; init; }
+    /// <summary>Experimental member ranking and line suggestions. It decides for itself whether it is on.</summary>
+    public CodeAssistEngine? CodeAssist { get; init; }
+    public bool SuggestsLines => CodeAssist is { SuggestsLines: true } && IsCSharp && !IsReadOnly;
     public string Title => State.Title;
     public string ContentId => State.Path;
     public bool IsReadOnly => State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
@@ -345,8 +349,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
         if (State.Extension != ".cs" || !_workspace.IsConnected) return new(State.Version, offset, 0, []);
         await SyncAsync(token);
-        return await _workspace.GetCompletionsAsync(new(State.Path, offset, State.Version), token);
+        string content = State.Content;
+        var completions = await _workspace.GetCompletionsAsync(new(State.Path, offset, State.Version), token);
+        return CodeAssist is { } assist ? await assist.RankCompletionsAsync(content, completions, token) : completions;
     }
+    public Task<string?> SuggestLineAsync(int offset, CancellationToken token = default) =>
+        SuggestsLines ? CodeAssist!.SuggestLineAsync(State.Content, offset, token) : Task.FromResult<string?>(null);
     public async Task<TextEdit?> CompletionEditAsync(CompletionEntry entry, long version, CancellationToken token = default)
     {
         if (State.Extension != ".cs") return null;

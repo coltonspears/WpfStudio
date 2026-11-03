@@ -105,6 +105,12 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
                 Assert.Contains(nameof(WorkspaceChangedMessage), messages.Seen);
                 return;
             }
+            if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_CODEASSIST_ONLY") == "1")
+            {
+                await VerifyCodeAssistAsync(root, window, manager, shell);
+                Assert.Empty(bindingErrors.Messages);
+                return;
+            }
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_MEMORY_ONLY") == "1")
             {
                 await VerifyMemoryProfilerAsync(root, window, manager, shell);
@@ -354,6 +360,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await VerifyPreviewAppearanceAsync(root, data, window, manager, shell);
             await VerifyRuntimeInspectionAsync(root, data, window, manager, shell);
             await VerifyRetainedPanesAsync(Path.Combine(data, "layout.xml"), manager, shell);
+            await VerifyCodeAssistAsync(root, window, manager, shell);
             Assert.Contains(nameof(WorkspaceChangedMessage), messages.Seen);
             Assert.Contains(nameof(ThemeChangedMessage), messages.Seen);
             await VerifySaveMessagesAsync(data, shell, messages);

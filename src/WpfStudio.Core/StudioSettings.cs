@@ -17,4 +17,5 @@ public sealed record StudioSettings
     /// <summary>Solution Explorer nests code-behind under its XAML and partial files under their main file.</summary>
     public bool NestRelatedFiles { get; init; } = true;
     public EditorSettings Editor { get; init; } = new();
+    public CodeAssistSettings CodeAssist { get; init; } = new();
 }

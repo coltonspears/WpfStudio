@@ -17,7 +17,7 @@ public sealed record ShellPanes(DebuggerViewModel Debugger, TerminalViewModel Te
 
 /// <summary>The language and project services behind the shell's editing and build commands.</summary>
 public sealed record ShellLanguageServices(WorkspaceClient Workspace, BuildService Build, WpfIndexService Indexer, ScaffoldingService Scaffolding,
-    WorkspaceEditTransaction Edits, XamlCompletionService Xaml, XamlFormattingService XamlFormatter);
+    WorkspaceEditTransaction Edits, XamlCompletionService Xaml, XamlFormattingService XamlFormatter, CodeAssistPreferences CodeAssist);
 
 /// <summary>How the shell reaches the user's desktop: dialogs, the shell and clipboard, and the theme.</summary>
 public sealed record ShellDesktopServices(IFileDialogService Files, IUserDialogService Dialogs, IDesktopService Desktop, IClipboardService Clipboard, IThemeService Theme);

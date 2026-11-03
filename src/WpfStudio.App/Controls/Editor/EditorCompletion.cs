@@ -15,6 +15,7 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
     private readonly CompletionInputQueue<(EditorViewModel ViewModel, TextDocument Document)> _input = new(TimeSpan.FromSeconds(5));
     private CompletionWindow? _window;
     private CancellationTokenSource? _request;
+    private ICompletionData? _unconfirmed;
 
     public bool IsWindowOpen => _window != null;
     public bool IsPending => _input.IsPending;
@@ -31,7 +32,10 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
     {
         if (_input.Queue(args.Text)) { args.Handled = true; return; }
         if (!_input.IsReplaying && _window != null && args.Text.Length > 0 && !char.IsLetterOrDigit(args.Text[0]) && args.Text[0] != '_')
-            _window.CompletionList.RequestInsertion(args);
+        {
+            if (IsUnconfirmed(_window)) _window.Close();
+            else _window.CompletionList.RequestInsertion(args);
+        }
         if (!args.Handled && typing.TryApply(_input.IsReplaying ? owner.AttachedModel : owner.ViewModel, args.Text)) args.Handled = true;
     }
 
@@ -43,6 +47,10 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
     public void Show() => Observe(ShowCompletionAsync());
 
     public void CloseWindow() => _window?.Close();
+
+    // A recommendation is selected before anything is typed, so Tab or Enter can take it. Punctuation cannot: "x.)" should still type ")".
+    private bool IsUnconfirmed(CompletionWindow window) =>
+        _unconfirmed is not null && ReferenceEquals(window.CompletionList.SelectedItem, _unconfirmed) && owner.CaretOffset == window.StartOffset;
 
     // Takes the model now: the dependency property cannot be read from the thread a fault may arrive on.
     private void Observe(Task request) => request.Forget(owner.ViewModel is { } vm ? vm.ReportFault : null);
@@ -69,6 +77,8 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
                 foreach (var snippet in SnippetCatalog.For(".cs")) window.CompletionList.CompletionData.Add(new SnippetCompletion(owner, snippet));
             window.Closed += (_, _) => { if (_window == window) _window = null; };
             _window = window; window.Show();
+            _unconfirmed = window.CompletionList.CompletionData.OfType<StudioCompletion>().FirstOrDefault(data => data.IsRecommended);
+            if (_unconfirmed is not null) window.CompletionList.SelectedItem = _unconfirmed;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
@@ -161,10 +171,11 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
     private sealed class StudioCompletion(EditorCompletion owner, CompletionEntry entry, long version, long contextRevision) : ICompletionData
     {
         public ImageSource? Image => null;
+        public bool IsRecommended => entry.Recommended;
         public string Text => entry.DisplayText;
-        public object Content => entry.DisplayText;
+        public object Content => entry.Recommended ? "\u2605 " + entry.DisplayText : entry.DisplayText;
         public object Description => entry.Description ?? string.Join(", ", entry.Tags);
-        public double Priority => 0;
+        public double Priority => entry.Recommended ? 1 : 0;
         public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => owner.Observe(owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs));
     }
     private sealed class SnippetCompletion(EditorSurface owner, CodeSnippet snippet) : ICompletionData

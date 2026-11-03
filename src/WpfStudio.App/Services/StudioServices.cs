@@ -7,6 +7,7 @@ using WpfStudio.App.Features.Git;
 using WpfStudio.App.Features.Packages;
 using WpfStudio.App.Features.Profiling;
 using WpfStudio.App.ViewModels;
+using WpfStudio.CodeAssist;
 using WpfStudio.Contracts;
 using WpfStudio.Contracts.Profiling;
 using WpfStudio.Core;
@@ -29,7 +30,7 @@ public static class StudioServices
     private static string DataDirectory(IServiceProvider services) => services.GetRequiredService<IOptions<StudioPaths>>().Value.DataDirectory;
 
     public static IServiceCollection AddWpfStudio(this IServiceCollection services, IUiDispatcher dispatcher) => services
-        .AddStudioCore(dispatcher).AddWorkspaceServices().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddPackages().AddAssistant().AddProfiling().AddShell();
+        .AddStudioCore(dispatcher).AddWorkspaceServices().AddCodeAssist().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddPackages().AddAssistant().AddProfiling().AddShell();
 
     public static IServiceCollection AddStudioCore(this IServiceCollection services, IUiDispatcher dispatcher)
     {
@@ -58,6 +59,14 @@ public static class StudioServices
         services.AddSingleton<ScaffoldingService>();
         services.AddSingleton<XamlCompletionService>();
         services.AddSingleton<XamlFormattingService>();
+        return services;
+    }
+
+    public static IServiceCollection AddCodeAssist(this IServiceCollection services)
+    {
+        services.AddSingleton(_ => new AssistModelCatalog(AssistModelCatalog.DefaultDirectory));
+        services.AddSingleton<CodeAssistEngine>();
+        services.AddSingleton<CodeAssistPreferences>();
         return services;
     }
 
