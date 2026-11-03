@@ -298,6 +298,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             shell.ChangeReview.CancelCommand.Execute(null);
             await VerifyDesignerPaneFilterAsync(provider.GetRequiredService<IUiDispatcher>());
             await VerifySelectionAndFocusRequestsAsync(window, shell);
+            await VerifyEditorPopupsAsync(root);
             await VerifyLargeDiffsAsync();
             var performanceFixture = Path.Combine(root, "artifacts/performance/fixture/Performance.slnx");
             if (File.Exists(performanceFixture))

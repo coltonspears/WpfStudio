@@ -6,6 +6,7 @@
                     xmlns:search="clr-namespace:ICSharpCode.AvalonEdit.Search;assembly=ICSharpCode.AvalonEdit">
  <ResourceDictionary.MergedDictionaries>
   <ResourceDictionary Source="EditorMenus.xaml"/>
+  <ResourceDictionary Source="EditorPopups.xaml"/>
  </ResourceDictionary.MergedDictionaries>
 
  <!-- ================================================================

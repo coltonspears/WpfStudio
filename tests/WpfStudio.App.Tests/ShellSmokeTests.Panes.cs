@@ -1,17 +1,39 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
+using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Controls.Diff;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
+using WpfStudio.Core.Git;
 using WpfStudio.Runtime.Design;
 
 namespace WpfStudio.App.Tests;
 
 public sealed partial class ShellSmokeTests
 {
+    /// <summary>The popups' cards take their looks from the application's resources, the only ones a popup without a parent can find.</summary>
+    private static async Task VerifyEditorPopupsAsync(string root)
+    {
+        var now = DateTimeOffset.Now;
+        var commit = new BlameLine("0123456789abcdef", "Ada Lovelace", "ada@example.invalid", now.AddDays(-3), "Fix the parser");
+        var nothing = new RelayCommand(() => { });
+        var history = BlameHistoryCard.Create("ParseAsync", 4, 9, new([new(commit, 2)], 1), now, nothing, nothing);
+        var change = LineChangeCard.Create(new(LineChangeKind.Modified, 1, 1, "committed text\nsecond line"), true, nothing, nothing);
+        foreach (var (card, name, label) in new (object, string, string)[] { (history, "blame-history", "Show change"), (change, "line-change", "Revert change") })
+        {
+            var view = new ContentPresenter { Content = card };
+            view.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            view.Arrange(new Rect(view.DesiredSize));
+            await Idle();
+            Assert.Contains(Descendants<Button>(view), button => (string)button.Content == label);
+            Screenshot(view, Path.Combine(root, $"artifacts/screenshots/{name}.png"));
+        }
+    }
+
     /// <summary>Selecting in the explorer reaches its view model, which starts with nothing selected, and a focus request lands once the pane is up.</summary>
     private static async Task VerifySelectionAndFocusRequestsAsync(Window window, ShellViewModel shell)
     {

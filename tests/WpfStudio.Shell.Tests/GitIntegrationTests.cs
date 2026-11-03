@@ -1,6 +1,12 @@
 using System.Diagnostics;
+using System.Windows.Threading;
+using WpfStudio.App.Controls;
 using WpfStudio.App.Features.Git;
+using WpfStudio.App.Services;
+using WpfStudio.App.ViewModels;
+using WpfStudio.Core.Documents;
 using WpfStudio.Core.Git;
+using WpfStudio.Workspace;
 
 namespace WpfStudio.Shell.Tests;
 
@@ -456,6 +462,47 @@ public sealed class GitIntegrationTests
         Assert.NotEmpty(model.Error);
         await model.StageAllCommand.ExecuteAsync(null);
         Assert.Equal(3, changed);
+    }
+
+    [Fact]
+    public Task RevertingFromTheChangePopupRestoresTheCommittedText()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+            dispatcher.BeginInvoke(async () =>
+            {
+                try
+                {
+                    using var fixture = await Fixture.CreateAsync();
+                    await fixture.InitialCommitAsync();
+                    await using var workspace = new WorkspaceClient();
+                    var state = new DocumentState(fixture.File("file.cs"), "edited\n");
+                    using var model = new EditorViewModel(state, workspace, new XamlCompletionService(), new UiDispatcher(dispatcher), _ => { });
+                    var editor = new EditorSurface { ViewModel = model };
+                    var computed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    model.GitChanged += () => { if (model.LineChanges.Count > 0) computed.TrySetResult(); };
+                    await model.RefreshGitAsync(fixture.Service);
+                    await computed.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+                    var card = editor.CreateChangeCard(Assert.Single(model.LineChanges));
+                    Assert.Equal("Changed since the last commit", card.Heading);
+                    Assert.Equal("original", card.CommittedText);
+                    card.RevertCommand.Execute(null);
+
+                    Assert.Equal("original\n", state.Content);
+                    completion.SetResult();
+                }
+                catch (Exception exception) { completion.SetException(exception); }
+                finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
+            });
+            Dispatcher.Run();
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
     }
 
     [Fact]

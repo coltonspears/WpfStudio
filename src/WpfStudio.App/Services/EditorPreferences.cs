@@ -19,7 +19,9 @@ public sealed partial class EditorPreferences : ObservableObject
     public const double MinimumFontSize = 8, MaximumFontSize = 32;
 
     [ObservableProperty] public partial string FontFamily { get; set; } = EditorSettings.DefaultFontFamily;
-    [ObservableProperty] public partial double FontSize { get; set; } = 13;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(QuotedFontSize))] public partial double FontSize { get; set; } = 13;
+    /// <summary>Editor text quoted in a popup, a step smaller than the editor itself.</summary>
+    public double QuotedFontSize => Math.Max(MinimumFontSize, FontSize - 1);
     [ObservableProperty] public partial int TabSize { get; set; } = 4;
     [ObservableProperty] public partial bool InsertSpaces { get; set; } = true;
     [ObservableProperty] public partial bool ShowLineNumbers { get; set; } = true;
