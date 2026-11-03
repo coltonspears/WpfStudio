@@ -11,7 +11,10 @@ namespace WpfStudio.Runtime.Debugging;
 public sealed class BreakpointStore(string? directory = null)
 {
     private readonly string directory = directory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "debugging");
+    private readonly SemaphoreSlim turn = new(1, 1);
     private string? statePath;
+    /// <summary>Writes the temporary file. A test holds it to make saves overlap.</summary>
+    internal Func<string, string, Task> WriteFile { get; init; } = (path, text) => File.WriteAllTextAsync(path, text);
     public ObservableCollection<BreakpointViewModel> Breakpoints { get; } = [];
     public List<string> WatchExpressions { get; } = [];
     public IEnumerable<string> Files => Breakpoints.Select(x => x.Path).Distinct(StringComparer.OrdinalIgnoreCase);
@@ -39,27 +42,39 @@ public sealed class BreakpointStore(string? directory = null)
     public async Task LoadAsync(string workspacePath)
     {
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(workspacePath).ToUpperInvariant())))[..20];
-        statePath = Path.Combine(directory, hash + ".json");
-        Breakpoints.Clear(); WatchExpressions.Clear();
-        if (!File.Exists(statePath)) return;
-        var state = JsonSerializer.Deserialize<DebugWorkspaceState>(await File.ReadAllTextAsync(statePath));
-        if (state is null) return;
-        foreach (var item in state.Breakpoints) Breakpoints.Add(new BreakpointViewModel { Path = item.Path, Line = item.Line, Condition = item.Condition ?? "", Enabled = item.Enabled, HitCondition = item.HitCondition ?? "", LogMessage = item.LogMessage ?? "" });
-        WatchExpressions.AddRange(state.Watches);
+        await turn.WaitAsync(); // A save still in progress belongs to the workspace being left.
+        try
+        {
+            statePath = Path.Combine(directory, hash + ".json");
+            Breakpoints.Clear(); WatchExpressions.Clear();
+            if (!File.Exists(statePath)) return;
+            var state = JsonSerializer.Deserialize<DebugWorkspaceState>(await File.ReadAllTextAsync(statePath));
+            if (state is null) return;
+            foreach (var item in state.Breakpoints) Breakpoints.Add(new BreakpointViewModel { Path = item.Path, Line = item.Line, Condition = item.Condition ?? "", Enabled = item.Enabled, HitCondition = item.HitCondition ?? "", LogMessage = item.LogMessage ?? "" });
+            WatchExpressions.AddRange(state.Watches);
+        }
+        finally { turn.Release(); }
     }
 
     public async Task SaveAsync()
     {
-        if (statePath is null) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
-        // A unique temporary name lets overlapping saves (rapid breakpoint toggles) each complete; the last move wins.
-        var temporary = statePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        // Rapid breakpoint toggles overlap, and their writes can finish out of order. One at a time, each reading the state when its turn
+        // comes, the last save always holds the newest state. The turn resumes on the caller's context, because that state belongs to the UI thread.
+        await turn.WaitAsync();
         try
         {
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new DebugWorkspaceState(ToModels(), WatchExpressions.ToArray())));
-            File.Move(temporary, statePath, true);
+            if (statePath is null) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
+            // Unique because another WpfStudio can have this workspace open.
+            var temporary = statePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                await WriteFile(temporary, JsonSerializer.Serialize(new DebugWorkspaceState(ToModels(), WatchExpressions.ToArray())));
+                File.Move(temporary, statePath, true);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        finally { turn.Release(); }
     }
 
     private sealed record DebugWorkspaceState(SourceBreakpoint[] Breakpoints, string[] Watches);

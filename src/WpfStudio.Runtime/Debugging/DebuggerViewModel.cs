@@ -13,15 +13,16 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private readonly IUiDispatcher dispatcher;
     private readonly IDebugAdapterProvider adapters;
     private readonly DapClient client;
-    private readonly BreakpointStore store = new();
+    private readonly BreakpointStore store;
     private readonly OutputBuffer output;
     private int threadId;
     private int stopVersion;
     private int watchRefresh;
     private int sessionEnds;
-    public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters)
+    public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters) : this(session, dispatcher, adapters, new BreakpointStore()) { }
+    internal DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters, BreakpointStore store)
     {
-        this.session = session; this.dispatcher = dispatcher; this.adapters = adapters;
+        this.session = session; this.dispatcher = dispatcher; this.adapters = adapters; this.store = store;
         client = new DapClient(session);
         output = new OutputBuffer(dispatcher, text => Output = text);
         if (adapters.Locate() is { } adapter) session.AdapterPath = adapter;

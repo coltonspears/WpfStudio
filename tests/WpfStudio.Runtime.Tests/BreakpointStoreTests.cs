@@ -94,8 +94,7 @@ public sealed class BreakpointStoreTests : IDisposable
                     await Task.WhenAll(Enumerable.Range(1, 20).Select(line => { store.Toggle(@"C:\work\App\a.cs", line); return store.SaveAsync(); }));
                     var saved = new BreakpointStore(directory);
                     await saved.LoadAsync(@"C:\work\App");
-                    // Writes can finish out of order and the last move wins, so this may be any of the snapshots.
-                    Assert.InRange(saved.Breakpoints.Count, 1, 20);
+                    Assert.Equal(20, saved.Breakpoints.Count);
                     Assert.Single(Directory.GetFiles(directory));
                     result.TrySetResult();
                 }
@@ -106,6 +105,32 @@ public sealed class BreakpointStoreTests : IDisposable
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA); thread.Start();
         return result.Task.WaitAsync(TimeSpan.FromSeconds(20));
+    }
+
+    [Fact]
+    public async Task ASaveInProgressFinishesInItsOwnWorkspaceBeforeAnotherOpens()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource? hold = release;
+        var store = new BreakpointStore(directory)
+        {
+            WriteFile = async (path, text) =>
+            {
+                if (Interlocked.Exchange(ref hold, null) is { } held) await held.Task;
+                await File.WriteAllTextAsync(path, text);
+            }
+        };
+        await store.LoadAsync(@"C:\work\One");
+        store.Toggle(@"C:\work\One\a.cs", 1);
+        var saving = store.SaveAsync();
+        var opening = store.LoadAsync(@"C:\work\Two");
+        await Task.WhenAny(opening, Task.Delay(300));
+        release.SetResult();
+        await Task.WhenAll(saving, opening);
+        Assert.Empty(store.Breakpoints);
+        var one = new BreakpointStore(directory);
+        await one.LoadAsync(@"C:\work\One");
+        Assert.Equal(1, Assert.Single(one.Breakpoints).Line);
     }
 
     [Fact]

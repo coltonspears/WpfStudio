@@ -9,6 +9,7 @@ namespace WpfStudio.Runtime.Tests;
 public sealed class DebuggerFlowTests
 {
     private const string Source = @"C:\src\Program.cs";
+    private const string Workspace = @"C:\src";
 
     [Fact]
     public Task AStopFillsThreadsFramesLocalsAndWatches() => WithAttachedModelAsync("debug-step", async model =>
@@ -179,6 +180,40 @@ public sealed class DebuggerFlowTests
     }, start: model => model.LaunchAsync(new DebugLaunchConfiguration(@"C:\src\App.exe", @"C:\src")));
 
     [Fact]
+    public async Task OverlappingBreakpointTogglesLeaveTheNewestStateOnDisk()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WpfStudio-DebuggerFlow-" + Guid.NewGuid().ToString("N"));
+        TaskCompletionSource? hold = null;
+        var store = new BreakpointStore(directory)
+        {
+            WriteFile = async (path, text) =>
+            {
+                if (Interlocked.Exchange(ref hold, null) is { } held) await held.Task;
+                await File.WriteAllTextAsync(path, text);
+            }
+        };
+        try
+        {
+            await WithAttachedModelAsync("debug-step", async model =>
+            {
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                hold = release;
+                var older = model.ToggleBreakpointAsync(Source, 20);
+                var newer = model.ToggleBreakpointAsync(Source, 21);
+                // Unserialized, the newer save finishes here and the older one then moves over it.
+                await Task.WhenAny(newer, Task.Delay(300));
+                release.SetResult();
+                await Task.WhenAll(older, newer);
+                Assert.Equal("", model.Error);
+            }, store: store);
+            var saved = new BreakpointStore(directory);
+            await saved.LoadAsync(Workspace);
+            Assert.Equal([12, 20, 21], saved.Breakpoints.Select(item => item.Line));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public Task TerminationEndsTheSession() => WithAttachedModelAsync("debug-terminate", async model =>
     {
         await model.PauseCommand.ExecuteAsync(null);
@@ -209,7 +244,7 @@ public sealed class DebuggerFlowTests
 
     /// <param name="breakpoint">Shapes the one breakpoint before the session starts.</param>
     /// <param name="start">How the session starts, when not by attaching.</param>
-    private static Task WithAttachedModelAsync(string scenario, Func<DebuggerViewModel, Task> test, Action<BreakpointViewModel>? breakpoint = null, Func<DebuggerViewModel, Task>? start = null)
+    private static Task WithAttachedModelAsync(string scenario, Func<DebuggerViewModel, Task> test, Action<BreakpointViewModel>? breakpoint = null, Func<DebuggerViewModel, Task>? start = null, BreakpointStore? store = null)
     {
         var result = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -221,7 +256,8 @@ public sealed class DebuggerFlowTests
                 try
                 {
                     AdapterRun.UseScenario(scenario);
-                    await using var model = new DebuggerViewModel(new DebugSession { AdapterPath = AdapterRun.LocateAdapter() }, new DispatcherPost(dispatcher), new NoDebugAdapter());
+                    await using var model = new DebuggerViewModel(new DebugSession { AdapterPath = AdapterRun.LocateAdapter() }, new DispatcherPost(dispatcher), new NoDebugAdapter(), store ?? new BreakpointStore());
+                    if (store is not null) await model.SetWorkspaceAsync(Workspace);
                     var item = new BreakpointViewModel { Path = Source, Line = 12 };
                     breakpoint?.Invoke(item);
                     model.Breakpoints.Add(item);
