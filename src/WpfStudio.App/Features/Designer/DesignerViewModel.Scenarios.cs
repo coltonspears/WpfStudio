@@ -125,7 +125,7 @@ public sealed partial class DesignerViewModel
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
     }
-    private void ScenarioConfigurationChanged(FileSystemWatcher watcher) => _dispatcher.Post(() => _ = CheckScenarioConfigurationAsync(watcher));
+    private void ScenarioConfigurationChanged(FileSystemWatcher watcher) => _dispatcher.Post(() => CheckScenarioConfigurationAsync(watcher).Forget(ReportFault));
     private async Task CheckScenarioConfigurationAsync(FileSystemWatcher watcher)
     {
         if (_disposed || !ReferenceEquals(_scenarioWatcher, watcher)) return;

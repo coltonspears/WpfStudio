@@ -190,7 +190,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (_disposed) return;
         ContextChanged?.Invoke();
         OnGitContentChanged();
-        _ = StartAnalysisAsync(debounce: true);
+        StartAnalysisAsync(debounce: true).Forget(ReportFault);
     }
     private void StatePropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
@@ -221,7 +221,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                     LanguageStatus = _workspace.IsConnected ? "" : "Language service unavailable";
                 }
                 OnPropertyChanged(nameof(XamlContextRevision));
-                _ = StartAnalysisAsync(debounce: true);
+                StartAnalysisAsync(debounce: true).Forget(ReportFault);
             }
         });
     }
@@ -491,6 +491,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         CodeActions.Clear();
         _codeActionsVersion = -1;
     }
+    /// <summary>For a request nobody awaits: shows its fault on the status line and in the output. Safe on any thread.</summary>
+    public void ReportFault(Exception fault) => _dispatcher.Post(() => { if (!_disposed) LanguageStatus = fault.Message; _report(fault.Message); });
     public void Dispose()
     {
         if (_disposed) return;
@@ -503,7 +505,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (_resources is not null) _resources.Changed -= SemanticStateChanged;
         ClearQuickFixes();
         DisposeGit();
-        _codeLens?.Cancel();
+        _codeLens?.Cancel(); _codeLens?.Dispose(); _codeLens = null;
         _analysis?.Cancel();
         _analysis?.Dispose();
     }

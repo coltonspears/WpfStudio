@@ -104,6 +104,7 @@ public sealed partial class EditorViewModel
 
     private void DisposeGit()
     {
-        _gitChanges?.Cancel(); _gitBlame?.Cancel();
+        _gitChanges?.Cancel(); _gitChanges?.Dispose(); _gitChanges = null;
+        _gitBlame?.Cancel(); _gitBlame?.Dispose(); _gitBlame = null;
     }
 }

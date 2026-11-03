@@ -22,9 +22,9 @@ public sealed partial class ShellViewModel
     private void InitializeExperience()
     {
         Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
-        if (Features?.Assistant.Settings is INotifyPropertyChanged settings)
-            settings.PropertyChanged += (_, e) => { if (e.PropertyName == "HasApiKey") OnPropertyChanged(nameof(IsColtonGptReady)); };
+        if (Features?.Assistant.Settings is INotifyPropertyChanged settings) settings.PropertyChanged += AssistantSettingsChanged;
     }
+    private void AssistantSettingsChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == "HasApiKey") OnPropertyChanged(nameof(IsColtonGptReady)); }
 
     // ------------------------------------------------------------------ Theme
     public bool IsLightTheme => ThemeName.Equals("Light", IgnoreCase);

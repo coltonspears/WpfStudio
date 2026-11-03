@@ -48,7 +48,7 @@ public sealed partial class EditorViewModel
         Interlocked.Increment(ref _semanticRevision);
         OnPropertyChanged(nameof(XamlProjectPath));
         OnPropertyChanged(nameof(XamlContextRevision));
-        if (!_disposed) _ = StartAnalysisAsync(debounce: true);
+        if (!_disposed) StartAnalysisAsync(debounce: true).Forget(ReportFault);
     }
 
     public void SetXamlContextUnavailable(string? reason)

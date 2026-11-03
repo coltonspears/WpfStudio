@@ -12,6 +12,29 @@ namespace WpfStudio.Shell.Tests;
 public sealed class EditorCompletionTests
 {
     [Fact]
+    public Task AFaultFromARequestNobodyAwaitsReachesTheStatusAndOutput() => OnDispatcherAsync(async () =>
+    {
+        await using var workspace = new WorkspaceClient();
+        var reported = new List<string>();
+        using var model = new EditorViewModel(new DocumentState(Path.Combine(Path.GetTempPath(), "Faulted.cs"), "class C { }"), workspace, new XamlCompletionService(), new InlineDispatcher(), reported.Add);
+        Task.FromException(new InvalidOperationException("request failed")).Forget(model.ReportFault);
+        Assert.Equal("request failed", model.LanguageStatus);
+        Assert.Equal("request failed", Assert.Single(reported));
+    });
+
+    [Fact]
+    public Task ChangingLensAndBlameAfterDisposeCancelsNothingAlreadyDisposed() => OnDispatcherAsync(async () =>
+    {
+        await using var workspace = new WorkspaceClient();
+        var model = new EditorViewModel(new DocumentState(Path.Combine(Path.GetTempPath(), "Disposed.cs"), "class C { }"), workspace, new XamlCompletionService(), new InlineDispatcher(), _ => { });
+        model.ShowInlineBlame = false; model.ShowInlineBlame = true;
+        model.Dispose();
+        model.ShowInlineBlame = false; model.ShowInlineBlame = true;
+        model.ShowCodeLens = false; model.ShowCodeLens = true;
+        model.Dispose();
+    });
+
+    [Fact]
     public Task StaleCompletionCannotOverwriteNewerExternalEdit() => OnDispatcherAsync(async () =>
     {
         await using var workspace = new WorkspaceClient();

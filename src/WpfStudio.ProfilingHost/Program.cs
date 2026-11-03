@@ -11,7 +11,7 @@ try
         PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
     using var connectionTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
     await pipe.WaitForConnectionAsync(connectionTimeout.Token);
-    using var engine = new MemoryProfilerEngine();
+    await using var engine = new MemoryProfilerEngine();
     // System.Text.Json serializes the large analysis results several times faster than the default Newtonsoft formatter.
     // The client must use the same formatter.
     using var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(pipe, pipe, new SystemTextJsonFormatter()));

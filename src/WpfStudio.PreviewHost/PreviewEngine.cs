@@ -103,6 +103,8 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
                 _height = (int)Math.Ceiling(request.Height);
                 if (request.Mode is not (PreviewMode.Source or PreviewMode.Compiled)) throw new InvalidOperationException("Unknown preview mode.");
                 var assembly = _assemblies.Load(request);
+                // The steps below can each take a while. A render a newer one has replaced stops between them, so the newer one starts sooner.
+                cancellationToken.ThrowIfCancellationRequested();
                 _scenarioActivation = PreviewScenarioActivation.Validate(request, assembly);
                 if (request.Mode == PreviewMode.Compiled)
                 {
@@ -130,6 +132,7 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
                 // positions, including attributes moved by preview transforms.
                 using var markup = _document.CreateSourceReader();
                 object loaded = XamlReader.Load(markup);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (loaded is ResourceDictionary resources)
                 {
                     _root = new Border { Resources = resources, Child = new TextBlock { Text = $"Resource dictionary loaded · {resources.Count} resources", Margin = new Thickness(24), Foreground = Brushes.DimGray } };
@@ -176,9 +179,16 @@ public sealed partial class PreviewEngine : IPreviewRpc, IDisposable
                     PositionX = -32000, PositionY = -32000
                 }) { RootVisual = _viewport };
                 }
+                cancellationToken.ThrowIfCancellationRequested();
                 await SettleLayoutAsync();
+                cancellationToken.ThrowIfCancellationRequested();
                 InitializeNativeSurface();
                 return Snapshot();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                ClearPreview();
+                throw;
             }
             catch (Exception exception)
             {

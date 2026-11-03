@@ -204,7 +204,7 @@ public sealed partial class PreviewClient
         {
             if (_watchdog is not null) return;
             var lifetime = _watchdog = new CancellationTokenSource();
-            _ = Task.Run(() => WatchAsync(lifetime));
+            Task.Run(() => WatchAsync(lifetime)).Forget();
         }
 
         private void Disarm()

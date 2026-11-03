@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Git;
 
@@ -104,49 +105,53 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         if (_quietSelection) return;
         // One diff at a time: choosing a file in one list clears the other.
         if (value is not null) Quietly(() => SelectedStaged = null);
-        _ = LoadSelectedDiff();
+        LoadSelectedDiff().Forget();
     }
 
     partial void OnSelectedStagedChanged(GitChange? value)
     {
         if (_quietSelection) return;
         if (value is not null) Quietly(() => SelectedUnstaged = null);
-        _ = LoadSelectedDiff();
+        LoadSelectedDiff().Forget();
     }
 
-    partial void OnSelectedCommitChanged(GitCommit? value) { if (!_quietSelection) _ = LoadCommit(value); }
-    partial void OnSelectedCommitFileChanged(GitCommitFile? value) { if (!_quietSelection) _ = LoadCommitFile(value); }
+    partial void OnSelectedCommitChanged(GitCommit? value) { if (!_quietSelection) LoadCommit(value).Forget(); }
+    partial void OnSelectedCommitFileChanged(GitCommitFile? value) { if (!_quietSelection) LoadCommitFile(value).Forget(); }
 
     public async Task SetWorkspaceAsync(string? workspacePath, CancellationToken cancellationToken = default)
     {
         var version = ++_workspaceVersion;
         _switchingWorkspace = true;
         NotifyCommands();
-        _operation?.Cancel();
-        await _activeTask;
-        await CancelLoadsAsync();
-        if (version != _workspaceVersion) return;
-        _workspacePath = workspacePath;
-        RepositoryRoot = null;
-        Branch = "Loading repository…";
-        Tracking = "";
-        Quietly(() =>
+        try
         {
-            Staged.Clear();
-            Unstaged.Clear();
-            History.Clear();
-            VisibleHistory.Clear();
-            Branches.Clear();
-            SelectedBranch = null;
-            SelectedStaged = null;
-            SelectedUnstaged = null;
-            SelectedCommit = null;
-        });
-        HasMoreHistory = false;
-        ClearCommit();
-        CurrentDiff = null;
-        NotifyLists();
-        _switchingWorkspace = false;
+            _operation?.Cancel();
+            await _activeTask;
+            await CancelLoadsAsync();
+            if (version != _workspaceVersion) return;
+            _workspacePath = workspacePath;
+            RepositoryRoot = null;
+            Branch = "Loading repository…";
+            Tracking = "";
+            Quietly(() =>
+            {
+                Staged.Clear();
+                Unstaged.Clear();
+                History.Clear();
+                VisibleHistory.Clear();
+                Branches.Clear();
+                SelectedBranch = null;
+                SelectedStaged = null;
+                SelectedUnstaged = null;
+                SelectedCommit = null;
+            });
+            HasMoreHistory = false;
+            ClearCommit();
+            CurrentDiff = null;
+            NotifyLists();
+        }
+        // Only the newest switch may lift the guard; an older one returning early leaves it to that switch. A failure must not leave Git disabled.
+        finally { if (version == _workspaceVersion) { _switchingWorkspace = false; NotifyCommands(); } }
         await RunAsync("Refresh", token => RefreshCoreAsync(token), cancellationToken);
     }
 
@@ -302,6 +307,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         finally
         {
             if (ReferenceEquals(_diffLoad, load)) { _diffLoad = null; IsDiffLoading = false; }
+            load.Dispose(); // This load owns its source; the field no longer offers it to anyone who would cancel it.
         }
     }
 
@@ -355,6 +361,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         finally
         {
             if (ReferenceEquals(_commitLoad, load)) { _commitLoad = null; IsCommitLoading = false; }
+            load.Dispose();
         }
     }
 
@@ -387,6 +394,7 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         finally
         {
             if (ReferenceEquals(_commitFileLoad, load)) _commitFileLoad = null;
+            load.Dispose();
         }
     }
 
@@ -538,8 +546,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         NotifyLists();
         NotifyCommands();
         // Git may have changed the file (stage, commit, pull), so reload its diff even when the selection is unchanged.
-        _ = LoadSelectedDiff();
-        if (rootChanged || SelectedCommit is null) _ = LoadCommit(SelectedCommit);
+        LoadSelectedDiff().Forget();
+        if (rootChanged || SelectedCommit is null) LoadCommit(SelectedCommit).Forget();
         EnsureSelection();
     }
 

@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Profiling.Visuals;
 using WpfStudio.Contracts.Profiling;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
 
@@ -165,7 +166,7 @@ public sealed partial class MemoryProfilerViewModel
     private void ShowObject(int id)
     {
         ShowBrowser = true; if (FocusGraph) FocusGraph = false;
-        _ = InspectObjectAsync(id, _lifetime.Token);
+        InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault);
     }
 
     [RelayCommand]

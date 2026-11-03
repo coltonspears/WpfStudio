@@ -3,7 +3,7 @@ using WpfStudio.Contracts.Profiling;
 namespace WpfStudio.Profiling;
 
 /// <summary>Serializes all DAC and heap access, including read-only queries. One worker owns one capture.</summary>
-public sealed class MemoryProfilerEngine : IMemoryProfilerRpc, IDisposable
+public sealed class MemoryProfilerEngine : IMemoryProfilerRpc, IAsyncDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ClrHeapSnapshot? _snapshot;
@@ -60,9 +60,9 @@ public sealed class MemoryProfilerEngine : IMemoryProfilerRpc, IDisposable
         }
         finally { _gate.Release(); }
     }
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _gate.Wait();
+        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_disposed) return;

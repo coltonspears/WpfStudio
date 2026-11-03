@@ -45,7 +45,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             acquired ??= await AcquireAsync(request, cancellationToken).ConfigureAwait(false);
             var snapshot = await PublishAsync(request, acquired, cancellationToken).ConfigureAwait(false);
             // Discovering Roslyn's code fix providers takes a few seconds; do it before the first Ctrl+.
-            _ = Task.Run(CodeActionCatalog.Warm, CancellationToken.None);
+            Task.Run(CodeActionCatalog.Warm, CancellationToken.None).Forget(fault => Console.Error.WriteLine("Code action catalog: " + fault.Message));
             lock (_gate) _workspaceInventoryReady = _solution is not null;
             return snapshot;
         }
@@ -273,7 +273,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         }
         await RefreshPageProjectionSourcesAsync(null, cancellationToken).ConfigureAwait(false);
         // Every semantic request waits for the projection itself, so a cached start returns without it.
-        if (acquired.Cached) _ = Task.Run(WarmPageProjectionAsync, CancellationToken.None);
+        if (acquired.Cached) Task.Run(WarmPageProjectionAsync, CancellationToken.None).Forget();
         else await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         timings.Mark("XAML pages");
         issues.Enqueue(new WorkspaceIssue(acquired.Cached
@@ -286,12 +286,8 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             var evaluated = new Dictionary<string, ProjectDiscovery.EvaluatedProject?>(StringComparer.OrdinalIgnoreCase);
             foreach (var projectPath in paths) evaluated[projectPath] = await Evaluate(projectPath).ConfigureAwait(false);
             var saved = models.ToArray();
-            _ = Task.Run(() =>
-            {
-                try { SolutionCache.Write(request, sdk, fresh, evaluated, saved); }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException or InvalidOperationException)
-                { Console.Error.WriteLine("Workspace cache: " + exception.Message); }
-            }, CancellationToken.None);
+            Task.Run(() => SolutionCache.Write(request, sdk, fresh, evaluated, saved), CancellationToken.None)
+                .Forget(fault => Console.Error.WriteLine("Workspace cache: " + fault.Message));
         }
         return new WorkspaceSnapshot(path, sdk, models, issues.ToArray(), configurations.OrderBy(value => value == "Debug" ? 0 : value == "Release" ? 1 : 2).ThenBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray(), acquired.Cached);
     }

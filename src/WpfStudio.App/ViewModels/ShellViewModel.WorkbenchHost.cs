@@ -73,9 +73,9 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
     {
         XamlAnalysis.Request();
         // A commit or checkout in the terminal changes what change margins and blame compare with.
-        if (Features?.GitService is { } git) foreach (var document in Documents) _ = document.RefreshGitAsync(git, _lifetime.Token);
+        if (Features?.GitService is { } git) foreach (var document in Documents) document.RefreshGitAsync(git, _lifetime.Token).Forget(document.ReportFault);
     }
-    void IExternalChangesHost.SettingChanged() { if (_initialized) _ = SaveSettingsAsync(); }
+    void IExternalChangesHost.SettingChanged() { if (_initialized) SaveSettingsAsync().Forget(ReportBackgroundFault); }
 
     // ------------------------------------------------------------------ IProjectXamlAnalysisHost
     WorkspaceSnapshot? IProjectXamlAnalysisHost.Workspace => Workspace;
@@ -92,12 +92,13 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IExternalChang
 
     // ------------------------------------------------------------------ IAutoSaveHost
     IReadOnlyList<EditorViewModel> IAutoSaveHost.Documents => Documents;
+    CancellationToken IAutoSaveHost.Lifetime => _lifetime.Token;
     bool IAutoSaveHost.IsReviewOpen => IsPreviewOpen;
     void IAutoSaveHost.ReportStatus(string status) => Status = status;
     void IAutoSaveHost.AppendOutput(string line) => AppendOutput(line);
     void IAutoSaveHost.DocumentAutoSaved(EditorViewModel document) { if (document.IsXaml) _xamlResources.Invalidate(); }
     void IAutoSaveHost.AutoSaveCompleted() => XamlAnalysis.Request();
-    void IAutoSaveHost.ExternalChangeDetected() => _ = CheckExternalChangesAsync();
+    void IAutoSaveHost.ExternalChangeDetected() => CheckExternalChangesAsync().Forget(ReportBackgroundFault);
 
     // ------------------------------------------------------------------ IBreakpointEditingHost
     EditorViewModel? IBreakpointEditingHost.ActiveDocument => ActiveDocument;

@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.Runtime.Debugging;
 
@@ -16,7 +18,7 @@ public sealed class DebugSession : IAsyncDisposable
     private DapTransport? transport;
     private Task? stderr;
     private TaskCompletionSource initialized = NewCompletion();
-    private bool disposing;
+    private bool closeExpected;
     private bool ownsDebuggee;
     public string AdapterPath { get; set; } = Path.Combine(AppContext.BaseDirectory, "debugger", "netcoredbg.exe");
     public bool IsActive => transport is not null;
@@ -32,7 +34,7 @@ public sealed class DebugSession : IAsyncDisposable
     {
         if (IsActive) throw new InvalidOperationException("Stop the active debugging session first.");
         if (!File.Exists(AdapterPath)) throw new FileNotFoundException("netcoredbg is not installed. Choose Install debugger in the Debugger pane, or run tools/Get-Debugger.ps1 and rebuild WpfStudio.", AdapterPath);
-        disposing = false;
+        closeExpected = false;
         initialized = NewCompletion();
         process = new Process { StartInfo = new ProcessStartInfo(AdapterPath, "--interpreter=vscode") { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(AdapterPath)! } };
         if (isolateStartupHooks)
@@ -48,7 +50,7 @@ public sealed class DebugSession : IAsyncDisposable
         stderr = Task.Run(async () => { while (await currentProcess.StandardError.ReadLineAsync() is { } line) Output?.Invoke(line + "\n"); });
         transport = new DapTransport(process.StandardOutput.BaseStream, process.StandardInput.BaseStream);
         transport.EventReceived += OnEvent;
-        transport.ConnectionClosed += ex => { if (!disposing) Error?.Invoke(ex.Message); };
+        transport.ConnectionClosed += ex => { if (!closeExpected) Error?.Invoke(ex.Message); };
         transport.Start();
         Capabilities = await RequestAsync("initialize", new { clientID = "wpfstudio", clientName = "WpfStudio", adapterID = "coreclr", pathFormat = "path", linesStartAt1 = true, columnsStartAt1 = true, supportsVariableType = true, supportsVariablePaging = true, supportsRunInTerminalRequest = false }, cancellationToken).ConfigureAwait(false);
     }
@@ -68,8 +70,7 @@ public sealed class DebugSession : IAsyncDisposable
             if (hooks is not null) environment["DOTNET_STARTUP_HOOKS"] = hooks;
             await ConnectAsync(cancellationToken, isolateStartupHooks: true).ConfigureAwait(false);
             var launch = RequestAsync("launch", new { program = Path.GetFullPath(configuration.Program), cwd = configuration.WorkingDirectory, args = configuration.Arguments ?? [], env = environment, stopAtEntry = false, justMyCode = true, enableStepFiltering = true }, cancellationToken);
-            await ConfigureAsync(breakpoints, breakOnThrown, cancellationToken).ConfigureAwait(false);
-            await launch.ConfigureAwait(false);
+            await ConfigureWhileStartingAsync(launch, breakpoints, breakOnThrown, cancellationToken).ConfigureAwait(false);
         }
         catch { await TearDownAsync(); throw; }
     }
@@ -83,10 +84,19 @@ public sealed class DebugSession : IAsyncDisposable
         {
             await ConnectAsync(cancellationToken).ConfigureAwait(false);
             var attach = RequestAsync("attach", new { processId }, cancellationToken);
-            await ConfigureAsync(breakpoints, breakOnThrown, cancellationToken).ConfigureAwait(false);
-            await attach.ConfigureAwait(false);
+            await ConfigureWhileStartingAsync(attach, breakpoints, breakOnThrown, cancellationToken).ConfigureAwait(false);
         }
         catch { await TearDownAsync(); throw; }
+    }
+
+    /// <summary>The adapter answers launch and attach only after configuration, so both run at once and neither may be abandoned.</summary>
+    private async Task ConfigureWhileStartingAsync(Task start, IEnumerable<SourceBreakpoint> breakpoints, bool thrown, CancellationToken cancellationToken)
+    {
+        try { await ConfigureAsync(breakpoints, thrown, cancellationToken).ConfigureAwait(false); }
+        // A rejected start is why configuration never finished, and the reason worth showing.
+        catch (Exception) when (start.IsFaulted) { await start.ConfigureAwait(false); throw; }
+        catch (Exception) { start.Forget(); throw; } // Teardown ends the request, and nothing else would observe that.
+        await start.ConfigureAwait(false);
     }
 
     private async Task ConfigureAsync(IEnumerable<SourceBreakpoint> breakpoints, bool thrown, CancellationToken cancellationToken)
@@ -123,6 +133,8 @@ public sealed class DebugSession : IAsyncDisposable
     private void OnEvent(string name, JsonElement body)
     {
         if (name == "initialized") initialized.TrySetResult();
+        // Set here, on the reader, because the adapter's stdout closes right after this while the UI's dispose is still queued.
+        if (name is "terminated" or "exited") closeExpected = true;
         if (name == "output" && body.TryGetProperty("output", out var output)) Output?.Invoke(output.GetString() ?? "");
         EventReceived?.Invoke(new DebugEvent(name, body));
     }
@@ -137,13 +149,13 @@ public sealed class DebugSession : IAsyncDisposable
                 await RequestAsync("disconnect", new { terminateDebuggee = ownsDebuggee }, deadline.Token).ConfigureAwait(false);
             }
         }
-        catch (Exception ex) when (ex is IOException or OperationCanceledException or InvalidOperationException or ObjectDisposedException) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { } // The adapter is ended below whatever its last request did.
         finally { await TearDownAsync(); }
     }
 
     private async ValueTask TearDownAsync()
     {
-        disposing = true;
+        closeExpected = true;
         var activeTransport = transport;
         transport = null;
         if (activeTransport is not null) await activeTransport.DisposeAsync();
@@ -152,7 +164,7 @@ public sealed class DebugSession : IAsyncDisposable
         if (adapter is not null)
         {
             try { if (!adapter.HasExited) { adapter.Kill(entireProcessTree: false); await adapter.WaitForExitAsync(); } }
-            catch (InvalidOperationException) { }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception) { }
             adapter.Dispose();
         }
         if (stderr is not null) { try { await stderr; } catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { } }

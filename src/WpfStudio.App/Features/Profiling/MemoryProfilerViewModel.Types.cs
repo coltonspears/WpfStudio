@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts.Profiling;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
 
@@ -42,8 +43,8 @@ public sealed partial class MemoryProfilerViewModel
     {
         if (_updating) return;
         _skip = 0; QueueQuery();
-        if (value is not null) _ = LoadFlowAsync(value.Key, _lifetime.Token); else { CancelFlow(); Flow = null; }
-        if (IsGrouped) _ = LoadGroupsAsync(_lifetime.Token);
+        if (value is not null) LoadFlowAsync(value.Key, _lifetime.Token).Forget(ReportFault); else { CancelFlow(); Flow = null; }
+        if (IsGrouped) LoadGroupsAsync(_lifetime.Token).Forget(ReportFault);
     }
     partial void OnObjectFilterChanged(string value) { if (!_updating) { _skip = 0; QueueQuery(); } }
     partial void OnTypeFilterChanged(string value) => (_typeFilterThrottle ??= new(RefreshTypes)).Request();
@@ -51,7 +52,7 @@ public sealed partial class MemoryProfilerViewModel
     partial void OnTypeGroupingChanged(string value) => RefreshTypes();
     partial void OnOnlyApplicationTypesChanged(bool value) => RefreshTypes();
     partial void OnFlowUsesBytesChanged(bool value) => DescribeFlow();
-    partial void OnSelectedObjectChanged(MemoryObjectInfo? value) { if (!_updating && value is not null) _ = InspectObjectAsync(value.Id, _lifetime.Token); }
+    partial void OnSelectedObjectChanged(MemoryObjectInfo? value) { if (!_updating && value is not null) InspectObjectAsync(value.Id, _lifetime.Token).Forget(ReportFault); }
 
     private void RefreshTypes()
     {
@@ -102,7 +103,7 @@ public sealed partial class MemoryProfilerViewModel
     /// <summary>Raised after the type list is rebuilt, so the view can re-apply grouping.</summary>
     public event Action? TypesRefreshed;
 
-    private void QueueQuery() { _ = QueryObjectsAsync(_lifetime.Token); }
+    private void QueueQuery() { QueryObjectsAsync(_lifetime.Token).Forget(ReportFault); }
     private void CancelQuery() { _queryRevision++; _query?.Cancel(); _query?.Dispose(); _query = null; }
 
     private async Task QueryObjectsAsync(CancellationToken token)

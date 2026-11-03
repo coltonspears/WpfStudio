@@ -5,4 +5,17 @@
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+  <!-- Product code only. Fixtures, samples and tools stand in for user projects or target frameworks these do not need to cover. -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <!-- async void, sync-over-async and unobserved fire-and-forget. -->
+    <WarningsAsErrors>$(WarningsAsErrors);VSTHRD100;VSTHRD002;VSTHRD110</WarningsAsErrors>
+    <!-- 001 and 003 only apply with JoinableTaskFactory, which this code does not use. 103 is mostly Cancel versus CancelAsync, and 200 is a naming preference. -->
+    <NoWarn>$(NoWarn);VSTHRD001;VSTHRD003;VSTHRD103;VSTHRD200</NoWarn>
+  </PropertyGroup>
+  <ItemGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">
+    <!-- Compile-time only: nothing from this package reaches the output of any project, including those loaded into inspected applications. -->
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" PrivateAssets="all" />
+  </ItemGroup>
 </Project>

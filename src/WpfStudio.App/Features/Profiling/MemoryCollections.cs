@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
 
@@ -32,7 +33,7 @@ internal sealed class RefreshThrottle(Action refresh, int intervalMilliseconds =
         var wait = _last + intervalMilliseconds - Environment.TickCount64;
         if (wait <= 0) { Run(); return; }
         _pending = true;
-        _ = RunLaterAsync((int)wait);
+        RunLaterAsync((int)wait).Forget();
     }
 
     private async Task RunLaterAsync(int wait)

@@ -115,7 +115,7 @@ public sealed partial class EditorSurface : TextEditor
         // Moving onto the popup (to read or select from it) keeps it open.
         MouseHoverStopped += (_, _) => { if (!_hover.IsMouseOver) CancelHover(); };
         PreviewMouseWheel += (_, _) => CancelHover();
-        ContextMenuOpening += (_, _) => { if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset); };
+        ContextMenuOpening += (_, _) => { if (ViewModel is { } vm) vm.RefreshQuickFixesAsync(CaretOffset).Forget(vm.ReportFault); };
     }
     public EditorViewModel? ViewModel { get => (EditorViewModel?)GetValue(ViewModelProperty); set => SetValue(ViewModelProperty, value); }
     private static void Changed(DependencyObject owner, DependencyPropertyChangedEventArgs args) => ((EditorSurface)owner).Attach();
@@ -150,7 +150,7 @@ public sealed partial class EditorSurface : TextEditor
         CancelHover();
         _changePopup.IsOpen = false; _historyPopup.IsOpen = false;
         CancelPendingCompletion();
-        _completion?.Close(); _completionRequest?.Cancel();
+        _completion?.Close(); CancelCompletionRequest();
         if (_attached != null)
         {
             _attached.State.PropertyChanged -= StateChanged; _attached.PropertyChanged -= ModelChanged;
@@ -182,7 +182,7 @@ public sealed partial class EditorSurface : TextEditor
         if (args.PropertyName is nameof(EditorViewModel.ShowInlineBlame) or nameof(EditorViewModel.ShowCodeLens)) ApplyCodeLens();
         if (args.PropertyName == nameof(EditorViewModel.XamlContextRevision))
         {
-            _completionRequest?.Cancel(); _completion?.Close(); CancelHover();
+            CancelCompletionRequest(); _completion?.Close(); CancelHover();
         }
     }
     private void DiagnosticsChanged(object? sender, NotifyCollectionChangedEventArgs args)
@@ -238,19 +238,21 @@ public sealed partial class EditorSurface : TextEditor
     {
         if (_pendingCompletion != null && e.Key == Key.Escape) { CancelPendingCompletion(); e.Handled = true; return; }
         if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && TryExpandSnippet()) e.Handled = true;
-        else if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _ = ShowCompletionAsync(); }
+        else if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; Observe(ShowCompletionAsync()); }
         else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ViewModel is { IsCSharp: true } csharp)
         {
-            e.Handled = true; _ = ShowQuickActionsAsync(csharp);
+            e.Handled = true; ShowQuickActionsAsync(csharp).Forget(csharp.ReportFault);
         }
         else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ContextMenu != null)
         {
-            if (ViewModel is { } vm) _ = vm.RefreshQuickFixesAsync(CaretOffset);
+            if (ViewModel is { } vm) vm.RefreshQuickFixesAsync(CaretOffset).Forget(vm.ReportFault);
             ContextMenu.PlacementTarget = this; ContextMenu.IsOpen = true; e.Handled = true;
         }
         else if (e.Key == Key.Escape) { _completion?.Close(); CancelHover(); }
     }
+#pragma warning disable VSTHRD100 // A WPF event handler; the awaits below are guarded.
     private async void OnMouseHover(object? sender, MouseEventArgs e)
+#pragma warning restore VSTHRD100
     {
         CancelHover();
         if (IsOverAdornment(e.OriginalSource) || IsOverAdornment(Mouse.DirectlyOver)) return; // Folded blocks and lens rows have their own tips.
@@ -296,14 +298,17 @@ public sealed partial class EditorSurface : TextEditor
     private void OnTextEntered(object? sender, TextCompositionEventArgs e)
     {
         if (_replayingInput || _pendingCompletion != null) return;
-        if (e.Text is "(" or ",") _ = ShowSignatureAsync();
+        if (e.Text is "(" or ",") Observe(ShowSignatureAsync());
         else if (e.Text == ")") _signature.IsOpen = false;
-        if (_completion == null && e.Text.Length == 1 && (e.Text[0] is '.' or '<' or '{' || char.IsLetter(e.Text[0]))) _ = ShowCompletionAsync();
+        if (_completion == null && e.Text.Length == 1 && (e.Text[0] is '.' or '<' or '{' || char.IsLetter(e.Text[0]))) Observe(ShowCompletionAsync());
     }
+    // Takes the model now: the dependency property cannot be read from the thread a fault may arrive on.
+    private void Observe(Task request) => request.Forget(ViewModel is { } vm ? vm.ReportFault : null);
+    private void CancelCompletionRequest() { _completionRequest?.Cancel(); _completionRequest?.Dispose(); _completionRequest = null; }
     private async Task ShowCompletionAsync()
     {
         if (ViewModel == null || IsReadOnly || _pendingCompletion != null) return;
-        _completionRequest?.Cancel(); _completionRequest?.Dispose(); _completionRequest = new();
+        CancelCompletionRequest(); _completionRequest = new();
         var token = _completionRequest.Token; var vm = ViewModel; var version = vm.State.Version; var caret = CaretOffset;
         long contextRevision = vm.XamlContextRevision;
         try
@@ -493,7 +498,7 @@ public sealed partial class EditorSurface : TextEditor
         public object Content => entry.DisplayText;
         public object Description => entry.Description ?? string.Join(", ", entry.Tags);
         public double Priority => 0;
-        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => _ = owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs);
+        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => owner.Observe(owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs));
     }
     /// <summary>Takes the view model's decorations when they describe the current text; later edits shift them.</summary>
     private void ApplyDecorations()
@@ -562,7 +567,9 @@ public sealed partial class EditorSurface : TextEditor
         menu.Items.Add(new MenuItem { Header = new TextBlock { Text = "Finding quick actions…" }, IsEnabled = false });
         _quickActions = menu;
         menu.IsOpen = true;
-        await vm.RefreshQuickFixesAsync(CaretOffset);
+        // A failure shows as the menu's text below; the menu must not stay on "Finding quick actions…".
+        try { await vm.RefreshQuickFixesAsync(CaretOffset); }
+        catch (Exception ex) { vm.LanguageStatus = ex.Message; }
         if (!ReferenceEquals(_quickActions, menu) || !menu.IsOpen || vm != ViewModel) return;
         menu.Items.Clear();
         if (vm.CodeActions.Count == 0)

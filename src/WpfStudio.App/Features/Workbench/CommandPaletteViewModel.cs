@@ -94,7 +94,7 @@ public sealed partial class CommandPaletteViewModel : ObservableObject, IDisposa
         _symbolSearch = new();
         Results.Clear(); Selected = null;
         if (query.Length == 0) return;
-        _ = SearchSymbolsAsync(query, _symbolSearch.Token);
+        SearchSymbolsAsync(query, _symbolSearch.Token).Forget();
     }
     private async Task SearchSymbolsAsync(string query, CancellationToken token)
     {

@@ -11,6 +11,8 @@ namespace WpfStudio.App.Features.Documents;
 public interface IAutoSaveHost
 {
     IReadOnlyList<EditorViewModel> Documents { get; }
+    /// <summary>Cancelled when the shell shuts down.</summary>
+    CancellationToken Lifetime { get; }
     /// <summary>A change review is open; saving now could write text the user is still deciding about.</summary>
     bool IsReviewOpen { get; }
     void ReportStatus(string status);
@@ -61,10 +63,10 @@ public sealed class AutoSaveCoordinator : IDisposable
         _timer?.Cancel(); _timer?.Dispose(); _timer = null;
         if (!_preferences.AutoSave || !IsEnabled || IsHeld || _disposed) return;
         var pending = _timer = new();
-        _ = Task.Delay(TimeSpan.FromSeconds(_preferences.AutoSaveDelaySeconds), pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
+        Task.Delay(TimeSpan.FromSeconds(_preferences.AutoSaveDelaySeconds), pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
         {
-            if (!pending.IsCancellationRequested && !_disposed) _run = SaveAsync();
-        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+            if (!pending.IsCancellationRequested && !_disposed) _run = TimedSaveAsync();
+        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default).Forget();
     }
 
     /// <summary>
@@ -98,21 +100,30 @@ public sealed class AutoSaveCoordinator : IDisposable
     /// <summary>Runs the timed save now, as the timer would.</summary>
     public Task RunNowAsync() => _run = SaveAsync();
 
+    /// <summary>Nothing awaits a timed save unless a close happens to come along, so its failures are reported here.</summary>
+    private async Task TimedSaveAsync()
+    {
+        try { await SaveAsync(); }
+        catch (Exception exception) { _host.AppendOutput("Automatic save: " + exception.Message); }
+    }
+
     private async Task SaveAsync()
     {
         if (IsHeld) return;
         if (_host.IsReviewOpen) { Schedule(); return; }
         var saved = 0;
+        var lifetime = _host.Lifetime;
         foreach (var document in _host.Documents.Where(document => document.State.IsDirty && document.State.DiskHash is not null && !document.IsReadOnly
                      && !document.State.HasExternalChange && File.Exists(document.State.Path)).ToArray())
         {
             if (IsHeld || !_host.Documents.Contains(document)) break;
             try
             {
-                await _store.SaveAsync(document.State);
+                await _store.SaveAsync(document.State, cancellationToken: lifetime);
                 _host.DocumentAutoSaved(document);
                 saved++;
             }
+            catch (OperationCanceledException) { break; } // The write is atomic, so the file keeps its last saved content.
             catch (ExternalFileChangedException) { _host.ExternalChangeDetected(); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { _host.AppendOutput("Automatic save: " + exception.Message); }
         }

@@ -52,12 +52,77 @@ public sealed class CrashGuardTests
             using var provider = new StudioLogProvider(directory);
             var logger = provider.CreateLogger("Tests");
             using (new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
+            {
                 logger.LogWarning("while locked");
+                provider.Dispose(); // Waits for the writer, which must fail against the lock and carry on.
+            }
             logger.LogWarning("after unlock");
-            // The provider pauses after a failure, so neither line reaches the file; what matters is that no exception escaped.
             Assert.DoesNotContain("while locked", File.ReadAllText(path));
         }
         finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void LogLinesReachTheFileInOrderOnceTheProviderIsDisposed()
+    {
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-LogFlush-").FullName;
+        try
+        {
+            var provider = new StudioLogProvider(directory);
+            var logger = provider.CreateLogger("Tests");
+            for (var line = 0; line < 500; line++) logger.LogWarning("line {Line}", line);
+            logger.LogInformation("below the threshold");
+            provider.Dispose();
+            var lines = File.ReadAllLines(Path.Combine(directory, "Logs", "studio.log"));
+            Assert.Equal(500, lines.Length);
+            Assert.Contains("line 0 ", lines[0]);
+            Assert.Contains("line 499 ", lines[^1]);
+            provider.CreateLogger("Tests").LogWarning("after dispose"); // Too late to write, but must not throw.
+            provider.Dispose();
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void LoggingDoesNotWaitForALockedLogFile()
+    {
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-LogQueue-").FullName;
+        try
+        {
+            var logs = Path.Combine(directory, "Logs"); Directory.CreateDirectory(logs);
+            using var provider = new StudioLogProvider(directory);
+            var logger = provider.CreateLogger("Tests");
+            using var locked = new FileStream(Path.Combine(logs, "studio.log"), FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            for (var line = 0; line < 10_000; line++) logger.LogError("line {Line}", line); // More than the queue holds: the oldest lines give way.
+            Assert.InRange(clock.Elapsed.TotalSeconds, 0, 5);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task PromptWorksWithoutAnOwnerOrTheThemeBrushes()
+    {
+        var completion = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            void Answer()
+            {
+                var prompt = System.Windows.PresentationSource.CurrentSources.OfType<System.Windows.Interop.HwndSource>()
+                    .Select(source => source.RootVisual).OfType<System.Windows.Window>().FirstOrDefault(window => window.Title == "No theme");
+                if (prompt is null) { dispatcher.BeginInvoke(Answer, System.Windows.Threading.DispatcherPriority.Background); return; }
+                prompt.DialogResult = true;
+            }
+            dispatcher.BeginInvoke(Answer, System.Windows.Threading.DispatcherPriority.Background);
+            try { completion.TrySetResult(new DesktopDialogs(() => null).PromptAsync("No theme", "Name", "kept").Result); }
+            catch (Exception exception) { completion.TrySetException(exception); }
+            dispatcher.InvokeShutdown();
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        Assert.Equal("kept", await completion.Task.WaitAsync(TimeSpan.FromSeconds(30)));
     }
 
     [Fact]

@@ -222,7 +222,7 @@ public sealed partial class DesignerViewModel
     private void ArtboardSizeChanged()
     {
         if (_document is null || _disposed) return;
-        if (AutoRefresh && !IsCompiledPreview && !_scenarioSelectionPending) { _ = RenderAsync(debounce: true); return; }
+        if (AutoRefresh && !IsCompiledPreview && !_scenarioSelectionPending) { RenderAsync(debounce: true).Forget(ReportFault); return; }
         Invalidate();
         Status = "Artboard size changed. Refresh to apply it.";
     }

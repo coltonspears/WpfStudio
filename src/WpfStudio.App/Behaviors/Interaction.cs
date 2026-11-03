@@ -54,7 +54,9 @@ public static class Interaction
         window.Closing -= Closing; window.Activated -= Activated;
         if (args.NewValue != null) { window.Closing += Closing; window.Activated += Activated; }
     }
+#pragma warning disable VSTHRD100 // A WPF event must cancel synchronously; the await below is guarded.
     private static async void Closing(object? sender, CancelEventArgs args)
+#pragma warning restore VSTHRD100
     {
         if (sender is not Window window || GetCloseGuard(window) is not { } vm) return;
         args.Cancel = true;
@@ -64,7 +66,9 @@ public static class Interaction
         catch (Exception ex) { vm.Status = "Could not close safely: " + ex.Message; vm.AppendOutput(ex.ToString()); }
         finally { window.IsEnabled = true; ClosingWindows.Remove(window); }
     }
+#pragma warning disable VSTHRD100 // A WPF event handler; the await below is guarded.
     private static async void Activated(object? sender, EventArgs args)
+#pragma warning restore VSTHRD100
     {
         if (sender is not Window window || GetCloseGuard(window) is not { } vm) return;
         try { await vm.CheckExternalChangesAsync(); }
@@ -145,10 +149,18 @@ public static class Interaction
     public static bool GetFocusCaretEnd(DependencyObject target) => (bool)target.GetValue(FocusCaretEndProperty);
     private static void FocusCaretEndChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {
-        if (owner is not TextBox box || !(bool)args.NewValue) return;
-        box.IsVisibleChanged += (_, _) => { if (box.IsVisible) box.Dispatcher.BeginInvoke(() => { box.Focus(); box.CaretIndex = box.Text.Length; }); };
-        // A prefix such as ">" set while the box is focused must not leave the caret before it.
-        box.TextChanged += (_, _) => { if (box.IsKeyboardFocused && box.CaretIndex == 0 && box.Text.Length == 1 && !char.IsLetterOrDigit(box.Text[0])) box.CaretIndex = 1; };
+        if (owner is not TextBox box) return;
+        box.IsVisibleChanged -= FocusCaretEndWhenVisible; box.TextChanged -= KeepCaretAfterPrefix;
+        if ((bool)args.NewValue) { box.IsVisibleChanged += FocusCaretEndWhenVisible; box.TextChanged += KeepCaretAfterPrefix; }
+    }
+    private static void FocusCaretEndWhenVisible(object sender, DependencyPropertyChangedEventArgs args)
+    {
+        if (sender is TextBox { IsVisible: true } box) _ = box.Dispatcher.BeginInvoke(() => { box.Focus(); box.CaretIndex = box.Text.Length; });
+    }
+    // A prefix such as ">" set while the box is focused must not leave the caret before it.
+    private static void KeepCaretAfterPrefix(object sender, TextChangedEventArgs args)
+    {
+        if (sender is TextBox { IsKeyboardFocused: true, CaretIndex: 0 } box && box.Text.Length == 1 && !char.IsLetterOrDigit(box.Text[0])) box.CaretIndex = 1;
     }
     public static readonly DependencyProperty FocusWhenVisibleProperty = DependencyProperty.RegisterAttached("FocusWhenVisible", typeof(bool), typeof(Interaction), new PropertyMetadata(false, FocusChanged));
     public static void SetFocusWhenVisible(DependencyObject target, bool value) => target.SetValue(FocusWhenVisibleProperty, value);
@@ -156,6 +168,11 @@ public static class Interaction
     private static void FocusChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {
         if (owner is not UIElement element) return;
-        element.IsVisibleChanged += (_, _) => { if (element.IsVisible) element.Dispatcher.BeginInvoke(() => { element.Focus(); if (element is TextBox box) box.SelectAll(); }); };
+        element.IsVisibleChanged -= FocusWhenBecomingVisible;
+        if ((bool)args.NewValue) element.IsVisibleChanged += FocusWhenBecomingVisible;
+    }
+    private static void FocusWhenBecomingVisible(object sender, DependencyPropertyChangedEventArgs args)
+    {
+        if (sender is UIElement { IsVisible: true } element) _ = element.Dispatcher.BeginInvoke(() => { element.Focus(); if (element is TextBox box) box.SelectAll(); });
     }
 }

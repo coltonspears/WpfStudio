@@ -7,7 +7,8 @@ public sealed class ProjectXamlAnalysisScheduler(Func<long, CancellationToken, T
     private readonly object _gate = new();
     private readonly SemaphoreSlim _singleScan = new(1, 1);
     private CancellationTokenSource? _pending;
-    private long _generation;
+    private long _generation, _completionGeneration;
+    private int _runs;
     private bool _disposed;
     public Task Completion { get; private set; } = Task.CompletedTask;
     public bool IsCurrent(long generation) { lock (_gate) return !_disposed && generation == _generation; }
@@ -21,14 +22,23 @@ public sealed class ProjectXamlAnalysisScheduler(Func<long, CancellationToken, T
     }
     public Task Schedule(bool immediate = false)
     {
+        CancellationTokenSource pending;
+        long generation;
         lock (_gate)
         {
             if (_disposed) return Task.CompletedTask;
             _pending?.Cancel();
-            var pending = _pending = new CancellationTokenSource();
-            var generation = ++_generation;
-            return Completion = RunAsync(generation, pending, immediate);
+            pending = _pending = new CancellationTokenSource();
+            generation = ++_generation;
+            _runs++;
         }
+        // An immediate scan runs on this thread up to its first await, which must not happen under the lock.
+        var run = RunAsync(generation, pending, immediate);
+        lock (_gate)
+        {
+            if (generation > _completionGeneration) { _completionGeneration = generation; Completion = run; }
+        }
+        return run;
     }
     private async Task RunAsync(long generation, CancellationTokenSource pending, bool immediate)
     {
@@ -48,12 +58,25 @@ public sealed class ProjectXamlAnalysisScheduler(Func<long, CancellationToken, T
         { if (IsCurrent(generation)) report(generation, exception); }
         finally
         {
-            lock (_gate) { if (ReferenceEquals(_pending, pending)) _pending = null; }
+            bool last;
+            lock (_gate)
+            {
+                if (ReferenceEquals(_pending, pending)) _pending = null;
+                last = --_runs == 0 && _disposed;
+            }
             pending.Dispose();
+            if (last) _singleScan.Dispose();
         }
     }
     public void Dispose()
     {
-        lock (_gate) { if (_disposed) return; _disposed = true; _generation++; _pending?.Cancel(); }
+        bool idle;
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true; _generation++; _pending?.Cancel();
+            idle = _runs == 0;
+        }
+        if (idle) _singleScan.Dispose(); // Otherwise the last run does it: a cancelled scan may still be releasing the semaphore.
     }
 }

@@ -248,7 +248,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await SaveSettingsAsync();
         }
         finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; XamlAnalysis.Request(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
-        if (Workspace is { Cached: true } cached && !_contextReloadPending) _ = RefreshSavedProjectModelAsync(cached.Path, Configuration);
+        if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
     }
     /// <summary>
     /// Closes every tab before the workspace changes, asking about each unsaved document first. Nothing is closed when any
@@ -289,7 +289,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Workspace = snapshot;
             ApplyWorkspaceProjects(StartupProject?.ProjectPath);
             foreach (var issue in snapshot.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
-            foreach (var doc in Documents) await doc.SyncAsync();
+            foreach (var doc in Documents) await doc.SyncAsync(_lifetime.Token);
             await RefreshWpfAsync();
             if (Status.EndsWith("refreshing project model…", StringComparison.Ordinal)) Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}";
             XamlAnalysis.Request();
@@ -318,7 +318,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
                 if (Path.GetFileName(child) is not ("bin" or "obj" or ".git" or ".vs" or "node_modules" or "artifacts") && (File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) pending.Push(child);
         }
     }
-    [RelayCommand] private Task RestartWorkspaceAsync() => GuardAsync(async () => { Workspace = await _workspace.RestartAsync(); Status = "Language service restarted"; });
+    [RelayCommand] private Task RestartWorkspaceAsync() => GuardAsync(async () => { Workspace = await _workspace.RestartAsync(_lifetime.Token); Status = "Language service restarted"; });
     [RelayCommand] private Task ReloadWorkspaceAsync() => GuardAsync(async () =>
     {
         if (Workspace == null) return;
@@ -334,9 +334,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var requestedFramework = TargetFramework;
             Status = "Updating project context…";
             var startupPath = StartupProject?.ProjectPath;
-            Workspace = await _workspace.LoadAsync(new(Workspace.Path, requestedConfiguration, Path.GetExtension(Workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? requestedFramework : null));
+            Workspace = await _workspace.LoadAsync(new(Workspace.Path, requestedConfiguration, Path.GetExtension(Workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? requestedFramework : null), _lifetime.Token);
             ApplyWorkspaceProjects(startupPath);
-            foreach (var doc in Documents) await doc.SyncAsync();
+            foreach (var doc in Documents) await doc.SyncAsync(_lifetime.Token);
             await RefreshWpfAsync(); Status = "Workspace refreshed";
             if (requestedConfiguration != Configuration || requestedFramework != TargetFramework) _contextReloadPending = true;
           } while (_contextReloadPending && !_lifetime.IsCancellationRequested);
@@ -408,7 +408,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             vm.Navigate(Math.Min(position, vm.State.Content.Length));
             await FindReferencesCommand.ExecuteAsync(null);
         });
-        if (Features?.GitService is { } git) _ = vm.RefreshGitAsync(git, _lifetime.Token);
+        if (Features?.GitService is { } git) vm.RefreshGitAsync(git, _lifetime.Token).Forget(vm.ReportFault);
         vm.BlameCommitRequested += line => _ = GuardAsync(async () => { await OpenGitCommand.ExecuteAsync(null); Features?.Git.ShowCommit(line, vm.GitBase?.RelativePath); });
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
@@ -638,8 +638,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (declaration != null) await NavigateAsync(declaration.Path, declaration.Line, 1); else Status = "This XAML reference could not be resolved statically";
             return;
         }
-        await document.SyncAsync(); var state = document.State;
-        var results = await _workspace.GetDefinitionAsync(new(state.Path, state.CaretOffset, state.Version));
+        await document.SyncAsync(_lifetime.Token); var state = document.State;
+        var results = await _workspace.GetDefinitionAsync(new(state.Path, state.CaretOffset, state.Version), _lifetime.Token);
         if (results.Count > 0) await NavigateAsync(results[0].Path, results[0].Line, results[0].Column); else Status = "No source definition found";
     });
     [RelayCommand] private Task FindReferencesAsync() => GuardAsync(FindLanguageSymbolReferencesAsync);
@@ -875,13 +875,20 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         catch (OperationCanceledException) { Status = "Cancelled"; }
         catch (Exception ex) { _logger.LogError(ex, "Operation failed"); Status = ex.Message; AppendOutput(ex.ToString()); }
     }
+    /// <summary>For work nobody awaits: logs and shows its fault as a guarded command would. Safe on any thread.</summary>
+    private void ReportBackgroundFault(Exception fault)
+    {
+        _logger.LogError(fault, "Background operation failed");
+        _dispatcher.Post(() => { if (!_disposed) { Status = fault.Message; AppendOutput(fault.ToString()); } });
+    }
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
         XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Palette.Dispose();
+        _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
         Breakpoints.Dispose();
-        Features?.Dispose();
+        DetachFeatures(); Features?.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
         foreach (var document in Documents) document.Dispose();
         // Dispose UI-bound commands while the shell still owns its dispatcher

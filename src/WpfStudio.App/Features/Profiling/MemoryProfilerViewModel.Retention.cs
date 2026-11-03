@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Profiling.Visuals;
 using WpfStudio.Contracts.Profiling;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
 
@@ -31,7 +32,7 @@ public sealed partial class MemoryProfilerViewModel
     partial void OnRetentionChartChanged(string value)
     {
         OnPropertyChanged(nameof(RetentionMapDetail));
-        if (value == "Sunburst") _ = LoadSunburstAsync(_lifetime.Token);
+        if (value == "Sunburst") LoadSunburstAsync(_lifetime.Token).Forget(ReportFault);
     }
 
     /// <summary>Loads the nested dominator slice around the current focus for the sunburst.</summary>
@@ -98,7 +99,7 @@ public sealed partial class MemoryProfilerViewModel
             DominatorRoots.Clear();
             foreach (var node in Wrap(page, null)) DominatorRoots.Add(node);
             RetentionFocus = null; RetentionTrail.Clear(); RefreshRetentionMap();
-            if (IsSunburst) _ = LoadSunburstAsync(_lifetime.Token);
+            if (IsSunburst) LoadSunburstAsync(_lifetime.Token).Forget(ReportFault);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!_disposed && revision == _revision) Status = "The dominator tree is unavailable: " + ex.Message; }

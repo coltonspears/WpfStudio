@@ -4,6 +4,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Core;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Services;
 
@@ -66,14 +67,18 @@ public sealed partial class EditorPreferences : ObservableObject
             {
                 _listingFamilies = true;
                 var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
-                _ = Task.Run(ListFamilies).ContinueWith(listed => dispatcher.BeginInvoke(() =>
-                {
-                    _families = listed.Status == TaskStatus.RanToCompletion ? listed.Result : [EditorSettings.DefaultFontFamily];
-                    OnPropertyChanged(nameof(FontFamilies));
-                }), TaskScheduler.Default);
+                LoadFamiliesAsync(dispatcher).Forget();
             }
             return _families ?? [];
         }
+    }
+
+    private async Task LoadFamiliesAsync(System.Windows.Threading.Dispatcher dispatcher)
+    {
+        IReadOnlyList<string> families;
+        try { families = await Task.Run(ListFamilies).ConfigureAwait(false); }
+        catch (Exception) { families = [EditorSettings.DefaultFontFamily]; } // The settings page only needs something to offer.
+        _ = dispatcher.BeginInvoke(() => { _families = families; OnPropertyChanged(nameof(FontFamilies)); });
     }
 
     private static IReadOnlyList<string> ListFamilies()

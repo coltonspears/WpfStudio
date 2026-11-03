@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Appearance;
 using WpfStudio.Inspection.Protocol;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Inspection;
 
@@ -16,7 +17,7 @@ public sealed partial class InspectionViewModel
     partial void OnAppearanceTabIsActiveChanged(bool value)
     {
         ClearAppearance(value ? AppearanceUnavailableStatus() : "Open Appearance to inspect a property.");
-        if (value) _ = RefreshAppearanceAsync();
+        if (value) RefreshAppearanceAsync().Forget(ReportFault);
     }
     private string AppearanceUnavailableStatus() => !IsConnected ? "Connect to a running application to inspect appearance."
         : IsPaused ? "Debugger paused. Resume and refresh the element to inspect appearance."
@@ -44,7 +45,7 @@ public sealed partial class InspectionViewModel
     private void RefreshAppearanceSelection()
     {
         ClearAppearance(AppearanceUnavailableStatus());
-        if (AppearanceTabIsActive && CanRefreshAppearance()) _ = RefreshAppearanceAsync();
+        if (AppearanceTabIsActive && CanRefreshAppearance()) RefreshAppearanceAsync().Forget(ReportFault);
     }
     private void AppearanceOperationChanged(bool running)
     {

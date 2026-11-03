@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Runtime.Design;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Designer;
 
@@ -87,7 +88,7 @@ public sealed partial class DesignerViewModel
         IsInteracting = false;
         InteractionSession = null;
         NotifyInteractionState();
-        if (session is not null) _ = DeactivateRetiredInteractionAsync(session);
+        if (session is not null) DeactivateRetiredInteractionAsync(session).Forget();
     }
 
     private static async Task DeactivateRetiredInteractionAsync(IPreviewInteractionSession session)

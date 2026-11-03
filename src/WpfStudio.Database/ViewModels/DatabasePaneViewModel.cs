@@ -350,7 +350,7 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
         try
         {
             if (document.FilePath is not null && Path.GetFullPath(path).Equals(Path.GetFullPath(document.FilePath), StringComparison.OrdinalIgnoreCase)
-                && File.Exists(path) && await File.ReadAllTextAsync(path, cancellationToken) != document.SavedText)
+                && await Task.Run(() => File.Exists(path), cancellationToken) && await File.ReadAllTextAsync(path, cancellationToken) != document.SavedText)
             {
                 if (_dialogs is null || !await _dialogs.ConfirmAsync("SQL script changed outside WpfStudio", $"Overwrite the external changes to {Path.GetFileName(path)} with the editor content?"))
                 {
@@ -366,8 +366,8 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
                 await writer.WriteAsync(text.AsMemory(), cancellationToken);
                 await writer.FlushAsync(cancellationToken);
             }
-            cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, path, true);
+            // There is no asynchronous move, and the script may live on a slow or network drive.
+            await Task.Run(() => File.Move(temporary, path, true), cancellationToken);
             document.MarkSaved(text);
             document.FilePath = path;
             await FlushRecoveryAsync();
@@ -375,7 +375,11 @@ public partial class DatabasePaneViewModel : ObservableObject, IAsyncDisposable
             return !document.IsDirty;
         }
         catch (Exception exception) { Status = exception.Message; return false; }
-        finally { if (temporary is not null && File.Exists(temporary)) File.Delete(temporary); }
+        finally
+        {
+            // A cleanup failure must not replace the result reported above; the temporary file is hidden and uniquely named.
+            if (temporary is not null) await Task.Run(() => { try { if (File.Exists(temporary)) File.Delete(temporary); } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { } });
+        }
     }
 
     private ConnectionProfile CurrentProfile() => new()

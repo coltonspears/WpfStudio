@@ -1,5 +1,6 @@
 using WpfStudio.App.Features.Layout;
 using WpfStudio.Inspection.Protocol;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Inspection;
 
@@ -7,7 +8,7 @@ public sealed partial class InspectionViewModel
 {
     private LayoutInspectorViewModel? _layoutDetails;
     private bool _supportsLayout, _supportsLayoutOverlay, _layoutWasPaused, _layoutWasConnected;
-    public LayoutInspectorViewModel LayoutDetails => _layoutDetails ??= new(NotifyLayoutChanged, () => _ = HighlightSelectedAsync());
+    public LayoutInspectorViewModel LayoutDetails => _layoutDetails ??= new(NotifyLayoutChanged, () => HighlightSelectedAsync().Forget(ReportFault));
     public LayoutSnapshot? Layout => LayoutDetails.Snapshot;
     public bool HasLayout => LayoutDetails.Available;
     public string LayoutStatus => LayoutDetails.Status;
@@ -37,13 +38,13 @@ public sealed partial class InspectionViewModel
         _layoutWasConnected = IsConnected; _layoutWasPaused = IsPaused;
         // The target dispatcher cannot remove its frozen adorner while paused.
         // Clear it once execution resumes, even with automatic refresh disabled.
-        if (resumed) _ = HighlightSelectedAsync(clear: true);
+        if (resumed) HighlightSelectedAsync(clear: true).Forget(ReportFault);
     }
     private void ClearLayout(string status, bool hideOverlay = true)
     {
         LayoutDetails.Clear(!IsConnected ? "Layout unavailable: connect to a running application."
             : IsPaused ? "Debugger paused. Resume and refresh to observe current layout."
             : !_supportsLayout ? "This inspection agent does not provide layout details." : status);
-        if (hideOverlay) _ = HighlightSelectedAsync(clear: true);
+        if (hideOverlay) HighlightSelectedAsync(clear: true).Forget(ReportFault);
     }
 }

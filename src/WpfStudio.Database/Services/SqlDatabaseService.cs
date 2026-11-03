@@ -156,7 +156,7 @@ public sealed class SqlDatabaseService : IDatabaseService
                         {
                             if (await reader.IsDBNullAsync(column, cancellationToken).ConfigureAwait(false)) continue;
                             int maxChars = (int)Math.Min(65_536, Math.Max(0, (buffer.RemainingValueBytes - rowBytes) / 2));
-                            (values[column], bool clipped) = ReadValue(reader, column, maxChars);
+                            (values[column], bool clipped) = await ReadValueAsync(reader, column, maxChars, cancellationToken).ConfigureAwait(false);
                             cellTruncated |= clipped;
                             rowBytes += (values[column]?.Length ?? 0) * 2L;
                         }
@@ -181,11 +181,12 @@ public sealed class SqlDatabaseService : IDatabaseService
             display.HasOmittedResults || messages.IsTruncated || results.Any(result => result.IsTruncated));
     }
 
-    private static (string Text, bool Truncated) ReadValue(SqlDataReader reader, int column, int maximumCharacters)
+    private static async Task<(string Text, bool Truncated)> ReadValueAsync(SqlDataReader reader, int column, int maximumCharacters, CancellationToken cancellationToken)
     {
         string type = reader.GetDataTypeName(column).ToLowerInvariant();
         if (type == "xml")
         {
+            // The bounded formatter is synchronous, one reason the caller runs this whole query off the dispatcher thread.
             using var xml = reader.GetXmlReader(column);
             return BoundedXmlFormatter.Read(xml, maximumCharacters);
         }
@@ -193,18 +194,18 @@ public sealed class SqlDatabaseService : IDatabaseService
         {
             using TextReader text = reader.GetTextReader(column);
             var chars = new char[maximumCharacters + 1];
-            int count = text.ReadBlock(chars, 0, chars.Length);
+            int count = await text.ReadBlockAsync(chars, cancellationToken).ConfigureAwait(false);
             return (new string(chars, 0, Math.Min(count, maximumCharacters)), count > maximumCharacters);
         }
         if (type is "binary" or "varbinary" or "image" or "timestamp")
         {
-            using Stream stream = reader.GetStream(column);
+            await using Stream stream = reader.GetStream(column);
             int maximumBytes = Math.Max(0, (maximumCharacters - 2) / 2);
             var bytes = new byte[maximumBytes + 1];
-            int count = stream.ReadAtLeast(bytes, bytes.Length, throwOnEndOfStream: false);
+            int count = await stream.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
             return ((maximumCharacters < 2 ? "" : "0x") + Convert.ToHexString(bytes.AsSpan(0, Math.Min(count, maximumBytes))), count > maximumBytes);
         }
-        string value = Convert.ToString(reader.GetValue(column), CultureInfo.InvariantCulture) ?? "";
+        string value = Convert.ToString(await reader.GetFieldValueAsync<object>(column, cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture) ?? "";
         return value.Length > maximumCharacters ? (value[..maximumCharacters], true) : (value, false);
     }
 }

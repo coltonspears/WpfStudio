@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\WpfStudio.Runtime\WpfStudio.Runtime.csproj" />
+    <Compile Remove="Fixtures/**/*.cs" />
+    <ProjectReference Include="Fixtures/FakeDapAdapter/FakeDapAdapter.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

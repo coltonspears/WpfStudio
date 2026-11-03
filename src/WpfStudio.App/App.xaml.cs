@@ -21,7 +21,9 @@ namespace WpfStudio.App;
 public partial class App : Application
 {
     private IHost? _host;
+#pragma warning disable VSTHRD100 // A WPF override; its body catches and reports startup failures.
     protected override async void OnStartup(StartupEventArgs e)
+#pragma warning restore VSTHRD100
     {
         base.OnStartup(e);
         var faults = new UnhandledFaultReporter(Dispatcher, AppPaths.DataDirectory, () => _host?.Services.GetService<ILogger<App>>(), (status, details) =>
@@ -36,19 +38,23 @@ public partial class App : Application
         {
             Directory.CreateDirectory(AppPaths.DataDirectory);
             var builder = Host.CreateApplicationBuilder(e.Args);
-            builder.Logging.ClearProviders(); builder.Logging.AddProvider(new StudioLogProvider());
+            builder.Logging.ClearProviders();
+            // By factory so the container owns it: disposing the host writes the last queued lines. An instance given to AddProvider is never disposed.
+            builder.Services.AddSingleton<ILoggerProvider>(_ => new StudioLogProvider());
             ConfigureServices(builder.Services);
             _host = builder.Build(); await _host.StartAsync();
             var shell = _host.Services.GetRequiredService<ShellViewModel>();
             var window = _host.Services.GetRequiredService<MainWindow>();
             window.DataContext = shell; MainWindow = window;
             shell.ThemeChanged += ThemeService.Apply;
+#pragma warning disable VSTHRD101 // A WPF event handler; the awaits below are guarded.
             window.Closed += async (_, _) =>
             {
                 try { await _host.StopAsync(TimeSpan.FromSeconds(5)); if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync(); else _host.Dispose(); }
                 catch (Exception ex) { File.AppendAllText(Path.Combine(AppPaths.DataDirectory, "shutdown-error.log"), ex.ToString()); }
                 finally { Shutdown(); }
             };
+#pragma warning restore VSTHRD101
             window.Show();
             try { await shell.InitializeAsync(e.Args); }
             catch (Exception ex) { shell.Status = ex.Message; shell.AppendOutput(ex.ToString()); }

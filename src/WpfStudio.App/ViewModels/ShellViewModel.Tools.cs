@@ -1,8 +1,10 @@
+using System.ComponentModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
 using WpfStudio.Runtime.Debugging;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -18,13 +20,27 @@ public sealed partial class ShellViewModel
         Features = features;
         if (features == null) return;
         features.Attach(this);
-        features.Git.OpenFileRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
-        // Commits, checkouts and merges change what each editor's change margin and blame compare with.
-        features.Git.RepositoryChanged += () => { foreach (var document in Documents) _ = document.RefreshGitAsync(features.GitService, _lifetime.Token); };
-        features.Git.WorkspaceFilesChanged += () => _ = GuardAsync(WorkspaceMutatedAsync);
-        features.Assistant.SettingsRequested += () => _ = OpenSettingsCommand.ExecuteAsync(AssistantPage);
+        features.Git.OpenFileRequested += GitOpenFileRequested;
+        features.Git.RepositoryChanged += GitRepositoryChanged;
+        features.Git.WorkspaceFilesChanged += GitWorkspaceFilesChanged;
+        features.Assistant.SettingsRequested += AssistantSettingsRequested;
         features.Assistant.RefreshContextRequested += UpdateAssistantContext;
     }
+    private void DetachFeatures()
+    {
+        if (Features is not { } features) return;
+        features.Git.OpenFileRequested -= GitOpenFileRequested;
+        features.Git.RepositoryChanged -= GitRepositoryChanged;
+        features.Git.WorkspaceFilesChanged -= GitWorkspaceFilesChanged;
+        features.Assistant.SettingsRequested -= AssistantSettingsRequested;
+        features.Assistant.RefreshContextRequested -= UpdateAssistantContext;
+        if (features.Assistant.Settings is INotifyPropertyChanged settings) settings.PropertyChanged -= AssistantSettingsChanged;
+    }
+    private void GitOpenFileRequested(string path) => _ = GuardAsync(() => OpenDocumentAsync(path));
+    // Commits, checkouts and merges change what each editor's change margin and blame compare with.
+    private void GitRepositoryChanged() { if (Features is { } features) foreach (var document in Documents) document.RefreshGitAsync(features.GitService, _lifetime.Token).Forget(document.ReportFault); }
+    private void GitWorkspaceFilesChanged() => _ = GuardAsync(WorkspaceMutatedAsync);
+    private void AssistantSettingsRequested() => _ = OpenSettingsCommand.ExecuteAsync(AssistantPage);
     partial void OnActiveDocumentChanged(EditorViewModel? value)
     {
         if (value != null) { ActiveWorkbench = null; _assistantContextDocument = value; }
@@ -83,8 +99,8 @@ public sealed partial class ShellViewModel
     [RelayCommand] private Task RefactorAsync(string? action) => GuardAsync(async () =>
     {
         if (ActiveDocument is not { IsReadOnly: false } document || document.State.Extension != ".cs" || action == null) { Status = "Open a C# source document to use this refactoring"; return; }
-        await document.SyncAsync(); var state = document.State;
-        var result = await _workspace.RefactorAsync(new(state.Path, state.CaretOffset, state.Version, action));
+        await document.SyncAsync(_lifetime.Token); var state = document.State;
+        var result = await _workspace.RefactorAsync(new(state.Path, state.CaretOffset, state.Version, action), _lifetime.Token);
         await ReviewAndApplyAsync("Review C# refactoring", result);
     });
     private async Task ApplyCSharpCodeActionAsync(EditorViewModel editor, WpfStudio.Contracts.CodeActionEntry action)

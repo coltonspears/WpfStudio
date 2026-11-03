@@ -58,7 +58,7 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
             }
             catch (Exception ex) when (ex is IOException or JsonException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                packages = ReadProjectReferences(projectPath, central);
+                packages = await ReadProjectReferencesAsync(projectPath, central, cancellationToken).ConfigureAwait(false);
                 warnings.Add("Showing declared references because SDK evaluation failed. Conditions/imports may differ; restore the project to obtain resolved versions. " + ex.Message);
             }
         }
@@ -150,10 +150,10 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
         return rows.GroupBy(x => (x.Id, x.RequestedVersion, x.ResolvedVersion)).Select(g => g.First() with { Frameworks = string.Join(", ", g.Select(x => x.Frameworks).Distinct()) }).OrderBy(x => x.Id, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    public static IReadOnlyList<InstalledPackage> ReadProjectReferences(string projectPath, string? centralPath)
+    public static async Task<IReadOnlyList<InstalledPackage>> ReadProjectReferencesAsync(string projectPath, string? centralPath, CancellationToken cancellationToken = default)
     {
-        var document = XDocument.Load(projectPath);
-        var central = centralPath is null ? null : XDocument.Load(centralPath);
+        var document = await LoadXmlAsync(projectPath, cancellationToken).ConfigureAwait(false);
+        var central = centralPath is null ? null : await LoadXmlAsync(centralPath, cancellationToken).ConfigureAwait(false);
         var properties = document.Descendants().Where(x => x.Parent?.Name.LocalName == "PropertyGroup").GroupBy(x => x.Name.LocalName).ToDictionary(x => x.Key, x => x.Last().Value);
         if (central is not null)
             foreach (var property in central.Descendants().Where(x => x.Parent?.Name.LocalName == "PropertyGroup")) properties.TryAdd(property.Name.LocalName, property.Value);
@@ -167,6 +167,12 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
                 ?? centralEntry?.Attribute("Version")?.Value ?? centralEntry?.Elements().FirstOrDefault(p => p.Name.LocalName == "Version")?.Value ?? "(evaluated by MSBuild)";
             return new InstalledPackage(id, Resolve(version), "Not evaluated", x.Attribute("Condition")?.Value ?? "Declared reference");
         }).OrderBy(x => x.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static async Task<XDocument> LoadXmlAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+        return await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken).ConfigureAwait(false);
     }
 
     public static IReadOnlyList<string> SortVersions(IEnumerable<string> versions, bool prerelease) => versions

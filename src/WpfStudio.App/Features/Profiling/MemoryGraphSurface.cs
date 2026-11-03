@@ -77,7 +77,7 @@ public sealed class MemoryGraphSurface : FrameworkElement
     {
         var surface = (MemoryGraphSurface)d; surface._needsViewport = true;
         // Column widths change in the same binding update. Center only after layout settles.
-        surface.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(surface.InitializeViewport));
+        _ = surface.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(surface.InitializeViewport));
     }
 
     private static void GraphChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

@@ -16,6 +16,23 @@ public sealed class PreviewEngineTests(PreviewFixture fixture)
     private static PreviewRequest Request(string text, long version = 1) => new("C:/preview/View.xaml", text, version, 400, 300);
 
     [Fact]
+    public async Task ACancelledRenderStopsBetweenItsStepsAndTheNextOneWorks()
+    {
+        string text = $"<Grid {Namespace}><Button x:Name='Save' Content='Save' /></Grid>";
+        using var cancellation = new CancellationTokenSource();
+        var render = fixture.OnDispatcher(() =>
+        {
+            var started = Engine.RenderAsync(Request(text, 40), cancellation.Token);
+            // Background runs after the render starts and before layout settles at ContextIdle, so the render is in the middle of its steps.
+            Dispatcher.CurrentDispatcher.InvokeAsync(() => cancellation.Cancel(), DispatcherPriority.Background);
+            return started;
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => render);
+        var next = await Engine.RenderAsync(Request(text, 41), default);
+        Assert.True(next.Success, string.Join("\n", next.Diagnostics.Select(d => d.Message)));
+    }
+
+    [Fact]
     public async Task RendersWindowContentToPngWithNamedSourceAndVisualTree()
     {
         string text = $"<Window {Namespace} x:Class='Test.View' Title='Window'>\n<Grid><Button x:Name='SaveButton' Width='120' Height='40' Click='Save_Click'>Save</Button></Grid></Window>";

@@ -7,7 +7,7 @@ public static class TaskObservation
     /// is passed to <paramref name="failed"/> when one is given. Cancellation is not a fault.
     /// </summary>
     public static void Forget(this Task task, Action<Exception>? failed = null) =>
-        task.ContinueWith(static (completed, state) =>
+        _ = task.ContinueWith(static (completed, state) =>
         {
             var fault = completed.Exception!.GetBaseException(); // Reading Exception is what marks the fault observed.
             try { (state as Action<Exception>)?.Invoke(fault); }

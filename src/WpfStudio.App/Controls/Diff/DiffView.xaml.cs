@@ -11,6 +11,7 @@ using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using WpfStudio.App.Services;
 using WpfStudio.Core.Text;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Controls.Diff;
 
@@ -104,7 +105,8 @@ public partial class DiffView : UserControl
         _inline.TextArea.TextView.VisualLinesChanged += (_, _) => UpdateRulerViewport();
         _splitRuler.Navigate += fraction => ScrollToFraction(_right, fraction);
         _inlineRuler.Navigate += fraction => ScrollToFraction(_inline, fraction);
-        Loaded += (_, _) => { ThemeService.Applied += ThemeApplied; ApplyHighlighting(); };
+        // WPF can raise Loaded twice without Unloaded between, as when a tab is re-hosted.
+        Loaded += (_, _) => { ThemeService.Applied -= ThemeApplied; ThemeService.Applied += ThemeApplied; ApplyHighlighting(); };
         Unloaded += (_, _) => ThemeService.Applied -= ThemeApplied;
         UpdateLabels();
         ModeChanged();
@@ -162,7 +164,7 @@ public partial class DiffView : UserControl
     {
         if (_recomputeQueued) return;
         _recomputeQueued = true;
-        Dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
         {
             _recomputeQueued = false;
             Recompute();
@@ -180,12 +182,12 @@ public partial class DiffView : UserControl
         string before = Before ?? "", after = After ?? "";
         if (before.Length + after.Length < 400_000) { Apply(TextDiff.Compute(before, after)); return; }
         ShowMessage("Comparing…");
-        _ = Task.Run(() => TextDiff.Compute(before, after)).ContinueWith(task =>
+        Task.Run(() => TextDiff.Compute(before, after)).ContinueWith(task =>
         {
             if (version != _computeVersion) return;
             if (task.Exception is { } error) ShowMessage(error.GetBaseException().Message, "Warning");
             else Apply(task.Result);
-        }, TaskScheduler.FromCurrentSynchronizationContext());
+        }, TaskScheduler.FromCurrentSynchronizationContext()).Forget(fault => _ = Dispatcher.BeginInvoke(() => ShowMessage(fault.Message, "Warning")));
     }
 
     private void Apply(TextDiff diff)
@@ -232,7 +234,7 @@ public partial class DiffView : UserControl
         if (scrollToFirst)
         {
             _current = Changes.Count > 0 ? 0 : -1;
-            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { if (_current >= 0) GoToChange(_current); else ScrollTop(); });
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { if (_current >= 0) GoToChange(_current); else ScrollTop(); });
         }
         NotifyNavigation();
     }
@@ -268,7 +270,7 @@ public partial class DiffView : UserControl
         double offset = editor.VerticalOffset;
         _expanded.Add(separator.GapStart);
         Rebuild(scrollToFirst: false);
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => editor.ScrollToVerticalOffset(offset));
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => editor.ScrollToVerticalOffset(offset));
     }
 
     private void GoToChange(int index)
@@ -371,7 +373,7 @@ public partial class DiffView : UserControl
             // Keep the reader near the same change when switching presentations.
             int current = _current;
             Rebuild(scrollToFirst: false);
-            if (current >= 0) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => GoToChange(current));
+            if (current >= 0) _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => GoToChange(current));
         }
     }
 

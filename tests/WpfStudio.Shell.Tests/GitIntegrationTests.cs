@@ -362,6 +362,23 @@ public sealed class GitIntegrationTests
     }
 
     [Fact]
+    public async Task AFailedWorkspaceSwitchDoesNotLeaveGitDisabled()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        using var model = new GitViewModel(fixture.Service);
+        await model.SetWorkspaceAsync(fixture.Root);
+        Assert.True(model.RefreshCommand.CanExecute(null));
+        var fail = true;
+        model.PropertyChanged += (_, args) =>
+        {
+            if (fail && args.PropertyName == nameof(GitViewModel.Branch)) { fail = false; throw new InvalidOperationException("Subscriber failed"); }
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => model.SetWorkspaceAsync(fixture.Root));
+        Assert.True(model.RefreshCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task CommitOutputCannotExposeCredentialsEmbeddedInItsSubject()
     {
         using var fixture = await Fixture.CreateAsync();

@@ -67,7 +67,7 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
             SessionDescription = $"Process {hello.ProcessId} · .NET {hello.RuntimeVersion} · agent {hello.AgentVersion}";
             UpdateState();
             await RefreshAsync();
-            _ = PollAsync(generation, token);
+            PollAsync(generation, token).Forget(ReportFault);
         }
         catch (OperationCanceledException)
         {
@@ -196,7 +196,7 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
         ClearLayout(value is null ? "Select an element to inspect its layout." : "Reading the selected element's layout…");
         RefreshSourceState(clear: true);
         SelectBindingIssueCommand.NotifyCanExecuteChanged();
-        if (!_rebuilding) _ = InspectAndHighlightSelectedAsync();
+        if (!_rebuilding) InspectAndHighlightSelectedAsync().Forget(ReportFault);
     }
     private async Task InspectSelectedAsync()
     {
@@ -268,5 +268,7 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
         _stateChanged = null; _debugging = false;
         UpdateState();
     }
+    /// <summary>For a request nobody awaits. Safe on any thread.</summary>
+    private void ReportFault(Exception fault) => dispatcher.Post(() => { if (!_disposed) Status = fault.Message; });
     public async ValueTask DisposeAsync() { if (_disposed) return; _disposed = true; await DisconnectAsync(); }
 }

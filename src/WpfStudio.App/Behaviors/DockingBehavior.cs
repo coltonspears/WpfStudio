@@ -106,7 +106,7 @@ public static class DockingBehavior
             else if (manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => ReferenceEquals(d.Content, manager.ActiveContent)) is { } document)
                 shell.ActivateWorkbench(document.ContentId is "Packages" or "Git" or "Profiler" ? document.ContentId : null);
         }
-        private void DocumentsChanged(object? sender, NotifyCollectionChangedEventArgs args) => manager.Dispatcher.BeginInvoke(SynchronizeDocuments);
+        private void DocumentsChanged(object? sender, NotifyCollectionChangedEventArgs args) => _ = manager.Dispatcher.BeginInvoke(SynchronizeDocuments);
         private void SynchronizeDocuments()
         {
             if (restoring || defaultLayout is null) return;
@@ -132,7 +132,9 @@ public static class DockingBehavior
             else if (shell.Documents.Count == 0 && welcome is null && welcomeContent is not null) pane.Children.Add(new LayoutDocument { Content = welcomeContent, ContentId = "Welcome", Title = "Start", CanClose = false });
             if (requestedEditor is not null && (activateNewEditor || manager.ActiveContent is null)) manager.ActiveContent = requestedEditor;
         }
+#pragma warning disable VSTHRD100 // A WPF event must cancel synchronously; the awaits below are guarded.
         private async void DocumentClosing(object? sender, DocumentClosingEventArgs args)
+#pragma warning restore VSTHRD100
         {
             if (args.Document.Content is not EditorViewModel document)
             {

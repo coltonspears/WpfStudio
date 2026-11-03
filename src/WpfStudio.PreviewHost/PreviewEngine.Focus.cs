@@ -58,7 +58,7 @@ public sealed partial class PreviewEngine
     {
         if (_focusCaptureQueued || _attachment is not { } attachment || _bridgeHandle == 0) return;
         _focusCaptureQueued = true;
-        _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        _ = _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
         {
             if (_attachment != attachment) return;
             _focusCaptureQueued = false;

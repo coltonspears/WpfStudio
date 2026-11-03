@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts.Profiling;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
 
@@ -30,7 +31,7 @@ public sealed partial class MemoryProfilerViewModel
     partial void OnInstanceGroupingChanged(string value)
     {
         OnPropertyChanged(nameof(GroupingHint));
-        if (value == "None") ResetGroups(); else _ = LoadGroupsAsync(_lifetime.Token);
+        if (value == "None") ResetGroups(); else LoadGroupsAsync(_lifetime.Token).Forget(ReportFault);
     }
 
     internal void ResetGroups()
@@ -78,7 +79,7 @@ public sealed partial class MemoryProfilerViewModel
         if (typeKey is null) return;
         OpenType(typeKey);
         TypeDetailTab = 1;
-        if (InstanceGrouping == "Retention") _ = LoadGroupsAsync(_lifetime.Token); else InstanceGrouping = "Retention";
+        if (InstanceGrouping == "Retention") LoadGroupsAsync(_lifetime.Token).Forget(ReportFault); else InstanceGrouping = "Retention";
     }
 }
 

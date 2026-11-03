@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts.Profiling;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
 
@@ -40,9 +41,9 @@ public sealed partial class MemoryProfilerViewModel
     private void ReloadForRootFilter()
     {
         if (_session is null) return;
-        if (Details?.Object.Id is int id) _ = ReloadGraphAsync(id, _lifetime.Token);
-        if (SelectedType is { } type) _ = LoadFlowAsync(type.Key, _lifetime.Token);
-        if (InstanceGrouping == "Retention") _ = LoadGroupsAsync(_lifetime.Token);
+        if (Details?.Object.Id is int id) ReloadGraphAsync(id, _lifetime.Token).Forget(ReportFault);
+        if (SelectedType is { } type) LoadFlowAsync(type.Key, _lifetime.Token).Forget(ReportFault);
+        if (InstanceGrouping == "Retention") LoadGroupsAsync(_lifetime.Token).Forget(ReportFault);
     }
 
     private void CancelGraph() { _graphRevision++; _graphLoad?.Cancel(); _graphLoad?.Dispose(); _graphLoad = null; IsExpandingGraph = false; }
@@ -95,5 +96,5 @@ public sealed partial class MemoryProfilerViewModel
         return current with { Nodes = nodes.Values.ToArray(), References = references.Values.ToArray(), IsTruncated = current.IsTruncated || more.IsTruncated };
     }
 
-    [RelayCommand] private void InspectGraphSelection() { if (GraphSelectedObjectId is int id) _ = InspectObjectAsync(id, _lifetime.Token); }
+    [RelayCommand] private void InspectGraphSelection() { if (GraphSelectedObjectId is int id) InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault); }
 }
