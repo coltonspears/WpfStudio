@@ -16,13 +16,15 @@ public sealed partial class MemoryProfilerViewModel
     private RefreshThrottle TypeFilterThrottle => field ??= new(RefreshTypes);
     public BulkObservableCollection<MemoryObjectInfo> Objects { get; } = [];
     public IReadOnlyList<string> TypeSortOptions { get; } = ["Total managed bytes", "Retained bytes", "Largest retained object", "Object count", "Growth since baseline"];
-    public IReadOnlyList<string> TypeGroupings { get; } = ["No grouping", "Namespace", "Assembly"];
+    public IReadOnlyList<MemoryTypeGroupingOption> TypeGroupings { get; } = [new(MemoryTypeGrouping.None, "No grouping"), new(MemoryTypeGrouping.Namespace, "Namespace"), new(MemoryTypeGrouping.Assembly, "Assembly")];
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSelectedType), nameof(SelectedTypeTitle), nameof(SelectedTypeDetail))] public partial MemoryTypeRow? SelectedType { get; set; }
     [ObservableProperty] public partial MemoryObjectInfo? SelectedObject { get; set; }
     [ObservableProperty] public partial string TypeFilter { get; set; } = "";
     [ObservableProperty] public partial string ObjectFilter { get; set; } = "";
     [ObservableProperty] public partial string TypeSort { get; set; } = "Total managed bytes";
-    [ObservableProperty] public partial string TypeGrouping { get; set; } = "No grouping";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(TypeGroupProperty))] public partial MemoryTypeGrouping TypeGrouping { get; set; }
+    /// <summary>The row property the type list groups by; null shows it flat.</summary>
+    public string? TypeGroupProperty => TypeGrouping == MemoryTypeGrouping.None ? null : nameof(MemoryTypeRow.Group);
     [ObservableProperty] public partial bool OnlyApplicationTypes { get; set; }
     [ObservableProperty] public partial string ObjectPageDescription { get; set; } = "Choose a type to explore its objects.";
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(PreviousObjectsCommand), nameof(NextObjectsCommand))] public partial int TotalObjects { get; set; }
@@ -49,7 +51,7 @@ public sealed partial class MemoryProfilerViewModel
     partial void OnObjectFilterChanged(string value) { if (!_updating) { _skip = 0; QueueQuery(); } }
     partial void OnTypeFilterChanged(string value) => TypeFilterThrottle.Request();
     partial void OnTypeSortChanged(string value) => RefreshTypes();
-    partial void OnTypeGroupingChanged(string value) => RefreshTypes();
+    partial void OnTypeGroupingChanged(MemoryTypeGrouping value) => RefreshTypes();
     partial void OnOnlyApplicationTypesChanged(bool value) => RefreshTypes();
     partial void OnFlowUsesBytesChanged(bool value) => DescribeFlow();
     partial void OnSelectedObjectChanged(MemoryObjectInfo? value) { if (!_updating && value is not null) InspectObjectAsync(value.Id, _lifetime.Token).Forget(ReportFault); }
@@ -74,7 +76,7 @@ public sealed partial class MemoryProfilerViewModel
           .Where(x => !OnlyApplicationTypes || !MemoryLabels.IsFrameworkModule(x.Type.Module)).ToArray();
         var maxDelta = baseline is null || summaries.Length == 0 ? 0 : summaries.Max(x => Math.Abs(x.Type.Bytes - (x.Previous?.Bytes ?? 0)));
         var rows = summaries.Select(x => new MemoryTypeRow(x.Type, baseline is null ? null : x.Previous?.Count ?? 0, baseline is null ? null : x.Previous?.Bytes ?? 0,
-            maxBytes, maxRetained, maxDelta, TypeGrouping switch { "Namespace" => MemoryLabels.Namespace(x.Type.Name), "Assembly" => x.Type.Module, _ => "" }));
+            maxBytes, maxRetained, maxDelta, TypeGrouping switch { MemoryTypeGrouping.Namespace => MemoryLabels.Namespace(x.Type.Name), MemoryTypeGrouping.Assembly => x.Type.Module, _ => "" }));
         rows = TypeSort switch
         {
             "Retained bytes" => rows.OrderByDescending(r => r.RetainedBytes),
@@ -83,7 +85,7 @@ public sealed partial class MemoryProfilerViewModel
             "Growth since baseline" => rows.OrderByDescending(r => r.BytesDelta ?? 0),
             _ => rows.OrderByDescending(r => r.Bytes)
         };
-        if (TypeGrouping != "No grouping")
+        if (TypeGrouping != MemoryTypeGrouping.None)
         {
             // Groups are ordered by their total so the biggest namespace or assembly comes first.
             var list = rows.ToList();
@@ -97,11 +99,7 @@ public sealed partial class MemoryProfilerViewModel
         finally { _updating = false; }
         if (selectedKey is not null && SelectedType is null) { _skip = 0; QueueQuery(); CancelFlow(); Flow = null; }
         OnPropertyChanged(nameof(SelectedTypeDetail)); OnPropertyChanged(nameof(HasSelectedType)); OnPropertyChanged(nameof(SelectedTypeTitle));
-        TypesRefreshed?.Invoke();
     }
-
-    /// <summary>Raised after the type list is rebuilt, so the view can re-apply grouping.</summary>
-    public event Action? TypesRefreshed;
 
     private void QueueQuery() { QueryObjectsAsync(_lifetime.Token).Forget(ReportFault); }
     private void CancelQuery() { _queryRevision++; _query?.Cancel(); _query?.Dispose(); _query = null; }

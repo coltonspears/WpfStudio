@@ -3,9 +3,11 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using CommunityToolkit.Mvvm.Input;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
 using ICSharpCode.AvalonEdit.Rendering;
+using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Git;
 
@@ -121,62 +123,24 @@ public sealed partial class EditorSurface
         return block; // Click handlers mark the press handled, so the caret stays where it is.
     }
 
-    /// <summary>The commits behind a declaration, newest first, each opening its change to this file in Git history.</summary>
     private void ShowHistory(FrameworkElement anchor, string name, int first, int last, BlameHistory history)
     {
-        if (ViewModel is not { } vm) return;
-        var now = DateTimeOffset.Now;
-        var panel = new StackPanel { Width = 460 };
-        panel.Children.Add(new TextBlock { Text = name, FontWeight = FontWeights.SemiBold, FontSize = 13 });
-        var scope = $"Lines {first}–{last} · {history.Changes.Count} commit{(history.Changes.Count == 1 ? "" : "s")} by {history.Authors} author{(history.Authors == 1 ? "" : "s")}";
-        panel.Children.Add(new TextBlock { Text = scope, FontSize = 11, Margin = new Thickness(0, 2, 0, 8) }.WithResource(TextBlock.ForegroundProperty, "MutedBrush"));
-        var list = new StackPanel();
-        if (history.UncommittedLines > 0)
-            list.Children.Add(HistoryRow("Uncommitted changes", $"{history.UncommittedLines} line{(history.UncommittedLines == 1 ? "" : "s")} not committed yet · use the change bars in the margin to compare or revert", null));
-        foreach (var change in history.Changes.Take(12))
-        {
-            var commit = change.Commit;
-            var detail = $"{commit.Author} · {commit.Time.LocalDateTime:MMM d, yyyy} ({BlameLine.Relative(commit.Time, now)}) · {commit.ShortCommit} · {change.Lines} line{(change.Lines == 1 ? "" : "s")}";
-            list.Children.Add(HistoryRow(commit.Summary.Length == 0 ? commit.ShortCommit : commit.Summary, detail, commit));
-        }
-        if (history.Changes.Count > 12)
-            list.Children.Add(new TextBlock { Text = $"{history.Changes.Count - 12} older commits are in Git history.", FontSize = 11, Margin = new Thickness(6, 4, 0, 0) }.WithResource(TextBlock.ForegroundProperty, "MutedBrush"));
-        panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 360, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-        var close = new Button { Content = "Close" };
-        close.Click += (_, _) => { _historyPopup.IsOpen = false; Focus(); };
-        footer.Children.Add(close);
-        panel.Children.Add(footer);
-        var chrome = new Border { Child = panel, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) };
-        chrome.SetResourceReference(Border.BackgroundProperty, "RaisedBrush");
-        chrome.SetResourceReference(Border.BorderBrushProperty, "StrongBorderBrush");
-        _historyPopup.Child = chrome;
+        if (CreateHistoryCard(name, first, last, history) is not { } card) return;
+        _historyPopup.Child = new ContentPresenter { Content = card };
         _historyPopup.PlacementTarget = anchor;
         _historyPopup.IsOpen = true;
+    }
 
-        FrameworkElement HistoryRow(string title, string detail, BlameLine? commit)
-        {
-            var text = new StackPanel();
-            text.Children.Add(new TextBlock { Text = title, TextTrimming = TextTrimming.CharacterEllipsis });
-            text.Children.Add(new TextBlock { Text = detail, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 0, 0) }.WithResource(TextBlock.ForegroundProperty, "MutedBrush"));
-            var content = new DockPanel();
-            if (commit is not null)
+    internal BlameHistoryCard? CreateHistoryCard(string name, int first, int last, BlameHistory history)
+    {
+        if (ViewModel is not { } vm) return null;
+        return BlameHistoryCard.Create(name, first, last, history, DateTimeOffset.Now,
+            new RelayCommand<BlameLine>(commit =>
             {
-                var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
-                var show = new Button { Content = "Show change", ToolTip = "Open this commit in Git history with this file's diff selected", Margin = new Thickness(0, 0, 4, 0) };
-                show.Click += (_, _) => { _historyPopup.IsOpen = false; vm.RequestBlameCommit(commit); };
-                var copy = new Button { Content = "Copy ID", ToolTip = commit.Commit };
-                copy.Click += (_, _) => Services.ClipboardService.Shared.TrySetText(commit.Commit);
-                actions.Children.Add(show); actions.Children.Add(copy);
-                DockPanel.SetDock(actions, Dock.Right);
-                content.Children.Add(actions);
-            }
-            content.Children.Add(text);
-            var row = new Border { Child = content, Padding = new Thickness(6, 5, 6, 5), CornerRadius = new CornerRadius(4), Background = Brushes.Transparent };
-            row.MouseEnter += (_, _) => row.SetResourceReference(Border.BackgroundProperty, "HoverBrush");
-            row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
-            return row;
-        }
+                _historyPopup.IsOpen = false;
+                if (commit is not null) vm.RequestBlameCommit(commit);
+            }),
+            new RelayCommand(() => { _historyPopup.IsOpen = false; Focus(); }));
     }
 
     /// <summary>Subtle text in the editor's font, used for lens rows.</summary>
@@ -215,42 +179,26 @@ public sealed partial class EditorSurface
 
     private void ShowChange(LineChange change, int line)
     {
-        var kind = change.Kind switch { LineChangeKind.Added => "Added since the last commit", LineChangeKind.Deleted => "Deleted since the last commit", _ => "Changed since the last commit" };
-        var panel = new StackPanel { MaxWidth = 720 };
-        panel.Children.Add(new TextBlock { Text = kind, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
-        if (change.OriginalText.Length > 0 || change.Kind != LineChangeKind.Added)
-        {
-            panel.Children.Add(new TextBlock { Text = "Committed version", FontSize = 11, Margin = new Thickness(0, 0, 0, 3) }.WithResource(TextBlock.ForegroundProperty, "MutedBrush"));
-            var original = new TextBox
-            {
-                Text = change.OriginalText.Length == 0 ? "(empty line)" : change.OriginalText, IsReadOnly = true, FontFamily = FontFamily, FontSize = Math.Max(8, FontSize - 1),
-                MaxHeight = 260, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, TextWrapping = TextWrapping.NoWrap
-            };
-            panel.Children.Add(original);
-        }
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-        var revert = new Button { Content = change.Kind == LineChangeKind.Added ? "Remove added lines" : "Revert change", IsEnabled = !IsReadOnly, Margin = new Thickness(0, 0, 6, 0) };
-        // The popup can outlive its editor's state; revert only the same buffer while the change is still current.
-        var model = ViewModel; var document = Document;
-        revert.Click += (_, _) =>
-        {
-            _changePopup.IsOpen = false;
-            if (!ReferenceEquals(model, ViewModel) || !ReferenceEquals(document, Document) || model?.LineChanges.Contains(change) != true) return;
-            RevertChange(change); Focus();
-        };
-        var close = new Button { Content = "Close" };
-        close.Click += (_, _) => { _changePopup.IsOpen = false; Focus(); };
-        buttons.Children.Add(revert); buttons.Children.Add(close);
-        panel.Children.Add(buttons);
-        var chrome = new Border { Child = panel, Padding = new Thickness(10), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1) };
-        chrome.SetResourceReference(Border.BackgroundProperty, "RaisedBrush");
-        chrome.SetResourceReference(Border.BorderBrushProperty, "StrongBorderBrush");
-        _changePopup.Child = chrome;
+        _changePopup.Child = new ContentPresenter { Content = CreateChangeCard(change) };
         _changePopup.PlacementTarget = _changeMargin;
         var visual = TextArea.TextView.GetVisualLine(line);
         _changePopup.VerticalOffset = visual is null ? 0 : visual.VisualTop - TextArea.TextView.VerticalOffset;
         _changePopup.HorizontalOffset = 4;
         _changePopup.IsOpen = true;
+    }
+
+    internal LineChangeCard CreateChangeCard(LineChange change)
+    {
+        // The popup can outlive its editor's state; revert only the same buffer while the change is still current.
+        var model = ViewModel; var document = Document;
+        return LineChangeCard.Create(change, !IsReadOnly,
+            new RelayCommand(() =>
+            {
+                _changePopup.IsOpen = false;
+                if (!ReferenceEquals(model, ViewModel) || !ReferenceEquals(document, Document) || model?.LineChanges.Contains(change) != true) return;
+                RevertChange(change); Focus();
+            }),
+            new RelayCommand(() => { _changePopup.IsOpen = false; Focus(); })) with { Preferences = model?.Preferences };
     }
 
     /// <summary>Thin bars beside the line numbers: added (green), changed (accent) and deleted (red marker) since the last commit.</summary>

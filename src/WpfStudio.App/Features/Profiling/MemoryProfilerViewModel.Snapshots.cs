@@ -346,6 +346,9 @@ public sealed partial class SnapshotCard(int number, HeapSummary summary, string
 }
 
 /// <summary>A type's change between the baseline and the current snapshot. Trend holds its bytes in each snapshot of the series.</summary>
+public enum MemoryTypeGrouping { None, Namespace, Assembly }
+public sealed record MemoryTypeGroupingOption(MemoryTypeGrouping Value, string Label);
+
 public sealed record ComparisonRow(string Key, string Name, string Module, int BaselineCount, int Count, long BaselineBytes, long Bytes,
     bool IsNew, bool IsGone, bool GrowsEveryTime, IReadOnlyList<double> Trend, double DeltaRatio = 0)
 {

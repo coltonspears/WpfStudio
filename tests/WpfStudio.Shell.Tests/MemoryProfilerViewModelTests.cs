@@ -268,6 +268,52 @@ public sealed class MemoryProfilerViewModelTests
     }
 
     [Fact]
+    public async Task GroupingTypesAssignsEachRowItsGroupAndNamesTheGroupingProperty()
+    {
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(new Session(Summary([Type("Small", 1, 10), Type("Large", 1, 90)])));
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        Assert.Equal(MemoryTypeGrouping.None, model.TypeGrouping);
+        Assert.Null(model.TypeGroupProperty);
+        Assert.Equal(["No grouping", "Namespace", "Assembly"], model.TypeGroupings.Select(option => option.Label));
+        Assert.All(model.Types, row => Assert.Equal("", row.Group));
+
+        var notified = new List<string?>();
+        model.PropertyChanged += (_, args) => notified.Add(args.PropertyName);
+        model.TypeGrouping = MemoryTypeGrouping.Assembly;
+
+        Assert.Contains(nameof(MemoryProfilerViewModel.TypeGroupProperty), notified);
+        Assert.Equal(nameof(MemoryTypeRow.Group), model.TypeGroupProperty);
+        Assert.All(model.Types, row => Assert.Equal(row.Module, row.Group));
+
+        model.TypeGrouping = MemoryTypeGrouping.None;
+        Assert.Null(model.TypeGroupProperty);
+        Assert.All(model.Types, row => Assert.Equal("", row.Group));
+    }
+
+    [Fact]
+    public async Task AComparisonRowOpensItsTypeUnlessTheTypeIsGoneOrACaptureIsLoading()
+    {
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(new Session(Summary([Type("Page", 1, 10)])));
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
+        await model.OpenDumpCommand.ExecuteAsync(null);
+        static ComparisonRow Row(string key, bool gone) => new(key, key, "app", 0, 1, 0, 10, !gone, gone, false, []);
+        Assert.False(model.OpenComparisonRowCommand.CanExecute(null));
+        Assert.False(model.OpenComparisonRowCommand.CanExecute(Row("Page", gone: true)));
+        Assert.True(model.OpenComparisonRowCommand.CanExecute(Row("Page", gone: false)));
+
+        model.OpenComparisonRowCommand.Execute(Row("Page", gone: false));
+        Assert.Equal(MemoryProfilerViewModel.TypesView, model.SelectedView);
+        Assert.Equal("Page", model.SelectedType?.Key);
+
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        profiler.Open = async token => { started.SetResult(); await Task.Delay(Timeout.Infinite, token); throw new InvalidOperationException(); };
+        var opening = model.OpenDumpCommand.ExecuteAsync(null); await started.Task;
+        Assert.False(model.OpenComparisonRowCommand.CanExecute(Row("Page", gone: false)));
+        model.OpenDumpCancelCommand.Execute(null); await opening;
+    }
+
+    [Fact]
     public async Task OpeningATypeIsUnavailableWhileACaptureLoads()
     {
         var profiler = new Profiler(); profiler.Sessions.Enqueue(new Session(Summary([Type("Page", 1, 10)])));

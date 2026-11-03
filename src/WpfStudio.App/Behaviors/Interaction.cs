@@ -38,13 +38,35 @@ public static class Interaction
         if (owner is Control control) { control.MouseDoubleClick -= Activate; control.KeyDown -= KeyActivate; if (args.NewValue != null) { control.MouseDoubleClick += Activate; control.KeyDown += KeyActivate; } }
     }
     private static object? Selected(object source) => source switch { TreeView tree => tree.SelectedItem, System.Windows.Controls.Primitives.Selector selector => selector.SelectedItem, FrameworkElement element => element.DataContext, _ => null };
-    private static void Activate(object sender, MouseButtonEventArgs args) { if (GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(Selected(sender))) command.Execute(Selected(sender)); }
+    private static void Activate(object sender, MouseButtonEventArgs args)
+    {
+        var target = Selected(sender);
+        // A double-click on a list's empty area or scroll bar must not act on the selected row.
+        if (sender is ListBox list)
+        {
+            if (args.OriginalSource is not DependencyObject source || ItemsControl.ContainerFromElement(list, source) is not { } row) return;
+            target = list.ItemContainerGenerator.ItemFromContainer(row);
+        }
+        if (GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(target)) command.Execute(target);
+    }
     private static void KeyActivate(object sender, KeyEventArgs args) { if (args.Key == Key.Enter && GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(Selected(sender))) { command.Execute(Selected(sender)); args.Handled = true; } }
-    public static readonly DependencyProperty SelectedNodeProperty = DependencyProperty.RegisterAttached("SelectedNode", typeof(object), typeof(Interaction), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, SelectedNodeChanged));
-    public static void SetSelectedNode(DependencyObject target, object value) => target.SetValue(SelectedNodeProperty, value);
-    public static object GetSelectedNode(DependencyObject target) => target.GetValue(SelectedNodeProperty);
-    private static void SelectedNodeChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args) { if (owner is TreeView tree) { tree.SelectedItemChanged -= TreeSelection; tree.SelectedItemChanged += TreeSelection; } }
-    private static void TreeSelection(object sender, RoutedPropertyChangedEventArgs<object> args) => ((TreeView)sender).SetCurrentValue(SelectedNodeProperty, args.NewValue);
+    /// <summary>Where a tree publishes its selection. It only ever pushes: a tree cannot select an item it has not generated, so selecting from a view model goes through each item's IsSelected.</summary>
+    public static readonly DependencyProperty SelectionSourceProperty = DependencyProperty.RegisterAttached("SelectionSource", typeof(object), typeof(Interaction), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+    public static void SetSelectionSource(DependencyObject target, object value) => target.SetValue(SelectionSourceProperty, value);
+    public static object GetSelectionSource(DependencyObject target) => target.GetValue(SelectionSourceProperty);
+    /// <summary>Turns on <see cref="SelectionSourceProperty"/>. A separate switch because that property's change callback never runs while its source is null, which would leave the tree unobserved.</summary>
+    public static readonly DependencyProperty TrackSelectionProperty = DependencyProperty.RegisterAttached("TrackSelection", typeof(bool), typeof(Interaction), new PropertyMetadata(false, TrackSelectionChanged));
+    public static void SetTrackSelection(DependencyObject target, bool value) => target.SetValue(TrackSelectionProperty, value);
+    public static bool GetTrackSelection(DependencyObject target) => (bool)target.GetValue(TrackSelectionProperty);
+    private static void TrackSelectionChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not TreeView tree) return;
+        tree.SelectedItemChanged -= TreeSelection;
+        if ((bool)args.NewValue) tree.SelectedItemChanged += TreeSelection;
+    }
+    private static void TreeSelection(object sender, RoutedPropertyChangedEventArgs<object> args) => ((TreeView)sender).SetCurrentValue(SelectionSourceProperty, args.NewValue);
+    /// <summary>Copies its string parameter. A command rather than Click handlers, which WPF cannot connect inside style-defined context menus.</summary>
+    public static ICommand CopyCommand { get; } = new CommunityToolkit.Mvvm.Input.RelayCommand<string>(text => Services.ClipboardService.Shared.TrySetText(text!), text => !string.IsNullOrEmpty(text));
     public static readonly DependencyProperty CloseGuardProperty = DependencyProperty.RegisterAttached("CloseGuard", typeof(ShellViewModel), typeof(Interaction), new PropertyMetadata(null, CloseGuardChanged));
     public static void SetCloseGuard(DependencyObject target, ShellViewModel value) => target.SetValue(CloseGuardProperty, value);
     public static ShellViewModel? GetCloseGuard(DependencyObject target) => (ShellViewModel?)target.GetValue(CloseGuardProperty);
@@ -73,6 +95,30 @@ public static class Interaction
         if (sender is not Window window || GetCloseGuard(window) is not { } vm) return;
         try { await vm.CheckExternalChangesAsync(); }
         catch (Exception ex) { vm.Status = "Could not check for external changes: " + ex.Message; vm.AppendOutput(ex.ToString()); }
+    }
+    /// <summary>Runs a command when a combo box's list opens, for lists that refresh themselves on demand.</summary>
+    public static readonly DependencyProperty OpenedCommandProperty = DependencyProperty.RegisterAttached("OpenedCommand", typeof(ICommand), typeof(Interaction), new PropertyMetadata(null, OpenedCommandChanged));
+    public static void SetOpenedCommand(DependencyObject target, ICommand value) => target.SetValue(OpenedCommandProperty, value);
+    public static ICommand? GetOpenedCommand(DependencyObject target) => (ICommand?)target.GetValue(OpenedCommandProperty);
+    private static void OpenedCommandChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not ComboBox box) return;
+        box.DropDownOpened -= DropDownOpened;
+        if (args.NewValue != null) box.DropDownOpened += DropDownOpened;
+    }
+    private static void DropDownOpened(object? sender, EventArgs args)
+    {
+        if (sender is ComboBox box && GetOpenedCommand(box) is { } command && command.CanExecute(null)) command.Execute(null);
+    }
+    /// <summary>Groups an items control by this property of its items; null shows them ungrouped.</summary>
+    public static readonly DependencyProperty GroupByProperty = DependencyProperty.RegisterAttached("GroupBy", typeof(string), typeof(Interaction), new PropertyMetadata(null, GroupByChanged));
+    public static void SetGroupBy(DependencyObject target, string? value) => target.SetValue(GroupByProperty, value);
+    public static string? GetGroupBy(DependencyObject target) => (string?)target.GetValue(GroupByProperty);
+    private static void GroupByChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not ItemsControl items) return;
+        items.Items.GroupDescriptions.Clear();
+        if (args.NewValue is string property) items.Items.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(property));
     }
     /// <summary>Runs <see cref="ActivateCommandProperty"/> on a single click of a list item (palette-style lists).</summary>
     public static readonly DependencyProperty ActivateOnClickProperty = DependencyProperty.RegisterAttached("ActivateOnClick", typeof(bool), typeof(Interaction), new PropertyMetadata(false, ActivateOnClickChanged));
@@ -161,6 +207,21 @@ public static class Interaction
     private static void KeepCaretAfterPrefix(object sender, TextChangedEventArgs args)
     {
         if (sender is TextBox { IsKeyboardFocused: true, CaretIndex: 0 } box && box.Text.Length == 1 && !char.IsLetterOrDigit(box.Text[0])) box.CaretIndex = 1;
+    }
+    /// <summary>Focuses a control when its view model asks, then clears the request so the next one is a change again.</summary>
+    public static readonly DependencyProperty FocusWhenTrueProperty = DependencyProperty.RegisterAttached("FocusWhenTrue", typeof(bool), typeof(Interaction), new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, FocusWhenTrueChanged));
+    public static void SetFocusWhenTrue(DependencyObject target, bool value) => target.SetValue(FocusWhenTrueProperty, value);
+    public static bool GetFocusWhenTrue(DependencyObject target) => (bool)target.GetValue(FocusWhenTrueProperty);
+    private static void FocusWhenTrueChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not UIElement element || args.NewValue is not true) return;
+        // After layout: the same request may have just brought this control's pane forward.
+        _ = element.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () =>
+        {
+            element.SetCurrentValue(FocusWhenTrueProperty, false);
+            element.Focus(); Keyboard.Focus(element);
+            if (element is TextBox box) box.SelectAll();
+        });
     }
     public static readonly DependencyProperty FocusWhenVisibleProperty = DependencyProperty.RegisterAttached("FocusWhenVisible", typeof(bool), typeof(Interaction), new PropertyMetadata(false, FocusChanged));
     public static void SetFocusWhenVisible(DependencyObject target, bool value) => target.SetValue(FocusWhenVisibleProperty, value);

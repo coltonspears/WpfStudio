@@ -56,11 +56,57 @@ public sealed class WorkbenchRegressionTests
                   { "Profile": { "Name": "Sql", "Server": "two", "Database": "master", "WindowsAuthentication": false, "UserName": "sa", "RememberPassword": true }, "EncryptedPassword": "AAAA" }
                 ]
                 """);
-            var loaded = await new ConnectionProfileStore(path).LoadAsync();
+            var store = new ConnectionProfileStore(path);
+            var loaded = await store.LoadAsync();
             Assert.Equal(["Windows", "Sql"], loaded.Select(profile => profile.Name));
             Assert.Equal("", loaded[1].Password);
+            Assert.Equal("", store.UnlockPassword(loaded[1]));
+
+            // Saving other changes leaves that password as it was, in case its own account opens the file again.
+            await store.SaveAsync(loaded);
+            Assert.Contains("\"EncryptedPassword\": \"AAAA\"", await File.ReadAllTextAsync(path));
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task OnlyTheProfileBeingUsedHasItsPasswordUnlocked()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "wpfstudio-profile-" + Guid.NewGuid() + ".json");
+        try
+        {
+            var writer = new ConnectionProfileStore(path);
+            ConnectionProfile Sql(string name) => new() { Name = name, WindowsAuthentication = false, UserName = "sa", Password = name + "-secret", RememberPassword = true };
+            await writer.SaveAsync([Sql("first"), Sql("second")]);
+
+            var store = new CountingStore(new ConnectionProfileStore(path));
+            await using var model = new DatabasePaneViewModel(new OneDatabase(), store, new NoDialogs(), new NoAnswers(), new NoRecovery());
+            await model.InitializeCommand.ExecuteAsync(null);
+            Assert.Equal(["first"], store.Unlocked);
+            Assert.Equal("first-secret", model.Password);
+            Assert.All(model.Profiles, profile => Assert.Equal("", profile.Password));
+
+            model.SelectedProfile = model.Profiles[1];
+            Assert.Equal(["first", "second"], store.Unlocked);
+            Assert.Equal("second-secret", model.Password);
+
+            // Saving the selected profile re-encrypts what was typed and keeps the other profile's password.
+            model.Password = "changed";
+            await model.SaveProfileCommand.ExecuteAsync(null);
+            var reloaded = new ConnectionProfileStore(path);
+            var profiles = await reloaded.LoadAsync();
+            Assert.Equal("first-secret", reloaded.UnlockPassword(profiles.Single(profile => profile.Name == "first")));
+            Assert.Equal("changed", reloaded.UnlockPassword(profiles.Single(profile => profile.Name == "second")));
+        }
+        finally { File.Delete(path); }
+    }
+
+    private sealed class CountingStore(IConnectionProfileStore inner) : IConnectionProfileStore
+    {
+        public List<string> Unlocked { get; } = [];
+        public Task<IReadOnlyList<ConnectionProfile>> LoadAsync(CancellationToken cancellationToken = default) => inner.LoadAsync(cancellationToken);
+        public Task SaveAsync(IReadOnlyList<ConnectionProfile> profiles, CancellationToken cancellationToken = default) => inner.SaveAsync(profiles, cancellationToken);
+        public string UnlockPassword(ConnectionProfile profile) { Unlocked.Add(profile.Name); return inner.UnlockPassword(profile); }
     }
 
     private sealed class OneDatabase : IDatabaseService

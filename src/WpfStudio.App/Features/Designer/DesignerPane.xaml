@@ -177,7 +177,7 @@
     </DockPanel>
     <TextBlock DockPanel.Dock="Bottom" Text="Click selects authored markup · Ctrl+click selects template parts" TextWrapping="Wrap"
                FontSize="11" Foreground="{DynamicResource SubtleBrush}" Margin="12,4,10,8"/>
-    <TreeView ItemsSource="{Binding Tree}" b:Interaction.SelectedNode="{Binding SelectedNode}" b:Interaction.FollowSelection="True" BorderThickness="0"
+    <TreeView ItemsSource="{Binding Tree}" b:Interaction.TrackSelection="True" b:Interaction.SelectionSource="{Binding SelectedNode}" b:Interaction.FollowSelection="True" BorderThickness="0"
               VirtualizingPanel.IsVirtualizing="False" AutomationProperties.Name="Preview element outline">
      <TreeView.ItemContainerStyle>
       <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">

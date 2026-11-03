@@ -1,0 +1,65 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:vm="clr-namespace:WpfStudio.App.ViewModels" xmlns:c="clr-namespace:WpfStudio.App.Controls"
+                    xmlns:b="clr-namespace:WpfStudio.App.Behaviors">
+ <c:PresenceVisibilityConverter x:Key="CardPresence"/>
+ <Style x:Key="EditorPopupChrome" TargetType="Border">
+  <Setter Property="CornerRadius" Value="6"/>
+  <Setter Property="BorderThickness" Value="1"/>
+  <Setter Property="Background" Value="{DynamicResource RaisedBrush}"/>
+  <Setter Property="BorderBrush" Value="{DynamicResource StrongBorderBrush}"/>
+ </Style>
+
+ <DataTemplate DataType="{x:Type vm:BlameHistoryRow}">
+  <Border Padding="6,5,6,5" CornerRadius="4">
+   <Border.Style>
+    <Style TargetType="Border">
+     <Setter Property="Background" Value="Transparent"/>
+     <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource HoverBrush}"/></Trigger></Style.Triggers>
+    </Style>
+   </Border.Style>
+   <DockPanel>
+    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0" Visibility="{Binding Commit, Converter={StaticResource CardPresence}}">
+     <Button Content="Show change" ToolTip="Open this commit in Git history with this file's diff selected" Margin="0,0,4,0" Command="{Binding ShowChangeCommand}" CommandParameter="{Binding Commit}"/>
+     <Button Content="Copy ID" ToolTip="{Binding Commit.Commit}" Command="{x:Static b:Interaction.CopyCommand}" CommandParameter="{Binding Commit.Commit}"/>
+    </StackPanel>
+    <StackPanel>
+     <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextBrush}"/>
+     <TextBlock Text="{Binding Detail}" FontSize="11" TextWrapping="Wrap" Margin="0,1,0,0" Foreground="{DynamicResource MutedBrush}"/>
+    </StackPanel>
+   </DockPanel>
+  </Border>
+ </DataTemplate>
+
+ <DataTemplate DataType="{x:Type vm:BlameHistoryCard}">
+  <Border Style="{StaticResource EditorPopupChrome}" Padding="12,10,12,10">
+   <StackPanel Width="460">
+    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource TextBrush}"/>
+    <TextBlock Text="{Binding Scope}" FontSize="11" Margin="0,2,0,8" Foreground="{DynamicResource MutedBrush}"/>
+    <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto">
+     <StackPanel>
+      <ItemsControl ItemsSource="{Binding Rows}" Focusable="False"/>
+      <TextBlock Text="{Binding OlderCommits}" FontSize="11" Margin="6,4,0,0" Foreground="{DynamicResource MutedBrush}" Visibility="{Binding OlderCommits, Converter={StaticResource CardPresence}}"/>
+     </StackPanel>
+    </ScrollViewer>
+    <Button Content="Close" Command="{Binding CloseCommand}" HorizontalAlignment="Right" Margin="0,8,0,0"/>
+   </StackPanel>
+  </Border>
+ </DataTemplate>
+
+ <DataTemplate DataType="{x:Type vm:LineChangeCard}">
+  <Border Style="{StaticResource EditorPopupChrome}" Padding="10">
+   <StackPanel MaxWidth="720">
+    <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" Margin="0,0,0,6" Foreground="{DynamicResource TextBrush}"/>
+    <StackPanel Visibility="{Binding CommittedText, Converter={StaticResource CardPresence}}">
+     <TextBlock Text="Committed version" FontSize="11" Margin="0,0,0,3" Foreground="{DynamicResource MutedBrush}"/>
+     <TextBox Text="{Binding CommittedText, Mode=OneWay}" IsReadOnly="True" TextWrapping="NoWrap" MaxHeight="260" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+              FontFamily="{Binding Preferences.EditorFont}" FontSize="{Binding Preferences.QuotedFontSize}"/>
+    </StackPanel>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+     <Button Content="{Binding RevertLabel}" IsEnabled="{Binding CanRevert}" Command="{Binding RevertCommand}" Margin="0,0,6,0"/>
+     <Button Content="Close" Command="{Binding CloseCommand}"/>
+    </StackPanel>
+   </StackPanel>
+  </Border>
+ </DataTemplate>
+</ResourceDictionary>

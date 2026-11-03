@@ -169,6 +169,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_DESIGNER_ONLY") == "1")
             {
                 await VerifyDesignerAsync(root, data, window, manager, shell);
+                await VerifyRetainedPanesAsync(Path.Combine(data, "layout.xml"), manager, shell);
                 Assert.Empty(bindingErrors.Messages);
                 return;
             }
@@ -287,6 +288,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/change-preview.png"));
             shell.ChangeReview.CancelCommand.Execute(null);
             await VerifyDesignerPaneFilterAsync(provider.GetRequiredService<IUiDispatcher>());
+            await VerifySelectionAndFocusRequestsAsync(window, shell);
+            await VerifyEditorPopupsAsync(root);
             await VerifyLargeDiffsAsync();
             var performanceFixture = Path.Combine(root, "artifacts/performance/fixture/Performance.slnx");
             if (File.Exists(performanceFixture))
@@ -340,6 +343,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await VerifyPreviewScenariosAsync(root, data, window, manager, shell);
             await VerifyPreviewAppearanceAsync(root, data, window, manager, shell);
             await VerifyRuntimeInspectionAsync(root, data, window, manager, shell);
+            await VerifyRetainedPanesAsync(Path.Combine(data, "layout.xml"), manager, shell);
             Assert.Empty(bindingErrors.Messages);
         }
         catch (Exception exception)

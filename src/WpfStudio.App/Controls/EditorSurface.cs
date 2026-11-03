@@ -82,7 +82,7 @@ public sealed partial class EditorSurface : TextEditor
         InitializePreferenceChrome();
         _foldingTimer = new(TimeSpan.FromMilliseconds(500), System.Windows.Threading.DispatcherPriority.Background, (_, _) => UpdateFoldings(), Dispatcher) { IsEnabled = false };
         TextChanged += OnEditorTextChanged;
-        TextArea.Caret.PositionChanged += (_, _) => { if (ViewModel is { } vm && !_syncing) { vm.State.CaretOffset = CaretOffset; vm.State.CaretLine = TextArea.Caret.Line; vm.State.CaretColumn = TextArea.Caret.Column; } };
+        TextArea.Caret.PositionChanged += (_, _) => { if (ViewModel is { } vm && !_syncing) vm.ReportCaret(TextArea.Caret.Line, TextArea.Caret.Column, CaretOffset); };
         TextArea.TextEntered += OnTextEntered;
         TextArea.SelectionChanged += (_, _) => ViewModel?.UpdateSelection(SelectionStart, SelectionLength);
         PreviewMouseRightButtonDown += (_, e) =>
@@ -132,7 +132,7 @@ public sealed partial class EditorSurface : TextEditor
         Document = Buffers.GetValue(ViewModel.State, s => new TextDocument(s.Content));
         SyncText();
         SyntaxHighlighting = SyntaxHighlightingSelector.For(ViewModel.State.Path);
-        IsReadOnly = ViewModel.State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
+        IsReadOnly = ViewModel.IsReadOnly;
         ViewModel.State.PropertyChanged += StateChanged; ViewModel.PropertyChanged += ModelChanged;
         ViewModel.NavigationRequested += Navigate; ViewModel.Diagnostics.CollectionChanged += DiagnosticsChanged; ViewModel.BreakpointLines.CollectionChanged += BreakpointsChanged;
         ViewModel.SelectionRequested += RestoreSelection;
@@ -231,11 +231,7 @@ public sealed partial class EditorSurface : TextEditor
             int anchor = selection.CaretOffset == selection.Start ? selection.Start + selection.Length : selection.Start;
             TextArea.Selection = Selection.Create(TextArea, anchor, selection.CaretOffset);
             TextArea.Caret.BringCaretToView();
-            if (ViewModel is { } model)
-            {
-                model.State.CaretLine = TextArea.Caret.Line;
-                model.State.CaretColumn = TextArea.Caret.Column;
-            }
+            ViewModel?.ReportCaret(TextArea.Caret.Line, TextArea.Caret.Column, CaretOffset);
         }
         finally { _syncing = syncing; }
     }
@@ -266,8 +262,7 @@ public sealed partial class EditorSurface : TextEditor
         long version = vm.State.Version;
         _hoverRequest = new CancellationTokenSource();
         var token = _hoverRequest.Token;
-        var parts = new HoverParts(null, null, null,
-            vm.Diagnostics.Where(d => offset >= d.Start && offset < d.Start + Math.Max(1, d.Length)).OrderBy(d => d.Severity switch { "Error" => 0, "Warning" => 1, _ => 2 }).Take(4).ToArray());
+        var parts = new HoverParts(null, null, null, vm.DiagnosticsAt(offset));
         if (!vm.ShowQuickInfo && parts.Diagnostics.Count == 0 && vm.DataTipEvaluator is null) return;
         ShowHover(parts);
         try
@@ -482,9 +477,7 @@ public sealed partial class EditorSurface : TextEditor
                 else if (input.Command?.CanExecute(input.Parameter, TextArea) == true) input.Command.Execute(input.Parameter, TextArea);
             }
             pending.ViewModel.State.Content = pending.Document.Text;
-            pending.ViewModel.State.CaretOffset = CaretOffset;
-            pending.ViewModel.State.CaretLine = TextArea.Caret.Line;
-            pending.ViewModel.State.CaretColumn = TextArea.Caret.Column;
+            pending.ViewModel.ReportCaret(TextArea.Caret.Line, TextArea.Caret.Column, CaretOffset);
         }
         finally { _replayingInput = false; _syncing = previousSync; }
     }

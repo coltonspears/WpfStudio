@@ -62,16 +62,15 @@ public static class DockingBehavior
         {
             if (defaultLayout is not null) return;
             // Package and Git workbenches need document-sized space. Retain their
-            // views here so closing/reopening tabs preserves feature state.
-            staticContent[Workbenches.Packages] = new Features.Packages.PackagesPane { DataContext = shell.Features.Packages };
-            staticContent[Workbenches.Git] = new Features.Git.GitPane { DataContext = shell.Features.Git };
-            staticContent[Workbenches.Profiler] = new Features.Profiling.MemoryProfilerPane { DataContext = shell.MemoryProfiler };
-            staticTitles[Workbenches.Profiler] = "Memory profiler";
-            staticContent[Workbenches.Designer] = new Features.Designer.DesignerPane { DataContext = shell.Designer };
-            staticTitles[Workbenches.Designer] = "XAML Designer";
-            staticContent[Workbenches.LiveInspection] = new Features.Inspection.InspectionPane { DataContext = shell.LiveInspection };
-            staticTitles[Workbenches.LiveInspection] = "Live XAML";
-            staticTitles[Workbenches.Packages] = "NuGet packages"; staticTitles[Workbenches.Git] = "Git changes";
+            // views here so closing/reopening tabs preserves feature state. As content,
+            // a view model would get a new view whenever the layout rebuilds its items.
+            foreach (var pane in shell.RetainedPanes)
+            {
+                var view = (FrameworkElement)((DataTemplate)manager.FindResource(new DataTemplateKey(pane.Model.GetType()))).LoadContent();
+                view.DataContext = pane.Model;
+                staticContent[pane.ContentId] = view;
+                staticTitles[pane.ContentId] = pane.Title;
+            }
             foreach (var content in manager.Layout.Descendents().OfType<LayoutContent>().Where(x => x.Content is not EditorViewModel && !string.IsNullOrEmpty(x.ContentId)))
             {
                 if (content.Content is null) continue;
@@ -172,9 +171,9 @@ public static class DockingBehavior
             {
                 Capture();
                 var document = manager.Layout.Descendents().OfType<LayoutDocument>().FirstOrDefault(d => d.ContentId == id);
-                if (document == null && manager.Layout.Descendents().OfType<LayoutDocumentPane>().FirstOrDefault() is { } pane)
+                if (document == null && manager.Layout.Descendents().OfType<LayoutDocumentPane>().FirstOrDefault() is { } pane && staticContent.TryGetValue(id, out var workbench))
                 {
-                    document = new LayoutDocument { ContentId = id, Title = staticTitles[id], Content = staticContent[id], CanClose = true };
+                    document = new LayoutDocument { ContentId = id, Title = staticTitles[id], Content = workbench, CanClose = true };
                     pane.Children.Add(document);
                 }
                 if (document != null) { document.IsSelected = true; document.IsActive = true; }

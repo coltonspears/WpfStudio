@@ -21,7 +21,7 @@ public sealed class ConnectionProfileStore : IConnectionProfileStore
             if (!File.Exists(_path)) return [];
             await using var stream = File.OpenRead(_path);
             var saved = await JsonSerializer.DeserializeAsync<List<StoredProfile>>(stream, cancellationToken: cancellationToken).ConfigureAwait(false) ?? [];
-            return saved.Select(item => item.Profile with { Password = Decrypt(item.EncryptedPassword) }).ToArray();
+            return saved.Select(item => item.Profile with { ProtectedPassword = item.EncryptedPassword }).ToArray();
         }
         finally { _gate.Release(); }
     }
@@ -31,11 +31,14 @@ public sealed class ConnectionProfileStore : IConnectionProfileStore
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var saved = profiles.Select(profile => new StoredProfile(profile, profile.RememberPassword && !profile.WindowsAuthentication ? Encrypt(profile.Password) : null));
+            // Profiles nobody has opened keep their blob as it is, including one this account cannot unlock.
+            var saved = profiles.Select(profile => new StoredProfile(profile, profile.RememberPassword && !profile.WindowsAuthentication ? profile.ProtectedPassword ?? Encrypt(profile.Password) : null));
             await AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(saved, new JsonSerializerOptions { WriteIndented = true }), cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
+
+    public string UnlockPassword(ConnectionProfile profile) => profile.ProtectedPassword is { } saved ? Decrypt(saved) : profile.Password;
 
     private static string Encrypt(string password)
     {

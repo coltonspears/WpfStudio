@@ -12,6 +12,8 @@ public sealed record ConnectionProfile
     public bool WindowsAuthentication { get; init; } = true;
     public string UserName { get; init; } = "";
     [JsonIgnore] public string Password { get; init; } = "";
+    /// <summary>A saved password as it is on disk. A loaded profile has no plaintext until <see cref="IConnectionProfileStore.UnlockPassword"/> is asked for it.</summary>
+    [JsonIgnore] public string? ProtectedPassword { get; init; }
     public bool RememberPassword { get; init; }
     public bool TrustServerCertificate { get; init; }
     public override string ToString() => Name;
@@ -42,6 +44,8 @@ public interface IConnectionProfileStore
 {
     Task<IReadOnlyList<ConnectionProfile>> LoadAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(IReadOnlyList<ConnectionProfile> profiles, CancellationToken cancellationToken = default);
+    /// <summary>The profile's plaintext password, or empty when this Windows account cannot unlock it.</summary>
+    string UnlockPassword(ConnectionProfile profile) => profile.Password;
 }
 public interface IDatabaseService
 {

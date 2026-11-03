@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 namespace WpfStudio.App.Features.Profiling;
@@ -36,6 +37,6 @@ public sealed partial class MemoryProfilerViewModel
     public string? TypeNameOf(string typeKey) => Summary?.Types.FirstOrDefault(t => t.Key == typeKey)?.Name ?? _baseline?.Types.FirstOrDefault(t => t.Key == typeKey)?.Name;
 
     /// <summary>Focus the go-to box: raised for the command palette's "Go to address" entry.</summary>
-    public event Action? FocusGoToRequested;
-    [RelayCommand] private void FocusGoTo() { if (HasCapture) FocusGoToRequested?.Invoke(); }
+    [ObservableProperty] public partial bool IsGoToFocusRequested { get; set; }
+    [RelayCommand] private void FocusGoTo() { if (HasCapture) IsGoToFocusRequested = true; }
 }

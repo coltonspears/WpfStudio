@@ -8,8 +8,19 @@ using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 
+/// <summary>A pane the docking layout keeps for the shell's lifetime; its view is the DataTemplate for the model's type.</summary>
+public sealed record RetainedPane(string ContentId, string Title, object Model);
+
 public sealed partial class ShellViewModel
 {
+    public IReadOnlyList<RetainedPane> RetainedPanes =>
+    [
+        new(Workbenches.Packages, "NuGet packages", Features.Packages),
+        new(Workbenches.Git, "Git changes", Features.Git),
+        new(Workbenches.Profiler, "Memory profiler", MemoryProfiler),
+        new(Workbenches.Designer, "XAML Designer", Designer),
+        new(Workbenches.LiveInspection, "Live XAML", LiveInspection),
+    ];
     private bool _gitToolOpened;
     private bool _packagesToolOpened;
     private EditorViewModel? _assistantContextDocument;
