@@ -31,13 +31,17 @@ public partial class DesignerPane : UserControl
     private void Attach(DesignerViewModel? model)
     {
         if (ReferenceEquals(model, _model)) return;
-        if (_model is not null) _model.PropertyFilterChanged -= ApplyPropertyFilter;
+        if (_model is { } previous)
+        {
+            previous.PropertyFilterChanged -= ApplyPropertyFilter;
+            CollectionViewSource.GetDefaultView(previous.Properties).Filter = null;
+        }
         _model = model;
         if (model is null) return;
         model.PropertyFilterChanged += ApplyPropertyFilter;
         // The grid binds to Properties itself; the appearance picker uses its own view.
         CollectionViewSource.GetDefaultView(model.Properties).Filter = item =>
-            item is not PreviewProperty property || _model is not { } current || current.MatchesPropertyFilter(property);
+            item is not PreviewProperty property || model.MatchesPropertyFilter(property);
         PushViewport();
     }
 

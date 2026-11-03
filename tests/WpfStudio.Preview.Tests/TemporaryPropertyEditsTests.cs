@@ -192,6 +192,17 @@ public sealed class TemporaryPropertyEditsTests(PreviewFixture fixture)
     });
 
     [Fact]
+    public void BrushTransformsDecideWhetherAColorIsFaithfulAndNullMeansIdentity() => fixture.OnDispatcher(() =>
+    {
+        Assert.Equal("#FFFF0000", ScalarPropertyValues.ToEditableText(typeof(Brush), new SolidColorBrush(Colors.Red) { Transform = null }));
+        Assert.Equal("#FFFF0000", ScalarPropertyValues.ToEditableText(typeof(Brush), new SolidColorBrush(Colors.Red) { RelativeTransform = null }));
+        Assert.Equal("#FFFF0000", ScalarPropertyValues.ToEditableText(typeof(Brush), new SolidColorBrush(Colors.Red)));
+        Assert.Null(ScalarPropertyValues.ToEditableText(typeof(Brush), new SolidColorBrush(Colors.Red) { Transform = new ScaleTransform(2, 2) }));
+        Assert.Null(ScalarPropertyValues.ToEditableText(typeof(Brush), new SolidColorBrush(Colors.Red) { RelativeTransform = new ScaleTransform(2, 2) }));
+        return true;
+    });
+
+    [Fact]
     public void DefaultStyleAndInheritedValuesRecoverTheirOriginalPrecedence() => fixture.OnDispatcher(() =>
     {
         var editor = new TemporaryPropertyEdits();

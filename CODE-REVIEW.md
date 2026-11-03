@@ -46,6 +46,8 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 | Performance table, row 2 | `ErrorCount`/`WarningCount` recount once per rebuild (`ProblemsViewModel`) | 240f08b |
 | B69, B70, B71 | CodeLens, blame and change-margin requests observe their faults; the unhandled-fault handler touches UI state only on the UI thread; undo stays on the caller's thread | 250f4c5 |
 | A3, A5, A8, A9, A11, A13, A14, A17–A21, B44, B45 | Async and threading pass; see the fix log | ff2f978 … 6ee5446 |
+| B13, B21, B22, B26–B43, B46–B48, B50, B52, B53, B56–B68 | Bug pass; see the fix log | 4bd49c9 … 3d21bb6 |
+| Performance table, all rows | Same pass | fb2831a, 835ae7c, 9c9bd99, b281b7c |
 
 ### Partly done
 
@@ -66,7 +68,7 @@ Work on this branch (PR coltonspears/WpfStudio#13) is tracked here against the i
 - **Code-behind and MVVM (1.5):** M1–M10.
 - **CommunityToolkit.Mvvm (1.6):** T1–T9.
 - **`field` keyword (1.7):** F1–F6.
-- **Bugs (Part 2):** B13, B21, B22, B26–B43, B46–B68, and the performance table apart from row 2.
+- **Bugs (Part 2):** none. B49, B51, B54 and B55 turned out not to need a change (see the fix log).
 
 ---
 
@@ -409,3 +411,13 @@ Async and threading pass:
 - **A15** the shell's navigation, refactoring, reload and restart requests pass its lifetime token, a cancelled preview render stops between steps, and scaffolding's project evaluation has a one minute deadline. **A16** see the Partly done table.
 - **A17, A18, B44, B45** `DapTransport` uses `TryGetProperty` and never throws on dispose, the launch task is observed, and a rejected start is the error shown instead of "connection closed". Teardown still closes the transport before killing the adapter, to keep netcoredbg's graceful exit, with the wait capped at two seconds. These ran against a scripted fake adapter only: netcoredbg was not available on the machine that ran the tests.
 - **A19** the terminal reader has its own thread. **A20** named handlers detach on dispose for the assistant settings, feature, `DiffView` theme and `Interaction` subscriptions.
+
+Bug pass:
+
+- **Language worker.** **B27** an edit analyses one file; the full compilation runs 500 ms after edits settle and supplies what a semantic model cannot (unused fields CS0169, CS0414, CS0649, entry point and reference errors). Those arrive through a new `ProjectDiagnosticsChanged` event, deliberately not `SemanticStateChanged`, which would clear every editor and restart the project XAML scan. Until a pass finishes, replies keep the last compile-only diagnostics, moved through the edit and dropped if it touches them. **B26** a locked or unreadable `#line` target falls back to the declaration; a missing one already did. **B41** bare CR counts as a line break when locating XAML attributes. **B47** completion commit normalises its path. **B48** `launchSettings.json` values of any JSON type are tolerated. **B50** the worker listens before resolving the SDK.
+- **Documents.** **B13** a lease must keep denying writes, because it is what proves the build read the file, so the save still fails; it now says why and names the file. **B42** the state store takes its snapshot and sequence number together. The `DocumentStore` and `WhitespaceCleanup` rows no longer copy whole buffers per byte and per edit.
+- **Shell and Git views.** **B21** a commit opened from blame survives a refresh. **B22** the sign-in retry is a typed record, not a label check. **B34** closing the solution also closes loose files. **B35** the change review uses a separator-aware path check. **B36** a superseded Task List scan ends quietly. **B37** the font list no longer captures the first reader's dispatcher. **B52** `AttachAsync` owns the session. **B53** an unlisted selection survives a rebuild. **B28** the designer filter captures its own model and clears on detach. **B63** the dead SQL lookups are gone and older Windows builds get DWM id 19. **B64** a superseded large diff is cancelled and a failed one shows its message. The completion, scenario-hash, external-changes, margin and brush rows of the performance table moved off the per-keystroke, per-tick and per-line paths; their gains were not measured.
+- **Memory profiler.** **B29** Ctrl and Alt chords reach the shell. **B30** the largest retained size is computed once per layout, and hover is tracked on mouse move. **B31** `OpenType` has a `CanExecute`, which the view checks. **B32** each inspection part applies and reports alone. **B33** the load's tail runs under the load's token. **B43** a worker that dies at once fails immediately with its stderr. **B56** a null search means no filter.
+- **Packages, debugger install, Git, SQL.** **B38** a licence download timeout is tolerated; a user cancel still cancels. **B39** a partial `dotnet list` response falls back with the reason. **B40** stdout and stderr are separate, and JSON is read from the first line that opens with `{`. **B65** untracked files no longer block Pull, Merge or Switch, and git's own conflict error surfaces. **B66** a broken stdin no longer hides git's stderr. **B61** scripts continue past a failed `GO` batch like SSMS and say so; cancellation or a lost connection stops them. **B62** result columns are built from the table, so any column name displays.
+- **Preview, terminal, inspection, debugger.** **B46** the newest watch refresh wins. **B57** `_diagnostics` is always written under the lock. **B58** eviction takes the least recently observed entry. **B59** wrappers resolve through a hierarchy walk (`PropertyWrappers.Find`), including in the inspection agent. **B60** a null brush transform counts as identity. **B67** a renderer that fails to start keeps the shell session and offers Retry. **B68** the first inspection response gets 30 s, later ones keep 3 s. The compiled-preview row caches its hash by path, length and write time.
+- **Not changed, after checking.** **B49** on SDK 10.0.401 pipes reach EOF by the time the CLI exits even with reusable nodes alive, so the flag gives no benefit. **B51** the lease already dedupes paths. **B54** a real session does not throw cancellation here, and cancelling `_poll` changes the generation first. **B55** `ReloadWorkspaceAsync` now records a pending reload and has no `IsBusy` check.

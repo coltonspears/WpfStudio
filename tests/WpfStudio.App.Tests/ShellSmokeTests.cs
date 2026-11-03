@@ -296,6 +296,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             Assert.Contains(reviewDiff.Layout!.Right, line => line.Kind == WpfStudio.App.Controls.Diff.DiffLineKind.Added && line.Text.Contains("Hello"));
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/change-preview.png"));
             shell.ChangeReview.CancelCommand.Execute(null);
+            await VerifyDesignerPaneFilterAsync(provider.GetRequiredService<IUiDispatcher>());
+            await VerifyLargeDiffsAsync();
             var performanceFixture = Path.Combine(root, "artifacts/performance/fixture/Performance.slnx");
             if (File.Exists(performanceFixture))
             {

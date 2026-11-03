@@ -14,7 +14,7 @@ namespace WpfStudio.App.Services;
 /// </summary>
 public static class WindowChromeService
 {
-    private const int DwmUseImmersiveDarkMode = 20, DwmCornerPreference = 33, DwmBorderColor = 34, DwmCaptionColor = 35, DwmTextColor = 36;
+    private const int DwmUseImmersiveDarkMode = 20, DwmUseImmersiveDarkModeBefore20H1 = 19, DwmCornerPreference = 33, DwmBorderColor = 34, DwmCaptionColor = 35, DwmTextColor = 36;
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     /// <summary>Applies frame colours to a window that has a handle; later windows call <see cref="Track"/>.</summary>
@@ -24,7 +24,9 @@ public static class WindowChromeService
         if (hwnd == IntPtr.Zero) return;
         try
         {
-            int dark = light ? 0 : 1; DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
+            int dark = light ? 0 : 1;
+            // Windows 10 builds before 19041 reject the documented id and know this attribute by the older one.
+            if (DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int)) != 0) DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkModeBefore20H1, ref dark, sizeof(int));
             int round = 2; DwmSetWindowAttribute(hwnd, DwmCornerPreference, ref round, sizeof(int));
             int border = ColorRef(light ? "#CBCED6" : "#2E3037"); DwmSetWindowAttribute(hwnd, DwmBorderColor, ref border, sizeof(int));
             int caption = ColorRef(light ? "#EDEEF1" : "#131417"); DwmSetWindowAttribute(hwnd, DwmCaptionColor, ref caption, sizeof(int));

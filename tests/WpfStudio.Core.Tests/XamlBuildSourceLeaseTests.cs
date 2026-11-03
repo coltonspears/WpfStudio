@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using WpfStudio.Core.Documents;
 using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.Core.Tests;
@@ -102,6 +103,47 @@ public sealed class XamlBuildSourceLeaseTests
         Assert.Equal(1024, lease.Sources.Count);
         Assert.Contains(lease.Issues, issue => issue.Contains("1,024"));
         await File.WriteAllTextAsync(paths[^1], "<Button />");
+    }
+
+    [Fact]
+    public async Task SavingALeasedSourceFailsWithoutLosingEditsAndSucceedsAfterRelease()
+    {
+        using var directory = new LeaseDirectory();
+        string path = directory.PathFor("View.xaml");
+        await File.WriteAllTextAsync(path, "<Grid />");
+        var store = new DocumentStore(directory.PathFor("Data"));
+        var document = await store.OpenAsync(path);
+        using var lease = await XamlBuildSourceLease.AcquireAsync([path, path]);
+        document.Content = "<Button />";
+        var failure = await Assert.ThrowsAsync<IOException>(() => store.SaveAsync(document));
+        Assert.Contains("View.xaml", failure.Message);
+        Assert.Contains("build", failure.Message);
+        Assert.True(document.IsDirty);
+        Assert.Equal("<Grid />", await File.ReadAllTextAsync(path));
+        Assert.Equal([path], Directory.GetFiles(Path.GetDirectoryName(path)!));
+        lease.Dispose();
+        await store.SaveAsync(document);
+        Assert.False(document.IsDirty);
+        Assert.Equal("<Button />", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task ASourceStaysLeasedUntilItsLastHolderIsDisposed()
+    {
+        using var directory = new LeaseDirectory();
+        string path = directory.PathFor("View.xaml");
+        await File.WriteAllTextAsync(path, "<Grid />");
+        var store = new DocumentStore(directory.PathFor("Data"));
+        var document = await store.OpenAsync(path);
+        using var first = await XamlBuildSourceLease.AcquireAsync([path]);
+        using var second = await XamlBuildSourceLease.AcquireAsync([path]);
+        document.Content = "<Button />";
+        first.Dispose();
+        first.Dispose();
+        await Assert.ThrowsAsync<IOException>(() => store.SaveAsync(document));
+        second.Dispose();
+        await store.SaveAsync(document);
+        Assert.False(document.IsDirty);
     }
 
     private static void AssertSharingDenied(Action action)

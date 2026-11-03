@@ -128,26 +128,20 @@ public sealed partial class MemoryProfilerViewModel
         IsInspecting = true; Details = null; Graph = null; SelectedReference = null; SelectedIncomingReference = null; SelectedOutgoingReference = null; ResetEstimate(); ResetBrowserContent();
         try
         {
-            var detailTask = session.InspectAsync(objectId, operationToken);
-            var graphTask = session.GetGraphAsync(new(objectId, HiddenRootKinds: HiddenRootKinds), operationToken);
-            var childrenTask = session.GetChildrenAsync(new(objectId), operationToken);
-            var retainedTask = session.GetRetainedAsync(objectId, operationToken);
-            await Task.WhenAll(detailTask, graphTask);
-            if (_disposed || revision != _revision || selection != _inspectionRevision) return;
-            Details = await detailTask; Graph = await graphTask; _graphObject = objectId;
-            Status = "Object inspected from captured memory. Fields are read without invoking application getters.";
-            try
-            {
-                var children = await childrenTask;
-                if (selection == _inspectionRevision) ApplyRootChildren(children);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException) { if (selection == _inspectionRevision) ObjectPreview = "Fields are unavailable: " + ex.Message; }
-            try
-            {
-                var retained = await retainedTask;
-                if (selection == _inspectionRevision) RetainedComposition = retained;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException) { }
+            bool Current() => !_disposed && revision == _revision && selection == _inspectionRevision;
+            // Each part applies and reports on its own, so one that fails neither hides the others nor goes unobserved.
+            var details = ApplyPartAsync(session.InspectAsync(objectId, operationToken), Current, value => Details = value);
+            var graph = ApplyPartAsync(session.GetGraphAsync(new(objectId, HiddenRootKinds: HiddenRootKinds), operationToken), Current, value => { Graph = value; _graphObject = objectId; });
+            var children = ApplyPartAsync(session.GetChildrenAsync(new(objectId), operationToken), Current, ApplyRootChildren);
+            var retained = ApplyPartAsync(session.GetRetainedAsync(objectId, operationToken), Current, value => RetainedComposition = value);
+            var detailsFailure = await details;
+            var graphFailure = await graph;
+            if (Current() && !operationToken.IsCancellationRequested)
+                Status = detailsFailure is not null ? "Object inspection failed: " + detailsFailure.Message
+                    : graphFailure is not null ? "Object inspected, but its graph could not be loaded: " + graphFailure.Message
+                    : "Object inspected from captured memory. Fields are read without invoking application getters.";
+            if (await children is { } childrenFailure && Current()) ObjectPreview = "Fields are unavailable: " + childrenFailure.Message;
+            await retained;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!_disposed && revision == _revision && selection == _inspectionRevision) Status = "Object inspection failed: " + ex.Message; }
@@ -158,6 +152,18 @@ public sealed partial class MemoryProfilerViewModel
         }
     }
     private int? _pendingObject;
+
+    private static async Task<Exception?> ApplyPartAsync<T>(Task<T> part, Func<bool> current, Action<T> apply)
+    {
+        try
+        {
+            var value = await part;
+            if (current()) apply(value);
+            return null;
+        }
+        catch (OperationCanceledException) { return null; }
+        catch (Exception ex) { return ex; }
+    }
 
     private void UpdateTrail(int current)
     {

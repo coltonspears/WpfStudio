@@ -406,7 +406,8 @@ public sealed class GitService
 
     private async Task RequireCleanAsync(string root, CancellationToken cancellationToken)
     {
-        var status = await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cancellationToken);
+        // Untracked files don't count: Git refuses by itself, keeping the file, if an operation would overwrite one.
+        var status = await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=no"], cancellationToken);
         if (ParseStatus(status.Output).Count != 0)
             throw new InvalidOperationException("Commit or stash your changes in the terminal before switching branches or pulling. WpfStudio keeps all working files intact.");
     }
@@ -499,8 +500,12 @@ public sealed class GitService
         var errorTask = ReadBoundedAsync(process.StandardError);
         try
         {
-            if (input is not null) await process.StandardInput.WriteAsync(input.AsMemory(), cancellationToken);
-            process.StandardInput.Close();
+            try
+            {
+                if (input is not null) await process.StandardInput.WriteAsync(input.AsMemory(), cancellationToken);
+                process.StandardInput.Close();
+            }
+            catch (IOException) { /* Git stopped reading, usually because it failed. Its exit code and stderr say why. */ }
             await process.WaitForExitAsync(cancellationToken);
         }
         catch

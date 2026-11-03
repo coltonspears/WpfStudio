@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace WpfStudio.Core.Text;
 
 /// <summary>A replacement of <see cref="Length"/> characters at <see cref="Start"/>.</summary>
@@ -33,7 +35,13 @@ public static class WhitespaceCleanup
 
     public static string Apply(string text, IReadOnlyList<TextReplacement> edits)
     {
-        foreach (var edit in edits.OrderByDescending(edit => edit.Start)) text = text.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.Text);
-        return text;
+        var result = new StringBuilder(text.Length);
+        var position = 0;
+        foreach (var edit in edits.OrderBy(edit => edit.Start))
+        {
+            result.Append(text, position, edit.Start - position).Append(edit.Text);
+            position = edit.Start + edit.Length;
+        }
+        return result.Append(text, position, text.Length - position).ToString();
     }
 }

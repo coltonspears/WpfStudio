@@ -19,6 +19,13 @@ public sealed class HeapAnalysisTests
     }
 
     [Fact]
+    public void NullSearchFromTheClientMeansNoFilter()
+    {
+        var analysis = Analyze([10, 100], [(0, 1)], [0]);
+        Assert.Equal(2, analysis.GetObjects(new(Search: null!)).TotalCount);
+    }
+
+    [Fact]
     public void ParallelReferencesAreRemovedIndividually()
     {
         var analysis = Analyze([10, 100], [(0, 1), (0, 1)], [0]);

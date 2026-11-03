@@ -201,7 +201,7 @@ public partial class PackagesViewModel : ObservableObject, IDisposable
             try
             {
                 var result = await _service.ChangeAsync(project.ProjectPath, id, version, remove, output, token);
-                if (string.IsNullOrWhiteSpace(Output)) Output = result.Output;
+                if (string.IsNullOrWhiteSpace(Output)) Output = result.Display;
                 Status = result.ExitCode == 0 ? $"{id} {(remove ? "removed" : "installed at " + version)}. Restore completed." : $"Package command exited with code {result.ExitCode}. Review output; project files may have changed before restore failed.";
                 await ReadInventoryAsync(project.ProjectPath, token);
                 if (result.ExitCode == 0 && remove && Installed.Any(x => x.Id.Equals(id, StringComparison.OrdinalIgnoreCase)))

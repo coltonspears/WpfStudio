@@ -105,6 +105,27 @@ public sealed class GitFeatureTests
         Assert.Null(GitBlame.Summarize(blame, 7, 9));
     }
 
+    [Theory]
+    [InlineData(9)]
+    [InlineData(6)] // Stale changes against a text that has since become shorter: trailing deletions gather on the last line.
+    public void LineChangesAtFindsWhatAScanOfEveryChangeFinds(int lineCount)
+    {
+        LineChange[] changes =
+        [
+            new(LineChangeKind.Deleted, 1, 0, "gone"), new(LineChangeKind.Added, 2, 2, ""), new(LineChangeKind.Modified, 5, 1, "old"),
+            new(LineChangeKind.Deleted, 7, 0, "gone"), new(LineChangeKind.Deleted, 9, 0, "gone"), new(LineChangeKind.Deleted, 10, 0, "gone")
+        ];
+        for (var line = 1; line <= lineCount; line++)
+        {
+            var number = line;
+            var scanned = changes.Where(change => change.Kind == LineChangeKind.Deleted
+                ? Math.Min(change.StartLine, lineCount) == number
+                : number >= change.StartLine && number < change.StartLine + change.LineCount);
+            Assert.Equal(scanned, LineChanges.At(changes, number, lineCount));
+        }
+        Assert.Empty(LineChanges.At([], 1, 1));
+    }
+
     [Fact]
     public void LineChangesMarkAddedModifiedAndDeletedBlocks()
     {

@@ -141,6 +141,37 @@ public sealed partial class DesignerTests
     }
 
     [Fact]
+    public async Task ScenarioFileIsNotReadDuringMovesButStillGuardsTheCommit()
+    {
+        await using var test = new ShellTestContext(LayoutPreview());
+        string path = await test.CreateFileAsync("Layout.xaml", LayoutSource);
+        await test.Shell.OpenDocumentAsync(path);
+        var designer = test.Shell.Designer;
+        designer.AutoRefresh = false;
+        string configuration = Path.Combine(test.Root, PreviewScenarioCatalog.FileName);
+        await File.WriteAllTextAsync(configuration, "{\"version\":1,\"views\":[]}");
+        var timestamp = File.GetLastWriteTimeUtc(configuration);
+        await designer.OpenAsync(test.Shell.ActiveDocument!.State, projectDirectory: test.Root);
+        designer.IsLayoutEditingEnabled = true;
+        designer.SelectedNode = designer.Tree[0].Children[0];
+        Assert.True(designer.LayoutEditing?.Available, designer.LayoutEditingStatus);
+        await designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Begin, XamlLayoutHandle.Move));
+
+        // The guard treats a file it cannot open as changed, so a move that read it would end the gesture.
+        using (new FileStream(configuration, FileMode.Open, FileAccess.Read, FileShare.None))
+            await designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Update, XamlLayoutHandle.Move, 20, 15, true));
+        Assert.True(designer.LayoutDraft?.Success, designer.LayoutEditingStatus);
+
+        // A change that keeps the timestamp and is not seen by the watcher still fails the commit.
+        await File.WriteAllTextAsync(configuration, "{\"version\":1,\"views\":[ ]}");
+        File.SetLastWriteTimeUtc(configuration, timestamp);
+        await designer.LayoutGestureCommand.ExecuteAsync(new PreviewLayoutGesture(PreviewLayoutGesturePhase.Commit, XamlLayoutHandle.Move, 20, 15, true));
+        Assert.False(test.Shell.IsPreviewOpen);
+        Assert.Null(designer.LayoutDraft);
+        Assert.Equal(LayoutSource, test.Shell.ActiveDocument!.State.Content);
+    }
+
+    [Fact]
     public async Task RuntimeLayoutChangeWithUnchangedSourceIsRecheckedAfterReview()
     {
         var client = LayoutPreview();

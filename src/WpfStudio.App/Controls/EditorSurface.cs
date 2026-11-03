@@ -805,8 +805,21 @@ public sealed partial class EditorSurface : TextEditor
         }
         private void Refresh(object? sender, EventArgs e) => InvalidateVisual();
     }
+    /// <summary>
+    /// A frozen pen of the brush's current colour, kept in <paramref name="pen"/> until that colour changes. The theme recolours
+    /// its brushes in place, so the pen holds a frozen copy (freezing the pen would freeze the theme's brush) and compares colours.
+    /// </summary>
+    internal static Pen ThemedPen(Brush brush, double thickness, ref Pen? pen)
+    {
+        if (pen?.Brush is SolidColorBrush held && brush is SolidColorBrush current && held.Color == current.Color) return pen;
+        pen = new Pen((Brush)brush.GetCurrentValueAsFrozen(), thickness);
+        pen.Freeze();
+        return pen;
+    }
     private sealed class DiagnosticRenderer(EditorSurface owner) : IBackgroundRenderer
     {
+        private static readonly Brush ExecutionLine = (Brush)new SolidColorBrush(Color.FromArgb(46, 227, 180, 88)).GetAsFrozen();
+        private Pen? _errorPen, _warningPen;
         public KnownLayer Layer => KnownLayer.Selection;
         public void Draw(TextView textView, DrawingContext context)
         {
@@ -815,13 +828,16 @@ public sealed partial class EditorSurface : TextEditor
             if (vm.ExecutionLine > 0 && vm.ExecutionLine <= owner.Document.LineCount)
             {
                 var line = owner.Document.GetLineByNumber(vm.ExecutionLine);
-                foreach (var rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, line)) context.DrawRectangle(new SolidColorBrush(Color.FromArgb(46, 227, 180, 88)), null, rect);
+                foreach (var rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, line)) context.DrawRectangle(ExecutionLine, null, rect);
             }
             foreach (var diagnostic in vm.Diagnostics.Where(d => d.Start >= 0 && d.Start < owner.Document.TextLength))
             {
                 var segment = new TextSegment { StartOffset = diagnostic.Start, Length = Math.Min(Math.Max(1, diagnostic.Length), owner.Document.TextLength - diagnostic.Start) };
+                var pen = diagnostic.Severity == "Error"
+                    ? ThemedPen(owner.TryFindResource("DangerBrush") as Brush ?? Brushes.IndianRed, 1.5, ref _errorPen)
+                    : ThemedPen(owner.TryFindResource("WarningBrush") as Brush ?? Brushes.IndianRed, 1.5, ref _warningPen);
                 foreach (var rect in BackgroundGeometryBuilder.GetRectsForSegment(textView, segment))
-                    context.DrawLine(new Pen((diagnostic.Severity == "Error" ? owner.TryFindResource("DangerBrush") : owner.TryFindResource("WarningBrush")) as Brush ?? Brushes.IndianRed, 1.5), new Point(rect.Left, rect.Bottom), new Point(rect.Right, rect.Bottom));
+                    context.DrawLine(pen, new Point(rect.Left, rect.Bottom), new Point(rect.Right, rect.Bottom));
             }
         }
     }

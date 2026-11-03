@@ -122,6 +122,41 @@ public sealed class LiveSourceValidationTests
         Assert.Equal("ping", await app.SendAsync("ping", timeout.Token));
     }
 
+    [Theory]
+    [InlineData("net8.0-windows")]
+    [InlineData("net9.0-windows")]
+    [InlineData("net10.0-windows")]
+    public async Task WrappersHiddenWithAnotherTypeKeepTheirRowsAndResolveLikeXaml(string framework)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        await using var session = new InspectionSession();
+        await using var app = new FixtureApplication(framework);
+        app.Start(InspectionAgentUnderTest.CreateEnvironment(new Dictionary<string, string>(), session));
+        session.ExpectProcess(app.ProcessId);
+        await app.WaitForReadyAsync(timeout.Token);
+        await session.WaitForConnectionAsync(timeout.Token);
+        await app.SendAsync("source-validation-hidden-wrappers", timeout.Token);
+        var tree = await RunningApplicationTests.WaitForTreeAsync(session, snapshot => snapshot.Nodes.Any(node => node.Name == "SourceRedeclaredValue")
+            && snapshot.BindingObservations?.Any(observation => observation.TargetProperty == "FrameworkElement.Tag") == true, timeout.Token);
+
+        var hidden = await InspectAsync(session, tree, "SourceHiddenTag", timeout.Token);
+        Assert.Null(hidden.Status);
+        var tag = Property(hidden, "FrameworkElement.Tag");
+        Assert.False(tag.CanWriteSource);
+        Assert.Contains("canonical", tag.SourceUnavailableReason!, StringComparison.Ordinal);
+
+        var redeclared = await InspectAsync(session, tree, "SourceRedeclaredValue", timeout.Token);
+        Assert.Null(redeclared.Status);
+        var valid = await session.ValidateSourcePropertyAsync(Request(redeclared, Property(redeclared, "Value"), "Proposed"), timeout.Token);
+        Assert.True(valid.Success, valid.Error);
+        Assert.False(valid.Property!.IsAttached);
+        Assert.EndsWith("SourceRedeclaredValueProbe", valid.Property.OwnerType);
+        Assert.Contains(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceRedeclaredValueProbe"));
+        Assert.Contains(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceValueBaseProbe"));
+        Assert.DoesNotContain(valid.Property.AuthoredTargets!, candidate => candidate.Type.EndsWith("SourceHidingValueProbe"));
+        await session.DisconnectAsync(timeout.Token);
+    }
+
     private static InspectionSourcePropertyRequest Request(InspectionElement element, InspectionProperty property, string? value)
     {
         Assert.True(property.CanWriteSource, property.SourceUnavailableReason);

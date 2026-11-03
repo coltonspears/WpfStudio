@@ -184,12 +184,18 @@ public sealed partial class BuildService
         var path = Path.Combine(Path.GetDirectoryName(projectPath)!, "Properties", "launchSettings.json");
         if (!File.Exists(path)) return [];
         using var json = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
-        if (!json.RootElement.TryGetProperty("profiles", out var profiles)) return [];
-        return profiles.EnumerateObject().Select(profile =>
+        // Hand-edited values of an unexpected type must not cost the whole project its launch targets.
+        if (json.RootElement.ValueKind != JsonValueKind.Object || !json.RootElement.TryGetProperty("profiles", out var profiles) || profiles.ValueKind != JsonValueKind.Object) return [];
+        return profiles.EnumerateObject().Where(profile => profile.Value.ValueKind == JsonValueKind.Object).Select(profile =>
         {
-            string? Read(string name) => profile.Value.TryGetProperty(name, out var value) ? value.GetString() : null;
+            string? Read(string name) => !profile.Value.TryGetProperty(name, out var value) ? null : value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.ToString(),
+                _ => null
+            };
             var environment = new Dictionary<string, string>();
-            if (profile.Value.TryGetProperty("environmentVariables", out var variables))
+            if (profile.Value.TryGetProperty("environmentVariables", out var variables) && variables.ValueKind == JsonValueKind.Object)
                 foreach (var variable in variables.EnumerateObject()) environment[variable.Name] = variable.Value.ToString();
             return new LaunchProfile(profile.Name, Read("commandName"), Read("commandLineArgs"), Read("workingDirectory"), environment, Read("executablePath"));
         }).ToArray();

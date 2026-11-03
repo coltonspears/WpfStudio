@@ -26,7 +26,7 @@ public sealed partial class ShellViewModel
         { Status = "Running-app inspection currently requires an untrimmed .NET 8, 9 or 10 WPF project."; return; }
         string hook = InspectionLaunch.FindStartupHook();
         IsBusy = true; _operation = new();
-        InspectionSession? session = null;
+        InspectionSession? session = null, attached = null;
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
@@ -61,9 +61,10 @@ public sealed partial class ShellViewModel
             session = new InspectionSession();
             var environment = InspectionLaunch.CreateEnvironment(launch.Environment, session, hook);
             ToolRequested?.Invoke("LiveInspection");
-            var connection = LiveInspection.AttachAsync(session, debug, _operation.Token);
-            // AttachAsync owns disposal once it has adopted the session. The launch
-            // environment applies to the target only, never the build or adapter.
+            var connection = LiveInspection.AttachAsync(attached = session, debug, _operation.Token);
+            // AttachAsync owns disposal from here: it disposes a session it does not adopt, and
+            // Disconnect one it did. The launch environment applies to the target only, never the build or adapter.
+            session = null;
             if (debug)
             {
                 await Debugger.LaunchAsync(new DebugLaunchConfiguration(launch.Program, launch.WorkingDirectory,
@@ -78,15 +79,14 @@ public sealed partial class ShellViewModel
                 start.RedirectStandardOutput = false; start.RedirectStandardError = false;
                 using var target = Process.Start(start)
                     ?? throw new InvalidOperationException("The target application could not be launched.");
-                session.ExpectProcess(target.Id);
+                attached.ExpectProcess(target.Id);
             }
             await connection;
             Status = LiveInspection.IsConnected ? "Inspecting " + project.Name : LiveInspection.Status;
-            session = null;
         }
         catch
         {
-            if (session != null) await LiveInspection.DisconnectCommand.ExecuteAsync(null);
+            if (attached != null) await LiveInspection.DisconnectCommand.ExecuteAsync(null);
             throw;
         }
         finally

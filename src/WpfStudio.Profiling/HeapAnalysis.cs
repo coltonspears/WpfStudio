@@ -137,7 +137,7 @@ public sealed partial class HeapAnalysis
     {
         var found = new List<MemoryObjectInfo>(); var total = 0;
         var skip = Math.Max(0, query.Skip); var take = Math.Clamp(query.Take, 1, 500);
-        var search = query.Search.Trim();
+        var search = query.Search?.Trim() ?? ""; // The client's JSON can carry a null despite the record's default.
         ReadOnlySpan<int> candidates;
         if (query.TypeKey is null) candidates = _rankedObjects;
         else if (TryGetTypeId(query.TypeKey, out var typeId)) candidates = InstancesOf(typeId);

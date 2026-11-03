@@ -66,19 +66,21 @@ public sealed partial class EditorPreferences : ObservableObject
             if (_families is null && !_listingFamilies)
             {
                 _listingFamilies = true;
-                var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
-                LoadFamiliesAsync(dispatcher).Forget();
+                LoadFamiliesAsync().Forget();
             }
             return _families ?? [];
         }
     }
 
-    private async Task LoadFamiliesAsync(System.Windows.Threading.Dispatcher dispatcher)
+    private async Task LoadFamiliesAsync()
     {
         IReadOnlyList<string> families;
         try { families = await Task.Run(ListFamilies).ConfigureAwait(false); }
         catch (Exception) { families = [EditorSettings.DefaultFontFamily]; } // The settings page only needs something to offer.
-        _ = dispatcher.BeginInvoke(() => { _families = families; OnPropertyChanged(nameof(FontFamilies)); });
+        _families = families;
+        // Not through the first reader's dispatcher: that reader may be on a thread that never runs one.
+        if (Application.Current?.Dispatcher is { } ui) _ = ui.BeginInvoke(() => OnPropertyChanged(nameof(FontFamilies)));
+        else OnPropertyChanged(nameof(FontFamilies));
     }
 
     private static IReadOnlyList<string> ListFamilies()

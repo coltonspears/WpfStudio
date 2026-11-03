@@ -48,12 +48,16 @@ public sealed class GraphLayout
     public List<GraphDisplayEdge> Edges { get; } = [];
     public Rect Extent { get; private set; }
     public GraphDisplayNode? Focus { get; private set; }
+    /// <summary>The largest retained size among the object and group cards, at least 1. It scales every card's bar.</summary>
+    public long MaxRetainedBytes { get; private set; } = 1;
 
     public static GraphLayout Build(MemoryGraph graph, ISet<string> expandedGroups, Func<string, double, double> measureText)
     {
         var layout = new GraphLayout();
         layout.Create(graph, expandedGroups, measureText);
         layout.Arrange();
+        foreach (var node in layout.Nodes.Where(n => n.Kind is not (GraphNodeKind.Root or GraphNodeKind.Static)))
+            layout.MaxRetainedBytes = Math.Max(layout.MaxRetainedBytes, node.Kind == GraphNodeKind.Group ? node.Members.Sum(m => m.Object.RetainedBytes) : node.Node?.Object.RetainedBytes ?? 0);
         return layout;
     }
 

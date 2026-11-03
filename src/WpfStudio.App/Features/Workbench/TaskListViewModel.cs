@@ -46,11 +46,17 @@ public sealed partial class TaskListViewModel : ObservableObject, IDisposable
     partial void OnFilterChanged(string value) => RefreshVisibleComments();
 
     /// <summary>Scans every source file in the workspace, reading open documents from their editor buffers.</summary>
-    [RelayCommand] private Task RefreshAsync() => _host.GuardAsync(ScanAsync);
+    [RelayCommand] private Task RefreshAsync() => _host.GuardAsync(async () =>
+    {
+        // Only a newer scan or the end of the session cancels one, and neither is worth reporting.
+        try { await ScanAsync(); } catch (OperationCanceledException) { }
+    });
     private async Task ScanAsync()
     {
         _scan?.Cancel(); _scan?.Dispose();
         var scan = _scan = CancellationTokenSource.CreateLinkedTokenSource(_host.Lifetime);
+        // The next scan disposes the source while this one may still be reading files, so the worker keeps the token.
+        var token = scan.Token;
         if (_host.WorkspacePath is null) { _comments = []; RefreshVisibleComments(); Status = NoWorkspaceStatus; return; }
         Status = "Scanning for TODO comments…";
         var buffers = _host.OpenDocumentTexts();
@@ -60,7 +66,7 @@ public sealed partial class TaskListViewModel : ObservableObject, IDisposable
             var results = new List<TaskComment>();
             foreach (var file in files)
             {
-                scan.Token.ThrowIfCancellationRequested();
+                token.ThrowIfCancellationRequested();
                 try
                 {
                     if (!buffers.TryGetValue(file, out var text))
@@ -73,8 +79,8 @@ public sealed partial class TaskListViewModel : ObservableObject, IDisposable
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* Unreadable files are simply not listed. */ }
             }
             return results;
-        }, scan.Token);
-        if (scan.IsCancellationRequested) return;
+        }, token);
+        if (token.IsCancellationRequested) return;
         _comments = found;
         RefreshVisibleComments();
         Status = found.Count == 0 ? $"No TODO comments in {files.Length} files" : $"{found.Count} comment{(found.Count == 1 ? "" : "s")} in {found.Select(c => c.Path).Distinct().Count()} files";

@@ -14,7 +14,14 @@ public sealed record WpfItem(string Kind, string Name, string Path, int Line, st
 }
 public sealed record ResourceDeclaration(string Key, string Path, int Line, int ValueStart, int ValueLength, string Scope);
 public sealed record ResourceUsage(string Key, string Path, int Line, int Start, int Length, bool IsDynamic, string? ResolvedPath, int? ResolvedDeclarationStart);
-public sealed record WpfIndexSnapshot(IReadOnlyList<WpfItem> Items, IReadOnlyList<ResourceDeclaration> Resources, IReadOnlyList<ResourceUsage> Usages, IReadOnlyList<WorkspaceDiagnostic> Diagnostics, IReadOnlyDictionary<string, string> Texts);
+public sealed partial record WpfIndexSnapshot(IReadOnlyList<WpfItem> Items, IReadOnlyList<ResourceDeclaration> Resources, IReadOnlyList<ResourceUsage> Usages, IReadOnlyList<WorkspaceDiagnostic> Diagnostics, IReadOnlyDictionary<string, string> Texts)
+{
+    /// <summary>The namespaces each indexed file declares. Read once here, because XAML completion asks on every keystroke.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> Namespaces { get; } = Texts.ToDictionary(text => text.Key,
+        text => (IReadOnlyList<string>)[.. NamespacePattern().Matches(text.Value).Select(match => match.Groups[1].Value)], StringComparer.OrdinalIgnoreCase);
+    [GeneratedRegex(@"\bnamespace\s+([\w.]+)")]
+    private static partial Regex NamespacePattern();
+}
 
 public sealed partial class WpfIndexService
 {
@@ -208,7 +215,14 @@ public sealed partial class WpfIndexService
     {
         var info = (IXmlLineInfo)attribute;
         var offset = 0;
-        for (var line = 1; line < info.LineNumber; line++) { var next = text.IndexOf('\n', offset); if (next < 0) break; offset = next + 1; }
+        // XmlReader ends a line at \r\n, \n or a bare \r.
+        for (var line = 1; line < info.LineNumber; line++)
+        {
+            var next = text.AsSpan(offset).IndexOfAny('\r', '\n');
+            if (next < 0) break;
+            offset += next + 1;
+            if (text[offset - 1] == '\r' && offset < text.Length && text[offset] == '\n') offset++;
+        }
         offset += info.LinePosition - 1;
         var equal = text.IndexOf('=', offset);
         var quote = equal + 1;

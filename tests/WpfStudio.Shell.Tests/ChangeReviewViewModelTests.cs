@@ -58,6 +58,21 @@ public sealed class ChangeReviewViewModelTests
         Assert.False(await open);
     }
 
+    [Fact]
+    public async Task AFolderThatOnlySharesTheWorkspacePrefixIsNotInsideTheWorkspace()
+    {
+        var review = new ChangeReviewViewModel(new Host(), new InlineDispatcher());
+        var decision = review.ShowAsync("Edit", [new FileChange(@"C:\ShopTests\Cart.cs", "a", "b", "edit"), new FileChange(@"C:\Shop\Views\Cart.xaml", "a", "b", "edit")], "");
+        Assert.Equal([@"ShopTests", @"Shop\Views"], review.Files.Select(file => file.Folder));
+        review.CancelCommand.Execute(null);
+        await decision;
+
+        decision = review.ShowAsync("Edit", [new FileChange(@"C:\ShopTests\Cart.cs", "a", "b", "edit")], "");
+        Assert.Equal("ShopTests", Assert.Single(review.Files).Folder);
+        review.CancelCommand.Execute(null);
+        await decision;
+    }
+
     private sealed class Host : IWorkbenchHost
     {
         public string Status { get; private set; } = "";

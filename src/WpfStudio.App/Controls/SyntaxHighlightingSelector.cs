@@ -14,7 +14,6 @@ public static class SyntaxHighlightingSelector
             ".cs" or ".csx" => "C#",
             ".xaml" or ".xml" or ".csproj" or ".props" or ".targets" or ".config" or ".resx" or ".manifest" or ".nuspec" or ".slnx" => "XML",
             ".json" or ".js" => "JavaScript",
-            ".sql" => "SQL",
             _ => null
         };
         return name is null ? null : HighlightingManager.Instance.GetDefinition(name);

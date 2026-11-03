@@ -181,6 +181,33 @@ public sealed partial class DesignerTests
     }
 
     [Fact]
+    public async Task AnElementTheTreeDoesNotListStaysSelectedAcrossTreeRebuildsAndRenders()
+    {
+        var client = new FakePreview();
+        await using var model = new DesignerViewModel(client, new InlineDispatcher()) { AutoRefresh = false };
+        var document = Document("view.xaml");
+        // An authored element outside the visual tree, such as a RowDefinition.
+        Serve(client, version => Nodes(version, document.Path, (Grid, "Root", -1, true), (Text, "Off", 0, true))
+            .Select(node => node.Name == "Off" ? node with { IsVisual = false, ParentId = null, LogicalParentId = $"{version}-0" } : node).ToArray());
+        await model.OpenAsync(document);
+        Assert.DoesNotContain(Flatten(model.Tree), node => node.Node.Name == "Off");
+
+        model.SelectSource(document.Path, 11);
+        Assert.Equal("Off", model.SelectedNode?.Node.Name);
+
+        model.ShowLogicalTree = true;
+        Assert.Contains(Flatten(model.Tree), node => node.Node.Name == "Off");
+        Assert.Equal("Off", model.SelectedNode?.Node.Name);
+        model.ShowLogicalTree = false;
+        Assert.Equal("Off", model.SelectedNode?.Node.Name);
+
+        document.Content = "<Grid />";
+        await model.RefreshCommand.ExecuteAsync(null);
+        Assert.Equal("Off", model.SelectedNode?.Node.Name);
+        Assert.True(model.SelectedNode!.IsSelected);
+    }
+
+    [Fact]
     public async Task CanvasPicksPreferAuthoredElementsUnlessExact()
     {
         var client = new FakePreview();

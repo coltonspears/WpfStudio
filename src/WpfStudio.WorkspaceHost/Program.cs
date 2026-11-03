@@ -13,11 +13,14 @@ using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
 try
 {
+    // Listen first: resolving the SDK launches the CLI twice, which on a cold machine can outlast the client's connect budget.
+    // Requests sent in the meantime wait in the pipe until the engine below reads them.
+    using var pipe = new NamedPipeServerStream(args[pipeIndex + 1], PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+    var connected = pipe.WaitForConnectionAsync(cancellation.Token);
     // Register the selected SDK before JIT compilation touches MSBuildWorkspace.
     try { await ToolchainResolver.RegisterAsync(args[workspaceIndex + 1], cancellation.Token); }
     catch (Exception exception) when (exception is not OperationCanceledException) { Console.Error.WriteLine(exception.Message); }
-    using var pipe = new NamedPipeServerStream(args[pipeIndex + 1], PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-    await pipe.WaitForConnectionAsync(cancellation.Token);
+    await connected;
     using var engine = new WorkspaceEngine();
     using var rpc = new JsonRpc(pipe);
     rpc.AddLocalRpcTarget(engine);

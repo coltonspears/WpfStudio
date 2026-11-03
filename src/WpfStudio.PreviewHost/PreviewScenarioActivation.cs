@@ -1,6 +1,5 @@
 using System.IO;
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
@@ -112,7 +111,7 @@ internal sealed class PreviewScenarioActivation
 
     public PreviewScenarioProvenance Provenance(PreviewRequest request, FrameworkElement view, PreviewBuildProvenance? build) =>
         new(_configuration, Path.GetFullPath(request.AssemblyPath!),
-            build?.AssemblySha256 ?? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(_assembly.Location))),
+            build?.AssemblySha256 ?? CompiledPreview.AssemblySha256(_assembly.Location),
             _assembly.ManifestModule.ModuleVersionId.ToString("D"), view.GetType().FullName ?? view.GetType().Name);
 
     private object? Invoke(MethodInfo method, string kind, bool allowNull)

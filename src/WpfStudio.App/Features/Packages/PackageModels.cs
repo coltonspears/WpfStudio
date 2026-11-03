@@ -16,7 +16,12 @@ public sealed record PackageSearchItem(string Id, string Version, string Descrip
 }
 public sealed record PackageInventory(IReadOnlyList<InstalledPackage> Packages, IReadOnlyList<PackageSource> Sources,
     IReadOnlyList<string> ConfigurationFiles, string? CentralVersionsFile, string? Warning);
-public sealed record PackageProcessResult(int ExitCode, string Output);
+/// <param name="Output">Standard output only, the one stream a command's JSON can be read from.</param>
+/// <param name="Error">Standard error, where the SDK writes warnings that can themselves contain braces.</param>
+public sealed record PackageProcessResult(int ExitCode, string Output, string Error = "")
+{
+    public string Display => Output + Error;
+}
 
 public interface IPackageProcessRunner
 {
@@ -58,26 +63,23 @@ public sealed class PackageProcessRunner : IPackageProcessRunner
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var process = Process.Start(CreateStartInfo(directory, arguments)) ?? throw new IOException("Unable to start dotnet. Install the SDK selected by global.json.");
-        var captured = new System.Text.StringBuilder();
-        var sync = new object();
-        async Task PumpAsync(StreamReader reader)
+        var standardOutput = new System.Text.StringBuilder();
+        var standardError = new System.Text.StringBuilder();
+        async Task PumpAsync(StreamReader reader, System.Text.StringBuilder captured)
         {
             while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
             {
-                lock (sync)
-                {
-                    if (captured.Length < 2 * 1024 * 1024) captured.AppendLine(line.Length > 32768 ? line[..32768] : line);
-                }
+                if (captured.Length < 2 * 1024 * 1024) captured.AppendLine(line.Length > 32768 ? line[..32768] : line);
                 output?.Report(line.Length > 32768 ? line[..32768] : line);
             }
         }
         using var registration = cancellationToken.Register(() => Kill(process));
-        var readers = Task.WhenAll(PumpAsync(process.StandardOutput), PumpAsync(process.StandardError));
+        var readers = Task.WhenAll(PumpAsync(process.StandardOutput, standardOutput), PumpAsync(process.StandardError, standardError));
         try
         {
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await readers.ConfigureAwait(false);
-            return new(process.ExitCode, captured.ToString());
+            return new(process.ExitCode, standardOutput.ToString(), standardError.ToString());
         }
         catch
         {

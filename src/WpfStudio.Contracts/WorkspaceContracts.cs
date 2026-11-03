@@ -83,6 +83,8 @@ public interface IWorkspaceRpc
 {
     /// <summary>An operation refreshed closed source files internally; cached semantic results are stale.</summary>
     event EventHandler? SemanticStateChanged;
+    /// <summary>A whole-project compilation contradicted an analysis reply. Nothing semantic changed: only diagnostics need requesting again.</summary>
+    event EventHandler? ProjectDiagnosticsChanged;
     Task<WorkspaceSnapshot> LoadAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken);
     /// <summary>Loads with MSBuild while the current solution keeps serving requests. Fails without changing anything.</summary>
     Task<bool> PrepareRefreshAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken);

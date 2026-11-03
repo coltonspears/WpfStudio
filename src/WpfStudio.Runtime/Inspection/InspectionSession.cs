@@ -53,6 +53,7 @@ public sealed class InspectionSession : IInspectionSession
     private readonly TaskCompletionSource<InspectionHello> _connection = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TimeSpan _connectionTimeout;
     private readonly TimeSpan _requestTimeout;
+    private readonly TimeSpan _firstResponseTimeout;
     private readonly Task _listener;
     private Task? _reader;
     private PauseAwareDeadline? _connectionDeadline;
@@ -63,12 +64,16 @@ public sealed class InspectionSession : IInspectionSession
     private bool _connected;
     private bool _paused;
     private bool _closed;
+    private bool _answered;
     private string _status = "Waiting for the application's inspection agent…";
 
-    public InspectionSession(TimeSpan? connectionTimeout = null, TimeSpan? requestTimeout = null)
+    public InspectionSession(TimeSpan? connectionTimeout = null, TimeSpan? requestTimeout = null, TimeSpan? firstResponseTimeout = null)
     {
         _connectionTimeout = ValidateTimeout(connectionTimeout ?? TimeSpan.FromSeconds(30), nameof(connectionTimeout));
         _requestTimeout = ValidateTimeout(requestTimeout ?? TimeSpan.FromSeconds(3), nameof(requestTimeout));
+        // Closing is permanent, since the agent does not reconnect, and its first answer pays for JIT in the target on top of a dispatcher
+        // wait. The shorter budget starts once a response proves the agent is warm; a debugger pause cancels the request instead of timing it out.
+        _firstResponseTimeout = ValidateTimeout(firstResponseTimeout ?? requestTimeout ?? TimeSpan.FromSeconds(30), nameof(firstResponseTimeout));
         _lifetimeToken = _lifetime.Token;
         PipeName = "WpfStudio.Inspection." + Guid.NewGuid().ToString("N");
         Token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
@@ -309,6 +314,7 @@ public sealed class InspectionSession : IInspectionSession
             {
                 if (message.Id <= 0 || message.Id > Interlocked.Read(ref _sequence))
                     throw new InvalidDataException("The inspection agent sent an unexpected response ID.");
+                lock (_stateGate) _answered = true;
                 if (!_pending.TryRemove(message.Id, out var pending)) continue; // Cancelled/paused request's late response.
                 if (message.Kind != pending.Kind)
                 {
@@ -334,14 +340,16 @@ public sealed class InspectionSession : IInspectionSession
         try
         {
             CancellationToken running;
+            TimeSpan budget;
             lock (_stateGate)
             {
                 if (_closed || !_connected) throw new InvalidOperationException("Connect to an application before inspecting it.");
                 if (_paused) throw new InvalidOperationException("Inspection is paused while the debugger has stopped managed threads.");
                 running = _running.Token;
+                budget = _answered ? _requestTimeout : _firstResponseTimeout;
             }
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(wait.Token, running);
-            deadline.CancelAfter(_requestTimeout);
+            deadline.CancelAfter(budget);
             deadline.Token.ThrowIfCancellationRequested();
             id = Interlocked.Increment(ref _sequence);
             var completion = new TaskCompletionSource<InspectionMessage>(TaskCreationOptions.RunContinuationsAsynchronously);

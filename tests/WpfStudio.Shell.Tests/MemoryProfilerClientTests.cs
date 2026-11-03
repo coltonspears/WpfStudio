@@ -73,6 +73,18 @@ public sealed class MemoryProfilerClientTests
         }
         finally { if (!fixture.HasExited) fixture.Kill(); }
     }
+
+    [Fact]
+    public async Task WorkerThatExitsAtOnceReportsItsErrorWithoutWaitingOutTheTimeout()
+    {
+        // whoami rejects --pipe and exits, like an apphost that cannot find its runtime.
+        var client = new MemoryProfilerClient(Path.Combine(Environment.SystemDirectory, "whoami.exe"));
+        var clock = Stopwatch.StartNew();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.OpenAsync(new()));
+        Assert.Contains("--pipe", error.Message);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(15), clock.Elapsed.ToString());
+    }
+
     private static string FindRoot()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)

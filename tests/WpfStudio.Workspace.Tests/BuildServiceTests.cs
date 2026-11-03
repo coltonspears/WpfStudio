@@ -50,6 +50,47 @@ public class BuildServiceTests
     }
 
     [Fact]
+    public void LaunchProfilesTolerateValuesOfAnyJsonType()
+    {
+        var project = WriteLaunchSettings("""
+            {
+              "profiles": {
+                "Mixed": { "commandName": "Project", "commandLineArgs": 42, "workingDirectory": true, "executablePath": null, "environmentVariables": { "PORT": 5000 } },
+                "Shapes": { "commandName": ["Project"], "commandLineArgs": { "a": 1 }, "environmentVariables": null },
+                "Scalar": 7,
+                "Plain": { "commandName": "Project", "commandLineArgs": "--name two", "environmentVariables": { "MODE": "dev" } }
+              }
+            }
+            """);
+        var profiles = BuildService.ReadLaunchProfiles(project);
+        Assert.Equal(["Mixed", "Shapes", "Plain"], profiles.Select(profile => profile.Name));
+        var mixed = profiles[0];
+        Assert.Equal("42", mixed.CommandLineArgs);
+        Assert.Equal("True", mixed.WorkingDirectory);
+        Assert.Null(mixed.ExecutablePath);
+        Assert.Equal("5000", mixed.EnvironmentVariables["PORT"]);
+        Assert.Null(profiles[1].CommandName);
+        Assert.Null(profiles[1].CommandLineArgs);
+        Assert.Empty(profiles[1].EnvironmentVariables);
+        Assert.Equal("--name two", profiles[2].CommandLineArgs);
+        Assert.Equal("dev", profiles[2].EnvironmentVariables["MODE"]);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("{ \"profiles\": 3 }")]
+    [InlineData("{ }")]
+    public void LaunchSettingsWithoutAProfilesObjectHaveNoProfiles(string json) => Assert.Empty(BuildService.ReadLaunchProfiles(WriteLaunchSettings(json)));
+
+    private static string WriteLaunchSettings(string json)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "WpfStudio.Workspace.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(directory, "Properties"));
+        File.WriteAllText(Path.Combine(directory, "Properties", "launchSettings.json"), json);
+        return Path.Combine(directory, "App.csproj");
+    }
+
+    [Fact]
     public void VisualStudioMSBuildRestoresPackagesConfigAndReceivesTheSolutionFolder()
     {
         var solution = Path.Combine(Path.GetTempPath(), "Shop", "Shop.sln");
@@ -99,6 +140,79 @@ public class BuildServiceTests
 
         Assert.Equal(Path.Combine(directory, "bin", "Debug", "App.exe"), fromSolution.OutputPath);
         Assert.Equal(Path.Combine(directory, "App", "bin", "Debug", "App.exe"), alone.OutputPath);
+    }
+
+    [Fact]
+    public async Task EvaluationReadsItsJsonFromStandardOutputWhateverStandardErrorSays()
+    {
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-{braces}-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "Twice.props"), "<Project />");
+            var project = Path.Combine(directory, "Warns.csproj");
+            File.WriteAllText(project, "<Project><Import Project=\"Twice.props\"/><Import Project=\"Twice.props\"/><PropertyGroup><AssemblyName>Warns</AssemblyName></PropertyGroup></Project>");
+            Assert.Equal("Warns", (await ProjectDiscovery.EvaluateAsync(project, "Debug", null, default)).AssemblyName);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData("""{"a":1}""")]
+    [InlineData("""
+        Workload updates are available.
+        {"a":1}
+        """)]
+    [InlineData("Workload updates are available.\r\n\r\n  {\"a\":1}\r\n")]
+    [InlineData("""
+        Notice {with a brace} mid-line
+        {"a":1}
+        """)]
+    public void JsonOutputStartsAtTheFirstLineThatOpensWithABrace(string output)
+    {
+        using var json = ProjectDiscovery.ParseJsonOutput(output);
+        Assert.Equal(1, json.RootElement.GetProperty("a").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Workload updates are available.\n")]
+    [InlineData("Notice {with a brace} mid-line\n")]
+    public void OutputWithNoLineOpeningWithABraceIsAJsonError(string output) =>
+        Assert.ThrowsAny<System.Text.Json.JsonException>(() => ProjectDiscovery.ParseJsonOutput(output).Dispose());
+
+    [Theory]
+    [InlineData("Workload updates are available.")]
+    [InlineData("Notice {with a brace} mid-line")]
+    public async Task EvaluationSkipsANoticeLineBeforeItsJson(string notice)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-Evaluation-").FullName;
+        try
+        {
+            var project = Path.Combine(directory, "App.csproj");
+            File.WriteAllText(project, "<Project />");
+            var msbuild = Path.Combine(directory, "notice-msbuild.cmd");
+            File.WriteAllText(msbuild, $"@echo {notice}\r\n@echo {{\"Properties\":{{\"AssemblyName\":\"Noted\"}},\"Items\":{{}}}}\r\n");
+            Assert.Equal("Noted", (await ProjectDiscovery.EvaluateAsync(project, "Debug", null, default, null, msbuild)).AssemblyName);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task EvaluationThatPrintsSomethingOtherThanJsonIsReportedAsMissingData()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-Evaluation-").FullName;
+        try
+        {
+            var project = Path.Combine(directory, "App.csproj");
+            File.WriteAllText(project, "<Project />");
+            var msbuild = Path.Combine(directory, "note-msbuild.cmd");
+            File.WriteAllText(msbuild, "@echo note {not json}\r\n");
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => ProjectDiscovery.EvaluateAsync(project, "Debug", null, default, null, msbuild));
+            Assert.Contains("did not return project evaluation data", error.Message);
+        }
+        finally { Directory.Delete(directory, true); }
     }
 
     [Fact]

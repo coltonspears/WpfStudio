@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 
 namespace WpfStudio.Core.Wpf;
@@ -11,12 +12,20 @@ public sealed class XamlBuildSourceLease : IDisposable
     private const long MaximumFileBytes = 8 * 1024 * 1024;
     private const long MaximumTotalBytes = 64 * 1024 * 1024;
     private const int MaximumIssues = 64;
+    private static readonly ConcurrentDictionary<XamlBuildSourceLease, byte> Active = new();
     private readonly List<FileStream> _streams = [];
     private int _disposed;
     private XamlBuildSourceLease() { }
 
     public IReadOnlyList<XamlBuildSource> Sources { get; private set; } = [];
     public IReadOnlyList<string> Issues { get; private set; } = [];
+
+    /// <summary>Whether a live lease holds this file, so replacing it would be denied until the build finishes.</summary>
+    public static bool IsHeld(string path)
+    {
+        path = System.IO.Path.GetFullPath(path);
+        return Active.Keys.Any(lease => lease.Sources.Any(source => string.Equals(source.Path, path, StringComparison.OrdinalIgnoreCase)));
+    }
 
     public static async Task<XamlBuildSourceLease> AcquireAsync(IEnumerable<string> paths, CancellationToken cancellationToken = default)
     {
@@ -75,6 +84,7 @@ public sealed class XamlBuildSourceLease : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             lease.Sources = sources.ToArray();
             lease.Issues = issues.ToArray();
+            Active[lease] = 0;
             return lease;
         }
         catch { lease.Dispose(); throw; }
@@ -89,6 +99,7 @@ public sealed class XamlBuildSourceLease : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        Active.TryRemove(this, out _);
         foreach (var stream in _streams) stream.Dispose();
         _streams.Clear();
     }

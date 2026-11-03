@@ -20,6 +20,7 @@ namespace WpfStudio.InspectionFixture
             if (command == "source-validation-change") _probe!.Value = "Changed by application";
             if (command == "source-validation-remove") _container!.Children.Remove(_probe!);
             if (command == "source-validation-french") CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            if (command == "source-validation-hidden-wrappers") CreateHiddenWrappers();
             File.WriteAllText(Path.Combine(directory, "source-validation-state.json"), JsonSerializer.Serialize(new
             {
                 Value = _probe?.GetValue(SourceValidationProbe.ValueProperty), Guarded = _probe?.GetValue(SourceValidationProbe.GuardedProperty),
@@ -49,6 +50,15 @@ namespace WpfStudio.InspectionFixture
             oneWay.SetBinding(SourceValidationProbe.ValueProperty, new Binding(nameof(SourceValidationModel.Value))
                 { Source = new SourceValidationModel(), Mode = BindingMode.OneWayToSource });
             _container.Children.Add(oneWay);
+            primary.UpdateLayout();
+        }
+
+        private void CreateHiddenWrappers()
+        {
+            var container = new StackPanel { Name = "SourceHiddenWrappers" };
+            primary.PrimaryContent.Children.Add(container);
+            container.Children.Add(new SourceHiddenTagProbe { Name = "SourceHiddenTag" });
+            container.Children.Add(new SourceRedeclaredValueProbe { Name = "SourceRedeclaredValue", Value = "Original" });
             primary.UpdateLayout();
         }
     }
@@ -109,6 +119,26 @@ namespace WpfStudio.InspectionFixture
     public class SourceOriginalOwner : DependencyObject
     {
         public static readonly DependencyProperty SharedValueProperty = DependencyProperty.Register("SharedValue", typeof(string), typeof(SourceOriginalOwner), new PropertyMetadata("Shared default"));
+    }
+    /// <summary>Hides the Tag wrapper with another type, so reflection by name alone is ambiguous.</summary>
+    public sealed class SourceHiddenTagProbe : FrameworkElement
+    {
+        public SourceHiddenTagProbe() => SetBinding(TagProperty, new Binding("MissingProperty") { RelativeSource = RelativeSource.Self });
+        public new string? Tag { get; set; }
+    }
+    public class SourceValueBaseProbe : FrameworkElement
+    {
+        public static readonly DependencyProperty ValueProperty = DependencyProperty.Register(nameof(Value), typeof(string), typeof(SourceValueBaseProbe), new PropertyMetadata("Default"));
+        public string Value { get => (string)GetValue(ValueProperty); set => SetValue(ValueProperty, value); }
+    }
+    public class SourceHidingValueProbe : SourceValueBaseProbe
+    {
+        public new int Value { get; set; }
+    }
+    /// <summary>The wrapper XAML resolves here is canonical again, though an ancestor hides it with another type.</summary>
+    public sealed class SourceRedeclaredValueProbe : SourceHidingValueProbe
+    {
+        public new string Value { get => (string)GetValue(ValueProperty); set => SetValue(ValueProperty, value); }
     }
     [ContentProperty(nameof(SharedValue))]
     public class SourceAddOwnerProbe : FrameworkElement
