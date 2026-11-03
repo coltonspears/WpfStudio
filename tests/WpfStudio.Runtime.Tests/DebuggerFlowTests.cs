@@ -214,6 +214,36 @@ public sealed class DebuggerFlowTests
     }
 
     [Fact]
+    public Task ABreakpointChangeSeenBeforeTheAnswerIsNotLost() => WithAttachedModelAsync("debug-change-before-answer", model =>
+    {
+        var breakpoint = model.Breakpoints.Single();
+        Assert.Equal(("moved away", 100, 40), (breakpoint.Status, breakpoint.AdapterId, breakpoint.BoundLine));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ABreakpointChangeThatOvertakesTheAnswerIsNotOverwritten() => WithAttachedModelAsync("debug-change-after-answer", async model =>
+    {
+        var breakpoint = model.Breakpoints.Single();
+        var applying = model.ApplyBreakpointsCommand.ExecuteAsync(null);
+        // The answer and then the event arrive while this thread is busy. The event's post outranks the answer's continuation, so it runs first, as it can with a real adapter.
+        Thread.Sleep(500);
+        await applying;
+        await Until(() => breakpoint.Status == "moved away");
+        Assert.Equal(40, breakpoint.BoundLine);
+    }, posts: DispatcherPriority.Send);
+
+    [Fact]
+    public Task ABreakpointChangeHeldWhenTheSessionEndsIsDropped() => WithAttachedModelAsync("debug-change-then-terminate", async model =>
+    {
+        Assert.Equal(100, model.Breakpoints.Single().AdapterId);
+        await model.ApplyBreakpointsCommand.ExecuteAsync(null);
+        await Until(() => model.Status == "Session ended");
+        Assert.False(model.IsActive);
+        Assert.Equal("Pending", model.Breakpoints.Single().Status);
+    });
+
+    [Fact]
     public Task TerminationEndsTheSession() => WithAttachedModelAsync("debug-terminate", async model =>
     {
         await model.PauseCommand.ExecuteAsync(null);
@@ -244,7 +274,7 @@ public sealed class DebuggerFlowTests
 
     /// <param name="breakpoint">Shapes the one breakpoint before the session starts.</param>
     /// <param name="start">How the session starts, when not by attaching.</param>
-    private static Task WithAttachedModelAsync(string scenario, Func<DebuggerViewModel, Task> test, Action<BreakpointViewModel>? breakpoint = null, Func<DebuggerViewModel, Task>? start = null, BreakpointStore? store = null)
+    private static Task WithAttachedModelAsync(string scenario, Func<DebuggerViewModel, Task> test, Action<BreakpointViewModel>? breakpoint = null, Func<DebuggerViewModel, Task>? start = null, BreakpointStore? store = null, DispatcherPriority posts = DispatcherPriority.Normal)
     {
         var result = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -256,7 +286,7 @@ public sealed class DebuggerFlowTests
                 try
                 {
                     AdapterRun.UseScenario(scenario);
-                    await using var model = new DebuggerViewModel(new DebugSession { AdapterPath = AdapterRun.LocateAdapter() }, new DispatcherPost(dispatcher), new NoDebugAdapter(), store ?? new BreakpointStore());
+                    await using var model = new DebuggerViewModel(new DebugSession { AdapterPath = AdapterRun.LocateAdapter() }, new DispatcherPost(dispatcher, posts), new NoDebugAdapter(), store ?? new BreakpointStore());
                     if (store is not null) await model.SetWorkspaceAsync(Workspace);
                     var item = new BreakpointViewModel { Path = Source, Line = 12 };
                     breakpoint?.Invoke(item);
@@ -276,9 +306,9 @@ public sealed class DebuggerFlowTests
         return result.Task.WaitAsync(TimeSpan.FromSeconds(30));
     }
 
-    private sealed class DispatcherPost(Dispatcher dispatcher) : IUiDispatcher
+    private sealed class DispatcherPost(Dispatcher dispatcher, DispatcherPriority priority = DispatcherPriority.Normal) : IUiDispatcher
     {
-        public void Post(Action action) => dispatcher.BeginInvoke(action);
+        public void Post(Action action) => dispatcher.BeginInvoke(action, priority);
         public Task InvokeAsync(Action action, CancellationToken cancellationToken = default) => dispatcher.InvokeAsync(action, DispatcherPriority.Normal, cancellationToken).Task;
     }
 }

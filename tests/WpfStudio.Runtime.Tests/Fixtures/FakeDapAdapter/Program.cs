@@ -6,6 +6,8 @@ var scenario = Environment.GetEnvironmentVariable("WPFSTUDIO_FAKE_DAP_SCENARIO")
 var input = Console.OpenStandardInput();
 var output = Console.OpenStandardOutput();
 var continues = 0;
+var applied = 0;
+const string BreakpointMovedAway = """{"reason":"changed","breakpoint":{"id":100,"verified":false,"message":"moved away","line":40,"source":{"path":"C:\\src\\Program.cs"}}}""";
 
 void Raw(string text) { output.Write(Encoding.ASCII.GetBytes(text)); output.Flush(); }
 void Frame(string json) => Raw($"Content-Length: {Encoding.UTF8.GetByteCount(json)}\r\n\r\n{json}");
@@ -20,10 +22,20 @@ while (ReadFrame(input) is { } request)
     var command = request.GetProperty("command").GetString();
     if (Canned(scenario, command, request) is { } canned)
     {
+        // The session sets breakpoints once while starting, so the view model's first apply is the second of these.
+        if (command == "setBreakpoints") applied++;
+        if (scenario == "debug-change-before-answer" && command == "setBreakpoints" && applied == 2) EventWith("breakpoint", BreakpointMovedAway);
+        if (scenario == "debug-change-then-terminate" && command == "setBreakpoints" && applied == 3)
+        {
+            EventWith("breakpoint", BreakpointMovedAway);
+            Event("terminated");
+            return;
+        }
         Answer(sequence, canned);
+        if (scenario == "debug-change-after-answer" && command == "setBreakpoints" && applied == 3) EventWith("breakpoint", BreakpointMovedAway);
         // On request, so a test can wait until the view model holds the adapter's id first.
         if (scenario == "debug-events" && command == "evaluate" && request.GetProperty("arguments").GetProperty("expression").GetString() == "send-breakpoint-change")
-            EventWith("breakpoint", """{"reason":"changed","breakpoint":{"id":100,"verified":false,"message":"moved away","line":40,"source":{"path":"C:\\src\\Program.cs"}}}""");
+            EventWith("breakpoint", BreakpointMovedAway);
         continue;
     }
     switch (scenario, command)

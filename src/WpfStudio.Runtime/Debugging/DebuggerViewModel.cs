@@ -19,6 +19,8 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private int stopVersion;
     private int watchRefresh;
     private int sessionEnds;
+    private int applyingBreakpoints;
+    private readonly List<DapBreakpoint> changesWhileApplying = [];
     public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters) : this(session, dispatcher, adapters, new BreakpointStore()) { }
     internal DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters, BreakpointStore store)
     {
@@ -166,12 +168,29 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     [RelayCommand] private Task ClearWatchesAsync() => GuardAsync(async () => { store.WatchExpressions.Clear(); ResetWatchRows(); await store.SaveAsync(); });
     [RelayCommand] private void ClearOutput() => output.Clear();
 
+    /// <summary>
+    /// A <c>breakpoint</c> event sent right after the answer can reach this thread first, because the answer goes through the thread pool on its way here.
+    /// Applied then, the change would find no adapter id yet or be overwritten by the answer, so changes wait until the answers are in.
+    /// </summary>
     private async Task ApplyFileBreakpointsAsync(string path)
     {
         var items = store.EnabledIn(path);
-        var answers = await client.SetBreakpointsAsync(path, items.Select(x => x.ToModel()));
-        foreach (var (item, answer) in items.Zip(answers)) item.Apply(answer);
+        applyingBreakpoints++;
+        try
+        {
+            var answers = await client.SetBreakpointsAsync(path, items.Select(x => x.ToModel()));
+            foreach (var (item, answer) in items.Zip(answers)) item.Apply(answer);
+        }
+        finally
+        {
+            if (--applyingBreakpoints == 0)
+            {
+                foreach (var changed in changesWhileApplying) ApplyChange(changed);
+                changesWhileApplying.Clear();
+            }
+        }
     }
+    private void ApplyChange(DapBreakpoint changed) { foreach (var item in store.Matching(changed)) item.ApplyChange(changed); }
 
     private void OnDebugEvent(DebugEvent message) => dispatcher.Post(() =>
     {
@@ -190,7 +209,9 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         else if (message.Name == "continued") { IsStopped = false; Status = "Running"; stopVersion++; Locals.Clear(); }
         else if (message.Name is "terminated" or "exited") { EndSession(); _ = GuardAsync(async () => await session.DisposeAsync()); }
         else if (message.Name == "breakpoint" && DapMessages.ChangedBreakpoint(message.Body) is { SourcePath: not null } changed)
-            foreach (var item in store.Matching(changed)) item.ApplyChange(changed);
+        {
+            if (applyingBreakpoints > 0) changesWhileApplying.Add(changed); else ApplyChange(changed);
+        }
     });
 
     private void EnterStopped(DapStopped stopped)
@@ -315,7 +336,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     }
     /// <summary>Empties the rows and supersedes any refresh still awaiting the adapter, whose answers would land on top of the newer rows.</summary>
     private int ResetWatchRows() { Watches.Clear(); return ++watchRefresh; }
-    private void EndSession() { sessionEnds++; IsActive = false; IsStopped = false; Status = "Session ended"; store.MarkPending(); stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
+    private void EndSession() { sessionEnds++; changesWhileApplying.Clear(); IsActive = false; IsStopped = false; Status = "Session ended"; store.MarkPending(); stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
     private void OnError(string value) => dispatcher.Post(() => { Error = value; EndSession(); });
     private async Task GuardAsync(Func<Task> action) { try { Error = ""; await action(); } catch (Exception ex) { Error = ex.Message; } }
     public async ValueTask DisposeAsync() { output.Close(); session.EventReceived -= OnDebugEvent; session.Output -= output.Append; session.Error -= OnError; await session.DisposeAsync(); }
