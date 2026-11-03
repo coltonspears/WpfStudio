@@ -404,7 +404,7 @@
     </TabItem>
     <TabItem Header="Bindings">
      <DockPanel>
-      <bindings:BindingSourcePanel DockPanel.Dock="Top"/>
+      <bindings:BindingSourcePanel DockPanel.Dock="Top" DataContext="{Binding BindingDeclarations}"/>
       <diagnostics:BindingExplanationPanel xmlns:diagnostics="clr-namespace:WpfStudio.App.Features.BindingDiagnostics" DataContext="{Binding BindingExplanation}"/>
      </DockPanel>
     </TabItem>

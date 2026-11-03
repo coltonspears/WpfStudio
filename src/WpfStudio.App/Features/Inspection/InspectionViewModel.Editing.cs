@@ -55,7 +55,7 @@ public sealed partial class InspectionViewModel
         SeedPropertyEdit(value);
         UpdatePropertyEditingState();
         RefreshAppearanceSelection();
-        BindingPropertySelectionChanged();
+        BindingDeclarations.PropertySelected(SelectedProperty?.Binding?.Sources?.BindingId);
     }
 
     private void RefreshPropertyEditSelection()
@@ -91,7 +91,7 @@ public sealed partial class InspectionViewModel
     {
         UpdatePropertyEditingState();
         AppearanceOperationChanged(value);
-        if (value) { ++_bindingSourceEpoch; ++_bindingOperationEpoch; ClearBindingExplanation("Property operation in progress. Waiting for a new binding observation…"); }
+        if (value) { BindingDeclarations.AdvanceEpoch(); ++_bindingOperationEpoch; ClearBindingExplanation("Property operation in progress. Waiting for a new binding observation…"); }
         RefreshBindingSourceState();
     }
 

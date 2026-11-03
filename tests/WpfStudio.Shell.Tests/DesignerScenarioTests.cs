@@ -63,7 +63,7 @@ public sealed class DesignerScenarioTests
         context.Select("Populated");
         Assert.Empty(context.Model.Tree);
         Assert.Empty(context.Model.Properties);
-        Assert.Null(context.Model.Layout);
+        Assert.Null(context.Model.LayoutDetails.Snapshot);
         pending.SetResult(Snapshot(request));
         await render;
         Assert.False(context.Model.IsCurrent);

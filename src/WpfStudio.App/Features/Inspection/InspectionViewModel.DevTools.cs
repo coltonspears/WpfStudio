@@ -140,21 +140,18 @@ public sealed partial class InspectionViewModel
         try { SelectedNode = node; SelectedTabIndex = 1; }
         finally { _rebuilding = false; }
         var sourceEpoch = _sourceEpoch;
-        var userSelection = _bindingSourceUserSelection;
+        var userSelection = BindingDeclarations.UserSelection;
         await InspectAndHighlightSelectedAsync();
-        if (generation != _generation || sourceEpoch != _sourceEpoch || userSelection != _bindingSourceUserSelection
+        if (generation != _generation || sourceEpoch != _sourceEpoch || userSelection != BindingDeclarations.UserSelection
             || !IsConnected || IsPaused || SelectedNode?.Node.Id != issue.NodeId) return;
-        var roots = BindingDeclarations.Where(item => item.BindingId == issue.Id && item.Declaration.ParentExpressionId is null).ToArray();
+        var roots = BindingDeclarations.Items.Where(item => item.BindingId == issue.Id && item.Declaration.ParentExpressionId is null).ToArray();
         // Choosing an issue changes diagnosis selection, never a property's edit draft.
-        _updatingBindingDeclarations = true;
-        try { SelectedBindingDeclaration = roots.Length == 1 ? roots[0] : null; }
-        finally { _updatingBindingDeclarations = false; }
-        BindingSourceSelectionChanged();
+        BindingDeclarations.SelectObserved(roots.Length == 1 ? roots[0] : null);
         if (roots.Length != 1)
         {
-            _bindingSelectionRemoved = true;
-            BindingSourceStatus = "That issue's expression is no longer present. A replacement is a different binding.";
-            BindingExplanation.Clear(BindingSourceStatus);
+            BindingDeclarations.MarkSelectionRemoved();
+            BindingDeclarations.Status = "That issue's expression is no longer present. A replacement is a different binding.";
+            BindingExplanation.Clear(BindingDeclarations.Status);
         }
     }
 
@@ -173,7 +170,7 @@ public sealed partial class InspectionViewModel
         _highlight = cancellation;
         try
         {
-            bool showLayout = !clear && CanShowLayoutOverlay && ShowLayoutOverlay;
+            bool showLayout = !clear && LayoutDetails.CanShowOverlay && LayoutDetails.ShowOverlay;
             var nodeId = !clear && (HighlightSelection && _supportsHighlight || showLayout) ? SelectedNode?.Node.Id : null;
             var result = await session.HighlightAsync(new(_revision, nodeId, ShowLayout: showLayout), cancellation.Token);
             if (generation == _generation && selection == _selection && !result.Applied && result.Status is not null)

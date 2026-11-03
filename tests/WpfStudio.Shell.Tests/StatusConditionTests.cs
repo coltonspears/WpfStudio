@@ -56,8 +56,8 @@ public sealed partial class InspectionViewModelTests
         await model.AttachAsync(session, debugging: true);
         model.SelectedNode = model.Tree[0];
         model.SetDebuggerState(true);
-        Assert.Contains("Debugger paused", model.BindingSourceStatus);
+        Assert.Contains("Debugger paused", model.BindingDeclarations.Status);
         model.SetDebuggerState(false);
-        Assert.DoesNotContain("Debugger paused", model.BindingSourceStatus);
+        Assert.DoesNotContain("Debugger paused", model.BindingDeclarations.Status);
     }
 }

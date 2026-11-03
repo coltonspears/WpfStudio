@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.App.Features.Layout;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 using WpfStudio.Runtime.Design;
@@ -74,6 +75,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     public ObservableCollection<PreviewProperty> Properties { get; } = [];
     public ObservableCollection<PreviewProperty> Bindings { get; } = [];
     public ObservableCollection<PreviewDiagnostic> Diagnostics { get; } = [];
+    public LayoutInspectorViewModel LayoutDetails { get; } = new();
     public event Action<SourceLocation>? SourceRequested;
     public string? SourcePath => _document?.Path;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(ArtboardTitle))] public partial string DocumentName { get; set; } = "Open a XAML document and choose Preview";
@@ -275,7 +277,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         EditedValue = value?.EditableValue ?? (value?.CanWriteSource == true ? "" : value?.Value ?? "");
         NotifySourceCommands();
         RefreshAppearanceSelection();
-        BindingPropertySelectionChanged();
+        BindingDeclarations.PropertySelected(value?.BindingSources?.BindingId);
     }
     partial void OnIsCurrentChanged(bool value)
     {
@@ -305,8 +307,8 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         if (!_picking)
         {
             ClearLayoutEditing();
-            ++_bindingDiagnosticSelection;
-            _bindingSelectionRemoved = false;
+            BindingDeclarations.NoteUserSelection();
+            BindingDeclarations.ForgetRemoval();
             _bindingObservedNodeId = null;
             ClearBindingExplanation("Select an element to inspect its bindings.");
             _selectionRevision++;
@@ -348,7 +350,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         var operationEpoch = _bindingOperationEpoch;
         bool operationIdle = _bindingOperations == 0;
         _inspectedNodeId = null;
-        ++_bindingDiagnosticSelection;
+        BindingDeclarations.NoteUserSelection();
         ClearBindingExplanation("Picking an element and reading its bindings…");
         ClearAppearance("Picking an element. Select a property to inspect its appearance.");
         LayoutDetails.Clear("Picking an element and reading its layout…");
@@ -431,7 +433,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         ++_bindingOperationEpoch;
         ++_bindingOperations;
         ++_appearancePropertyOperations;
-        ++_bindingSourceEpoch; RefreshBindingSourceState();
+        BindingDeclarations.AdvanceEpoch(); RefreshBindingSourceState();
         ClearAppearance("Preview property changing. Appearance will refresh after the edit.");
         LayoutDetails.Clear("Preview property changing. Waiting for updated layout…");
         ClearLayoutEditing();
@@ -515,7 +517,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         _disposed = true;
         ClearLayoutEditing();
         ForgetInteraction();
-        ++_bindingSourceEpoch; RefreshBindingSourceState();
+        BindingDeclarations.AdvanceEpoch(); RefreshBindingSourceState();
         ClearAppearance("Preview closed. Open a preview to inspect appearance.");
         ClearScenarios();
         LayoutDetails.Clear("Preview closed. Open a preview to inspect layout.");

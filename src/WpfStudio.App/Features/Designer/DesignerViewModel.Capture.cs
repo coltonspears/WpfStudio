@@ -26,7 +26,7 @@ public sealed partial class DesignerViewModel
         ClearBindingExplanation("Updating the preview binding observation…");
         var operationEpoch = _bindingOperationEpoch;
         ++_appearancePropertyOperations;
-        ++_bindingSourceEpoch;
+        BindingDeclarations.AdvanceEpoch();
         RefreshBindingSourceState();
         NotifySourceCommands();
         ClearAppearance("Updating the preview observation…");
