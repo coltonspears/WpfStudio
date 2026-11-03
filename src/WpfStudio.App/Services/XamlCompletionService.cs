@@ -33,7 +33,7 @@ public sealed partial class XamlCompletionService
         {
             start = namespaceValue.Groups[2].Index;
             words = new[] { "http://schemas.microsoft.com/winfx/2006/xaml/presentation", "http://schemas.microsoft.com/winfx/2006/xaml", "http://schemas.microsoft.com/expression/blend/2008", "http://schemas.openxmlformats.org/markup-compatibility/2006" }
-                .Concat(Index?.Texts.Where(p => p.Key.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).SelectMany(p => Regex.Matches(p.Value, @"\bnamespace\s+([\w.]+)").Select(m => "clr-namespace:" + m.Groups[1].Value)) ?? []);
+                .Concat(Index?.Namespaces.Where(p => p.Key.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).SelectMany(p => p.Value).Select(name => "clr-namespace:" + name) ?? []);
         }
         else if (lastBrace > lastEndBrace && (prefix[lastBrace..].Contains("StaticResource") || prefix[lastBrace..].Contains("DynamicResource")))
             words = Index?.Resources.Select(r => r.Key) ?? [];
@@ -73,7 +73,7 @@ public sealed partial class XamlCompletionService
             var namespaceName = mapping.Groups[2].Value;
             if (item.Name.StartsWith(namespaceName + ".", StringComparison.Ordinal) && !item.Name[(namespaceName.Length + 1)..].Contains('.'))
                 yield return mapping.Groups[1].Value + ":" + item.Name[(namespaceName.Length + 1)..];
-            else if (!item.Name.Contains('.') && Index.Texts.TryGetValue(item.Path, out var source) && Regex.IsMatch(source, @"\bnamespace\s+" + Regex.Escape(namespaceName) + @"\b"))
+            else if (!item.Name.Contains('.') && Index.Namespaces.TryGetValue(item.Path, out var declared) && declared.Any(name => name == namespaceName || name.StartsWith(namespaceName + ".", StringComparison.Ordinal)))
                 yield return mapping.Groups[1].Value + ":" + item.Name;
         }
     }

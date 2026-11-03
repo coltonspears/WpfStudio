@@ -1,3 +1,5 @@
+using System.Windows.Media;
+using WpfStudio.App.Controls;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
@@ -29,6 +31,32 @@ public sealed class EditorSettingsTests
             Assert.Equal(new EditorSettings(), restored.ToSettings());
         }
         finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void DiagnosticPenIsReusedUntilTheThemeRecoloursItsBrush()
+    {
+        var theme = new SolidColorBrush(Colors.Red);
+        Pen? held = null;
+        var first = EditorSurface.ThemedPen(theme, 1.5, ref held);
+        Assert.True(first.IsFrozen);
+        Assert.False(theme.IsFrozen);
+        Assert.Same(first, EditorSurface.ThemedPen(theme, 1.5, ref held));
+        theme.Color = Colors.Blue;
+        var second = EditorSurface.ThemedPen(theme, 1.5, ref held);
+        Assert.NotSame(first, second);
+        Assert.Equal(Colors.Blue, ((SolidColorBrush)second.Brush).Color);
+    }
+
+    [Fact]
+    public async Task FontListFillsInWhenAWorkerThreadReadsItFirst()
+    {
+        var preferences = new EditorPreferences();
+        var listed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        preferences.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(EditorPreferences.FontFamilies)) listed.TrySetResult(); };
+        await Task.Run(() => Assert.Empty(preferences.FontFamilies));
+        await listed.Task.WaitAsync(TimeSpan.FromSeconds(60));
+        Assert.NotEmpty(preferences.FontFamilies);
     }
 
     [Fact]

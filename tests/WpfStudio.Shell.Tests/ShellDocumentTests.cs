@@ -1,3 +1,4 @@
+using WpfStudio.App.Features.Documents;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.Shell.Tests;
@@ -36,6 +37,32 @@ public sealed class ShellDocumentTests
         Assert.Equal("my edit", editor.State.Content);
         Assert.True(editor.State.IsDirty);
         Assert.Equal("external edit", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task ExternalChangeSummaryIsComputedInTheBackgroundAndOnlyWhenASideChanged()
+    {
+        await using var test = new ShellTestContext();
+        await test.Shell.OpenDocumentAsync(await test.CreateFileAsync("File.cs", "one\n"));
+        var change = new ExternalChange(test.Shell.ActiveDocument!);
+        static string Disk(int lines) => "one\n" + string.Concat(Enumerable.Range(0, lines).Select(line => $"line {line}\n"));
+
+        var update = change.UpdateAsync(Disk(20_000), "first");
+        Assert.Equal("first", change.DiskHash);
+        Assert.Equal("", change.Summary);
+        await update;
+        Assert.Equal("+20000 −0 lines on disk", change.Summary);
+
+        Assert.True(change.UpdateAsync(Disk(20_000), "first").IsCompleted);
+
+        var older = change.UpdateAsync(Disk(20_000), "second");
+        var newer = change.UpdateAsync(Disk(1), "third");
+        await Task.WhenAll(older, newer);
+        Assert.Equal("+1 −0 lines on disk", change.Summary);
+
+        await change.UpdateAsync(null, null);
+        Assert.Equal("deleted", change.Summary);
+        change.Detach();
     }
 
     [Fact]
