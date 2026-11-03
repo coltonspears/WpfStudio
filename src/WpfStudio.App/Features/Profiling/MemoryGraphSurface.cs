@@ -47,6 +47,7 @@ public sealed class MemoryGraphSurface : FrameworkElement
     private HashSet<int> _released = [];
     private Point _pan, _lastPointer;
     private GraphDisplayNode? _dragNode, _hoverNode, _keyboardNode;
+    private (int ObjectId, bool Incoming)? _hoverHandle;
     private bool _panning, _minimapDragging, _needsViewport = true;
     private int? _anchorId, _previousFocusId;
     private Point? _anchorScreen;
@@ -111,7 +112,7 @@ public sealed class MemoryGraphSurface : FrameworkElement
 
     private void Rebuild()
     {
-        _hoverNode = null; _dragNode = null;
+        _hoverNode = null; _hoverHandle = null; _dragNode = null;
         var keyboardKey = _keyboardNode?.Key;
         try { _layout = Graph is { Nodes.Count: > 0 } graph ? GraphLayout.Build(graph, _expandedGroups, MeasureText) : null; }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException or IndexOutOfRangeException)
@@ -158,7 +159,7 @@ public sealed class MemoryGraphSurface : FrameworkElement
         InvalidateVisual();
     }
 
-    private Point Screen(Point world) => new(world.X * Zoom + _pan.X, world.Y * Zoom + _pan.Y);
+    internal Point Screen(Point world) => new(world.X * Zoom + _pan.X, world.Y * Zoom + _pan.Y);
     private Point World(Point screen) => new((screen.X - _pan.X) / Zoom, (screen.Y - _pan.Y) / Zoom);
     private Color C(string key, Color fallback) => ChartPalette.Resource(this, key, fallback);
 
@@ -303,11 +304,9 @@ public sealed class MemoryGraphSurface : FrameworkElement
         var metrics = ChartPalette.Text(this, $"Own {MemorySize.Format(own)}  ·  Retains {MemorySize.Format(retained)}", 10.5,
             isFocus ? accent : released ? success : muted, r.Width - 24);
         dc.DrawText(metrics, new Point(r.X + 12, r.Y + 40));
-        var max = Math.Max(1, _layout.Nodes.Where(n => n.Kind != GraphNodeKind.Root && n.Kind != GraphNodeKind.Static)
-            .Max(n => n.Kind == GraphNodeKind.Group ? n.Members.Sum(m => m.Object.RetainedBytes) : n.Node?.Object.RetainedBytes ?? 0));
         var track = new Rect(r.X + 12, r.Bottom - 9, r.Width - 24, 3);
         dc.DrawRoundedRectangle(ChartPalette.Frozen(C("BorderBrush", Colors.DimGray)), null, track, 1.5, 1.5);
-        var ratio = Math.Clamp((double)retained / max, 0, 1);
+        var ratio = Math.Clamp((double)retained / _layout.MaxRetainedBytes, 0, 1);
         if (ratio > 0)
             dc.DrawRoundedRectangle(ChartPalette.Frozen(ChartPalette.WithAlpha(released ? success : accent, isFocus ? 0.95 : 0.6)), null,
                 new Rect(track.X, track.Y, Math.Max(3, track.Width * ratio), track.Height), 1.5, 1.5);
@@ -323,7 +322,7 @@ public sealed class MemoryGraphSurface : FrameworkElement
         if (Zoom < 0.45) return;
         var text = ChartPalette.Text(this, label, 9.5, C("TextBrush", Colors.White), 120);
         var bounds = new Rect(center.X - text.Width / 2 - 7, center.Y - 8, text.Width + 14, 16);
-        var hover = IsMouseOver && bounds.Contains(World(Mouse.GetPosition(this)));
+        var hover = _hoverHandle == (objectId, incoming);
         dc.DrawRoundedRectangle(ChartPalette.Frozen(hover ? C("AccentFillBrush", Colors.SlateBlue) : C("SurfaceBrush", Colors.Black)),
             ChartPalette.Pen(hover ? C("AccentFillBrush", Colors.SlateBlue) : C("StrongBorderBrush", Colors.Gray), 1), bounds, 8, 8);
         dc.DrawText(hover ? ChartPalette.Text(this, label, 9.5, Colors.White, 120) : text, new Point(bounds.X + 7, bounds.Y + 1.5));
@@ -434,12 +433,21 @@ public sealed class MemoryGraphSurface : FrameworkElement
         if (_minimapDragging) { NavigateMinimap(point); return; }
         if (_dragNode is { } dragged) { MoveNode(dragged, delta / Zoom); InvalidateVisual(); return; }
         if (_panning) { _pan += delta; InvalidateVisual(); return; }
+        UpdateHover(point);
+    }
+
+    internal IReadOnlyList<(Rect Bounds, int ObjectId, bool Incoming)> Handles => _handles;
+    internal (int ObjectId, bool Incoming)? HoverHandle => _hoverHandle;
+
+    /// <summary>Redraws only when what is under the pointer changes, and tells rendering what that is.</summary>
+    internal void UpdateHover(Point point)
+    {
         var world = World(point);
         var hover = HitNode(world);
-        var overHandle = _handles.Any(h => h.Bounds.Contains(world));
-        if (hover != _hoverNode || overHandle) { _hoverNode = hover; InvalidateVisual(); }
-        Cursor = overHandle || hover is not null || _edgeLabels.Any(x => x.Bounds.Contains(world)) ? Cursors.Hand : null;
-        ToolTip = hover is null ? (overHandle ? "Show more neighbours of this object" : null) : Describe(hover);
+        (int ObjectId, bool Incoming)? handle = _handles.LastOrDefault(h => h.Bounds.Contains(world)) is { Bounds.Width: > 0 } over ? (over.ObjectId, over.Incoming) : null;
+        if (hover != _hoverNode || handle != _hoverHandle) { _hoverNode = hover; _hoverHandle = handle; InvalidateVisual(); }
+        Cursor = handle is not null || hover is not null || _edgeLabels.Any(x => x.Bounds.Contains(world)) ? Cursors.Hand : null;
+        ToolTip = hover is null ? (handle is not null ? "Show more neighbours of this object" : null) : Describe(hover);
     }
 
     private static string Describe(GraphDisplayNode node) => node.Kind switch
@@ -477,7 +485,7 @@ public sealed class MemoryGraphSurface : FrameworkElement
     }
     private Point _rightDown;
     protected override void OnLostMouseCapture(MouseEventArgs e) { base.OnLostMouseCapture(e); _dragNode = null; _panning = false; _minimapDragging = false; }
-    protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); if (_hoverNode is not null) { _hoverNode = null; InvalidateVisual(); } }
+    protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); if (_hoverNode is not null || _hoverHandle is not null) { _hoverNode = null; _hoverHandle = null; InvalidateVisual(); } }
     protected override void OnMouseWheel(MouseWheelEventArgs e) { base.OnMouseWheel(e); ZoomAt(e.GetPosition(this), e.Delta > 0 ? 1.15 : 1 / 1.15); e.Handled = true; }
 
     private void ZoomAt(Point point, double factor)
@@ -486,25 +494,33 @@ public sealed class MemoryGraphSurface : FrameworkElement
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (e.Key == Key.D0 && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { FitGraph(); e.Handled = true; return; }
-        if (e.Key is Key.Add or Key.OemPlus) { ZoomAt(new(ActualWidth / 2, ActualHeight / 2), 1.2); e.Handled = true; return; }
-        if (e.Key is Key.Subtract or Key.OemMinus) { ZoomAt(new(ActualWidth / 2, ActualHeight / 2), 1 / 1.2); e.Handled = true; return; }
-        if (e.Key == Key.M) { SetCurrentValue(ShowMinimapProperty, !ShowMinimap); e.Handled = true; return; }
-        if (_layout is not { Nodes.Count: > 0 } layout) return;
+        if (HandleKey(e.Key, Keyboard.Modifiers)) e.Handled = true;
+    }
+
+    internal bool HandleKey(Key key, ModifierKeys modifiers)
+    {
+        if (key == Key.D0 && modifiers.HasFlag(ModifierKeys.Control)) { FitGraph(); return true; }
+        // Other Ctrl and Alt chords belong to the shell: Ctrl+- is Navigate Back.
+        if ((modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0) return false;
+        if (key is Key.Add or Key.OemPlus) { ZoomAt(new(ActualWidth / 2, ActualHeight / 2), 1.2); return true; }
+        if (key is Key.Subtract or Key.OemMinus) { ZoomAt(new(ActualWidth / 2, ActualHeight / 2), 1 / 1.2); return true; }
+        if (key == Key.M) { SetCurrentValue(ShowMinimapProperty, !ShowMinimap); return true; }
+        if (_layout is not { Nodes.Count: > 0 } layout) return false;
         var current = _keyboardNode ?? layout.Focus ?? layout.Nodes[0];
-        if (e.Key is Key.Enter or Key.Space) { Activate(current); e.Handled = true; return; }
-        if (e.Key is not (Key.Left or Key.Right or Key.Up or Key.Down)) return;
-        var direction = e.Key switch { Key.Left => new Vector(-1, 0), Key.Right => new Vector(1, 0), Key.Up => new Vector(0, -1), _ => new Vector(0, 1) };
+        if (key is Key.Enter or Key.Space) { Activate(current); return true; }
+        if (key is not (Key.Left or Key.Right or Key.Up or Key.Down)) return false;
+        var direction = key switch { Key.Left => new Vector(-1, 0), Key.Right => new Vector(1, 0), Key.Up => new Vector(0, -1), _ => new Vector(0, 1) };
         // Nearest node in the pressed direction, favouring straight lines.
         var best = layout.Nodes.Where(n => n != current).Select(n => (Node: n, Offset: n.Center - current.Center))
             .Where(x => Vector.Multiply(x.Offset, direction) > 1)
             .OrderBy(x => x.Offset.Length + Math.Abs(Vector.CrossProduct(x.Offset, direction)) * 2).Select(x => x.Node).FirstOrDefault();
-        if (best is null) return;
+        if (best is null) return false;
         _keyboardNode = best;
         if (best.ObjectId is int id) SetCurrentValue(SelectedObjectIdProperty, id);
         var screen = Screen(best.Center);
         if (screen.X < 40 || screen.Y < 40 || screen.X > ActualWidth - 40 || screen.Y > ActualHeight - 40) CenterOn(best);
-        InvalidateVisual(); e.Handled = true;
+        InvalidateVisual();
+        return true;
     }
 
     protected override AutomationPeer OnCreateAutomationPeer() => new GraphPeer(this);

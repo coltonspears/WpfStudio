@@ -100,6 +100,63 @@ public sealed class GitIntegrationTests
     }
 
     [Fact]
+    public async Task UnrelatedUntrackedFilesDoNotBlockSwitchMergeOrPull()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        var remote = fixture.File("../remote.git");
+        await fixture.RunAsync("init", "--bare", remote);
+        await fixture.RunAsync("remote", "add", "origin", remote);
+        await fixture.RunAsync("push", "--set-upstream", "origin", "main");
+        await File.WriteAllTextAsync(fixture.File("scratch.txt"), "mine");
+        await fixture.Service.SwitchBranchAsync(fixture.Root, "feature", create: true);
+        await fixture.RunAsync("commit", "--allow-empty", "-m", "Feature");
+        await fixture.Service.SwitchBranchAsync(fixture.Root, "main");
+        await fixture.Service.PullAsync(fixture.Root);
+        await fixture.Service.MergeAsync(fixture.Root, "feature");
+        Assert.Equal("mine", await File.ReadAllTextAsync(fixture.File("scratch.txt")));
+    }
+
+    [Fact]
+    public async Task UntrackedFileThatWouldBeOverwrittenSurfacesGitsOwnError()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        var remote = fixture.File("../remote.git");
+        await fixture.RunAsync("init", "--bare", remote);
+        await fixture.RunAsync("remote", "add", "origin", remote);
+        await fixture.RunAsync("push", "--set-upstream", "origin", "main");
+        await fixture.RunAsync("switch", "-c", "feature");
+        await File.WriteAllTextAsync(fixture.File("collide.txt"), "theirs");
+        await fixture.RunAsync("add", "collide.txt");
+        await fixture.RunAsync("commit", "-m", "Add collide");
+        await fixture.RunAsync("push", "origin", "feature:main");
+        await fixture.RunAsync("switch", "main");
+        await fixture.RunAsync("fetch");
+        await File.WriteAllTextAsync(fixture.File("collide.txt"), "mine");
+        Func<Task<string>>[] attempts = [() => fixture.Service.SwitchBranchAsync(fixture.Root, "feature"), () => fixture.Service.MergeAsync(fixture.Root, "feature"), () => fixture.Service.PullAsync(fixture.Root)];
+        foreach (var attempt in attempts)
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(attempt);
+            Assert.Contains("untracked working tree files would be overwritten", error.Message);
+            Assert.Contains("collide.txt", error.Message);
+            Assert.DoesNotContain("Commit or stash", error.Message);
+        }
+        Assert.Equal("mine", await File.ReadAllTextAsync(fixture.File("collide.txt")));
+        Assert.Equal("main", (await fixture.Service.LoadAsync(fixture.Root)).Branch);
+    }
+
+    [Fact]
+    public async Task BlameOfAPathOutsideHeadReportsGitsMessageNotABrokenPipe()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        // Larger than a pipe buffer, so the write is still in progress when Git gives up without reading it.
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.BlameAsync(fixture.Root, "unsaved.cs", new string('x', 1024 * 1024)));
+        Assert.Contains("no such path", error.Message);
+    }
+
+    [Fact]
     public async Task ViewModelAbortsStageWhenSavingFailsAndShowsDiffWithoutMutation()
     {
         using var fixture = await Fixture.CreateAsync();

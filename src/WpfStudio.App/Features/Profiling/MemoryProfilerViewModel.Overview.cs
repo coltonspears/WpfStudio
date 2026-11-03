@@ -169,7 +169,7 @@ public sealed partial class MemoryProfilerViewModel
         InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanLoad))]
     private void OpenType(string? typeKey)
     {
         if (typeKey is null) return;

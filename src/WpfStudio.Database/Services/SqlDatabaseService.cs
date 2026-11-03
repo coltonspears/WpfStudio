@@ -124,13 +124,21 @@ public sealed class SqlDatabaseService : IDatabaseService
         {
             foreach (SqlError error in args.Errors) messages.Add(new QueryMessage(error.Message, error.LineNumber > 0 ? batchLine + error.LineNumber - 1 : null));
         };
+        void AddErrors(SqlException exception)
+        {
+            foreach (SqlError error in exception.Errors)
+                messages.Add(new QueryMessage($"SQL {error.Number}: {error.Message}", error.LineNumber > 0 ? batchLine + error.LineNumber - 1 : null, true));
+        }
         try
         {
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            foreach (SqlBatch batch in batches)
+            for (int index = 0; index < batches.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                SqlBatch batch = batches[index];
                 batchLine = batch.StartLine;
+                try
+                {
                 await using var command = new SqlCommand(batch.Text, connection) { CommandTimeout = 0 };
                 using var registration = cancellationToken.Register(() => { try { command.Cancel(); } catch (ObjectDisposedException) { } });
                 await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
@@ -169,14 +177,23 @@ public sealed class SqlDatabaseService : IDatabaseService
                 } while (await reader.NextResultAsync(cancellationToken).ConfigureAwait(false));
                 if (reader.RecordsAffected >= 0) messages.Add(new QueryMessage($"{reader.RecordsAffected:N0} row(s) affected."));
             }
+                // Like SSMS, a failed batch does not stop the script. Cancelling it does, and so does losing the connection.
+                catch (SqlException exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    AddErrors(exception);
+                    if (index == batches.Count - 1) break;
+                    if (connection.State != ConnectionState.Open)
+                    {
+                        messages.Add(new QueryMessage($"The connection closed when batch {index + 1} of {batches.Count} failed, so the remaining batches were not run.", null, true));
+                        break;
+                    }
+                    messages.Add(new QueryMessage($"Batch {index + 1} of {batches.Count} failed. Continuing with the next batch."));
+                }
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { cancelled = true; messages.Add(new QueryMessage("Query cancelled. Batches that completed before cancellation may have committed changes.")); }
         catch (SqlException) when (cancellationToken.IsCancellationRequested) { cancelled = true; messages.Add(new QueryMessage("Query cancelled. Batches that completed before cancellation may have committed changes.")); }
-        catch (SqlException exception)
-        {
-            foreach (SqlError error in exception.Errors)
-                messages.Add(new QueryMessage($"SQL {error.Number}: {error.Message}", error.LineNumber > 0 ? batchLine + error.LineNumber - 1 : null, true));
-        }
+        catch (SqlException exception) { AddErrors(exception); }
         return new QueryExecutionResult(results, messages.Snapshot(display.Warning), clock.Elapsed, cancelled,
             display.HasOmittedResults || messages.IsTruncated || results.Any(result => result.IsTruncated));
     }

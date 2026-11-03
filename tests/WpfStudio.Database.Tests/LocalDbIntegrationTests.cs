@@ -126,6 +126,49 @@ public sealed class LocalDbIntegrationTests
         }
     }
 
+    [LocalDbFact]
+    public async Task LaterBatchesRunAfterAFailedBatchUnlessTheScriptIsCancelledOrTheConnectionDies()
+    {
+        string instance = "WpfStudioTests" + Guid.NewGuid().ToString("N");
+        string tool = LocalDbFactAttribute.Tool!;
+        bool created = false;
+        try
+        {
+            await Run(tool, "create", instance, "-s");
+            created = true;
+            var profile = new ConnectionProfile { Server = @"(localdb)\" + instance, TrustServerCertificate = true };
+            var service = new SqlDatabaseService();
+
+            var continued = await service.ExecuteAsync(profile, "SELECT 1 AS First;\nGO\nSELECT NoSuchColumn;\nGO\nSELECT 3 AS Third;\nGO\nSELECT AlsoMissing;", 10, CancellationToken.None);
+            Assert.False(continued.WasCancelled);
+            Assert.Equal(["First", "Third"], continued.Results.Select(result => result.Table.Columns[0].ColumnName));
+            Assert.Contains(continued.Messages, message => message.IsError && message.Line == 12);
+            Assert.Contains(continued.Messages, message => message.IsError && message.Line == 16);
+            Assert.Single(continued.Messages, message => message.Text.Contains("Continuing", StringComparison.Ordinal));
+
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+            var cancelled = await service.ExecuteAsync(profile, "WAITFOR DELAY '00:00:10';\nGO\nSELECT 2 AS Later;", 1, cancellation.Token);
+            Assert.True(cancelled.WasCancelled);
+            Assert.Empty(cancelled.Results);
+
+            // Severity 20 ends the session, so there is no connection left to run the next batch on.
+            var severe = await service.ExecuteAsync(profile, "RAISERROR('Fatal', 20, 1) WITH LOG;\nGO\nSELECT 2 AS Later;", 1, CancellationToken.None);
+            Assert.False(severe.WasCancelled);
+            Assert.Empty(severe.Results);
+            Assert.Contains(severe.Messages, message => message.IsError);
+            Assert.Contains(severe.Messages, message => message.Text.Contains("not run", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (created)
+            {
+                Microsoft.Data.SqlClient.SqlConnection.ClearAllPools();
+                await Run(tool, "stop", instance, "-k");
+                await Run(tool, "delete", instance);
+            }
+        }
+    }
+
     private static long PrivateBytesAfterCollection()
     {
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
