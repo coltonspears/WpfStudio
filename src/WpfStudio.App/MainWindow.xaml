@@ -16,6 +16,11 @@
         xmlns:term="clr-namespace:WpfStudio.Runtime.Terminal;assembly=WpfStudio.Runtime"
         xmlns:debug="clr-namespace:WpfStudio.Runtime.Debugging;assembly=WpfStudio.Runtime"
         xmlns:sql="clr-namespace:WpfStudio.Database.Views;assembly=WpfStudio.Database"
+        xmlns:packages="clr-namespace:WpfStudio.App.Features.Packages"
+        xmlns:git="clr-namespace:WpfStudio.App.Features.Git"
+        xmlns:profiling="clr-namespace:WpfStudio.App.Features.Profiling"
+        xmlns:designer="clr-namespace:WpfStudio.App.Features.Designer"
+        xmlns:inspection="clr-namespace:WpfStudio.App.Features.Inspection"
         Title="{Binding WindowTitle}" Icon="/WpfStudio;component/Resources/WpfStudio.ico"
         Width="1480" Height="940" MinWidth="1000" MinHeight="680" WindowStartupLocation="CenterScreen"
         b:Interaction.CloseGuard="{Binding}">
@@ -78,6 +83,12 @@
         <controls:EditorSurface ContextMenu="{StaticResource EditorContextMenu}" ViewModel="{Binding}" Background="{DynamicResource EditorBrush}" Foreground="{DynamicResource TextBrush}" LineNumbersForeground="{DynamicResource GutterTextBrush}" FontFamily="Cascadia Code, Cascadia Mono, Consolas" FontSize="13" />
       </DockPanel>
     </DataTemplate>
+    <!-- Retained panes: DockingBehavior instantiates each once and keeps the view across layout changes. -->
+    <DataTemplate DataType="{x:Type packages:PackagesViewModel}"><packages:PackagesPane /></DataTemplate>
+    <DataTemplate DataType="{x:Type git:GitViewModel}"><git:GitPane /></DataTemplate>
+    <DataTemplate DataType="{x:Type profiling:MemoryProfilerViewModel}"><profiling:MemoryProfilerPane /></DataTemplate>
+    <DataTemplate DataType="{x:Type designer:DesignerViewModel}"><designer:DesignerPane /></DataTemplate>
+    <DataTemplate DataType="{x:Type inspection:InspectionViewModel}"><inspection:InspectionPane /></DataTemplate>
     <HierarchicalDataTemplate DataType="{x:Type vm:ExplorerNode}" ItemsSource="{Binding Children}">
       <StackPanel Orientation="Horizontal" ToolTip="{Binding ToolTip}">
         <controls:StudioIcon Kind="{Binding IconKind}" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center" />

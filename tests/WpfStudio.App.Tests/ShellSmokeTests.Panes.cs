@@ -3,7 +3,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
+using AvalonDock;
+using AvalonDock.Layout;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.App.Behaviors;
 using WpfStudio.App.Controls.Diff;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.ViewModels;
@@ -15,7 +18,81 @@ namespace WpfStudio.App.Tests;
 
 public sealed partial class ShellSmokeTests
 {
-    /// <summary>The popups' cards take their looks from the application's resources, the only ones a popup without a parent can find.</summary>
+    /// <summary>
+    /// Each retained pane comes from its view model's template and keeps the content id its saved layouts use. Tab switches,
+    /// closing and reopening, and a layout round trip move the same views; their native child windows (the preview surface,
+    /// the terminal's WebView2) must survive those moves rather than be rebuilt.
+    /// </summary>
+    private async Task VerifyRetainedPanesAsync(string layoutPath, DockingManager manager, ShellViewModel shell)
+    {
+        LayoutContent Placed(string id) => manager.Layout.Descendents().OfType<LayoutContent>().Single(item => item.ContentId == id);
+        async Task<FrameworkElement> ShowAsync(string id)
+        {
+            shell.ShowToolCommand.Execute(id); await Idle();
+            return Assert.IsAssignableFrom<FrameworkElement>(Placed(id).Content);
+        }
+        Assert.Equal(["Packages", "Git", "Profiler", "Designer", "LiveInspection"], shell.RetainedPanes.Select(pane => pane.ContentId));
+        var ids = shell.RetainedPanes.Select(pane => pane.ContentId).Append("Terminal").ToArray();
+        var views = new Dictionary<string, FrameworkElement>();
+        foreach (var pane in shell.RetainedPanes)
+        {
+            var view = await ShowAsync(pane.ContentId);
+            Assert.Same(pane.Model, view.DataContext);
+            Assert.Equal(pane.Title, Placed(pane.ContentId).Title);
+            Assert.True(view.IsVisible, pane.ContentId);
+            views[pane.ContentId] = view;
+        }
+        views["Terminal"] = await ShowAsync("Terminal");
+        await shell.Terminal.NewSessionCommand.ExecuteAsync(null);
+        // A machine without the WebView2 runtime shows a message instead, and there is no browser to move.
+        var browser = await TerminalBrowserAsync(views["Terminal"]);
+        var hosts = new Dictionary<string, System.Windows.Interop.HwndHost[]>();
+        foreach (var id in ids)
+        {
+            await ShowAsync(id);
+            hosts[id] = Descendants<System.Windows.Interop.HwndHost>(views[id]).ToArray();
+            output.WriteLine($"{id}: {hosts[id].Length} native child window(s)");
+        }
+        async Task AssertUnchangedAsync(string step)
+        {
+            foreach (var id in ids)
+            {
+                Assert.Same(views[id], await ShowAsync(id));
+                Assert.True(views[id].IsVisible, $"{id} after {step}");
+                Assert.Equal(hosts[id], Descendants<System.Windows.Interop.HwndHost>(views[id]));
+            }
+            if (browser is not null) { await ShowAsync("Terminal"); Assert.NotNull(browser.CoreWebView2); }
+        }
+        await AssertUnchangedAsync("switching tabs");
+
+        await ShowAsync("Git");
+        await shell.CloseActiveCommand.ExecuteAsync(null); await Idle();
+        Assert.DoesNotContain(manager.Layout.Descendents().OfType<LayoutDocument>(), document => document.ContentId == "Git");
+        await AssertUnchangedAsync("reopening a closed workbench");
+
+        shell.SaveLayoutCommand.Execute(null);
+        var saved = File.ReadAllText(layoutPath);
+        foreach (var id in ids) Assert.Contains($"ContentId=\"{id}\"", saved);
+        DockingBehavior.RestoreLayout(manager); await Idle();
+        await AssertUnchangedAsync("restoring the layout");
+
+        shell.ResetLayoutCommand.Execute(null); await Idle();
+        await AssertUnchangedAsync("resetting the layout");
+        await shell.Terminal.CloseSessionCommand.ExecuteAsync(null);
+    }
+
+    private static async Task<Microsoft.Web.WebView2.Wpf.WebView2?> TerminalBrowserAsync(FrameworkElement terminal)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (Descendants<Microsoft.Web.WebView2.Wpf.WebView2>(terminal).FirstOrDefault() is { CoreWebView2: not null } browser) return browser;
+            await Task.Delay(50);
+        }
+        return null;
+    }
+
+    /// <summary>The popups' cards get their templates and brushes from the application's resources.</summary>
     private static async Task VerifyEditorPopupsAsync(string root)
     {
         var now = DateTimeOffset.Now;

@@ -179,6 +179,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_DESIGNER_ONLY") == "1")
             {
                 await VerifyDesignerAsync(root, data, window, manager, shell);
+                await VerifyRetainedPanesAsync(Path.Combine(data, "layout.xml"), manager, shell);
                 Assert.Empty(bindingErrors.Messages);
                 return;
             }
@@ -352,6 +353,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             await VerifyPreviewScenariosAsync(root, data, window, manager, shell);
             await VerifyPreviewAppearanceAsync(root, data, window, manager, shell);
             await VerifyRuntimeInspectionAsync(root, data, window, manager, shell);
+            await VerifyRetainedPanesAsync(Path.Combine(data, "layout.xml"), manager, shell);
             Assert.Empty(bindingErrors.Messages);
         }
         catch (Exception exception)

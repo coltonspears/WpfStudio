@@ -6,6 +6,17 @@ namespace WpfStudio.Shell.Tests;
 
 public sealed class WorkbenchTests
 {
+    [Fact]
+    public async Task RetainedPanesKeepTheContentIdsSavedLayoutsUse()
+    {
+        await using var test = new ShellTestContext();
+        var panes = test.Shell.RetainedPanes.ToDictionary(pane => pane.ContentId);
+        Assert.Same(test.Shell.MemoryProfiler, panes["Profiler"].Model);
+        Assert.Same(test.Shell.Designer, panes["Designer"].Model);
+        Assert.Same(test.Shell.LiveInspection, panes["LiveInspection"].Model);
+        Assert.Equal(("Memory profiler", "XAML Designer", "Live XAML"), (panes["Profiler"].Title, panes["Designer"].Title, panes["LiveInspection"].Title));
+    }
+
     [Theory]
     [InlineData("MainWindow.xaml.cs", "MainWindow.xaml")]
     [InlineData("Resources.Designer.cs", "Resources.resx")]
