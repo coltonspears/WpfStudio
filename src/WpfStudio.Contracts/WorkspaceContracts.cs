@@ -37,7 +37,7 @@ public sealed record DocumentRequest(string Path, long Version);
 public sealed record WorkspaceDiagnostic(string Id, string Message, string Severity, string? Path, int Line, int Column, int Start, int Length,
     string? ProjectPath = null, string? ProjectName = null);
 public sealed record WorkspaceDiagnosticEvent(string Path, long Version, IReadOnlyList<WorkspaceDiagnostic> Diagnostics);
-public sealed record CompletionEntry(string Id, string DisplayText, string InsertText, string? Description, IReadOnlyList<string> Tags);
+public sealed record CompletionEntry(string Id, string DisplayText, string InsertText, string? Description, IReadOnlyList<string> Tags, bool Recommended = false);
 public sealed record CompletionResult(long Version, int Start, int Length, IReadOnlyList<CompletionEntry> Items);
 public sealed record CompletionEditRequest(string Path, long Version, string ItemId);
 public sealed record TextEdit(int Start, int Length, string NewText);

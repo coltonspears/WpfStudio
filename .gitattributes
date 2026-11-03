@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Model files are hashed by their manifests, so line endings must never change them.
+src/WpfStudio.CodeAssist/Models/** -text
+src/WpfStudio.CodeAssist/Models/**/*.onnx binary
+src/WpfStudio.CodeAssist/Models/**/manifest.json text

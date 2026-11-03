@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../WpfStudio.Contracts/WpfStudio.Contracts.csproj" /></ItemGroup>
+  <ItemGroup>
+    <!-- Windows x64 is all WpfStudio runs on, and the package's other platforms would add 220 MB to every build output. So its native files are left out and this one is copied below. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" ExcludeAssets="native" GeneratePathProperty="true" />
+    <PackageReference Include="System.IO.Hashing" Version="10.0.12" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime)/runtimes/win-x64/native/onnxruntime.dll" Link="onnxruntime.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Each model version keeps its own folder, Models/<kind>/<version>, copied beside whichever program references this project. -->
+    <None Remove="Models/**/*" />
+    <None Include="Models/**/*" Link="CodeAssist/Models/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="WpfStudio.CodeAssist.Tests" /></ItemGroup>
+</Project>
