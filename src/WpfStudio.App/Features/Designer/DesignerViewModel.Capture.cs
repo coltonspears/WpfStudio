@@ -96,8 +96,8 @@ public sealed partial class DesignerViewModel
     partial void OnIsBusyChanged(bool value)
     {
         NotifyCanvasState();
-        if (value) ClearLayoutEditing();
-        NotifyLayoutEditingState();
+        if (value) LayoutGesture.Clear();
+        LayoutGesture.NotifyStatus();
         NotifyInteractionState();
     }
 }

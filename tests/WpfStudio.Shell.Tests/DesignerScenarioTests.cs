@@ -17,7 +17,7 @@ public sealed class DesignerScenarioTests
         await using var context = new ScenarioContext();
         await context.WriteScenariosAsync(Data("Loading"), Data("Empty"), Data("Populated"), Data("Error"));
         await context.OpenAsync();
-        Assert.Equal(["Default", "Loading", "Empty", "Populated", "Error"], context.Model.Scenarios.Select(scenario => scenario.Name));
+        Assert.Equal(["Default", "Loading", "Empty", "Populated", "Error"], context.Model.Scenarios.Items.Select(scenario => scenario.Name));
         Assert.Null(Assert.Single(context.Client.Requests).Scenario);
         context.Select("Populated");
         Assert.False(context.Model.IsCurrent);
@@ -80,11 +80,11 @@ public sealed class DesignerScenarioTests
         context.Select("Loading");
         await context.Model.RefreshCommand.ExecuteAsync(null);
         await context.WriteScenariosAsync(Data("Different"));
-        await context.Model.ReloadScenariosCommand.ExecuteAsync(null);
+        await context.Model.Scenarios.ReloadCommand.ExecuteAsync(null);
         Assert.Equal(2, context.Client.Requests.Count);
-        Assert.Null(context.Model.SelectedScenario!.Configuration);
+        Assert.Null(context.Model.Scenarios.Selected!.Configuration);
         Assert.Contains("no longer available", context.Model.Status);
-        Assert.Contains(context.Model.ScenarioWarnings, warning => warning.Contains("Loading"));
+        Assert.Contains(context.Model.Scenarios.Warnings, warning => warning.Contains("Loading"));
         Assert.False(context.Model.IsCurrent);
         await context.Model.RefreshCommand.ExecuteAsync(null);
         Assert.Null(context.Client.Requests.Last().Scenario);
@@ -135,7 +135,7 @@ public sealed class DesignerScenarioTests
         Directory.CreateDirectory(otherProject);
         context.Model.ProjectDirectory = otherProject;
         Assert.False(context.Model.IsCurrent);
-        Assert.Null(context.Model.SelectedScenario!.Configuration);
+        Assert.Null(context.Model.Scenarios.Selected!.Configuration);
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public sealed class DesignerScenarioTests
             [new("Factory failed")], "Factory failed"));
         await context.Model.RefreshCommand.ExecuteAsync(null);
         Assert.False(context.Model.IsCurrent);
-        Assert.Equal("Error", context.Model.SelectedScenario!.Name);
+        Assert.Equal("Error", context.Model.Scenarios.Selected!.Name);
         Assert.Contains(context.Model.Diagnostics, diagnostic => diagnostic.Message == "Factory failed");
     }
 
@@ -204,15 +204,15 @@ public sealed class DesignerScenarioTests
     {
         await using var context = new ScenarioContext();
         await context.OpenAsync();
-        Assert.False(context.Model.OpenScenarioConfigurationCommand.CanExecute(null));
+        Assert.False(context.Model.Scenarios.OpenConfigurationCommand.CanExecute(null));
         await File.WriteAllTextAsync(context.ConfigurationPath, "{ broken");
-        await context.Model.ReloadScenariosCommand.ExecuteAsync(null);
-        Assert.NotEmpty(context.Model.ScenarioWarnings);
-        Assert.Single(context.Model.Scenarios);
+        await context.Model.Scenarios.ReloadCommand.ExecuteAsync(null);
+        Assert.NotEmpty(context.Model.Scenarios.Warnings);
+        Assert.Single(context.Model.Scenarios.Items);
         SourceLocation? requested = null;
         context.Model.SourceRequested += source => requested = source;
-        Assert.True(context.Model.OpenScenarioConfigurationCommand.CanExecute(null));
-        context.Model.OpenScenarioConfigurationCommand.Execute(null);
+        Assert.True(context.Model.Scenarios.OpenConfigurationCommand.CanExecute(null));
+        context.Model.Scenarios.OpenConfigurationCommand.Execute(null);
         Assert.Equal(context.ConfigurationPath, requested!.Path);
         await context.Model.RefreshCommand.ExecuteAsync(null);
         Assert.Contains(context.Model.Diagnostics, diagnostic => diagnostic.Severity == "Warning");
@@ -231,9 +231,9 @@ public sealed class DesignerScenarioTests
         Assert.False(context.Model.IsCurrent);
         Assert.Null(context.Model.Image);
         await context.Model.CloseAsync();
-        Assert.Null(context.Model.ScenarioConfigurationPath);
-        Assert.Single(context.Model.Scenarios);
-        Assert.Null(context.Model.SelectedScenario!.Configuration);
+        Assert.Null(context.Model.Scenarios.ConfigurationPath);
+        Assert.Single(context.Model.Scenarios.Items);
+        Assert.Null(context.Model.Scenarios.Selected!.Configuration);
         context.Dispatcher.Drain();
         Assert.Contains("stopped", context.Model.Status);
     }
@@ -257,7 +257,7 @@ public sealed class DesignerScenarioTests
         editor.XamlProject = owners[1];
         await context.Shell.OpenDesignerCommand.ExecuteAsync(null);
         Assert.Equal(second, Assert.Single(client.Requests).ProjectDirectory);
-        Assert.Contains(context.Shell.Designer.Scenarios, scenario => scenario.Name == "Second project");
+        Assert.Contains(context.Shell.Designer.Scenarios.Items, scenario => scenario.Name == "Second project");
     }
 
     [Theory]
@@ -362,7 +362,7 @@ public sealed class DesignerScenarioTests
         }
         public Task WriteScenariosAsync(params PreviewScenario[] scenarios) => WriteCatalogAsync(Root, "View.xaml", scenarios);
         public Task OpenAsync() => Model.OpenAsync(Document, projectDirectory: Root);
-        public void Select(string name) => Model.SelectedScenario = Assert.Single(Model.Scenarios, scenario => scenario.Name == name);
+        public void Select(string name) => Model.Scenarios.Selected = Assert.Single(Model.Scenarios.Items, scenario => scenario.Name == name);
         public async ValueTask DisposeAsync() { await Model.DisposeAsync(); await _files.DisposeAsync(); }
     }
     private sealed class PostedDispatcher : IUiDispatcher
@@ -421,7 +421,7 @@ public sealed partial class DesignerTests
         model.EditedValue = "Updated";
         var pending = model.WritePropertyToSourceCommand.ExecuteAsync(null);
         Assert.True(context.Shell.IsPreviewOpen, model.Status);
-        model.SelectedScenario = Assert.Single(model.Scenarios, scenario => scenario.Name == "Populated");
+        model.Scenarios.Selected = Assert.Single(model.Scenarios.Items, scenario => scenario.Name == "Populated");
         context.Shell.ChangeReview.AcceptCommand.Execute(null);
         await pending;
         Assert.Equal(BoundSource, context.Shell.ActiveDocument!.State.Content);

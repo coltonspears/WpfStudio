@@ -52,7 +52,7 @@ public sealed partial class DesignerViewModel : IBindingDeclarationOwner
         bool CurrentBinding() => BindingDeclarations.IsOpening && Current(revision) && IsCurrent && !IsCompiledPreview && _appearancePropertyOperations == 0
             && selection == _selectionRevision && epoch == BindingDeclarations.Epoch && ReferenceEquals(document, _document)
             && document.Version == version && document.Content == text && SelectedNode?.Node.Id == request.NodeId
-            && BindingDeclarations.Selected?.SameIdentity(item) == true && IsScenarioConfigurationCurrent();
+            && BindingDeclarations.Selected?.SameIdentity(item) == true && Scenarios.IsConfigurationCurrent();
         async Task<BindingSourceResponse> ValidateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();

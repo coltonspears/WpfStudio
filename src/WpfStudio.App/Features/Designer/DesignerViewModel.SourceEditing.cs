@@ -19,7 +19,7 @@ public sealed partial class DesignerViewModel
         var document = _document; var property = SelectedProperty; var value = EditedValue;
         return () => Current(revision) && selection == _selectionRevision && ReferenceEquals(document, _document)
             && property == SelectedProperty && value == EditedValue && CanWritePropertySource()
-            && IsScenarioConfigurationCurrent();
+            && Scenarios.IsConfigurationCurrent();
     }
 
     public string SourceEditDescription => SelectedNode?.Node.Source == null

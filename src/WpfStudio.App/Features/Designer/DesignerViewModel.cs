@@ -67,6 +67,9 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     public DesignerViewModel(IPreviewClient client, IUiDispatcher dispatcher)
     {
         _client = client; _dispatcher = dispatcher;
+        Canvas = new(() => DocumentName, ArtboardSizeChanged);
+        Scenarios = new(this, dispatcher);
+        LayoutGesture = new(this);
         _client.Disconnected += Disconnected;
         Diagnostics.CollectionChanged += (_, _) => NotifyDiagnosticCounts();
         InitializePropertyFilter();
@@ -78,16 +81,13 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     public LayoutInspectorViewModel LayoutDetails { get; } = new();
     public event Action<SourceLocation>? SourceRequested;
     public string? SourcePath => _document?.Path;
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(ArtboardTitle))] public partial string DocumentName { get; set; } = "Open a XAML document and choose Preview";
+    [ObservableProperty] public partial string DocumentName { get; set; } = "Open a XAML document and choose Preview";
     [ObservableProperty] public partial string Status { get; set; } = "Preview has not started";
     [ObservableProperty] public partial byte[]? Image { get; set; }
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(ShowBindingDiagnosticCommand), nameof(UpdateSnapshotCommand))] public partial bool IsBusy { get; set; }
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(UpdateSnapshotCommand))] public partial bool IsCurrent { get; set; }
     [ObservableProperty] public partial bool AutoRefresh { get; set; } = true;
     [ObservableProperty] public partial bool ShowLogicalTree { get; set; }
-    [ObservableProperty] public partial double PreviewWidth { get; set; } = 960;
-    [ObservableProperty] public partial double PreviewHeight { get; set; } = 640;
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(ZoomText))] public partial double Zoom { get; set; } = 0.65;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(UsesApplicationResources), nameof(SessionDescription))] public partial string? AssemblyPath { get; set; }
     [ObservableProperty] public partial string? ProjectDirectory { get; set; }
     [ObservableProperty] public partial DesignerNode? SelectedNode { get; set; }
@@ -111,11 +111,12 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         _document = document; _document.ContentChanged += ContentChanged;
         DocumentName = document.Name; AssemblyPath = assemblyPath; ProjectDirectory = projectDirectory; _sourceAssembly = sourceAssembly; _projectAssetsPath = projectAssetsPath;
         _referenceResolver = referenceResolver; _references = null;
-        ConfigureScenarios(document.Path, projectDirectory);
+        Scenarios.Configure(document.Path, projectDirectory);
         ViewTypeName = ReadViewType(document.Content);
         OnPropertyChanged(nameof(SourcePath));
         await RefreshAsync();
     }
+    partial void OnDocumentNameChanged(string value) => Canvas.NotifyDocumentName();
     private void ContentChanged(object? sender, EventArgs args)
     {
         Invalidate();
@@ -125,7 +126,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     }
     private void Invalidate()
     {
-        ClearLayoutEditing();
+        LayoutGesture.Clear();
         _render?.Cancel();
         _revision++; _selectionRevision++;
         ForgetInteraction();
@@ -144,7 +145,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     private async Task RenderAsync(bool debounce)
     {
         if (_document == null || _disposed) return;
-        if (debounce && _scenarioSelectionPending)
+        if (debounce && Scenarios.SelectionPending)
         {
             Status = "Preview configuration changed. Refresh to apply it.";
             return;
@@ -157,22 +158,23 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         try
         {
             if (debounce) await Task.Delay(650, token);
-            var previousConfiguration = _scenarioFingerprint;
-            if (!await LoadScenariosAsync(revision, token) || !Current(revision)) return;
-            if (debounce && previousConfiguration != _scenarioFingerprint)
+            var previousConfiguration = Scenarios.Fingerprint;
+            if (!await Scenarios.LoadAsync(revision, token) || !Current(revision)) return;
+            if (debounce && previousConfiguration != Scenarios.Fingerprint)
             {
-                _scenarioSelectionPending = true;
+                Scenarios.SelectionPending = true;
                 Status = "Scenario configuration changed. Refresh to apply it.";
                 return;
             }
-            if (!debounce) _scenarioSelectionPending = false;
-            var scenario = SelectedScenario?.Configuration;
+            if (!debounce) Scenarios.SelectionPending = false;
+            var scenario = Scenarios.Selected?.Configuration;
             if (scenario?.ViewFactory is not null && !IsCompiledPreview)
             {
                 Status = "This scenario creates a view. Select Compiled mode, then Refresh.";
                 return;
             }
-            if (!double.IsFinite(PreviewWidth) || !double.IsFinite(PreviewHeight) || PreviewWidth < 32 || PreviewHeight < 32 || PreviewWidth > 4096 || PreviewHeight > 4096)
+            double width = Canvas.PreviewWidth, height = Canvas.PreviewHeight;
+            if (!double.IsFinite(width) || !double.IsFinite(height) || width < 32 || height < 32 || width > 4096 || height > 4096)
                 throw new InvalidOperationException("Preview width and height must be between 32 and 4096.");
             var assembly = string.IsNullOrWhiteSpace(AssemblyPath) || !IsCompiledPreview && !File.Exists(AssemblyPath) ? null : AssemblyPath;
             // MSBuild resolves HintPath and project references; typing reuses the last answer, Refresh asks again.
@@ -186,13 +188,13 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
                 Status = "Rendering preview…";
             }
             OnPropertyChanged(nameof(SessionDescription));
-            var snapshot = await _client.RenderAsync(new(document.Path, text, revision, PreviewWidth, PreviewHeight,
+            var snapshot = await _client.RenderAsync(new(document.Path, text, revision, width, height,
                 assembly, ProjectDirectory, Mode,
                 string.IsNullOrWhiteSpace(ViewTypeName) ? null : ViewTypeName,
                 string.IsNullOrWhiteSpace(ApplicationResourcePath) ? null : ApplicationResourcePath,
-                scenario, UseDesignTimeValues, AutoSize, _projectAssetsPath, _references), token);
+                scenario, UseDesignTimeValues, Canvas.AutoSize, _projectAssetsPath, _references), token);
             if (!Current(revision) || document.Version != sourceVersion || snapshot.Version != revision) return;
-            if (!await VerifyScenarioConfigurationAsync(revision, token) || !Current(revision) || document.Version != sourceVersion) return;
+            if (!await Scenarios.VerifyAsync(revision, token) || !Current(revision) || document.Version != sourceVersion) return;
             if (snapshot.Success && snapshot.Scenario?.Configuration != scenario)
                 throw new InvalidOperationException("The preview did not confirm the selected scenario. Refresh and try again.");
             _sourceVersion = sourceVersion;
@@ -218,7 +220,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         OnPropertyChanged(nameof(BuildDescription));
         OnPropertyChanged(nameof(ScenarioDescription));
         Diagnostics.Clear(); foreach (var diagnostic in snapshot.Diagnostics.Distinct()) Diagnostics.Add(diagnostic);
-        foreach (var warning in ScenarioWarnings) Diagnostics.Add(new(warning, "Warning"));
+        foreach (var warning in Scenarios.Warnings) Diagnostics.Add(new(warning, "Warning"));
         RebuildTree();
     }
     private void RebuildTree()
@@ -260,15 +262,15 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     partial void OnShowLogicalTreeChanged(bool value) => RebuildTree();
     partial void OnAssemblyPathChanged(string? value)
     {
-        _scenarioSelectionPending = true;
+        Scenarios.SelectionPending = true;
         Invalidate();
         Status = "Preview assembly changed. Refresh to load it.";
     }
     partial void OnProjectDirectoryChanged(string? value)
     {
         Invalidate();
-        if (_document is not null) ConfigureScenarios(_document.Path, value);
-        _scenarioSelectionPending = true;
+        if (_document is not null) Scenarios.Configure(_document.Path, value);
+        Scenarios.SelectionPending = true;
         Status = "Preview project changed. Refresh to load its scenarios.";
     }
     partial void OnSelectedPropertyChanged(PreviewProperty? value)
@@ -306,7 +308,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         RevealSelectionSource(value);
         if (!_picking)
         {
-            ClearLayoutEditing();
+            LayoutGesture.Clear();
             BindingDeclarations.NoteUserSelection();
             BindingDeclarations.ForgetRemoval();
             _bindingObservedNodeId = null;
@@ -323,7 +325,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     }
     private async Task InspectAsync(string id)
     {
-        ClearLayoutEditing();
+        LayoutGesture.Clear();
         var revision = _revision; var selection = ++_selectionRevision;
         var operationEpoch = _bindingOperationEpoch;
         bool operationIdle = _bindingOperations == 0;
@@ -436,7 +438,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         BindingDeclarations.AdvanceEpoch(); RefreshBindingSourceState();
         ClearAppearance("Preview property changing. Appearance will refresh after the edit.");
         LayoutDetails.Clear("Preview property changing. Waiting for updated layout…");
-        ClearLayoutEditing();
+        LayoutGesture.Clear();
         try
         {
             var result = await _client.SetPropertyAsync(new(revision, nodeId, property.Name, submittedValue, reset,
@@ -499,7 +501,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     {
         if (_document != null) _document.ContentChanged -= ContentChanged;
         _document = null; OnPropertyChanged(nameof(SourcePath));
-        ClearScenarios();
+        Scenarios.Reset();
         DocumentName = "Open a XAML document and choose Preview";
         await StopAsync();
     }
@@ -515,11 +517,11 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     {
         if (_disposed) return;
         _disposed = true;
-        ClearLayoutEditing();
+        LayoutGesture.Clear();
         ForgetInteraction();
         BindingDeclarations.AdvanceEpoch(); RefreshBindingSourceState();
         ClearAppearance("Preview closed. Open a preview to inspect appearance.");
-        ClearScenarios();
+        Scenarios.Reset();
         LayoutDetails.Clear("Preview closed. Open a preview to inspect layout.");
         if (_document != null) _document.ContentChanged -= ContentChanged;
         _client.Disconnected -= Disconnected; _lifetime.Cancel(); _render?.Cancel();

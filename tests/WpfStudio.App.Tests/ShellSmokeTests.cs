@@ -1751,7 +1751,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var timings = new Dictionary<string, long>();
         foreach (var state in new[] { ("Loading", "Loading orders"), ("Empty", "No orders"), ("Populated", "3 orders"), ("Error", "Unable to load orders") })
         {
-            selector.SelectedItem = model.Scenarios.Single(item => item.Name == state.Item1);
+            selector.SelectedItem = model.Scenarios.Items.Single(item => item.Name == state.Item1);
             Assert.False(model.IsCurrent);
             var timer = Stopwatch.StartNew();
             await Assert.IsAssignableFrom<CommunityToolkit.Mvvm.Input.IAsyncRelayCommand>(refresh.Command).ExecuteAsync(null);
@@ -1786,7 +1786,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         shell.ToggleThemeCommand.Execute(null); await Idle();
         Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/xaml-preview-scenarios-light.png"));
         shell.ToggleThemeCommand.Execute(null);
-        selector.SelectedItem = model.Scenarios.Single(item => item.Name == "Injected view");
+        selector.SelectedItem = model.Scenarios.Items.Single(item => item.Name == "Injected view");
         await model.RefreshCommand.ExecuteAsync(null);
         Assert.False(model.IsCurrent);
         Assert.Contains("Compiled", model.Status);
