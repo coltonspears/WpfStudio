@@ -151,6 +151,43 @@ public sealed class PackageManagementTests
         Assert.Equal("1.0.0", Assert.Single(inventory.Packages).ResolvedVersion);
     }
 
+    [Theory]
+    [InlineData("Workload updates are available.\n")]
+    [InlineData("Workload updates are available.\r\n\r\n")]
+    [InlineData("Notice {with a brace} mid-line\n")]
+    public async Task NoticeLineBeforeTheJsonDoesNotDisturbTheInventory(string notice)
+    {
+        using var fixture = new Fixture();
+        const string list = """{"version":1,"projects":[{"frameworks":[{"framework":"net10.0","topLevelPackages":[{"id":"Example","requestedVersion":"1.0.0","resolvedVersion":"1.0.0"}]}]}]}""";
+        var runner = new FakeRunner((args, _) => Task.FromResult(new PackageProcessResult(0, args[0] == "list" ? notice + list : "10.0.400")));
+        using var service = new NuGetPackageService(new HttpClient(new HttpStub(_ => "{}")), runner);
+        var inventory = await service.ReadProjectAsync(fixture.Project, default);
+        Assert.Null(inventory.Warning);
+        Assert.Equal("1.0.0", Assert.Single(inventory.Packages).ResolvedVersion);
+    }
+
+    [Fact]
+    public async Task NoticeLineBeforeAFailedListStillGivesTheProblemText()
+    {
+        using var fixture = new Fixture();
+        const string list = """{"version":1,"problems":[{"level":"error","text":"No assets file was found"}],"projects":[{"path":"Example.csproj"}]}""";
+        var runner = new FakeRunner((args, _) => Task.FromResult(args[0] == "list" ? new PackageProcessResult(1, "Notice {with a brace} mid-line\n" + list) : new PackageProcessResult(0, "10.0.400")));
+        using var service = new NuGetPackageService(new HttpClient(new HttpStub(_ => "{}")), runner);
+        var inventory = await service.ReadProjectAsync(fixture.Project, default);
+        Assert.Contains("No assets file was found", inventory.Warning);
+        Assert.DoesNotContain("\"problems\"", inventory.Warning);
+    }
+
+    [Fact]
+    public async Task ListWithoutAJsonLineFallsBackToDeclaredReferences()
+    {
+        using var fixture = new Fixture();
+        var runner = new FakeRunner((args, _) => Task.FromResult(new PackageProcessResult(0, args[0] == "list" ? "Notice {with a brace} mid-line\n" : "10.0.400")));
+        using var service = new NuGetPackageService(new HttpClient(new HttpStub(_ => "{}")), runner);
+        var inventory = await service.ReadProjectAsync(fixture.Project, default);
+        Assert.Contains("Showing declared references", inventory.Warning);
+    }
+
     [Fact]
     public async Task FailedListWithoutJsonReportsBothStreams()
     {

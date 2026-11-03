@@ -115,6 +115,48 @@ public class BuildServiceTests
         finally { Directory.Delete(directory, true); }
     }
 
+    [Theory]
+    [InlineData("""{"a":1}""")]
+    [InlineData("""
+        Workload updates are available.
+        {"a":1}
+        """)]
+    [InlineData("Workload updates are available.\r\n\r\n  {\"a\":1}\r\n")]
+    [InlineData("""
+        Notice {with a brace} mid-line
+        {"a":1}
+        """)]
+    public void JsonOutputStartsAtTheFirstLineThatOpensWithABrace(string output)
+    {
+        using var json = ProjectDiscovery.ParseJsonOutput(output);
+        Assert.Equal(1, json.RootElement.GetProperty("a").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Workload updates are available.\n")]
+    [InlineData("Notice {with a brace} mid-line\n")]
+    public void OutputWithNoLineOpeningWithABraceIsAJsonError(string output) =>
+        Assert.ThrowsAny<System.Text.Json.JsonException>(() => ProjectDiscovery.ParseJsonOutput(output).Dispose());
+
+    [Theory]
+    [InlineData("Workload updates are available.")]
+    [InlineData("Notice {with a brace} mid-line")]
+    public async Task EvaluationSkipsANoticeLineBeforeItsJson(string notice)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var directory = Directory.CreateTempSubdirectory("WpfStudio-Evaluation-").FullName;
+        try
+        {
+            var project = Path.Combine(directory, "App.csproj");
+            File.WriteAllText(project, "<Project />");
+            var msbuild = Path.Combine(directory, "notice-msbuild.cmd");
+            File.WriteAllText(msbuild, $"@echo {notice}\r\n@echo {{\"Properties\":{{\"AssemblyName\":\"Noted\"}},\"Items\":{{}}}}\r\n");
+            Assert.Equal("Noted", (await ProjectDiscovery.EvaluateAsync(project, "Debug", null, default, null, msbuild)).AssemblyName);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     [Fact]
     public async Task EvaluationThatPrintsSomethingOtherThanJsonIsReportedAsMissingData()
     {

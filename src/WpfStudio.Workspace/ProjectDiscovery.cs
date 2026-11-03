@@ -81,12 +81,22 @@ public static partial class ProjectDiscovery
             moniker.Length == 0 ? null : moniker, ReadEvaluatedDependencies(projectPath, items, Property("TargetFramework"), Property("TargetFrameworks"), moniker));
     }
 
-    /// <summary>With -getProperty, MSBuild writes warnings to standard error, so standard output is exactly one JSON document.</summary>
     private static JsonDocument ParseEvaluation(string output)
     {
-        try { return JsonDocument.Parse(output); }
+        try { return ParseJsonOutput(output); }
         catch (JsonException exception) { throw new InvalidOperationException("MSBuild did not return project evaluation data.", exception); }
     }
+
+    /// <summary>Reads a command's JSON from its standard output. The SDK can print a notice first, so the document starts at the
+    /// first line that opens with a brace; a brace inside a notice does not count. Throws <see cref="JsonException"/> if no line does.</summary>
+    public static JsonDocument ParseJsonOutput(string standardOutput)
+    {
+        var start = JsonLineRegex().Match(standardOutput);
+        return JsonDocument.Parse(start.Success ? standardOutput[start.Index..] : "");
+    }
+
+    [GeneratedRegex(@"^\s*\{", RegexOptions.Multiline)]
+    private static partial Regex JsonLineRegex();
 
     /// <summary>A solution build defines SolutionDir itself; a project built from a solution receives it the way Visual Studio passes it.</summary>
     internal static string? SolutionDirArgument(string targetPath, string? solutionPath) =>

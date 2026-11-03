@@ -131,7 +131,7 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
 
     public static IReadOnlyList<InstalledPackage> ParseInstalledPackages(string output)
     {
-        using var json = JsonDocument.Parse(output);
+        using var json = ProjectDiscovery.ParseJsonOutput(output);
         if (!json.RootElement.TryGetProperty("projects", out var projects))
             throw new InvalidDataException(ProblemText(json.RootElement) ?? "dotnet list package returned no projects.");
         var rows = new List<InstalledPackage>();
@@ -156,7 +156,7 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
     {
         try
         {
-            using var json = JsonDocument.Parse(result.Output);
+            using var json = ProjectDiscovery.ParseJsonOutput(result.Output);
             if (ProblemText(json.RootElement) is { } problems) return problems;
         }
         catch (JsonException) { }
