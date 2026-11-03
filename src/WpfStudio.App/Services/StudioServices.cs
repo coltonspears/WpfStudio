@@ -1,5 +1,4 @@
 using System.IO;
-using System.Net.Http;
 using Microsoft.Extensions.DependencyInjection;
 using WpfStudio.App.Features.ColtonGpt;
 using WpfStudio.App.Features.Designer;
@@ -92,7 +91,7 @@ public static class StudioServices
     public static IServiceCollection AddAssistant(this IServiceCollection services)
     {
         services.AddSingleton<AssistantSettingsStore>();
-        services.AddSingleton(_ => new OpenRouterClient(new HttpClient { Timeout = TimeSpan.FromMinutes(5) }));
+        services.AddHttpClient<OpenRouterClient>(client => client.Timeout = TimeSpan.FromMinutes(5));
         services.AddSingleton<AssistantSettingsViewModel>();
         services.AddSingleton<AssistantViewModel>();
         return services;

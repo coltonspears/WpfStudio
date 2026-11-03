@@ -2030,7 +2030,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
     private static async Task VerifyColtonGptViewsAsync(string root, string restoreTheme)
     {
         using var http = new System.Net.Http.HttpClient();
-        using var client = new WpfStudio.App.Features.ColtonGpt.OpenRouterClient(http);
+        var client = new WpfStudio.App.Features.ColtonGpt.OpenRouterClient(http);
         var settings = new WpfStudio.App.Features.ColtonGpt.AssistantSettingsViewModel(
             new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(Path.GetTempPath(), "ColtonGpt-View-" + Guid.NewGuid().ToString("N"))), client);
         using var assistant = new WpfStudio.App.Features.ColtonGpt.AssistantViewModel(client, settings);
