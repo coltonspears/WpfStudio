@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.Core.Documents;
 
@@ -48,6 +49,9 @@ public sealed class DocumentStore
         await _saveGate.WaitAsync(cancellationToken);
         try
         {
+            // The lease denies replacement on purpose, and the operating system would only report "Access to the path is denied."
+            if (XamlBuildSourceLease.IsHeld(document.Path))
+                throw new IOException($"{document.Name} is locked while the inspection build reads it. Your edits are kept; save again when the build finishes.");
             if (File.Exists(document.Path))
             {
                 var current = Hash(await File.ReadAllBytesAsync(document.Path, cancellationToken));
