@@ -1,4 +1,5 @@
 using System.IO;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Services;
 
@@ -93,7 +94,7 @@ public sealed class KnownSourceFileWatcher : IDisposable
         if (args.ChangeType != WatcherChangeTypes.Deleted) { Notify(args.FullPath); return; }
         // Editors may replace a file atomically. Allow the replacement to finish
         // before treating a known file's disappearance as project membership loss.
-        _ = ConfirmDeletionAsync(args.FullPath);
+        ConfirmDeletionAsync(args.FullPath).Forget();
     });
     private async Task ConfirmDeletionAsync(string path)
     {

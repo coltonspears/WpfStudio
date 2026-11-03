@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Git;
 
@@ -104,18 +105,18 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         if (_quietSelection) return;
         // One diff at a time: choosing a file in one list clears the other.
         if (value is not null) Quietly(() => SelectedStaged = null);
-        _ = LoadSelectedDiff();
+        LoadSelectedDiff().Forget();
     }
 
     partial void OnSelectedStagedChanged(GitChange? value)
     {
         if (_quietSelection) return;
         if (value is not null) Quietly(() => SelectedUnstaged = null);
-        _ = LoadSelectedDiff();
+        LoadSelectedDiff().Forget();
     }
 
-    partial void OnSelectedCommitChanged(GitCommit? value) { if (!_quietSelection) _ = LoadCommit(value); }
-    partial void OnSelectedCommitFileChanged(GitCommitFile? value) { if (!_quietSelection) _ = LoadCommitFile(value); }
+    partial void OnSelectedCommitChanged(GitCommit? value) { if (!_quietSelection) LoadCommit(value).Forget(); }
+    partial void OnSelectedCommitFileChanged(GitCommitFile? value) { if (!_quietSelection) LoadCommitFile(value).Forget(); }
 
     public async Task SetWorkspaceAsync(string? workspacePath, CancellationToken cancellationToken = default)
     {
@@ -545,8 +546,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable
         NotifyLists();
         NotifyCommands();
         // Git may have changed the file (stage, commit, pull), so reload its diff even when the selection is unchanged.
-        _ = LoadSelectedDiff();
-        if (rootChanged || SelectedCommit is null) _ = LoadCommit(SelectedCommit);
+        LoadSelectedDiff().Forget();
+        if (rootChanged || SelectedCommit is null) LoadCommit(SelectedCommit).Forget();
         EnsureSelection();
     }
 

@@ -248,7 +248,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await SaveSettingsAsync();
         }
         finally { IsBusy = false; _loading = false; _operation.Dispose(); _operation = null; XamlAnalysis.Request(); if (_contextReloadPending) _ = ReloadWorkspaceAsync(); }
-        if (Workspace is { Cached: true } cached && !_contextReloadPending) _ = RefreshSavedProjectModelAsync(cached.Path, Configuration);
+        if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
     }
     /// <summary>
     /// Closes every tab before the workspace changes, asking about each unsaved document first. Nothing is closed when any
@@ -408,7 +408,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             vm.Navigate(Math.Min(position, vm.State.Content.Length));
             await FindReferencesCommand.ExecuteAsync(null);
         });
-        if (Features?.GitService is { } git) _ = vm.RefreshGitAsync(git, _lifetime.Token);
+        if (Features?.GitService is { } git) vm.RefreshGitAsync(git, _lifetime.Token).Forget(vm.ReportFault);
         vm.BlameCommitRequested += line => _ = GuardAsync(async () => { await OpenGitCommand.ExecuteAsync(null); Features?.Git.ShowCommit(line, vm.GitBase?.RelativePath); });
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
@@ -874,6 +874,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         try { await action(); }
         catch (OperationCanceledException) { Status = "Cancelled"; }
         catch (Exception ex) { _logger.LogError(ex, "Operation failed"); Status = ex.Message; AppendOutput(ex.ToString()); }
+    }
+    /// <summary>For work nobody awaits: logs and shows its fault as a guarded command would. Safe on any thread.</summary>
+    private void ReportBackgroundFault(Exception fault)
+    {
+        _logger.LogError(fault, "Background operation failed");
+        _dispatcher.Post(() => { if (!_disposed) { Status = fault.Message; AppendOutput(fault.ToString()); } });
     }
     public async ValueTask DisposeAsync()
     {

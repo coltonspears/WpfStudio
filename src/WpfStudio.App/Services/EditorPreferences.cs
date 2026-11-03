@@ -4,6 +4,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Core;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Services;
 
@@ -66,11 +67,12 @@ public sealed partial class EditorPreferences : ObservableObject
             {
                 _listingFamilies = true;
                 var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
-                _ = Task.Run(ListFamilies).ContinueWith(listed => dispatcher.BeginInvoke(() =>
+                Task.Run(ListFamilies).ContinueWith(listed => dispatcher.BeginInvoke(() =>
                 {
-                    _families = listed.Status == TaskStatus.RanToCompletion ? listed.Result : [EditorSettings.DefaultFontFamily];
+                    // Checking Exception, not Status: it is what marks a failed listing as observed.
+                    _families = listed.Exception is null ? listed.Result : [EditorSettings.DefaultFontFamily];
                     OnPropertyChanged(nameof(FontFamilies));
-                }), TaskScheduler.Default);
+                }), TaskScheduler.Default).Forget();
             }
             return _families ?? [];
         }

@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.Input;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Designer;
 
@@ -43,7 +44,7 @@ public sealed partial class DesignerViewModel
                 // Capture superseded any earlier selection request. If that
                 // request had not completed, restore an inspection path too.
                 if (previousInspectedNode is null && SelectedNode is { } uninspected)
-                    _ = InspectAsync(uninspected.Node.Id);
+                    InspectAsync(uninspected.Node.Id).Forget(ReportFault);
                 return;
             }
 

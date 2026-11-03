@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
 using WpfStudio.Runtime.Debugging;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -20,7 +21,7 @@ public sealed partial class ShellViewModel
         features.Attach(this);
         features.Git.OpenFileRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
         // Commits, checkouts and merges change what each editor's change margin and blame compare with.
-        features.Git.RepositoryChanged += () => { foreach (var document in Documents) _ = document.RefreshGitAsync(features.GitService, _lifetime.Token); };
+        features.Git.RepositoryChanged += () => { foreach (var document in Documents) document.RefreshGitAsync(features.GitService, _lifetime.Token).Forget(document.ReportFault); };
         features.Git.WorkspaceFilesChanged += () => _ = GuardAsync(WorkspaceMutatedAsync);
         features.Assistant.SettingsRequested += () => _ = OpenSettingsCommand.ExecuteAsync(AssistantPage);
         features.Assistant.RefreshContextRequested += UpdateAssistantContext;

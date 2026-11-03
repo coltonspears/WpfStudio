@@ -119,7 +119,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         Invalidate();
         if (IsCompiledPreview) { Status = "Source changed. Rebuild the project, then refresh to see compiled changes."; return; }
         Status = AutoRefresh ? "Source changed; updating preview…" : "Source changed; refresh the preview";
-        if (AutoRefresh) _ = RenderAsync(debounce: true);
+        if (AutoRefresh) RenderAsync(debounce: true).Forget(ReportFault);
     }
     private void Invalidate()
     {
@@ -318,7 +318,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
             LayoutDetails.Clear(value is null ? "Select an element to inspect its layout." : "Reading the selected element's layout…");
         }
         NotifySourceCommands();
-        if (!_picking && value != null && IsCurrent) _ = InspectAsync(value.Node.Id);
+        if (!_picking && value != null && IsCurrent) InspectAsync(value.Node.Id).Forget(ReportFault);
     }
     private async Task InspectAsync(string id)
     {
@@ -470,7 +470,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
             RefreshAppearanceSelection();
             RefreshBindingSourceState();
             if (Current(revision) && reinspectionNodeId is not null && SelectedNode?.Node.Id == reinspectionNodeId)
-                _ = InspectAsync(reinspectionNodeId);
+                InspectAsync(reinspectionNodeId).Forget(ReportFault);
         }
     }
     [RelayCommand] private void GoToSource()
@@ -502,6 +502,8 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         DocumentName = "Open a XAML document and choose Preview";
         await StopAsync();
     }
+    /// <summary>For a request nobody awaits. Safe on any thread.</summary>
+    private void ReportFault(Exception fault) => _dispatcher.Post(() => { if (!_disposed) Status = fault.Message; });
     private void Disconnected(object? sender, string reason) => _dispatcher.Post(() =>
     {
         if (_disposed) return;

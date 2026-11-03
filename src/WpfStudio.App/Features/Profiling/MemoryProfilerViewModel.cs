@@ -124,10 +124,10 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         }
         if (_session is not null && !_disposed && Summary is not null && SelectedType is null)
         {
-            _ = LoadDominatorRootsAsync(_lifetime.Token);
+            LoadDominatorRootsAsync(_lifetime.Token).Forget(ReportFault);
             _updating = true; SelectedType = Types.FirstOrDefault(); _updating = false;
-            if (SelectedType is not null) _ = LoadFlowAsync(SelectedType.Key, _lifetime.Token);
-            if (IsGrouped) _ = LoadGroupsAsync(_lifetime.Token);
+            if (SelectedType is not null) LoadFlowAsync(SelectedType.Key, _lifetime.Token).Forget(ReportFault);
+            if (IsGrouped) LoadGroupsAsync(_lifetime.Token).Forget(ReportFault);
             await QueryObjectsAsync(_lifetime.Token);
             // Start the browser on the biggest owner rather than an arbitrary instance of the largest type.
             // Prefer an application type: a runtime cache is rarely what someone opening a snapshot wants to see first.
@@ -251,6 +251,9 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         }
         Status = "Memory capture closed. The target application keeps running.";
     }
+
+    /// <summary>For a load nobody awaits. Only a scalar changes, so a fault may arrive on any thread.</summary>
+    private void ReportFault(Exception fault) { if (!_disposed) Status = fault.Message; }
 
     private void CancelSelection() { CancelQuery(); CancelInspection(); CancelFlow(); CancelGraph(); }
 

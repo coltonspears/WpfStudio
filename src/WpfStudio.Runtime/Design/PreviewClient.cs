@@ -136,7 +136,7 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
                     // is still healthy: let it finish in the background, holding the gate so
                     // requests stay ordered, instead of killing and cold-starting a process.
                     releaseGate = false;
-                    _ = DrainSupersededAsync(call);
+                    DrainSupersededAsync(call).Forget();
                     throw new SupersededRequestException(token);
                 }
                 catch (OperationCanceledException) when (render is null && token.IsCancellationRequested
@@ -145,7 +145,7 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
                     // The caller lost interest in a query (a pick while the pointer moved on). The host is healthy:
                     // hold the gate until it acknowledges, as for a superseded render, rather than kill and cold-start it.
                     releaseGate = false; abandoned = true;
-                    _ = DrainSupersededAsync(call);
+                    DrainSupersededAsync(call).Forget();
                     throw new OperationCanceledException("The preview request was cancelled.", token);
                 }
                 lifetime.Token.ThrowIfCancellationRequested();
@@ -218,7 +218,7 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
             // holds its ownership lock. Never invoke subscribers under that lock.
             ThreadPool.QueueUserWorkItem(_ =>
             {
-                _ = shadow.CleanupAsync();
+                shadow.CleanupAsync().Forget();
                 if (lease is not null && ReferenceEquals(Volatile.Read(ref _lease), lease) && _proxy is not null && !_disposed)
                 {
                     string reason = lease.Reason ?? Volatile.Read(ref error);

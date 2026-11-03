@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Appearance;
 using WpfStudio.Inspection.Protocol;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Designer;
 
@@ -16,7 +17,7 @@ public sealed partial class DesignerViewModel
     partial void OnAppearanceTabIsActiveChanged(bool value)
     {
         ClearAppearance(value ? "Select a property to inspect its appearance." : "Open Appearance to inspect a property.");
-        if (value) _ = RefreshAppearanceAsync();
+        if (value) RefreshAppearanceAsync().Forget(ReportFault);
     }
     private bool CanRefreshAppearance() => !_disposed && _appearancePropertyOperations == 0 && IsCurrent && SelectedNode is { } node
         && _inspectedNodeId == node.Node.Id && SelectedProperty is { OwnerType: not null, OwnerAssembly: not null } property
@@ -31,7 +32,7 @@ public sealed partial class DesignerViewModel
     private void RefreshAppearanceSelection()
     {
         ClearAppearance(IsCurrent ? "Select a property to inspect its appearance." : "Refresh the preview before inspecting appearance.");
-        if (AppearanceTabIsActive && CanRefreshAppearance()) _ = RefreshAppearanceAsync();
+        if (AppearanceTabIsActive && CanRefreshAppearance()) RefreshAppearanceAsync().Forget(ReportFault);
     }
     [RelayCommand(CanExecute = nameof(CanRefreshAppearance))]
     private async Task RefreshAppearanceAsync()

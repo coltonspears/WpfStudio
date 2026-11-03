@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Profiling.Visuals;
 using WpfStudio.Contracts.Profiling;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
 
@@ -280,7 +281,7 @@ public sealed partial class MemoryProfilerViewModel
         if (!run) { _monitor?.Cancel(); _monitor?.Dispose(); _monitor = null; return; }
         if (_monitor is not null) return;
         _monitor = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        _ = MonitorAsync(_monitor.Token);
+        MonitorAsync(_monitor.Token).Forget(ReportFault);
     }
 
     private async Task MonitorAsync(CancellationToken token)

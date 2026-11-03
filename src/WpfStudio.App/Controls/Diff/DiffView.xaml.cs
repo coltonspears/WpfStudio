@@ -11,6 +11,7 @@ using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using WpfStudio.App.Services;
 using WpfStudio.Core.Text;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Controls.Diff;
 
@@ -180,12 +181,12 @@ public partial class DiffView : UserControl
         string before = Before ?? "", after = After ?? "";
         if (before.Length + after.Length < 400_000) { Apply(TextDiff.Compute(before, after)); return; }
         ShowMessage("Comparing…");
-        _ = Task.Run(() => TextDiff.Compute(before, after)).ContinueWith(task =>
+        Task.Run(() => TextDiff.Compute(before, after)).ContinueWith(task =>
         {
             if (version != _computeVersion) return;
             if (task.Exception is { } error) ShowMessage(error.GetBaseException().Message, "Warning");
             else Apply(task.Result);
-        }, TaskScheduler.FromCurrentSynchronizationContext());
+        }, TaskScheduler.FromCurrentSynchronizationContext()).Forget(fault => Dispatcher.BeginInvoke(() => ShowMessage(fault.Message, "Warning")));
     }
 
     private void Apply(TextDiff diff)

@@ -270,7 +270,8 @@ public sealed partial class NativePreviewSurface : HwndHost
         if (_destroyed || _releasing) return;
         _pending = true;
         if (_inNativeNavigation) return;
-        if (!_updating) _ = UpdateAsync();
+        // UpdateAsync reports its own failures; this covers its cleanup failing while it does.
+        if (!_updating) UpdateAsync().Forget(fault => Dispatcher.BeginInvoke(() => SetState(false, "Interactive preview stopped: " + fault.Message)));
     }
 
     private async Task UpdateAsync()

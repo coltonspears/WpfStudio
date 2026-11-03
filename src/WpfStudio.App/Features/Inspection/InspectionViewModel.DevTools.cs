@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Inspection.Protocol;
 using WpfStudio.Runtime.Inspection;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Inspection;
 
@@ -108,7 +109,7 @@ public sealed partial class InspectionViewModel
 
     partial void OnShowIssueHistoryChanged(bool value) => RefreshIssueGroups();
     partial void OnIsPickingChanged(bool value) => OnPropertyChanged(nameof(PickButtonLabel));
-    partial void OnHighlightSelectionChanged(bool value) => _ = HighlightSelectedAsync();
+    partial void OnHighlightSelectionChanged(bool value) => HighlightSelectedAsync().Forget(ReportFault);
 
     [RelayCommand(CanExecute = nameof(CanPick))]
     private async Task TogglePickingAsync()

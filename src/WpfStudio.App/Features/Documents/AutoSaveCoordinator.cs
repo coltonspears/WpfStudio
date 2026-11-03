@@ -61,10 +61,10 @@ public sealed class AutoSaveCoordinator : IDisposable
         _timer?.Cancel(); _timer?.Dispose(); _timer = null;
         if (!_preferences.AutoSave || !IsEnabled || IsHeld || _disposed) return;
         var pending = _timer = new();
-        _ = Task.Delay(TimeSpan.FromSeconds(_preferences.AutoSaveDelaySeconds), pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
+        Task.Delay(TimeSpan.FromSeconds(_preferences.AutoSaveDelaySeconds), pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
         {
-            if (!pending.IsCancellationRequested && !_disposed) _run = SaveAsync();
-        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+            if (!pending.IsCancellationRequested && !_disposed) _run = TimedSaveAsync();
+        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default).Forget();
     }
 
     /// <summary>
@@ -97,6 +97,13 @@ public sealed class AutoSaveCoordinator : IDisposable
 
     /// <summary>Runs the timed save now, as the timer would.</summary>
     public Task RunNowAsync() => _run = SaveAsync();
+
+    /// <summary>Nothing awaits a timed save unless a close happens to come along, so its failures are reported here.</summary>
+    private async Task TimedSaveAsync()
+    {
+        try { await SaveAsync(); }
+        catch (Exception exception) { _host.AppendOutput("Automatic save: " + exception.Message); }
+    }
 
     private async Task SaveAsync()
     {

@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.Runtime.Terminal;
 
@@ -16,8 +17,10 @@ public sealed class TerminalSurface : ContentControl
     private static readonly Dictionary<ConPtySession, Renderer> Renderers = [];
     public static readonly DependencyProperty SessionProperty = DependencyProperty.Register(nameof(Session), typeof(ConPtySession), typeof(TerminalSurface), new PropertyMetadata(null, Changed));
     public ConPtySession? Session { get => (ConPtySession?)GetValue(SessionProperty); set => SetValue(SessionProperty, value); }
-    public TerminalSurface() { Loaded += (_, _) => _ = AttachAsync(); Unloaded += (_, _) => Content = null; }
-    private static void Changed(DependencyObject value, DependencyPropertyChangedEventArgs args) { var surface = (TerminalSurface)value; if (surface.IsLoaded) _ = surface.AttachAsync(); }
+    public TerminalSurface() { Loaded += (_, _) => Attach(); Unloaded += (_, _) => Content = null; }
+    private static void Changed(DependencyObject value, DependencyPropertyChangedEventArgs args) { var surface = (TerminalSurface)value; if (surface.IsLoaded) surface.Attach(); }
+    // AttachAsync reports a renderer that cannot start; this covers it failing while it does.
+    private void Attach() => AttachAsync().Forget(fault => Dispatcher.BeginInvoke(() => Content = new TextBlock { Text = "Terminal renderer stopped: " + fault.Message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) }));
     private async Task AttachAsync()
     {
         if (Session is not { } session) return;
@@ -88,7 +91,7 @@ public sealed class TerminalSurface : ContentControl
                 {
                     case "ready": ready.TrySetResult(); break;
                     case "ack": acknowledgement?.TrySetResult(); break;
-                    case "input": _ = SendInputAsync(root.GetProperty("data").GetString() ?? ""); break;
+                    case "input": SendInputAsync(root.GetProperty("data").GetString() ?? "").Forget(); break;
                     case "resize": session.Resize(root.GetProperty("cols").GetInt32(), root.GetProperty("rows").GetInt32()); break;
                 }
             }
@@ -115,7 +118,7 @@ public sealed class TerminalSurface : ContentControl
         private void ProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs args)
         {
             if (args.ProcessFailedKind is CoreWebView2ProcessFailedKind.BrowserProcessExited or CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.FrameRenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)
-                _ = FailAsync("Terminal renderer stopped (" + args.ProcessFailedKind + ").");
+                FailAsync("Terminal renderer stopped (" + args.ProcessFailedKind + ").").Forget();
         }
         private async Task FailAsync(string message)
         {

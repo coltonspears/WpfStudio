@@ -58,7 +58,7 @@ public sealed partial class DebugVariableViewModel : ObservableObject
     public int Reference { get; }
     public ObservableCollection<DebugVariableViewModel> Children { get; } = [];
     [ObservableProperty] public partial bool IsExpanded { get; set; }
-    partial void OnIsExpandedChanged(bool value) { if (value && !loaded && Reference > 0) _ = LoadAsync(); }
+    partial void OnIsExpandedChanged(bool value) { if (value && !loaded && Reference > 0) LoadAsync().Forget(); }
     private async Task LoadAsync()
     {
         loaded = true;
@@ -431,7 +431,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
             if (outputScheduled) return;
             outputScheduled = true;
         }
-        _ = ScheduleOutputAsync();
+        ScheduleOutputAsync().Forget();
     }
     private async Task ScheduleOutputAsync()
     {

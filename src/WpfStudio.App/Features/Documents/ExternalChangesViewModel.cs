@@ -23,11 +23,14 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
     private bool _recheckFiles, _recheckFromApp;
     private bool _disposed;
 
+    private readonly Action<Exception> _report;
+
     public ExternalChangesViewModel(IExternalChangesHost host, DocumentStore store, IUiDispatcher dispatcher)
     {
         _host = host; _store = store;
         Changes.CollectionChanged += ChangesChanged;
-        _watcher = new OpenDocumentWatcher(() => dispatcher.Post(() => _ = CheckAsync()));
+        _report = fault => dispatcher.Post(() => _host.AppendOutput("Checking files changed outside WpfStudio: " + fault.Message));
+        _watcher = new OpenDocumentWatcher(() => dispatcher.Post(() => CheckAsync().Forget(_report)));
         host.DocumentsChanged += () =>
         {
             _watcher.Watch(host.Documents.Select(document => document.State.Path));
@@ -39,7 +42,7 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
     [ObservableProperty] public partial bool IsExpanded { get; set; } = true;
     /// <summary>Files without unsaved edits follow the disk without asking; the banner then lists only conflicts.</summary>
     [ObservableProperty] public partial bool AutoReloadUnchangedFiles { get; set; }
-    partial void OnAutoReloadUnchangedFilesChanged(bool value) { _host.SettingChanged(); if (value) _ = CheckAsync(); }
+    partial void OnAutoReloadUnchangedFilesChanged(bool value) { _host.SettingChanged(); if (value) CheckAsync().Forget(_report); }
     partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ToggleText));
 
     public bool HasChanges => Changes.Count > 0;

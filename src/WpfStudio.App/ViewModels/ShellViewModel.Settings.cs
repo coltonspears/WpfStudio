@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
 using WpfStudio.Core.Documents;
+using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -61,11 +62,11 @@ public sealed partial class ShellViewModel
         if (!_initialized) return;
         _settingsSave?.Cancel(); _settingsSave?.Dispose();
         var pending = _settingsSave = new();
-        _ = Task.Delay(600, pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
+        Task.Delay(600, pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
         {
             if (pending.IsCancellationRequested || _disposed) return;
             _ = GuardAsync(SaveSettingsAsync);
-        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default).Forget();
     }
 
     /// <summary>Applies the whitespace settings to a document before an explicit save.</summary>
