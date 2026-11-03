@@ -246,6 +246,8 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
             try
             {
                 if (selectedId != null && nodes.TryGetValue(selectedId, out var selected)) SelectedNode = selected;
+                // A picked element this tree view does not list is still selected while the snapshot has it.
+                else if (selectedId != null && _snapshot?.Nodes.FirstOrDefault(n => n.Id == selectedId) is { } unlisted) SelectedNode = new DesignerNode(unlisted);
                 else if (selectedId != null) { SelectedNode = null; selectionRemoved = true; }
             }
             finally { _suppressSourceSync--; }

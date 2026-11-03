@@ -31,7 +31,7 @@ public sealed partial class DesignerViewModel
     {
         if (_rememberedSelection is not { } memento || _snapshot is not { } snapshot || SelectedNode is not null) return;
         _rememberedSelection = null;
-        var candidates = snapshot.Nodes.Where(n => n.Type == memento.Type && (ShowLogicalTree || n.IsVisual)).ToArray();
+        var candidates = snapshot.Nodes.Where(n => n.Type == memento.Type).ToArray();
         if (candidates.Length == 0) return;
         var paths = new NodePaths(snapshot.Nodes);
         PreviewNode? match = null;
@@ -40,10 +40,11 @@ public sealed partial class DesignerViewModel
             && candidates.Where(n => n.Source is not null && paths.Authored(n).SequenceEqual(memento.AuthoredPath)).ToArray() is [var authored])
             match = authored;
         match ??= candidates.FirstOrDefault(n => paths.Visual(n).SequenceEqual(memento.VisualPath));
-        if (match is null || FindNode(Tree, match.Id) is not { } restored) return;
+        if (match is null) return;
         _restoringSelection = memento;
         _suppressSourceSync++;
-        try { SelectedNode = restored; }
+        // As when picking: an element the tree does not list can still be the selection.
+        try { SelectedNode = FindNode(Tree, match.Id) ?? new DesignerNode(match); }
         finally { _suppressSourceSync--; }
     }
 
