@@ -55,7 +55,7 @@ public sealed class DocumentStore
             }
             else if (document.DiskHash != null && !overwriteExternal) throw new ExternalFileChangedException(document.Path);
             var content = document.Content;
-            var bytes = document.Encoding.GetPreamble().Concat(document.Encoding.GetBytes(content)).ToArray();
+            byte[] bytes = [.. document.Encoding.GetPreamble(), .. document.Encoding.GetBytes(content)];
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(document.Path)!);
             await AtomicWriteAsync(document.Path, bytes, cancellationToken);
             document.MarkSavedSnapshot(content, Hash(bytes));
