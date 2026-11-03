@@ -75,6 +75,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
 {
     private readonly DebugSession session;
     private readonly IUiDispatcher dispatcher;
+    private readonly IDebugAdapterProvider adapters;
     private readonly object outputGate = new();
     private readonly StringBuilder pendingOutput = new();
     private bool outputScheduled;
@@ -84,28 +85,26 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     private int stopVersion;
     private int watchRefresh;
     private readonly List<string> watchExpressions = [];
-    public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher)
+    public DebuggerViewModel(DebugSession session, IUiDispatcher dispatcher, IDebugAdapterProvider adapters)
     {
-        this.session = session; this.dispatcher = dispatcher;
+        this.session = session; this.dispatcher = dispatcher; this.adapters = adapters;
+        if (adapters.Locate() is { } adapter) session.AdapterPath = adapter;
         session.EventReceived += OnDebugEvent;
         session.Output += AppendOutput;
         session.Error += OnError;
     }
     public event Action<string, int>? SourceRequested;
-    /// <summary>Downloads and installs the debug adapter, returning its executable; set by the application.</summary>
-    public Func<IProgress<string>, CancellationToken, Task<string>>? AdapterInstaller { get; init; }
-    public string AdapterDescription { get; init; } = "the debug adapter";
+    public string AdapterDescription => adapters.Description;
     public bool IsAdapterMissing => !File.Exists(session.AdapterPath);
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(InstallAdapterCommand))] public partial bool IsInstallingAdapter { get; set; }
     [ObservableProperty] public partial string AdapterStatus { get; set; } = "";
-    private bool CanInstallAdapter() => AdapterInstaller is not null && !IsInstallingAdapter;
+    private bool CanInstallAdapter() => !IsInstallingAdapter;
     [RelayCommand(CanExecute = nameof(CanInstallAdapter))] private async Task InstallAdapterAsync()
     {
-        if (AdapterInstaller is not { } install) return;
         IsInstallingAdapter = true; Error = "";
         try
         {
-            session.AdapterPath = await install(new Progress<string>(message => AdapterStatus = message), CancellationToken.None);
+            session.AdapterPath = await adapters.InstallAsync(new Progress<string>(message => AdapterStatus = message), CancellationToken.None);
             AdapterStatus = "Installed " + AdapterDescription;
             Status = "Ready · .NET 8–10 managed debugging";
         }
@@ -116,7 +115,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     public async Task<bool> EnsureAdapterAsync(Func<Task<bool>> confirm)
     {
         if (!IsAdapterMissing) return true;
-        if (AdapterInstaller is null || !await confirm()) return false;
+        if (!await confirm()) return false;
         await InstallAdapterAsync();
         return !IsAdapterMissing;
     }

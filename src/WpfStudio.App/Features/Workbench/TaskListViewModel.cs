@@ -30,10 +30,10 @@ public sealed partial class TaskListViewModel : ObservableObject, IDisposable
     private List<TaskComment> _comments = [];
     private bool _disposed;
 
-    public TaskListViewModel(IWorkbenchHost host, WorkspaceStateStore<UserTaskItem>? store = null)
+    public TaskListViewModel(IWorkbenchHost host, WorkspaceStateStore<UserTaskItem> store)
     {
         _host = host;
-        _store = store ?? new("tasks");
+        _store = store;
     }
 
     /// <summary>The comments matching <see cref="Filter"/>, high priority first.</summary>

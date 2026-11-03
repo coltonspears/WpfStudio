@@ -1,4 +1,5 @@
 using System.Text.Json;
+using WpfStudio.Core.IO;
 
 namespace WpfStudio.Database.Services;
 
@@ -15,7 +16,6 @@ public sealed class QueryRecoveryStore : IQueryRecoveryStore
 {
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    public QueryRecoveryStore() : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "sql-recovery.json")) { }
     public QueryRecoveryStore(string path) => _path = Path.GetFullPath(path);
 
     public async Task<IReadOnlyList<QueryRecoveryDocument>> LoadAsync(CancellationToken cancellationToken = default)
@@ -33,24 +33,12 @@ public sealed class QueryRecoveryStore : IQueryRecoveryStore
     public async Task SaveAsync(IReadOnlyList<QueryRecoveryDocument> documents, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        string temporary = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (documents.Count == 0) { File.Delete(_path); return; }
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                await JsonSerializer.SerializeAsync(stream, documents, cancellationToken: cancellationToken).ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, _path, true);
+            await AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(documents), cancellationToken, writeThrough: true).ConfigureAwait(false);
         }
-        finally
-        {
-            if (File.Exists(temporary)) File.Delete(temporary);
-            _gate.Release();
-        }
+        finally { _gate.Release(); }
     }
 }

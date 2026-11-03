@@ -7,24 +7,28 @@ using WpfStudio.App.Services;
 
 namespace WpfStudio.App.Controls;
 
-/// <summary>Applies <see cref="EditorPreferences"/> to this editor, live, and zooms the editor font with Ctrl+wheel.</summary>
+/// <summary>Applies the view model's <see cref="EditorPreferences"/> to this editor, live, and zooms the editor font with Ctrl+wheel.</summary>
 public sealed partial class EditorSurface
 {
-    private bool _preferencesObserved;
+    private EditorPreferences? _observedPreferences;
 
+    // XAML creates this control, so it cannot take the instance in a constructor. The view model is how it reaches everything
+    // else, and unlike an inherited property or an ancestor binding that also works in a floating document window.
     private void ObservePreferences(bool observe)
     {
-        if (observe == _preferencesObserved) return;
-        _preferencesObserved = observe;
-        if (observe) { EditorPreferences.Current.PropertyChanged += PreferencesChanged; ApplyPreferences(); }
-        else EditorPreferences.Current.PropertyChanged -= PreferencesChanged;
+        var preferences = observe ? ViewModel?.Preferences : null;
+        if (ReferenceEquals(preferences, _observedPreferences)) return;
+        if (_observedPreferences is { } previous) previous.PropertyChanged -= PreferencesChanged;
+        _observedPreferences = preferences;
+        if (preferences is null) return;
+        preferences.PropertyChanged += PreferencesChanged;
+        ApplyPreferences(preferences);
     }
 
-    private void PreferencesChanged(object? sender, PropertyChangedEventArgs e) => ApplyPreferences();
+    private void PreferencesChanged(object? sender, PropertyChangedEventArgs e) { if (_observedPreferences is { } preferences) ApplyPreferences(preferences); }
 
-    private void ApplyPreferences()
+    private void ApplyPreferences(EditorPreferences preferences)
     {
-        var preferences = EditorPreferences.Current;
         FontFamily = preferences.EditorFont;
         FontSize = preferences.FontSize;
         Options.IndentationSize = preferences.TabSize;
@@ -65,7 +69,7 @@ public sealed partial class EditorSurface
         PreviewMouseWheel += (_, e) =>
         {
             if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
-            if (e.Delta > 0) EditorPreferences.Current.ZoomInCommand.Execute(null); else EditorPreferences.Current.ZoomOutCommand.Execute(null);
+            if (ViewModel?.Preferences is { } preferences) (e.Delta > 0 ? preferences.ZoomInCommand : preferences.ZoomOutCommand).Execute(null);
             e.Handled = true;
         };
     }

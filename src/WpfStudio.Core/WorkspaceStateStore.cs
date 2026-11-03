@@ -1,5 +1,5 @@
 using System.Text.Json;
-using WpfStudio.Core.Documents;
+using WpfStudio.Core.IO;
 
 namespace WpfStudio.Core;
 
@@ -7,9 +7,9 @@ namespace WpfStudio.Core;
 /// A list kept per workspace in the WpfStudio profile rather than the repository, such as the Task List's own items or
 /// pinned file groups. Each workspace gets one JSON file under <c>&lt;data&gt;/&lt;folder&gt;</c>, named by a hash of its path.
 /// </summary>
-public sealed class WorkspaceStateStore<T>(string folder, string? directory = null)
+public sealed class WorkspaceStateStore<T>(string folder, string directory)
 {
-    private readonly string _directory = Path.Combine(directory ?? AppPaths.DataDirectory, folder);
+    private readonly string _directory = Path.Combine(directory, folder);
     private string PathFor(string workspacePath)
     {
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(workspacePath).ToUpperInvariant())))[..20];
@@ -45,7 +45,7 @@ public sealed class WorkspaceStateStore<T>(string folder, string? directory = nu
         try
         {
             if (_written.TryGetValue(path, out var newest) && newest > sequence) return;
-            await DocumentStore.AtomicWriteAsync(path, bytes, token).ConfigureAwait(false);
+            await AtomicFile.WriteAsync(path, bytes, token).ConfigureAwait(false);
             _written[path] = sequence;
         }
         finally { _writeGate.Release(); }

@@ -1,22 +1,21 @@
-using System.Globalization;
-using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Core;
-using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Services;
 
 /// <summary>
 /// Editor settings every code editor follows live: font, indentation, what is drawn and how text behaves. One
-/// instance is shared by the settings page and all editors; <see cref="Load"/> and <see cref="ToSettings"/> map it
-/// to the saved settings file.
+/// instance, from the container, is shared by the settings page and all editors; <see cref="Load"/> and
+/// <see cref="ToSettings"/> map it to the saved settings file.
 /// </summary>
-public sealed partial class EditorPreferences : ObservableObject
+public sealed partial class EditorPreferences(FontCatalog fonts) : ObservableObject
 {
-    public static EditorPreferences Current { get; } = new();
     public const double MinimumFontSize = 8, MaximumFontSize = 32;
+
+    /// <summary>The families the settings page offers.</summary>
+    public FontCatalog Fonts { get; } = fonts;
 
     [ObservableProperty] public partial string FontFamily { get; set; } = EditorSettings.DefaultFontFamily;
     [ObservableProperty] public partial double FontSize { get; set; } = 13;
@@ -52,62 +51,6 @@ public sealed partial class EditorPreferences : ObservableObject
     public static IReadOnlyList<int> TabSizes { get; } = [2, 3, 4, 8];
     public static IReadOnlyList<int> AutoSaveDelays { get; } = [1, 2, 5, 10, 30, 60];
     public static IReadOnlyList<double> FontSizes { get; } = [9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24];
-
-    private bool _listingFamilies;
-    /// <summary>
-    /// Installed font families, fixed-width ones first since code is aligned in columns. Measuring every installed
-    /// font takes a moment, so the list fills in from a background thread the first time it is shown.
-    /// </summary>
-    public IReadOnlyList<string> FontFamilies
-    {
-        get
-        {
-            if (field is null && !_listingFamilies)
-            {
-                _listingFamilies = true;
-                LoadFamiliesAsync().Forget();
-            }
-            return field ?? [];
-        }
-        private set;
-    }
-
-    private async Task LoadFamiliesAsync()
-    {
-        IReadOnlyList<string> families;
-        try { families = await Task.Run(ListFamilies).ConfigureAwait(false); }
-        catch (Exception) { families = [EditorSettings.DefaultFontFamily]; } // The settings page only needs something to offer.
-        FontFamilies = families;
-        // Not through the first reader's dispatcher: that reader may be on a thread that never runs one.
-        if (Application.Current?.Dispatcher is { } ui) _ = ui.BeginInvoke(() => OnPropertyChanged(nameof(FontFamilies)));
-        else OnPropertyChanged(nameof(FontFamilies));
-    }
-
-    private static IReadOnlyList<string> ListFamilies()
-    {
-        var language = System.Windows.Markup.XmlLanguage.GetLanguage(CultureInfo.CurrentUICulture.IetfLanguageTag);
-        var families = new List<(string Name, bool Monospace)>();
-        foreach (var family in Fonts.SystemFontFamilies)
-        {
-            var name = family.FamilyNames.TryGetValue(language, out var localized) ? localized : family.Source;
-            families.Add((name, IsMonospace(family)));
-        }
-        return families.DistinctBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(item => item.Monospace ? 0 : 1).ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase).Select(item => item.Name).ToArray();
-    }
-
-    private static bool IsMonospace(FontFamily family)
-    {
-        try
-        {
-            var typeface = family.GetTypefaces().FirstOrDefault(face => face.Style == FontStyles.Normal && face.Weight == FontWeights.Normal) ?? family.GetTypefaces().FirstOrDefault();
-            if (typeface is null || !typeface.TryGetGlyphTypeface(out var glyphs)) return false;
-            double Width(char character) => glyphs.CharacterToGlyphMap.TryGetValue(character, out var glyph) ? glyphs.AdvanceWidths[glyph] : -1;
-            var narrow = Width('i');
-            return narrow > 0 && Math.Abs(narrow - Width('W')) < 0.001 && Math.Abs(narrow - Width('.')) < 0.001;
-        }
-        catch (Exception exception) when (exception is ArgumentException or System.IO.IOException or UnauthorizedAccessException) { return false; }
-    }
 
     public void Load(EditorSettings settings)
     {

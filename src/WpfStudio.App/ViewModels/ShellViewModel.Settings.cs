@@ -17,7 +17,7 @@ public sealed partial class ShellViewModel
         FilesPage = "Files", AssistantPage = "Assistant", ShortcutsPage = "Shortcuts";
     private CancellationTokenSource? _settingsSave;
 
-    public EditorPreferences Editor => EditorPreferences.Current;
+    public EditorPreferences Editor { get; }
     [ObservableProperty] public partial string SettingsPage { get; set; } = AppearancePage;
     [ObservableProperty] public partial bool ShowQuickInfo { get; set; } = true;
     partial void OnShowQuickInfoChanged(bool value) { foreach (var document in Documents) document.ShowQuickInfo = value; ScheduleSettingsSave(); }

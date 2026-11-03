@@ -10,9 +10,9 @@ namespace WpfStudio.App.Features.Profiling;
 
 /// <summary>Memory investigations are snapshot based. The target is never mutated by an estimate or field inspection.
 /// This file owns capture lifetime; the Overview, Types, Retention, Graph and Browser partials own their views.</summary>
-public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IFileDialogService files, IProcessMemorySampler? sampler = null) : ObservableObject, IAsyncDisposable
+public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IFileDialogService files, IProcessMemorySampler sampler) : ObservableObject, IAsyncDisposable
 {
-    private readonly IProcessMemorySampler _sampler = sampler ?? new ProcessMemorySampler();
+    private readonly IProcessMemorySampler _sampler = sampler;
     public const int OverviewView = 0, TypesView = 1, RetentionView = 2, GraphView = 3;
     public const int FieldsTab = 0, RootsTab = 1, KeepsAliveTab = 2, ReferencesTab = 3;
     private readonly CancellationTokenSource _lifetime = new();
@@ -282,7 +282,6 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     {
         if (_disposed) return;
         _disposed = true; _revision++; StopMonitor(); _lifetime.Cancel(); CancelSelection(); ResetGroups();
-        if (_sampler is IDisposable owned && sampler is null) owned.Dispose();
         if (_session is not null) await _session.DisposeAsync();
         _session = null; _lifetime.Dispose();
     }

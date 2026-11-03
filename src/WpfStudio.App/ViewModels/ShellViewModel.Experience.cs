@@ -1,12 +1,9 @@
-using System.ComponentModel;
 using System.IO;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Controls;
-using WpfStudio.App.Features.ColtonGpt;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.App.Services;
-using WpfStudio.Core;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -23,9 +20,7 @@ public sealed partial class ShellViewModel
     private void InitializeExperience()
     {
         Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
-        if (Features?.Assistant.Settings is INotifyPropertyChanged settings) settings.PropertyChanged += AssistantSettingsChanged;
     }
-    private void AssistantSettingsChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(AssistantSettingsViewModel.HasApiKey)) OnPropertyChanged(nameof(IsColtonGptReady)); }
 
     // ------------------------------------------------------------------ Theme
     public bool IsLightTheme => ThemeName.Equals("Light", IgnoreCase);
@@ -42,7 +37,7 @@ public sealed partial class ShellViewModel
     public string WorkspaceSummary => Workspace == null ? "" : $"{Workspace.Projects.Count} project{(Workspace.Projects.Count == 1 ? "" : "s")} · .NET SDK {Workspace.SdkVersion}";
     public string CommandCenterText => Workspace == null ? "Search files and commands" : WorkspaceName;
     public bool HasDocuments => Documents.Count > 0;
-    public bool IsColtonGptReady => Features?.Assistant.Settings.HasApiKey == true;
+    public bool IsColtonGptReady => Features.Assistant.Settings.HasApiKey;
     private void NotifyWorkspaceSummary()
     {
         OnPropertyChanged(nameof(WorkspaceName)); OnPropertyChanged(nameof(WorkspaceSummary)); OnPropertyChanged(nameof(CommandCenterText));
@@ -63,7 +58,7 @@ public sealed partial class ShellViewModel
         return null;
     }
     [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke("Search"); SearchFocusRequested?.Invoke(); }
-    [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(AppPaths.DataDirectory); DesktopNavigation.Reveal(AppPaths.DataDirectory); return Task.CompletedTask; });
+    [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(DataFolder); DesktopNavigation.Reveal(DataFolder); return Task.CompletedTask; });
     /// <summary>Opens the command palette on the snippets for the active editor's language.</summary>
     [RelayCommand] private void InsertSnippet()
     {
@@ -195,7 +190,7 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Save window layout", SaveLayoutCommand, icon: "Sidebar");
         yield return Command("View", "Reset window layout", ResetLayoutCommand, icon: "Sidebar");
         yield return Command("Tools", "NuGet packages", OpenPackagesCommand, icon: "Package", detail: "Search, install, update, remove");
-        if (Features?.Git is { HasRemote: true } git)
+        if (Features.Git is { HasRemote: true } git)
         {
             yield return Command("Tools", git.RemoteText, git.OpenRemoteCommand, icon: "Link", detail: git.Remote!.WebUrl);
             yield return Command("Tools", git.PullRequestText, git.CreatePullRequestCommand, icon: "Link", detail: "Opens " + git.Remote.HostName + " for the current branch");

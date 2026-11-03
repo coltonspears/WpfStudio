@@ -11,7 +11,7 @@ public sealed class WorkbenchRegressionTests
     [Fact]
     public async Task SavingTheConnectedProfileKeepsTheSchemaTree()
     {
-        var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs());
+        var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs(), new NoAnswers(), new NoRecovery());
         await model.ConnectCommand.ExecuteAsync(null);
         Assert.True(model.IsConnected);
         Assert.Single(model.Schema);
@@ -28,7 +28,7 @@ public sealed class WorkbenchRegressionTests
     [Fact]
     public async Task SelectingAProfileForAnotherServerClearsTheSchemaTree()
     {
-        var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs());
+        var model = new DatabasePaneViewModel(new OneDatabase(), new MemoryStore(), new NoDialogs(), new NoAnswers(), new NoRecovery());
         await model.ConnectCommand.ExecuteAsync(null);
         model.SelectedProfile = new ConnectionProfile { Name = "Other", Server = "other-host" };
         Assert.False(model.IsConnected);

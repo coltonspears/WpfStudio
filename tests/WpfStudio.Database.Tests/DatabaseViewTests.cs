@@ -17,7 +17,7 @@ public sealed class DatabaseViewTests
     {
         await OnStaThread(() =>
         {
-            var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(), new NullDialogs());
+            var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Path.GetTempPath(), "WpfStudio-DatabaseView-" + Guid.NewGuid().ToString("N"), "profiles.json")), new NullDialogs(), new NoAnswers(), new NoRecovery());
             var pane = new DatabasePane { DataContext = model };
             pane.Measure(new Size(1000, 800));
             pane.Arrange(new Rect(0, 0, 1000, 800));
@@ -59,7 +59,7 @@ public sealed class DatabaseViewTests
     {
         await OnStaThread(() =>
         {
-            var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(), new NullDialogs());
+            var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Path.GetTempPath(), "WpfStudio-DatabaseView-" + Guid.NewGuid().ToString("N"), "profiles.json")), new NullDialogs(), new NoAnswers(), new NoRecovery());
             var password = new PasswordBox();
             BindingOperations.SetBinding(password, DatabaseViewBehaviors.PasswordProperty, new Binding(nameof(model.Password)) { Source = model, Mode = BindingMode.TwoWay });
             password.Password = "first edit";
@@ -81,7 +81,7 @@ public sealed class DatabaseViewTests
         {
             var buffer = new ResultSetBuffer(names);
             Assert.True(buffer.TryAdd(names.Select((_, index) => "cell" + index).ToArray()));
-            var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(), new NullDialogs());
+            var model = new DatabasePaneViewModel(new SqlDatabaseService(), new ConnectionProfileStore(Path.Combine(Path.GetTempPath(), "WpfStudio-DatabaseView-" + Guid.NewGuid().ToString("N"), "profiles.json")), new NullDialogs(), new NoAnswers(), new NoRecovery());
             var result = buffer.Build("Result 1");
             model.SelectedDocument!.Results.Add(result);
             model.SelectedDocument.SelectedResult = result;
