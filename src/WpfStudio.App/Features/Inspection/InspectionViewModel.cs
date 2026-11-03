@@ -9,12 +9,11 @@ namespace WpfStudio.App.Features.Inspection;
 
 public sealed partial class RuntimeNodeViewModel(InspectionNode node) : ObservableObject
 {
-    [ObservableProperty] public partial InspectionNode Node { get; set; } = node;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(Label))] public partial InspectionNode Node { get; set; } = node;
     [ObservableProperty] public partial bool IsSelected { get; set; }
     public ObservableCollection<RuntimeNodeViewModel> Children { get; } = [];
     public string Label => Node.Type.Split('.').Last() + (string.IsNullOrEmpty(Node.Name) ? "" : " #" + Node.Name) +
         (string.IsNullOrEmpty(Node.WindowTitle) ? "" : " · " + Node.WindowTitle);
-    partial void OnNodeChanged(InspectionNode value) => OnPropertyChanged(nameof(Label));
 }
 
 /// <summary>Inspection of an application's actual objects, independent of the preview host.</summary>

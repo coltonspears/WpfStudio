@@ -3,18 +3,10 @@ using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
-using WpfStudio.Contracts;
 using WpfStudio.Core;
-using WpfStudio.Core.Documents;
-using WpfStudio.Core.Wpf;
-using WpfStudio.Database;
-using WpfStudio.Database.Models;
-using WpfStudio.Database.Services;
-using WpfStudio.Runtime.Debugging;
-using WpfStudio.Runtime.Terminal;
-using WpfStudio.Workspace;
 
 namespace WpfStudio.App;
 
@@ -40,8 +32,8 @@ public partial class App : Application
             var builder = Host.CreateApplicationBuilder(e.Args);
             builder.Logging.ClearProviders();
             // By factory so the container owns it: disposing the host writes the last queued lines. An instance given to AddProvider is never disposed.
-            builder.Services.AddSingleton<ILoggerProvider>(_ => new StudioLogProvider());
-            ConfigureServices(builder.Services);
+            builder.Services.AddSingleton<ILoggerProvider>(sp => new StudioLogProvider(sp.GetRequiredService<IOptions<StudioPaths>>().Value.DataDirectory));
+            builder.Services.AddWpfStudio(new UiDispatcher(Dispatcher));
             _host = builder.Build(); await _host.StartAsync();
             var shell = _host.Services.GetRequiredService<ShellViewModel>();
             var window = _host.Services.GetRequiredService<MainWindow>();
@@ -66,32 +58,5 @@ public partial class App : Application
             if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync();
             Shutdown(1);
         }
-    }
-    public void ConfigureServices(IServiceCollection services)
-    {
-        services.AddSingleton<IUiDispatcher>(new UiDispatcher(Dispatcher));
-        services.AddSingleton<DesktopDialogs>();
-        services.AddSingleton<IFileDialogService>(sp => sp.GetRequiredService<DesktopDialogs>());
-        services.AddSingleton<IUserDialogService>(sp => sp.GetRequiredService<DesktopDialogs>());
-        services.AddSingleton<DocumentStore>(); services.AddSingleton<SettingsStore>();
-        services.AddSingleton<WorkspaceEditTransaction>(); services.AddSingleton<WorkspaceClient>(); services.AddSingleton<BuildService>();
-        services.AddSingleton<WpfIndexService>(); services.AddSingleton<ScaffoldingService>(); services.AddSingleton<XamlCompletionService>();
-        services.AddSingleton<WpfStudio.Runtime.Design.IPreviewClient, WpfStudio.Runtime.Design.PreviewClient>();
-        services.AddSingleton<Features.Designer.DesignerViewModel>();
-        services.AddSingleton<WpfStudio.Core.Debugging.DebuggerInstaller>(_ => new());
-        services.AddSingleton(sp => new DebugSession { AdapterPath = sp.GetRequiredService<WpfStudio.Core.Debugging.DebuggerInstaller>().Locate() ?? Path.Combine(AppContext.BaseDirectory, "debugger", "netcoredbg.exe") });
-        services.AddSingleton(sp =>
-        {
-            var installer = sp.GetRequiredService<WpfStudio.Core.Debugging.DebuggerInstaller>();
-            return new DebuggerViewModel(sp.GetRequiredService<DebugSession>(), sp.GetRequiredService<IUiDispatcher>())
-            {
-                AdapterInstaller = installer.InstallAsync,
-                AdapterDescription = "netcoredbg " + WpfStudio.Core.Debugging.DebuggerInstaller.Version
-            };
-        }); services.AddSingleton<TerminalViewModel>();
-        services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(AppPaths.DataDirectory, "sql-connections.json")));
-        services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(AppPaths.DataDirectory, "sql-recovery.json")));
-        services.AddDatabaseFeature(); services.AddSingleton<ShellViewModel>(); services.AddSingleton<MainWindow>();
-        services.AddStudioFeatures();
     }
 }

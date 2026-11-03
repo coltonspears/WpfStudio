@@ -22,7 +22,7 @@ public sealed partial class InspectionViewModel
     [ObservableProperty] public partial bool ShowIssueHistory { get; set; } = true;
     [ObservableProperty] public partial string IssueSummary { get; set; } = "No binding observations yet.";
     [ObservableProperty] public partial string PickStatus { get; set; } = "";
-    [ObservableProperty] public partial bool IsPicking { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(PickButtonLabel))] public partial bool IsPicking { get; set; }
     [ObservableProperty] public partial bool HighlightSelection { get; set; } = true;
     [ObservableProperty] public partial int SelectedTabIndex { get; set; }
     public string PickButtonLabel => IsPicking ? "Cancel picking" : "Pick from app";
@@ -108,7 +108,6 @@ public sealed partial class InspectionViewModel
     }
 
     partial void OnShowIssueHistoryChanged(bool value) => RefreshIssueGroups();
-    partial void OnIsPickingChanged(bool value) => OnPropertyChanged(nameof(PickButtonLabel));
     partial void OnHighlightSelectionChanged(bool value) => HighlightSelectedAsync().Forget(ReportFault);
 
     [RelayCommand(CanExecute = nameof(CanPick))]

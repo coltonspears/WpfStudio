@@ -98,8 +98,6 @@ public sealed partial class DesignerViewModel
         NotifyCanvasState();
         if (value) ClearLayoutEditing();
         NotifyLayoutEditingState();
-        ShowBindingDiagnosticCommand.NotifyCanExecuteChanged();
-        UpdateSnapshotCommand.NotifyCanExecuteChanged();
         NotifyInteractionState();
     }
 }

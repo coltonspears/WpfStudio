@@ -64,26 +64,17 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var data = Path.Combine(Path.GetTempPath(), "WpfStudio-ui-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(data);
         var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton<IUiDispatcher>(new UiDispatcher(Dispatcher.CurrentDispatcher));
+        services.AddWpfStudio(new UiDispatcher(Dispatcher.CurrentDispatcher));
+        services.Configure<StudioPaths>(paths => paths.DataDirectory = data);
+        // Later registrations win: no real dialogs, and hosts built by this configuration rather than located next to the test.
         var dialogs = new TestDialogs();
         services.AddSingleton<IFileDialogService>(dialogs); services.AddSingleton<IUserDialogService>(dialogs);
-        services.AddSingleton(new DocumentStore(data)); services.AddSingleton(new SettingsStore(data));
         var configuration = typeof(ShellSmokeTests).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
         services.AddSingleton(new WorkspaceClient(Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_WORKSPACE_HOST") ?? Path.Combine(root, $"src/WpfStudio.WorkspaceHost/bin/{configuration}/net10.0/WpfStudio.WorkspaceHost.dll")));
-        services.AddSingleton<WorkspaceEditTransaction>(); services.AddSingleton<BuildService>();
-        services.AddSingleton<WpfIndexService>(); services.AddSingleton<ScaffoldingService>(); services.AddSingleton<XamlCompletionService>();
-        services.AddSingleton<DebugSession>(); services.AddSingleton<DebuggerViewModel>(); services.AddSingleton<TerminalViewModel>();
-        services.AddSingleton<IConnectionProfileStore>(new ConnectionProfileStore(Path.Combine(data, "connections.json")));
-        services.AddSingleton<IQueryRecoveryStore>(new QueryRecoveryStore(Path.Combine(data, "query-recovery.json")));
-        services.AddDatabaseFeature(); services.AddStudioFeatures();
         services.AddSingleton<WpfStudio.Contracts.Profiling.IMemoryProfiler>(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(
             Path.Combine(root, $"src/WpfStudio.App/bin/{configuration}/net10.0-windows/ProfilingHost/WpfStudio.ProfilingHost.dll")));
         services.AddSingleton<WpfStudio.Runtime.Design.IPreviewClient>(_ => new WpfStudio.Runtime.Design.PreviewClient(
             Environment.GetEnvironmentVariable("WPFSTUDIO_PREVIEW_HOST_UNDER_TEST")));
-        services.AddSingleton<WpfStudio.App.Features.Designer.DesignerViewModel>();
-        services.AddSingleton(new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(data, "assistant")));
-        services.AddSingleton<ShellViewModel>();
         await using var provider = services.BuildServiceProvider();
         var shell = provider.GetRequiredService<ShellViewModel>();
         var bindingErrors = new BindingErrors();
@@ -95,7 +86,6 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var clock = Stopwatch.StartNew();
             window = new MainWindow { DataContext = shell, ShowInTaskbar = false, ShowActivated = false, Opacity = 0 };
             var manager = (DockingManager)window.FindName("DockManager");
-            DockingBehavior.SetLayoutPath(manager, Path.Combine(data, "layout.xml"));
             window.Show(); await Idle();
             var startup = clock.Elapsed;
             output.WriteLine($"Shell construction to rendered idle: {startup.TotalMilliseconds:N0} ms");
@@ -398,7 +388,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         await shell.OpenPackagesCommand.ExecuteAsync(null); await Idle();
         var packages = manager.Layout.Descendents().OfType<LayoutDocument>().Single(d => d.ContentId == "Packages");
         Assert.True(((FrameworkElement)packages.Content).ActualHeight > 300);
-        Assert.NotEmpty(shell.Features!.Packages.Installed);
+        Assert.NotEmpty(shell.Features.Packages.Installed);
         shell.Features.Packages.SelectedInstalled = shell.Features.Packages.Installed.First();
         await Idle();
         var packagePane = (FrameworkElement)packages.Content;
@@ -2036,7 +2026,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
     private static async Task VerifyColtonGptViewsAsync(string root, IThemeService themes, string restoreTheme)
     {
         using var http = new System.Net.Http.HttpClient();
-        using var client = new WpfStudio.App.Features.ColtonGpt.OpenRouterClient(http);
+        var client = new WpfStudio.App.Features.ColtonGpt.OpenRouterClient(http);
         var settings = new WpfStudio.App.Features.ColtonGpt.AssistantSettingsViewModel(
             new WpfStudio.App.Features.ColtonGpt.AssistantSettingsStore(Path.Combine(Path.GetTempPath(), "ColtonGpt-View-" + Guid.NewGuid().ToString("N"))), client);
         using var assistant = new WpfStudio.App.Features.ColtonGpt.AssistantViewModel(client, settings);

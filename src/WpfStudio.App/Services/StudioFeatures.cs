@@ -1,5 +1,3 @@
-using System.Net.Http;
-using Microsoft.Extensions.DependencyInjection;
 using WpfStudio.App.Features.ColtonGpt;
 using WpfStudio.App.Features.Git;
 using WpfStudio.App.Features.Packages;
@@ -19,10 +17,24 @@ public interface IWorkspaceMutationHost
     Task WorkspaceChangedAsync();
 }
 
+/// <summary>Everything the optional tools ask of the shell. They reach it only through <see cref="StudioFeatures"/>.</summary>
+public interface IStudioToolsHost : IWorkspaceMutationHost
+{
+    void OpenFile(string path);
+    /// <summary>A commit, checkout or merge changed the repository.</summary>
+    void GitRepositoryChanged();
+    /// <summary>A Git operation rewrote working files.</summary>
+    void GitWorkspaceFilesChanged();
+    void OpenAssistantSettings();
+    void RefreshAssistantContext();
+    /// <summary>The assistant gained or lost its API key.</summary>
+    void AssistantReadinessChanged();
+}
+
 /// <summary>Composition and workspace coordination for optional tools.</summary>
 public sealed class StudioFeatures : IDisposable
 {
-    private IWorkspaceMutationHost? _host;
+    private IStudioToolsHost? _host;
     private bool _disposed;
     public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs, IDesktopService desktop)
     {
@@ -30,10 +42,16 @@ public sealed class StudioFeatures : IDisposable
         GitService = git;
         Packages = new(packages, dialogs, () => Git?.IsBusy == true ? Task.FromException<bool>(new InvalidOperationException("Wait for the Git operation to finish.")) : Host.SaveBeforeMutationAsync(), () => Host.WorkspaceChangedAsync());
         Git = new(git, desktop, _ => Packages.IsBusy ? Task.FromException<bool>(new InvalidOperationException("Wait for the package operation to finish.")) : Host.SaveBeforeMutationAsync()) { AutoSelect = true };
+        Git.OpenFileRequested += path => _host?.OpenFile(path);
+        Git.RepositoryChanged += () => _host?.GitRepositoryChanged();
+        Git.WorkspaceFilesChanged += () => _host?.GitWorkspaceFilesChanged();
+        assistant.SettingsRequested += () => _host?.OpenAssistantSettings();
+        assistant.RefreshContextRequested += () => _host?.RefreshAssistantContext();
+        assistant.Settings.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(AssistantSettingsViewModel.HasApiKey)) _host?.AssistantReadinessChanged(); };
     }
-    private IWorkspaceMutationHost Host => _host ?? throw new InvalidOperationException("The shell has not attached to the workspace tools yet.");
+    private IStudioToolsHost Host => _host ?? throw new InvalidOperationException("The shell has not attached to the workspace tools yet.");
     /// <summary>Connects the tools to the shell that owns the documents and the project model; the shell calls this once.</summary>
-    public void Attach(IWorkspaceMutationHost host) => _host = host;
+    public void Attach(IStudioToolsHost host) => _host = host;
     public PackagesViewModel Packages { get; }
     public GitViewModel Git { get; }
     /// <summary>The Git CLI boundary shared by the Git pane and editors (change margin and blame).</summary>
@@ -43,26 +61,7 @@ public sealed class StudioFeatures : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _host = null;
         Packages.Dispose(); Git.Dispose(); Assistant.Dispose();
-    }
-}
-
-public static class StudioFeatureRegistration
-{
-    public static IServiceCollection AddStudioFeatures(this IServiceCollection services)
-    {
-        services.AddSingleton<IThemeService, ThemeService>();
-        services.AddSingleton<IDesktopService, DesktopService>();
-        services.AddSingleton<IClipboardService>(ClipboardService.Shared);
-        services.AddSingleton<WpfStudio.Contracts.Profiling.IMemoryProfiler, WpfStudio.Runtime.Profiling.MemoryProfilerClient>();
-        services.AddSingleton<Features.Profiling.MemoryProfilerViewModel>();
-        services.AddSingleton<INuGetPackageService, NuGetPackageService>();
-        services.AddSingleton<GitService>();
-        services.AddSingleton<AssistantSettingsStore>();
-        services.AddSingleton(_ => new OpenRouterClient(new HttpClient { Timeout = TimeSpan.FromMinutes(5) }));
-        services.AddSingleton<AssistantSettingsViewModel>();
-        services.AddSingleton<AssistantViewModel>();
-        services.AddSingleton<StudioFeatures>();
-        return services;
     }
 }

@@ -34,6 +34,16 @@ public sealed class CodeSnippetTests
     }
 
     [Fact]
+    public void NotifyIsAPartialPropertyAndSetPropertyMovesToNotifyLegacy()
+    {
+        var notify = SnippetCatalog.Find("notify", ".cs")!.Body;
+        Assert.Contains("[ObservableProperty]\npublic partial ", notify);
+        Assert.DoesNotContain("SetProperty", notify);
+        Assert.Contains("set => SetProperty(ref _$field$, value);", SnippetCatalog.Find("notifylegacy", ".cs")!.Body);
+        Assert.Contains("field = value;", SnippetCatalog.Find("propfield", ".cs")!.Body);
+    }
+
+    [Fact]
     public void ClassNameResolvesToTheNearestPrecedingTypeDeclaration()
     {
         const string text = "namespace App; public partial class Outer { } public sealed partial class CustomerViewModel : ObservableObject { | }";

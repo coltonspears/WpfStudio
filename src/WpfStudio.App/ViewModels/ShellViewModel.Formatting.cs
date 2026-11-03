@@ -80,7 +80,7 @@ public sealed partial class ShellViewModel
         else
             await FormatEditorAsync(editor, token => Task.Run(() =>
             {
-                var result = new XamlFormattingService().Format(xamlRequest.Text, options: xamlRequest.Options, token: token);
+                var result = _xamlFormatter.Format(xamlRequest.Text, options: xamlRequest.Options, token: token);
                 return new WorkspaceEditResult(result.Accepted
                     ? [new DocumentEdits(xamlRequest.Path, xamlRequest.Version, result.Edits, ProjectXamlAnalysisCoordinator.TextHash(xamlRequest.Text))] : [],
                     fallbackReason is null ? result.Warnings : result.Accepted

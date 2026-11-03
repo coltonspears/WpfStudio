@@ -1,8 +1,14 @@
+using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using WpfStudio.App.Controls;
 using WpfStudio.App.Services;
+using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Core;
+using WpfStudio.Core.Documents;
+using WpfStudio.Core.Wpf;
+using WpfStudio.Workspace;
 
 namespace WpfStudio.Shell.Tests;
 
@@ -14,12 +20,12 @@ public sealed class EditorSettingsTests
         var directory = Directory.CreateTempSubdirectory("WpfStudio-EditorSettings-").FullName;
         try
         {
-            var preferences = new EditorPreferences { FontFamily = "JetBrains Mono", FontSize = 15, TabSize = 2, InsertSpaces = false, WordWrap = true, ShowColumnRuler = true, ColumnRulerPosition = 100, TrimTrailingWhitespace = true, AutoSave = true };
+            var preferences = new EditorPreferences(new FontCatalog()) { FontFamily = "JetBrains Mono", FontSize = 15, TabSize = 2, InsertSpaces = false, WordWrap = true, ShowColumnRuler = true, ColumnRulerPosition = 100, TrimTrailingWhitespace = true, AutoSave = true };
             var store = new SettingsStore(directory);
             await store.SaveAsync(new StudioSettings { Editor = preferences.ToSettings(), ShowQuickInfo = false });
             var loaded = await store.LoadAsync();
             Assert.False(loaded.ShowQuickInfo);
-            var restored = new EditorPreferences();
+            var restored = new EditorPreferences(new FontCatalog());
             restored.Load(loaded.Editor);
             Assert.Equal(preferences.ToSettings(), restored.ToSettings());
 
@@ -51,12 +57,58 @@ public sealed class EditorSettingsTests
     [Fact]
     public async Task FontListFillsInWhenAWorkerThreadReadsItFirst()
     {
-        var preferences = new EditorPreferences();
+        var fonts = new FontCatalog();
         var listed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        preferences.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(EditorPreferences.FontFamilies)) listed.TrySetResult(); };
-        await Task.Run(() => Assert.Empty(preferences.FontFamilies));
+        fonts.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(FontCatalog.Families)) listed.TrySetResult(); };
+        await Task.Run(() => Assert.Empty(fonts.Families));
         await listed.Task.WaitAsync(TimeSpan.FromSeconds(60));
-        Assert.NotEmpty(preferences.FontFamilies);
+        Assert.NotEmpty(fonts.Families);
+    }
+
+    [Fact]
+    public Task AnEditorSurfaceFollowsItsViewModelsPreferencesWhileLoaded() => OnDispatcherAsync(async () =>
+    {
+        var preferences = new EditorPreferences(new FontCatalog());
+        await using var workspace = new WorkspaceClient();
+        using var model = new EditorViewModel(new DocumentState(Path.Combine(Path.GetTempPath(), "Preferences.cs"), "class C { }"), workspace, new XamlCompletionService(), new InlineDispatcher(), _ => { }) { Preferences = preferences };
+        var editor = new EditorSurface { ViewModel = model };
+        editor.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+        preferences.FontSize = 20; preferences.WordWrap = true;
+        Assert.Equal(20, editor.FontSize);
+        Assert.True(editor.WordWrap);
+        editor.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
+        preferences.FontSize = 22;
+        Assert.Equal(20, editor.FontSize);
+    });
+
+    [Fact]
+    public async Task ShellsDoNotShareEditorPreferencesAndDocumentsGetTheirShells()
+    {
+        await using var first = new ShellTestContext();
+        await using var second = new ShellTestContext();
+        Assert.NotSame(first.Shell.Editor, second.Shell.Editor);
+        await first.Shell.OpenDocumentAsync(await first.CreateFileAsync("Preferences.cs", "class C { }"));
+        Assert.Same(first.Shell.Editor, first.Shell.ActiveDocument!.Preferences);
+    }
+
+    private static Task OnDispatcherAsync(Func<Task> action)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+            _ = dispatcher.BeginInvoke(async () =>
+            {
+                try { await action(); completion.SetResult(); }
+                catch (Exception exception) { completion.SetException(exception); }
+                finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
+            });
+            Dispatcher.Run();
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
     }
 
     [Fact]

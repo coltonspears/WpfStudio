@@ -45,8 +45,6 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         XamlResourceContext? resources = null)
     {
         State = state; _workspace = workspace; _xaml = xaml; _dispatcher = dispatcher; _report = report; _resources = resources;
-        ActionCommand = new RelayCommand<EditorAction>(action => ActionRequested?.Invoke(action));
-        OpenRelatedCommand = new RelayCommand<RelatedFile>(file => { if (file != null) OpenRequested?.Invoke(file.Path); });
         state.ContentChanged += ContentChanged;
         state.PropertyChanged += StatePropertyChanged;
         if (State.Extension == ".xaml")
@@ -66,6 +64,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         ContentChanged(this, EventArgs.Empty);
     }
     public DocumentState State { get; }
+    /// <summary>The editor settings its surface follows; without any, the surface keeps its defaults.</summary>
+    public EditorPreferences? Preferences { get; init; }
     public string Title => State.Title;
     public string ContentId => State.Path;
     public bool IsReadOnly => State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
@@ -79,11 +79,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private long _codeActionsVersion = -1;
     public ObservableCollection<int> BreakpointLines { get; } = [];
     public ObservableCollection<BreakpointMarker> BreakpointMarkers { get; } = [];
-    public IRelayCommand<EditorAction> ActionCommand { get; }
+    [RelayCommand] private void Action(EditorAction action) => ActionRequested?.Invoke(action);
     public event Action<EditorAction>? ActionRequested;
     /// <summary>Paired XAML, code-behind and view-model files shown in the editor context bar.</summary>
     public ObservableCollection<RelatedFile> RelatedFiles { get; } = [];
-    public IRelayCommand<RelatedFile> OpenRelatedCommand { get; }
+    [RelayCommand] private void OpenRelated(RelatedFile? file) { if (file != null) OpenRequested?.Invoke(file.Path); }
     public event Action<string>? OpenRequested;
     /// <summary>Folder breadcrumb relative to the workspace, e.g. "CounterApp › Views".</summary>
     [ObservableProperty] public partial string Location { get; set; } = "";

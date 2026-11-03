@@ -17,7 +17,7 @@ public sealed record AssistantChunk(string Text, string? FinishReason = null);
 public sealed class AssistantException(string message) : Exception(message);
 
 /// <summary>OpenRouter transport. Never executes tools or writes model output to the workspace.</summary>
-public sealed class OpenRouterClient(HttpClient http) : IDisposable
+public sealed class OpenRouterClient(HttpClient http)
 {
     private const int MaximumEventCharacters = 131_072;
     public const int MaximumResponseCharacters = 131_072;
@@ -107,8 +107,6 @@ public sealed class OpenRouterClient(HttpClient http) : IDisposable
         try { return JsonDocument.Parse(value); }
         catch (JsonException) { throw new AssistantException("OpenRouter returned an invalid streaming response. Try again or choose another model."); }
     }
-
-    public void Dispose() => http.Dispose();
 
     private static void ThrowForStatus(HttpStatusCode code)
     {

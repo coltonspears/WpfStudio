@@ -11,7 +11,7 @@ public sealed class DebuggerOutputTests
     public async Task OutputFloodQueuesOneBoundedBatchAndClearDiscardsPendingText()
     {
         var dispatcher = new QueuedDispatcher();
-        await using var viewModel = new DebuggerViewModel(new DebugSession(), dispatcher);
+        await using var viewModel = new DebuggerViewModel(new DebugSession(), dispatcher, new NoDebugAdapter());
         var append = typeof(DebuggerViewModel).GetMethod("AppendOutput", BindingFlags.NonPublic | BindingFlags.Instance)!.CreateDelegate<Action<string>>(viewModel);
         for (var i = 0; i < 20_000; i++) append(new string('x', 255) + "\n");
         append("LAST OUTPUT");

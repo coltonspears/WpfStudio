@@ -17,7 +17,7 @@ public sealed partial class ConflictItem(int number, ConflictBlock block, Action
     public string Current => Block.Current.Length == 0 ? "(nothing)" : Block.Current.TrimEnd('\r', '\n');
     public string Incoming => Block.Incoming.Length == 0 ? "(nothing)" : Block.Incoming.TrimEnd('\r', '\n');
     public bool HasBase => Block.Base is not null;
-    [ObservableProperty] public partial ConflictChoice Choice { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(ChoiceText), nameof(IsResolved))] public partial ConflictChoice Choice { get; set; }
     public string ChoiceText => Choice switch
     {
         ConflictChoice.Current => "Keeps current", ConflictChoice.Incoming => "Keeps incoming",
@@ -25,7 +25,7 @@ public sealed partial class ConflictItem(int number, ConflictBlock block, Action
         ConflictChoice.Base => "Keeps the common ancestor", _ => "Not resolved"
     };
     public bool IsResolved => Choice != ConflictChoice.Unresolved;
-    partial void OnChoiceChanged(ConflictChoice value) { OnPropertyChanged(nameof(ChoiceText)); OnPropertyChanged(nameof(IsResolved)); changed(); }
+    partial void OnChoiceChanged(ConflictChoice value) => changed();
     [RelayCommand] private void Choose(ConflictChoice choice) => Choice = choice;
 }
 
@@ -38,12 +38,12 @@ public sealed partial class GitViewModel
     /// <summary>Raised after any successful Git action, so editors can refresh their change margins and blame.</summary>
     public event Action? RepositoryChanged;
     public ObservableCollection<ConflictItem> Conflicts { get; } = [];
-    [ObservableProperty] public partial GitRemote? Remote { get; set; }
-    [ObservableProperty] public partial GitOperation Operation { get; set; }
-    [ObservableProperty] public partial bool CanSignIn { get; set; }
-    [ObservableProperty] public partial GitConflictFile? ConflictFile { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasRemote), nameof(RemoteText), nameof(PullRequestText))] public partial GitRemote? Remote { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasOperation), nameof(OperationText))] public partial GitOperation Operation { get; set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(SignInAndRetryCommand))] public partial bool CanSignIn { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsResolving), nameof(ResolverHeading))] public partial GitConflictFile? ConflictFile { get; set; }
     [ObservableProperty] public partial string ResolvedPreview { get; set; } = "";
-    [ObservableProperty] public partial string? MergeSource { get; set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(MergeBranchCommand))] public partial string? MergeSource { get; set; }
 
     public bool HasRemote => Remote is not null;
     public string RemoteText => Remote is null ? "No web remote" : $"Open on {Remote.HostName}";
@@ -59,10 +59,8 @@ public sealed partial class GitViewModel
     public string ResolverHeading => ConflictFile is null ? "" : $"{ConflictFile.RelativePath} · {Conflicts.Count(c => c.IsResolved)} of {Conflicts.Count} resolved";
     public bool AllConflictsChosen => Conflicts.Count > 0 && Conflicts.All(c => c.IsResolved);
 
-    partial void OnRemoteChanged(GitRemote? value) { OnPropertyChanged(nameof(HasRemote)); OnPropertyChanged(nameof(RemoteText)); OnPropertyChanged(nameof(PullRequestText)); NotifyCollaborationCommands(); }
-    partial void OnOperationChanged(GitOperation value) { OnPropertyChanged(nameof(HasOperation)); OnPropertyChanged(nameof(OperationText)); NotifyCollaborationCommands(); }
-    partial void OnConflictFileChanged(GitConflictFile? value) { OnPropertyChanged(nameof(IsResolving)); OnPropertyChanged(nameof(ResolverHeading)); }
-    partial void OnMergeSourceChanged(string? value) => MergeBranchCommand.NotifyCanExecuteChanged();
+    partial void OnRemoteChanged(GitRemote? value) => NotifyCollaborationCommands();
+    partial void OnOperationChanged(GitOperation value) => NotifyCollaborationCommands();
 
     private void ApplyCollaboration(GitSnapshot snapshot)
     {
@@ -88,7 +86,6 @@ public sealed partial class GitViewModel
     private bool CanOpenCommitOnRemote() => HasRemote && CommitDetails is not null;
     [RelayCommand(CanExecute = nameof(CanOpenCommitOnRemote))]
     private void OpenCommitOnRemote() => Open(Remote!.CommitUrl(CommitDetails!.Id));
-    partial void OnCommitDetailsChanged(GitCommitDetails? value) => OpenCommitOnRemoteCommand.NotifyCanExecuteChanged();
     private void Open(string url)
     {
         try { _desktop.OpenUrl(url); AppendOutput("Opened " + url); }
@@ -137,7 +134,6 @@ public sealed partial class GitViewModel
         _signInRetry = null; CanSignIn = false;
         return MutateAsync(retry.Label + " (signed in)", retry.Action, retry.Save, retry.ChangesWorkspaceFiles);
     }
-    partial void OnCanSignInChanged(bool value) => SignInAndRetryCommand.NotifyCanExecuteChanged();
 
     // ------------------------------------------------------------------ Merge and conflicts
     private bool CanMerge() => CanOperate() && !HasOperation && !string.IsNullOrWhiteSpace(MergeSource) && MergeSource != Branch;

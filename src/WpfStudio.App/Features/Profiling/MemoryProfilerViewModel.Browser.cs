@@ -20,14 +20,17 @@ public sealed partial class MemoryProfilerViewModel
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(EstimateReferenceCommand))] public partial MemoryReferenceInfo? SelectedReference { get; set; }
     [ObservableProperty] public partial MemoryReferenceInfo? SelectedIncomingReference { get; set; }
     [ObservableProperty] public partial MemoryReferenceInfo? SelectedOutgoingReference { get; set; }
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(EstimateObjectCommand), nameof(EstimateReferenceCommand))] public partial MemoryObjectDetails? Details { get; set; }
-    [ObservableProperty] public partial MemoryReleaseEstimate? ReleaseEstimate { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(OwnSize), nameof(RetainedSize), nameof(ObjectState), nameof(ReferenceCoverage), nameof(ObjectTitle), nameof(ObjectNamespace),
+        nameof(ReachabilityBadge), nameof(ReachabilityTone), nameof(GenerationBadge), nameof(IsPinnedObject), nameof(RetainedShare), nameof(RetainedShareText), nameof(WhyAliveSummary)),
+        NotifyCanExecuteChangedFor(nameof(EstimateObjectCommand), nameof(EstimateReferenceCommand))]
+    public partial MemoryObjectDetails? Details { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(EstimateSize), nameof(EstimateHeading))] public partial MemoryReleaseEstimate? ReleaseEstimate { get; set; }
     [ObservableProperty] public partial IReadOnlyList<int> ReleasedObjects { get; set; } = [];
     [ObservableProperty] public partial string ReleaseDescription { get; set; } = "Choose an incoming or outgoing reference to model removing that slot, or estimate releasing all owners of this object.";
     [ObservableProperty] public partial int InspectorTab { get; set; }
     [ObservableProperty] public partial bool IsInspecting { get; set; }
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(EstimateObjectCommand), nameof(EstimateReferenceCommand))] public partial bool IsEstimating { get; set; }
-    [ObservableProperty] public partial MemoryRetainedComposition? RetainedComposition { get; set; }
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(RetainedHeading))] public partial MemoryRetainedComposition? RetainedComposition { get; set; }
     [ObservableProperty] public partial IReadOnlyList<RetainedTypeRow> RetainedTypes { get; set; } = [];
     [ObservableProperty] public partial IReadOnlyList<RetainedTypeRow> ReleasedTypes { get; set; } = [];
     [ObservableProperty] public partial string ObjectPreview { get; set; } = "";
@@ -61,10 +64,7 @@ public sealed partial class MemoryProfilerViewModel
 
     partial void OnDetailsChanged(MemoryObjectDetails? value)
     {
-        foreach (var name in new[] { nameof(OwnSize), nameof(RetainedSize), nameof(ObjectState), nameof(ReferenceCoverage), nameof(ObjectTitle), nameof(ObjectNamespace),
-            nameof(ReachabilityBadge), nameof(ReachabilityTone), nameof(GenerationBadge), nameof(IsPinnedObject), nameof(RetainedShare), nameof(RetainedShareText) }) OnPropertyChanged(name);
         RootPaths.Clear(); if (value is not null) foreach (var path in value.RootPaths) RootPaths.Add(RootPathRow.Create(path));
-        OnPropertyChanged(nameof(WhyAliveSummary));
         if (value is not null)
         {
             _labels[value.Object.Id] = MemoryLabels.ShortType(value.Object.Type);
@@ -74,13 +74,11 @@ public sealed partial class MemoryProfilerViewModel
     }
     partial void OnReleaseEstimateChanged(MemoryReleaseEstimate? value)
     {
-        OnPropertyChanged(nameof(EstimateSize)); OnPropertyChanged(nameof(EstimateHeading));
         var max = value is { Types.Count: > 0 } ? Math.Max(1, value.Types.Max(t => t.Bytes)) : 1;
         ReleasedTypes = value?.Types.Take(30).Select(t => new RetainedTypeRow(t, (double)t.Bytes / max)).ToArray() ?? [];
     }
     partial void OnRetainedCompositionChanged(MemoryRetainedComposition? value)
     {
-        OnPropertyChanged(nameof(RetainedHeading));
         var max = value is { Types.Count: > 0 } ? Math.Max(1, value.Types.Max(t => t.Bytes)) : 1;
         RetainedTypes = value?.Types.Take(30).Select(t => new RetainedTypeRow(t, (double)t.Bytes / max)).ToArray() ?? [];
     }

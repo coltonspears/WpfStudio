@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -14,35 +13,9 @@ public sealed partial class ShellViewModel
     private bool _gitToolOpened;
     private bool _packagesToolOpened;
     private EditorViewModel? _assistantContextDocument;
-    public StudioFeatures? Features { get; private set; }
+    public StudioFeatures Features { get; }
     [ObservableProperty] public partial bool IsSettingsOpen { get; set; }
     partial void OnIsSettingsOpenChanged(bool value) => UpdateDesignerOverlay();
-    private void InitializeFeatures(StudioFeatures? features)
-    {
-        Features = features;
-        if (features == null) return;
-        features.Attach(this);
-        features.Git.OpenFileRequested += GitOpenFileRequested;
-        features.Git.RepositoryChanged += GitRepositoryChanged;
-        features.Git.WorkspaceFilesChanged += GitWorkspaceFilesChanged;
-        features.Assistant.SettingsRequested += AssistantSettingsRequested;
-        features.Assistant.RefreshContextRequested += UpdateAssistantContext;
-    }
-    private void DetachFeatures()
-    {
-        if (Features is not { } features) return;
-        features.Git.OpenFileRequested -= GitOpenFileRequested;
-        features.Git.RepositoryChanged -= GitRepositoryChanged;
-        features.Git.WorkspaceFilesChanged -= GitWorkspaceFilesChanged;
-        features.Assistant.SettingsRequested -= AssistantSettingsRequested;
-        features.Assistant.RefreshContextRequested -= UpdateAssistantContext;
-        if (features.Assistant.Settings is INotifyPropertyChanged settings) settings.PropertyChanged -= AssistantSettingsChanged;
-    }
-    private void GitOpenFileRequested(string path) => _ = GuardAsync(() => OpenDocumentAsync(path));
-    // Commits, checkouts and merges change what each editor's change margin and blame compare with.
-    private void GitRepositoryChanged() { if (Features is { } features) foreach (var document in Documents) document.RefreshGitAsync(features.GitService, _lifetime.Token).Forget(document.ReportFault); }
-    private void GitWorkspaceFilesChanged() => _ = GuardAsync(WorkspaceMutatedAsync);
-    private void AssistantSettingsRequested() => _ = OpenSettingsCommand.ExecuteAsync(AssistantPage);
     partial void OnActiveDocumentChanged(EditorViewModel? value)
     {
         if (value != null) { ActiveWorkbench = null; _assistantContextDocument = value; }
@@ -52,14 +25,13 @@ public sealed partial class ShellViewModel
     private void UpdateAssistantContext()
     {
         var document = ActiveDocument ?? (Documents.Contains(_assistantContextDocument!) ? _assistantContextDocument : null);
-        Features?.Assistant.SetEditorContext(document?.State.Path, document?.State.Content, document?.SelectedText);
+        Features.Assistant.SetEditorContext(document?.State.Path, document?.State.Content, document?.SelectedText);
     }
     public void ActivateWorkbench(string? name)
     {
         ActiveWorkbench = name;
         ActiveDocument = null;
         // Restored tabs get the same lazy initialization as a menu-opened tab.
-        if (Features == null) return;
         if (name == Workbenches.Git && !_gitToolOpened)
         {
             _gitToolOpened = true;
@@ -74,14 +46,13 @@ public sealed partial class ShellViewModel
     }
     [RelayCommand] private Task OpenSettingsAsync(string? page) => GuardAsync(async () =>
     {
-        if (Features != null) await Features.Assistant.InitializeAsync();
+        await Features.Assistant.InitializeAsync();
         if (!string.IsNullOrEmpty(page)) SettingsPage = page;
         IsSettingsOpen = true;
     });
     [RelayCommand] private void CloseSettings() => IsSettingsOpen = false;
     [RelayCommand] private Task OpenPackagesAsync() => GuardAsync(async () =>
     {
-        if (Features == null) return;
         _packagesToolOpened = true;
         ToolRequested?.Invoke(Workbenches.Packages); Features.Packages.SetWorkspace(Workspace);
         await Features.Packages.ActivateAsync();
@@ -89,15 +60,14 @@ public sealed partial class ShellViewModel
     [RelayCommand] private Task OpenSelectedProjectPackagesAsync() => OpenProjectPackagesAsync(Explorer.SelectedNode?.ProjectPath);
     private Task OpenProjectPackagesAsync(string? projectPath) => GuardAsync(async () =>
     {
-        if (Features == null) return;
         _packagesToolOpened = true;
         ToolRequested?.Invoke(Workbenches.Packages); Features.Packages.SetWorkspace(Workspace);
         if (Features.Packages.Projects.FirstOrDefault(project => project.ProjectPath.Equals(projectPath, StringComparison.OrdinalIgnoreCase)) is { } selected)
             Features.Packages.SelectedProject = selected;
         await Features.Packages.ActivateAsync();
     });
-    [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { if (Features != null) { _gitToolOpened = true; ToolRequested?.Invoke(Workbenches.Git); await Features.Git.SetWorkspaceAsync(Workspace?.Path); } });
-    [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { if (Features != null) { UpdateAssistantContext(); ToolRequested?.Invoke(Workbenches.Assistant); await Features.Assistant.InitializeAsync(); } });
+    [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { _gitToolOpened = true; ToolRequested?.Invoke(Workbenches.Git); await Features.Git.SetWorkspaceAsync(Workspace?.Path); });
+    [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { UpdateAssistantContext(); ToolRequested?.Invoke(Workbenches.Assistant); await Features.Assistant.InitializeAsync(); });
     [RelayCommand] private Task RefactorAsync(string? action) => GuardAsync(async () =>
     {
         if (ActiveDocument is not { IsReadOnly: false } document || document.State.Extension != ".cs" || action == null) { Status = "Open a C# source document to use this refactoring"; return; }
@@ -137,7 +107,7 @@ public sealed partial class ShellViewModel
             case EditorAction.InsertSnippet: InsertSnippet(); break;
             case EditorAction.AskColtonGpt:
                 await OpenAssistantCommand.ExecuteAsync(null);
-                if (Features != null) Features.Assistant.ContextMode = document.SelectionLength > 0 ? "Selected text" : "No editor context";
+                Features.Assistant.ContextMode = document.SelectionLength > 0 ? "Selected text" : "No editor context";
                 break;
         }
     }
