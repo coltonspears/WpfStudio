@@ -49,13 +49,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private int _launchChoicesGeneration;
     private Task? _recoveryLoop;
 
-    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures? features = null, Features.Designer.DesignerViewModel? designer = null, Features.Profiling.MemoryProfilerViewModel? memoryProfiler = null)
+    public ShellViewModel(DocumentStore store, SettingsStore settings, WorkspaceClient workspace, BuildService build, WpfIndexService indexer, ScaffoldingService scaffolding, WorkspaceEditTransaction edits, XamlCompletionService xaml, IFileDialogService files, IUserDialogService dialogs, IUiDispatcher dispatcher, DebuggerViewModel debugger, TerminalViewModel terminal, DatabasePaneViewModel database, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths, StudioFeatures features, Features.Designer.DesignerViewModel designer, Features.Profiling.MemoryProfilerViewModel memoryProfiler)
     {
         _store = store; _settings = settings; _workspace = workspace; _build = build; _indexer = indexer; _scaffolding = scaffolding; _edits = edits; _xaml = xaml; _files = files; _dialogs = dialogs; _dispatcher = dispatcher; _logger = logger; _paths = paths.Value;
-        Debugger = debugger; Terminal = terminal; Database = database;
-        MemoryProfiler = memoryProfiler ?? new(new WpfStudio.Runtime.Profiling.MemoryProfilerClient(), files);
-        Designer = designer ?? new(new WpfStudio.Runtime.Design.PreviewClient(), dispatcher);
-        Designer.SourceRequested += source => _ = GuardAsync(() => NavigateAsync(source.Path, source.Line, source.Column));
+        Debugger = debugger; Terminal = terminal; Database = database; Features = features; MemoryProfiler = memoryProfiler; Designer = designer;
         Designer.SourceEditRequested += PreviewDesignerEditAsync;
         Designer.LayoutEditRequested += PreviewDesignerLayoutEditAsync;
         Designer.BindingSourceRequested += NavigatePreviewBindingSourceAsync;
@@ -71,7 +68,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         LiveInspection.SourceRequested += NavigateInspectionSourceAsync;
         LiveInspection.BindingSourceRequested += NavigateInspectionBindingSourceAsync;
         LiveInspection.SourceEditRequested += EditInspectionSourceAsync;
-        InitializeFeatures(features);
+        features.Attach(this);
         InitializeExperience();
         InitializeWorkbench();
         InitializeSettings();
@@ -140,7 +137,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public string WindowTitle => Workspace == null ? "WpfStudio" : $"{Path.GetFileNameWithoutExtension(Workspace.Path)} — WpfStudio";
     public bool HasWorkspace => Workspace != null;
     public bool IsWelcomeVisible => Documents.Count == 0;
-    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features?.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); XamlAnalysis.Reset(value); }
+    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HasWorkspace)); Features.Packages.SetWorkspace(value); NotifyWorkspaceSummary(); XamlAnalysis.Reset(value); }
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
     partial void OnConfigurationChanged(string value) { if (!string.IsNullOrWhiteSpace(value)) ScheduleContextReload(); }
     partial void OnTargetFrameworkChanged(string? value) { if (value != null) ScheduleContextReload(); }
@@ -153,7 +150,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     public async Task InitializeAsync(string[] arguments)
     {
-        var assistant = Features?.Assistant.InitializeAsync() ?? Task.CompletedTask;
+        var assistant = Features.Assistant.InitializeAsync();
         var settings = await _settings.LoadAsync();
         await assistant;
         ThemeName = settings.Theme; ThemeChanged?.Invoke(ThemeName);
@@ -212,7 +209,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before switching workspaces"; return; }
         if (!await CloseAllDocumentsForWorkspaceAsync()) return;
         if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
-        if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(null);
+        if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(null);
         // The awaits above let another operation start; claiming the operation token now would orphan its cancellation.
         if (IsBusy || _loading) { Status = "Wait for the current workspace operation to finish"; return; }
         IsBusy = true; _loading = true; _operation = new();
@@ -242,7 +239,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             foreach (var issue in Workspace.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
             RecentWorkspaces.Remove(path); RecentWorkspaces.Insert(0, path); while (RecentWorkspaces.Count > 10) RecentWorkspaces.RemoveAt(10);
             await Debugger.SetWorkspaceAsync(path);
-            if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(path);
+            if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(path);
             await RefreshWpfAsync();
             await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync();
             _ = TaskList.RefreshCommand.ExecuteAsync(null);
@@ -410,8 +407,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             vm.Navigate(Math.Min(position, vm.State.Content.Length));
             await FindReferencesCommand.ExecuteAsync(null);
         });
-        if (Features?.GitService is { } git) vm.RefreshGitAsync(git, _lifetime.Token).Forget(vm.ReportFault);
-        vm.BlameCommitRequested += line => _ = GuardAsync(async () => { await OpenGitCommand.ExecuteAsync(null); Features?.Git.ShowCommit(line, vm.GitBase?.RelativePath); });
+        vm.RefreshGitAsync(Features.GitService, _lifetime.Token).Forget(vm.ReportFault);
+        vm.BlameCommitRequested += line => _ = GuardAsync(async () => { await OpenGitCommand.ExecuteAsync(null); Features.Git.ShowCommit(line, vm.GitBase?.RelativePath); });
         ConfigureXamlContext(vm);
         vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
         vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
@@ -890,7 +887,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Palette.Dispose();
         _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
         Breakpoints.Dispose();
-        DetachFeatures(); Features?.Dispose();
+        Features.Dispose();
         _operation?.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
         foreach (var document in Documents) document.Dispose();
         // Dispose UI-bound commands while the shell still owns its dispatcher

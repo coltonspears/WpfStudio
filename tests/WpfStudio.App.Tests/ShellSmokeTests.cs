@@ -388,7 +388,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         await shell.OpenPackagesCommand.ExecuteAsync(null); await Idle();
         var packages = manager.Layout.Descendents().OfType<LayoutDocument>().Single(d => d.ContentId == "Packages");
         Assert.True(((FrameworkElement)packages.Content).ActualHeight > 300);
-        Assert.NotEmpty(shell.Features!.Packages.Installed);
+        Assert.NotEmpty(shell.Features.Packages.Installed);
         shell.Features.Packages.SelectedInstalled = shell.Features.Packages.Installed.First();
         await Idle();
         var packagePane = (FrameworkElement)packages.Content;

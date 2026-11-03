@@ -28,7 +28,7 @@ public sealed partial class ShellViewModel
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before closing the solution"; return false; }
         if (!await CloseAllDocumentsForWorkspaceAsync()) return false;
         if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
-        if (_gitToolOpened && Features != null) await Features.Git.SetWorkspaceAsync(null);
+        if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(null);
         var name = Workspace == null ? "" : Path.GetFileName(Workspace.Path);
         _history.Clear();
         _allFiles = [];

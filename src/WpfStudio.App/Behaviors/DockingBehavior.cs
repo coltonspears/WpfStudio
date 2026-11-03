@@ -63,8 +63,8 @@ public static class DockingBehavior
             if (defaultLayout is not null) return;
             // Package and Git workbenches need document-sized space. Retain their
             // views here so closing/reopening tabs preserves feature state.
-            staticContent["Packages"] = new Features.Packages.PackagesPane { DataContext = shell.Features?.Packages };
-            staticContent["Git"] = new Features.Git.GitPane { DataContext = shell.Features?.Git };
+            staticContent["Packages"] = new Features.Packages.PackagesPane { DataContext = shell.Features.Packages };
+            staticContent["Git"] = new Features.Git.GitPane { DataContext = shell.Features.Git };
             staticContent["Profiler"] = new Features.Profiling.MemoryProfilerPane { DataContext = shell.MemoryProfiler };
             staticTitles["Profiler"] = "Memory profiler";
             staticContent["Designer"] = new Features.Designer.DesignerPane { DataContext = shell.Designer };
