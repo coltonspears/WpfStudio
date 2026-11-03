@@ -64,7 +64,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         XamlAnalysis = new(this, store, workspace, dispatcher, logger, _lifetime.Token);
         Explorer = new(this, Projects); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher); Breakpoints = new(this, debugger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
-        ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) OnPropertyChanged(nameof(IsPreviewOpen)); };
+        ChangeReview.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(ChangeReviewViewModel.IsOpen)) { OnPropertyChanged(nameof(IsPreviewOpen)); UpdateDesignerOverlay(); } };
+        Palette.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Palette.IsOpen)) UpdateDesignerOverlay(); };
         LiveInspection = new(dispatcher);
         LiveInspection.LaunchRequested += debug => LaunchWithInspectionAsync(debug);
         LiveInspection.SourceRequested += NavigateInspectionSourceAsync;
@@ -117,6 +118,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial string? LaunchProfile { get; set; }
     [ObservableProperty] public partial string SearchQuery { get; set; } = "";
     [ObservableProperty] public partial bool IsScaffoldOpen { get; set; }
+    partial void OnIsScaffoldOpenChanged(bool value) => UpdateDesignerOverlay();
+    private void UpdateDesignerOverlay() => Designer.IsOverlayOpen = Palette.IsOpen || IsScaffoldOpen || IsPreviewOpen || IsSettingsOpen;
     [ObservableProperty] public partial ScaffoldKind SelectedScaffoldKind { get; set; } = ScaffoldKind.ViewAndViewModel;
     [ObservableProperty] public partial string ScaffoldName { get; set; } = "CustomerView";
     [ObservableProperty] public partial bool AddDataTemplate { get; set; }

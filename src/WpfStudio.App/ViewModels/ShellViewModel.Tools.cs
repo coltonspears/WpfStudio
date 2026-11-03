@@ -16,6 +16,7 @@ public sealed partial class ShellViewModel
     private EditorViewModel? _assistantContextDocument;
     public StudioFeatures? Features { get; private set; }
     [ObservableProperty] public partial bool IsSettingsOpen { get; set; }
+    partial void OnIsSettingsOpenChanged(bool value) => UpdateDesignerOverlay();
     private void InitializeFeatures(StudioFeatures? features)
     {
         Features = features;

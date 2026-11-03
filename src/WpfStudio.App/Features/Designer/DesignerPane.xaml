@@ -6,7 +6,6 @@
  xmlns:bindings="clr-namespace:WpfStudio.App.Features.BindingSources">
  <UserControl.Resources>
   <BooleanToVisibilityConverter x:Key="DesignerBoolVisibility"/>
-  <local:NativePreviewSuppressionConverter x:Key="NativePreviewSuppression"/>
   <local:PropertyIsSetConverter x:Key="PropertyIsSet"/>
   <!-- The appearance picker lists every property; the grid's search filter applies only to the grid. -->
   <CollectionViewSource x:Key="AppearanceProperties" Source="{Binding Properties}"/>
@@ -295,18 +294,10 @@
      <!-- Native content is never transformed or placed inside a WPF ScrollViewer. -->
      <local:NativePreviewPane Session="{Binding InteractionSession}" IsActive="{Binding IsInteracting}"
                               ContentWidth="{Binding InteractionWidth}" ContentHeight="{Binding InteractionHeight}"
-                              ExitInteractionCommand="{Binding ExitInteractionCommand}">
+                              ExitInteractionCommand="{Binding ExitInteractionCommand}" IsSuppressed="{Binding IsOverlayOpen}">
       <local:NativePreviewPane.Style><Style TargetType="local:NativePreviewPane"><Setter Property="Visibility" Value="Hidden"/><Style.Triggers>
        <DataTrigger Binding="{Binding IsInteracting}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
       </Style.Triggers></Style></local:NativePreviewPane.Style>
-      <local:NativePreviewPane.IsSuppressed>
-       <MultiBinding Converter="{StaticResource NativePreviewSuppression}">
-        <Binding Path="MainWindow.DataContext.Palette.IsOpen" Source="{x:Static Application.Current}"/>
-        <Binding Path="MainWindow.DataContext.IsScaffoldOpen" Source="{x:Static Application.Current}"/>
-        <Binding Path="MainWindow.DataContext.IsPreviewOpen" Source="{x:Static Application.Current}"/>
-        <Binding Path="MainWindow.DataContext.IsSettingsOpen" Source="{x:Static Application.Current}"/>
-       </MultiBinding>
-      </local:NativePreviewPane.IsSuppressed>
      </local:NativePreviewPane>
     </Grid>
    </DockPanel>
