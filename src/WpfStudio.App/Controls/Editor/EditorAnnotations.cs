@@ -11,16 +11,16 @@ using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Git;
 
-namespace WpfStudio.App.Controls;
+namespace WpfStudio.App.Controls.Editor;
 
 /// <summary>
 /// Git change margin, and in C# a row above each type and member with its reference counts and Git history. The
 /// row is part of the declaration's first line, so nothing clickable sits beside the code itself.
 /// </summary>
-public sealed partial class EditorSurface
+internal sealed class EditorAnnotations
 {
-    private GitChangeMargin? _changeMargin;
-    private LensRowGenerator? _lensRows;
+    private readonly EditorSurface _owner;
+    private readonly GitChangeMargin _changeMargin;
     /// <summary>A declaration's lens; its offsets follow edits until the next counts arrive.</summary>
     private sealed class TrackedLens(int position, int start, int end, CodeLensEntry entry)
     {
@@ -31,31 +31,39 @@ public sealed partial class EditorSurface
     private readonly Popup _changePopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Right, PopupAnimation = PopupAnimation.Fade };
     private readonly Popup _historyPopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.Fade };
 
-    private void InitializeAnnotations()
+    public EditorAnnotations(EditorSurface owner)
     {
-        _changeMargin = new GitChangeMargin(this);
-        var numbers = TextArea.LeftMargins.OfType<LineNumberMargin>().FirstOrDefault();
-        TextArea.LeftMargins.Insert(numbers is null ? TextArea.LeftMargins.Count : TextArea.LeftMargins.IndexOf(numbers) + 1, _changeMargin);
-        _lensRows = new LensRowGenerator(this);
-        TextArea.TextView.ElementGenerators.Add(_lensRows);
+        _owner = owner;
+        _changeMargin = new GitChangeMargin(owner, this);
+        var numbers = owner.TextArea.LeftMargins.OfType<LineNumberMargin>().FirstOrDefault();
+        owner.TextArea.LeftMargins.Insert(numbers is null ? owner.TextArea.LeftMargins.Count : owner.TextArea.LeftMargins.IndexOf(numbers) + 1, _changeMargin);
+        owner.TextArea.TextView.ElementGenerators.Add(new LensRowGenerator(owner, this));
     }
 
-    private bool ShowsLensRows => ViewModel is { IsCSharp: true } vm && (vm.ShowCodeLens || vm.ShowInlineBlame);
+    public void UpdateChangeMargin() => _changeMargin.Update();
 
-    private void ApplyCodeLens()
+    public void CloseChangePopup() => _changePopup.IsOpen = false;
+
+    public void ClosePopups() { _changePopup.IsOpen = false; _historyPopup.IsOpen = false; }
+
+    public void ClearCodeLens() => _lenses = [];
+
+    private bool ShowsLensRows => _owner.ViewModel is { IsCSharp: true } vm && (vm.ShowCodeLens || vm.ShowInlineBlame);
+
+    public void ApplyCodeLens()
     {
         _lenses = [];
-        if (ShowsLensRows && ViewModel is { } vm && vm.CodeLensVersion == vm.State.Version && Text == vm.State.Content)
-            foreach (var entry in vm.CodeLenses.Where(entry => entry.Position <= Document.TextLength).OrderBy(entry => entry.Position))
+        if (ShowsLensRows && _owner.ViewModel is { } vm && vm.CodeLensVersion == vm.State.Version && _owner.Text == vm.State.Content)
+            foreach (var entry in vm.CodeLenses.Where(entry => entry.Position <= _owner.Document.TextLength).OrderBy(entry => entry.Position))
             {
-                var first = Document.GetLineByNumber(Math.Clamp(entry.StartLine > 0 ? entry.StartLine : entry.Line, 1, Document.LineCount));
-                var last = Document.GetLineByNumber(Math.Clamp(Math.Max(entry.EndLine, first.LineNumber), 1, Document.LineCount));
-                _lenses.Add(new(entry.Position, TextUtilities.GetLeadingWhitespace(Document, first).EndOffset, last.EndOffset, entry));
+                var first = _owner.Document.GetLineByNumber(Math.Clamp(entry.StartLine > 0 ? entry.StartLine : entry.Line, 1, _owner.Document.LineCount));
+                var last = _owner.Document.GetLineByNumber(Math.Clamp(Math.Max(entry.EndLine, first.LineNumber), 1, _owner.Document.LineCount));
+                _lenses.Add(new(entry.Position, TextUtilities.GetLeadingWhitespace(_owner.Document, first).EndOffset, last.EndOffset, entry));
             }
-        TextArea.TextView.Redraw();
+        _owner.TextArea.TextView.Redraw();
     }
 
-    private void ShiftCodeLens(int offset, int removed, int inserted)
+    public void ShiftCodeLens(int offset, int removed, int inserted)
     {
         if (_lenses.Count == 0) return;
         var kept = new List<TrackedLens>(_lenses.Count);
@@ -70,18 +78,18 @@ public sealed partial class EditorSurface
         _lenses = kept;
     }
 
-    private void OnGitChanged()
+    public void OnGitChanged()
     {
         _changePopup.IsOpen = false; // Its change no longer describes the file.
         _historyPopup.IsOpen = false;
-        _changeMargin?.Update(); // The margin appears once the file is known to be in a repository.
-        TextArea.TextView.Redraw(); // Lens rows show the new blame.
+        _changeMargin.Update(); // The margin appears once the file is known to be in a repository.
+        _owner.TextArea.TextView.Redraw(); // Lens rows show the new blame.
     }
 
     /// <summary>The lens row for the declarations starting on one line: counts, then Git history.</summary>
     private UIElement? CreateLensRow(IReadOnlyList<TrackedLens> lenses)
     {
-        if (ViewModel is not { } vm) return null;
+        if (_owner.ViewModel is not { } vm) return null;
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         void Separator() { if (row.Children.Count > 0) row.Children.Add(Annotation("  |  ")); }
         if (vm.ShowCodeLens)
@@ -96,11 +104,11 @@ public sealed partial class EditorSurface
                 block.MouseLeftButtonDown += (_, e) => { e.Handled = true; vm.RequestCodeLens(entry, lens.Position); };
                 row.Children.Add(block);
             }
-        if (vm.ShowInlineBlame && vm.BlameVersion == vm.State.Version && Text == vm.State.Content)
+        if (vm.ShowInlineBlame && vm.BlameVersion == vm.State.Version && _owner.Text == vm.State.Content)
         {
             var lens = lenses[0];
-            var first = Document.GetLineByOffset(Math.Min(lens.Start, Document.TextLength)).LineNumber;
-            var last = Document.GetLineByOffset(Math.Clamp(lens.End, 0, Document.TextLength)).LineNumber;
+            var first = _owner.Document.GetLineByOffset(Math.Min(lens.Start, _owner.Document.TextLength)).LineNumber;
+            var last = _owner.Document.GetLineByOffset(Math.Clamp(lens.End, 0, _owner.Document.TextLength)).LineNumber;
             if (GitBlame.Summarize(vm.Blame, first, last) is { } history && (history.Changes.Count > 0 || history.UncommittedLines > 0))
             {
                 Separator();
@@ -131,16 +139,16 @@ public sealed partial class EditorSurface
         _historyPopup.IsOpen = true;
     }
 
-    internal BlameHistoryCard? CreateHistoryCard(string name, int first, int last, BlameHistory history)
+    public BlameHistoryCard? CreateHistoryCard(string name, int first, int last, BlameHistory history)
     {
-        if (ViewModel is not { } vm) return null;
+        if (_owner.ViewModel is not { } vm) return null;
         return BlameHistoryCard.Create(name, first, last, history, DateTimeOffset.Now,
             new RelayCommand<BlameLine>(commit =>
             {
                 _historyPopup.IsOpen = false;
                 if (commit is not null) vm.RequestBlameCommit(commit);
             }),
-            new RelayCommand(() => { _historyPopup.IsOpen = false; Focus(); }));
+            new RelayCommand(() => { _historyPopup.IsOpen = false; _owner.Focus(); }));
     }
 
     /// <summary>Subtle text in the editor's font, used for lens rows.</summary>
@@ -148,32 +156,33 @@ public sealed partial class EditorSurface
     {
         var block = new TextBlock
         {
-            Text = text, FontFamily = FontFamily, FontSize = Math.Max(8, FontSize - 2), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 720
+            Text = text, FontFamily = _owner.FontFamily, FontSize = Math.Max(8, _owner.FontSize - 2), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 720
         };
         block.SetResourceReference(TextBlock.ForegroundProperty, "InlayHintBrush");
         return block;
     }
 
     /// <summary>Restores the committed text of a changed block in one undoable edit.</summary>
-    internal void RevertChange(LineChange change)
+    private void RevertChange(LineChange change)
     {
-        if (IsReadOnly) return;
-        var newline = TextUtilities.GetNewLineFromDocument(Document, Math.Clamp(change.StartLine, 1, Document.LineCount));
+        var document = _owner.Document;
+        if (_owner.IsReadOnly) return;
+        var newline = TextUtilities.GetNewLineFromDocument(document, Math.Clamp(change.StartLine, 1, document.LineCount));
         var original = change.OriginalText.Replace("\n", newline, StringComparison.Ordinal);
-        using (Document.RunUpdate())
+        using (document.RunUpdate())
         {
             if (change.Kind == LineChangeKind.Deleted)
             {
-                if (change.StartLine > Document.LineCount) Document.Insert(Document.TextLength, newline + original);
-                else Document.Insert(Document.GetLineByNumber(change.StartLine).Offset, original + newline);
+                if (change.StartLine > document.LineCount) document.Insert(document.TextLength, newline + original);
+                else document.Insert(document.GetLineByNumber(change.StartLine).Offset, original + newline);
                 return;
             }
-            var first = Document.GetLineByNumber(Math.Clamp(change.StartLine, 1, Document.LineCount));
-            var last = Document.GetLineByNumber(Math.Clamp(change.StartLine + change.LineCount - 1, 1, Document.LineCount));
-            if (change.Kind == LineChangeKind.Modified) Document.Replace(first.Offset, last.EndOffset - first.Offset, original);
-            else if (last.DelimiterLength > 0) Document.Remove(first.Offset, last.Offset + last.TotalLength - first.Offset);
-            else if (first.PreviousLine is { } previous) Document.Remove(previous.EndOffset, last.EndOffset - previous.EndOffset); // Added at the end of the file.
-            else Document.Remove(first.Offset, last.EndOffset - first.Offset);
+            var first = document.GetLineByNumber(Math.Clamp(change.StartLine, 1, document.LineCount));
+            var last = document.GetLineByNumber(Math.Clamp(change.StartLine + change.LineCount - 1, 1, document.LineCount));
+            if (change.Kind == LineChangeKind.Modified) document.Replace(first.Offset, last.EndOffset - first.Offset, original);
+            else if (last.DelimiterLength > 0) document.Remove(first.Offset, last.Offset + last.TotalLength - first.Offset);
+            else if (first.PreviousLine is { } previous) document.Remove(previous.EndOffset, last.EndOffset - previous.EndOffset); // Added at the end of the file.
+            else document.Remove(first.Offset, last.EndOffset - first.Offset);
         }
     }
 
@@ -181,28 +190,28 @@ public sealed partial class EditorSurface
     {
         _changePopup.Child = new ContentPresenter { Content = CreateChangeCard(change) };
         _changePopup.PlacementTarget = _changeMargin;
-        var visual = TextArea.TextView.GetVisualLine(line);
-        _changePopup.VerticalOffset = visual is null ? 0 : visual.VisualTop - TextArea.TextView.VerticalOffset;
+        var visual = _owner.TextArea.TextView.GetVisualLine(line);
+        _changePopup.VerticalOffset = visual is null ? 0 : visual.VisualTop - _owner.TextArea.TextView.VerticalOffset;
         _changePopup.HorizontalOffset = 4;
         _changePopup.IsOpen = true;
     }
 
-    internal LineChangeCard CreateChangeCard(LineChange change)
+    public LineChangeCard CreateChangeCard(LineChange change)
     {
         // The popup can outlive its editor's state; revert only the same buffer while the change is still current.
-        var model = ViewModel; var document = Document;
-        return LineChangeCard.Create(change, !IsReadOnly,
+        var model = _owner.ViewModel; var document = _owner.Document;
+        return LineChangeCard.Create(change, !_owner.IsReadOnly,
             new RelayCommand(() =>
             {
                 _changePopup.IsOpen = false;
-                if (!ReferenceEquals(model, ViewModel) || !ReferenceEquals(document, Document) || model?.LineChanges.Contains(change) != true) return;
-                RevertChange(change); Focus();
+                if (!ReferenceEquals(model, _owner.ViewModel) || !ReferenceEquals(document, _owner.Document) || model?.LineChanges.Contains(change) != true) return;
+                RevertChange(change); _owner.Focus();
             }),
-            new RelayCommand(() => { _changePopup.IsOpen = false; Focus(); })) with { Preferences = model?.Preferences };
+            new RelayCommand(() => { _changePopup.IsOpen = false; _owner.Focus(); })) with { Preferences = model?.Preferences };
     }
 
     /// <summary>Thin bars beside the line numbers: added (green), changed (accent) and deleted (red marker) since the last commit.</summary>
-    private sealed class GitChangeMargin(EditorSurface owner) : AbstractMargin
+    private sealed class GitChangeMargin(EditorSurface owner, EditorAnnotations annotations) : AbstractMargin
     {
         protected override Size MeasureOverride(Size availableSize) => new(owner.ViewModel?.GitBase is null ? 0 : 6, 0);
         protected override void OnRender(DrawingContext context)
@@ -240,7 +249,7 @@ public sealed partial class EditorSurface
         }
         protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
         {
-            if (ChangeAt(e, out var line) is { } change) { owner.ShowChange(change, line); e.Handled = true; }
+            if (ChangeAt(e, out var line) is { } change) { annotations.ShowChange(change, line); e.Handled = true; }
         }
         protected override void OnMouseMove(MouseEventArgs e)
         {
@@ -269,17 +278,17 @@ public sealed partial class EditorSurface
     /// character whose height raises the line's baseline, so the code moves down and the row fills the space above.
     /// The caret never stops on it, and the caret and line numbers stay aligned with the text.
     /// </summary>
-    private sealed class LensRowGenerator(EditorSurface owner) : VisualLineElementGenerator
+    private sealed class LensRowGenerator(EditorSurface owner, EditorAnnotations annotations) : VisualLineElementGenerator
     {
         private int _emittedAt = -1;
         public override void StartGeneration(ITextRunConstructionContext context) { base.StartGeneration(context); _emittedAt = -1; }
 
         private List<TrackedLens> LensesOn(DocumentLine line) =>
-            owner._lenses.Where(lens => lens.Start >= line.Offset && lens.Start <= line.EndOffset).ToList();
+            annotations._lenses.Where(lens => lens.Start >= line.Offset && lens.Start <= line.EndOffset).ToList();
 
         public override int GetFirstInterestedOffset(int startOffset)
         {
-            if (!owner.ShowsLensRows || owner._lenses.Count == 0) return -1;
+            if (!annotations.ShowsLensRows || annotations._lenses.Count == 0) return -1;
             var line = CurrentContext.VisualLine.FirstDocumentLine;
             if (LensesOn(line).Count == 0) return -1;
             var anchor = TextUtilities.GetLeadingWhitespace(CurrentContext.Document, line).EndOffset;
@@ -290,11 +299,11 @@ public sealed partial class EditorSurface
         {
             var line = CurrentContext.VisualLine.FirstDocumentLine;
             var lenses = LensesOn(line);
-            if (offset == _emittedAt || lenses.Count == 0 || owner.CreateLensRow(lenses) is not { } row) return null;
+            if (offset == _emittedAt || lenses.Count == 0 || annotations.CreateLensRow(lenses) is not { } row) return null;
             _emittedAt = offset;
             var view = owner.TextArea.TextView;
             var rowHeight = Math.Ceiling(view.DefaultLineHeight * 0.95);
-            var host = new Canvas { Width = 0, Height = rowHeight + view.DefaultBaseline, ClipToBounds = false, Tag = AdornmentTag };
+            var host = new Canvas { Width = 0, Height = rowHeight + view.DefaultBaseline, ClipToBounds = false, Tag = EditorAdornment.Tag };
             Canvas.SetTop(row, Math.Max(0, (rowHeight - view.DefaultLineHeight) / 2 + 1));
             host.Children.Add(row);
             TextBlock.SetBaselineOffset(host, host.Height);
@@ -304,14 +313,5 @@ public sealed partial class EditorSurface
     private sealed class LensElement(UIElement element) : InlineObjectElement(0, element)
     {
         public override int GetNextCaretPosition(int visualColumn, System.Windows.Documents.LogicalDirection direction, CaretPositioningMode mode) => -1;
-    }
-}
-
-internal static class FrameworkElementExtensions
-{
-    public static T WithResource<T>(this T element, DependencyProperty property, string key) where T : FrameworkElement
-    {
-        element.SetResourceReference(property, key);
-        return element;
     }
 }

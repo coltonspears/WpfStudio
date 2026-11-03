@@ -1,26 +1,25 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
-using System.Windows.Media;
+using ICSharpCode.AvalonEdit;
 using WpfStudio.Contracts;
 
-namespace WpfStudio.App.Controls;
+namespace WpfStudio.App.Controls.Editor;
+
+internal sealed record HoverParts(QuickInfoResult? QuickInfo, string? DataTip, string? Xaml, IReadOnlyList<WorkspaceDiagnostic> Diagnostics)
+{
+    public bool IsEmpty => QuickInfo is null && string.IsNullOrWhiteSpace(DataTip) && string.IsNullOrWhiteSpace(Xaml) && Diagnostics.Count == 0;
+}
 
 /// <summary>
 /// The hover card: Quick Info for the symbol under the pointer (its classified signature, kind, documentation and
 /// notes), the debugger's value while paused, XAML details, and the diagnostics at that position. Parts arrive at
 /// different times and the open card is updated in place.
 /// </summary>
-public sealed partial class EditorSurface
+internal sealed class HoverCard(TextEditor editor)
 {
-    private sealed record HoverParts(QuickInfoResult? QuickInfo, string? DataTip, string? Xaml, IReadOnlyList<WorkspaceDiagnostic> Diagnostics)
+    public StackPanel Build(HoverParts parts)
     {
-        public bool IsEmpty => QuickInfo is null && string.IsNullOrWhiteSpace(DataTip) && string.IsNullOrWhiteSpace(Xaml) && Diagnostics.Count == 0;
-    }
-
-    private void ShowHover(HoverParts parts)
-    {
-        if (parts.IsEmpty) return;
         var card = new StackPanel { MaxWidth = 640 };
         void Separate() { if (card.Children.Count > 0) card.Children.Add(new Border { Height = 1, Margin = new Thickness(-10, 8, -10, 8) }.WithResource(Border.BackgroundProperty, "BorderBrush")); }
         if (parts.QuickInfo is { } info) { AddQuickInfo(card, info); }
@@ -36,9 +35,7 @@ public sealed partial class EditorSurface
             Separate();
             foreach (var diagnostic in parts.Diagnostics) card.Children.Add(DiagnosticRow(diagnostic));
         }
-        // Updating an open popup in place avoids moving it when slower information arrives.
-        _hoverContent.Child = card;
-        if (!_hover.IsOpen) { _hover.PlacementTarget = this; _hover.IsOpen = true; }
+        return card;
     }
 
     private void AddQuickInfo(StackPanel card, QuickInfoResult info)
@@ -84,8 +81,8 @@ public sealed partial class EditorSurface
     private TextBlock Classified(IReadOnlyList<QuickInfoRun> runs, bool code)
     {
         var block = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        if (code) { block.FontFamily = FontFamily; block.FontSize = Math.Max(11, FontSize - 0.5); }
-        else block.FontSize = Math.Max(11, FontSize - 0.5);
+        if (code) { block.FontFamily = editor.FontFamily; block.FontSize = Math.Max(11, editor.FontSize - 0.5); }
+        else block.FontSize = Math.Max(11, editor.FontSize - 0.5);
         block.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         foreach (var run in runs)
         {
@@ -147,11 +144,11 @@ public sealed partial class EditorSurface
         icon.SetResourceReference(Glyph.ForegroundProperty, brush);
         DockPanel.SetDock(icon, Dock.Left);
         row.Children.Add(icon);
-        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = Math.Max(11, FontSize - 0.5) };
+        var text = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = Math.Max(11, editor.FontSize - 0.5) };
         text.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         if (!string.IsNullOrEmpty(diagnostic.Id))
         {
-            var id = new Run(diagnostic.Id + "  ") { FontFamily = FontFamily };
+            var id = new Run(diagnostic.Id + "  ") { FontFamily = editor.FontFamily };
             id.SetResourceReference(TextElement.ForegroundProperty, "MutedBrush");
             text.Inlines.Add(id);
         }
@@ -164,10 +161,10 @@ public sealed partial class EditorSurface
         new TextBlock { Text = text, FontSize = 11, Margin = new Thickness(0, 0, 0, 3) }.WithResource(TextBlock.ForegroundProperty, "MutedBrush");
 
     private TextBlock Code(string text) =>
-        new TextBlock { Text = text, FontFamily = FontFamily, FontSize = Math.Max(11, FontSize - 0.5), TextWrapping = TextWrapping.Wrap }.WithResource(TextBlock.ForegroundProperty, "TextBrush");
+        new TextBlock { Text = text, FontFamily = editor.FontFamily, FontSize = Math.Max(11, editor.FontSize - 0.5), TextWrapping = TextWrapping.Wrap }.WithResource(TextBlock.ForegroundProperty, "TextBrush");
 
     private TextBlock Prose(string text) =>
-        new TextBlock { Text = text, FontSize = Math.Max(11, FontSize - 0.5), TextWrapping = TextWrapping.Wrap }.WithResource(TextBlock.ForegroundProperty, "TextBrush");
+        new TextBlock { Text = text, FontSize = Math.Max(11, editor.FontSize - 0.5), TextWrapping = TextWrapping.Wrap }.WithResource(TextBlock.ForegroundProperty, "TextBrush");
 
     private static T Spaced<T>(T element, double top) where T : FrameworkElement { element.Margin = new Thickness(0, top, 0, 0); return element; }
 
@@ -176,5 +173,14 @@ public sealed partial class EditorSurface
         block.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
         block.FontSize = Math.Max(10.5, block.FontSize - 1);
         return block;
+    }
+}
+
+internal static class FrameworkElementExtensions
+{
+    public static T WithResource<T>(this T element, DependencyProperty property, string key) where T : FrameworkElement
+    {
+        element.SetResourceReference(property, key);
+        return element;
     }
 }
