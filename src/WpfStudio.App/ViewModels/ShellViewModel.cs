@@ -319,7 +319,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             XamlAnalysis.Request();
         }
         catch (OperationCanceledException) { }
-        catch (Exception exception) { AppendOutput("Project model refresh: " + exception.Message); }
+        catch (Exception exception)
+        {
+            AppendOutput("Project model refresh: " + exception.Message);
+            // The saved model stays in use, so the status must stop promising a refresh.
+            if (_statusShowsModelRefresh && Workspace is { } current) Status = $"{Projects.Count} projects · SDK {current.SdkVersion} · project model refresh failed; see Output";
+        }
     }
     private void ApplyWorkspaceProjects(string? startupPath)
     {

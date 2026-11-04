@@ -57,6 +57,13 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             if (acquired.Solution is not { } solution)
                 throw new InvalidOperationException(string.Join(" ", acquired.Issues.Select(issue => issue.Message)) is { Length: > 0 } reason
                     ? reason : "MSBuild could not load the workspace.");
+            // MSBuild reports a project it cannot open and loads it with no documents, as with a half-merged project file.
+            // The solution still lists it and the current model still answers for it, so swapping would only lose those answers.
+            Solution? current;
+            lock (_gate) current = _pages.Authored ?? CurrentSolution;
+            if (current is not null && acquired.Paths.FirstOrDefault(path => HasDocuments(current, path) && !HasDocuments(solution, path)) is { } lost)
+                throw new InvalidOperationException(string.Join(" ", acquired.Issues.Where(issue => issue.Severity == "Error").Select(issue => issue.Message)) is { Length: > 0 } reason
+                    ? reason : $"MSBuild could not load {lost}.");
             // Generators would otherwise run while publishing, when the client waits.
             foreach (var project in solution.Projects)
                 await project.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false);
@@ -84,10 +91,13 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         }
     }
 
+    private static bool HasDocuments(Solution solution, string projectPath) =>
+        solution.Projects.Any(project => project.DocumentIds.Count > 0 && string.Equals(project.FilePath, projectPath, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>What a load produced before it replaces the engine's state: a solution, evaluations and timings.</summary>
     private sealed record Acquired(Microsoft.CodeAnalysis.Workspace? Workspace, Solution? Solution, string Sdk, bool Cached, IReadOnlyList<string> Paths,
         ConcurrentQueue<WorkspaceIssue> Issues, Func<string, Task<ProjectDiscovery.EvaluatedProject?>> Evaluate, LoadTimings Timings,
-        IReadOnlyDictionary<string, WorkspaceProject> CachedModels);
+        IReadOnlyDictionary<string, WorkspaceProject> CachedModels, bool OutOfDate = false);
 
     private static async Task<Acquired> AcquireAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
     {
@@ -132,7 +142,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         return new(workspace, loaded, sdk, false, paths, issues, Evaluate, timings, new Dictionary<string, WorkspaceProject>());
     }
 
-    // The model saved by the last full load, when nothing it depends on has changed since.
+    // The model saved by the last full load. One behind the disk still answers at once, because a refresh follows every cached start.
     private static async Task<Acquired?> AcquireCachedAsync(LoadWorkspaceRequest request, CancellationToken cancellationToken)
     {
         var timings = new LoadTimings();
@@ -141,15 +151,14 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             var path = Path.GetFullPath(request.Path);
             var sdk = await ToolchainResolver.RegisterAsync(path, cancellationToken).ConfigureAwait(false);
             var entry = await SolutionCache.ReadAsync(request, sdk, cancellationToken).ConfigureAwait(false);
+            if (entry is null) return null;
             var paths = ProjectDiscovery.GetProjectPaths(path);
-            if (entry is null || !paths.All(project => entry.Evaluations.Any(evaluation => string.Equals(evaluation.ProjectPath, project, StringComparison.OrdinalIgnoreCase))))
-                return null;
             var (workspace, solution) = SolutionCache.Create(entry);
             timings.Mark("cached projects");
             var evaluations = entry.Evaluations.ToDictionary(item => item.ProjectPath, item => Task.FromResult<ProjectDiscovery.EvaluatedProject?>(item.Project), StringComparer.OrdinalIgnoreCase);
             return new(workspace, solution, sdk, true, paths, new(),
                 projectPath => evaluations.GetValueOrDefault(projectPath) ?? Task.FromResult<ProjectDiscovery.EvaluatedProject?>(null), timings,
-                entry.Models.ToDictionary(model => model.ProjectPath, StringComparer.OrdinalIgnoreCase));
+                entry.Models.ToDictionary(model => model.ProjectPath, StringComparer.OrdinalIgnoreCase), SolutionCache.IsOutOfDate(entry));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -206,7 +215,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                     }
                 }
             var projectConfigurations = evaluated?.Configurations.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? ProjectDiscovery.GetDeclaredConfigurations(projectPath);
-            var files = (evaluated?.Files ?? ProjectDiscovery.FallbackFiles(projectPath)).ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
+            var files = (evaluated?.Files ?? ProjectDiscovery.FallbackFiles(projectPath)).Where(f => !acquired.OutOfDate || File.Exists(f.Path)).ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
             if (project is not null)
             {
                 foreach (var document in project.Documents)
@@ -258,9 +267,11 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         if (acquired.Cached) Task.Run(WarmPageProjectionAsync, CancellationToken.None).Forget();
         else await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
         timings.Mark("XAML pages");
-        issues.Enqueue(new WorkspaceIssue(acquired.Cached
-            ? $"Language services started from the saved project model in {timings}; MSBuild is refreshing it in the background."
-            : $"Language services loaded in {timings}.", "Info"));
+        issues.Enqueue(new WorkspaceIssue(acquired.OutOfDate
+            ? $"Language services started in {timings} from a saved project model that is out of date, because project files changed since it was saved. Errors can be wrong until MSBuild finishes refreshing it in the background."
+            : acquired.Cached
+                ? $"Language services started from the saved project model in {timings}; MSBuild is refreshing it in the background."
+                : $"Language services loaded in {timings}.", "Info"));
         if (configurations.Count == 0) { configurations.Add("Debug"); configurations.Add("Release"); }
         if (!acquired.Cached && acquired.Solution is { } fresh)
         {

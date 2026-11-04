@@ -15,8 +15,9 @@ namespace WpfStudio.Workspace;
 /// <summary>
 /// The project model from the last full MSBuild load, saved so the next start can offer language services in
 /// seconds instead of waiting for design-time builds. A cached start is always followed by a full load in the
-/// background that replaces it. The cache is ignored when the SDK, a project file, an MSBuild import beside it
-/// or the restore output changed since it was written.
+/// background that replaces it, so a model saved before a project file, an MSBuild import beside it or the restore
+/// output changed still starts the session: it answers at once and that load corrects it. Only another SDK ignores
+/// it, because the references and analyzers it names belong to that SDK's installation.
 /// </summary>
 internal static class SolutionCache
 {
@@ -52,7 +53,7 @@ internal static class SolutionCache
         Path.Combine(Directory, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             $"{Path.GetFullPath(request.Path).ToUpperInvariant()}\n{request.Configuration}\n{request.TargetFramework}")))[..32] + ".json");
 
-    /// <summary>Returns the saved model when every recorded input is unchanged, otherwise null.</summary>
+    /// <summary>Returns the model saved for this SDK, otherwise null. <see cref="IsOutOfDate"/> says whether it is behind the disk.</summary>
     public static async Task<Entry?> ReadAsync(LoadWorkspaceRequest request, string sdk, CancellationToken cancellationToken)
     {
         var file = FileFor(request);
@@ -66,10 +67,11 @@ internal static class SolutionCache
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException) { return null; }
         if (entry is null || entry.Format != Format || entry.Sdk != sdk || entry.Projects.Count == 0
             || !string.Equals(entry.Path, Path.GetFullPath(request.Path), StringComparison.OrdinalIgnoreCase)) return null;
-        foreach (var input in entry.Inputs)
-            if (!Matches(input)) return null;
         return entry;
     }
+
+    /// <summary>A project file, an import beside one or the restore output changed since the model was saved.</summary>
+    public static bool IsOutOfDate(Entry entry) => !entry.Inputs.All(Matches);
 
     public static void Write(LoadWorkspaceRequest request, string sdk, Solution solution,
         IReadOnlyDictionary<string, ProjectDiscovery.EvaluatedProject?> evaluations, IReadOnlyList<WorkspaceProject> models)
@@ -172,16 +174,17 @@ internal static class SolutionCache
             project.ProjectReferences.Select(reference => new CachedProjectReference(reference.ProjectId.Id, reference.Aliases.ToArray(), reference.EmbedInteropTypes)).ToArray());
     }
 
-    /// <summary>Rebuilds the saved solution in a plain workspace. Files deleted since the save are left out.</summary>
+    /// <summary>Rebuilds the saved solution in a plain workspace. Projects and files deleted since the save are left out.</summary>
     public static (Microsoft.CodeAnalysis.Workspace Workspace, Solution Solution) Create(Entry entry)
     {
         var workspace = new AdhocWorkspace(MSBuildMefHostServices.DefaultServices, "WpfStudio cached workspace");
         // Shared instances let every project reuse one copy of each reference's metadata and symbols.
         var metadata = new Dictionary<(string, string, bool), MetadataReference>();
         var analyzers = new Dictionary<string, AnalyzerReference>(StringComparer.OrdinalIgnoreCase);
-        var ids = entry.Projects.ToDictionary(project => project.Id, project => ProjectId.CreateFromSerialized(project.Id, project.Name));
+        var saved = entry.Projects.Where(project => File.Exists(project.FilePath)).ToArray();
+        var ids = saved.ToDictionary(project => project.Id, project => ProjectId.CreateFromSerialized(project.Id, project.Name));
         var projects = new List<ProjectInfo>();
-        foreach (var project in entry.Projects)
+        foreach (var project in saved)
         {
             var id = ids[project.Id];
             var directory = Path.GetDirectoryName(project.FilePath) ?? "";
