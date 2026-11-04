@@ -181,6 +181,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
 
     /// <summary>The WPF index was rebuilt from current file texts, so index diagnostics are trustworthy again.</summary>
     public void MarkIndexRefreshed() { _invalidIndexPaths.Clear(); _indexTextHashes.Clear(); _indexDiagnosticsInvalid = false; }
+    /// <summary>The WPF index no longer describes this file, so its index diagnostics stop applying until the index is rebuilt.</summary>
+    public void MarkIndexStale(string path) => _invalidIndexPaths.Add(path);
     /// <summary>Queues a scan after the debounce without discarding the current results first.</summary>
     public void Schedule() => _ = _scheduler.Schedule();
 

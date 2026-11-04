@@ -478,13 +478,15 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
         if (Designer.SourcePath == document.State.Path) await Designer.CloseAsync();
         document.Dispose(); Documents.Remove(document); _store.Close(document.State);
+        // Reconcile saved/discarded text before exposing closed-file index issues again. The watcher may not have reported the save yet.
+        bool indexIsBehind = document.State.Extension == ".xaml" && WpfExplorer.Index?.Texts.TryGetValue(document.State.Path, out var indexedText) == true && indexedText != document.State.Content;
+        if (indexIsBehind) XamlAnalysis.MarkIndexStale(document.State.Path);
         XamlAnalysis.UntrackDocument(document.State);
         // Queue the worker close before awaiting index refresh. A reopened
         // editor must synchronize after this old buffer has been retired.
         if (document.IsCSharp || document.IsXaml)
             try { await _workspace.CloseDocumentAsync(document.State.Path); } catch (Exception ex) { AppendOutput("Language document close: " + ex.Message); }
-        if (document.State.Extension == ".xaml" && WpfExplorer.Index?.Texts.TryGetValue(document.State.Path, out var indexedText) == true && indexedText != document.State.Content)
-            await RefreshWpfAsync(); // Reconcile saved/discarded text before exposing closed-file index issues again.
+        if (indexIsBehind) await RefreshWpfAsync();
         else RefreshEditorDiagnostics();
         if (ReferenceEquals(ActiveDocument, document)) ActiveDocument = Documents.LastOrDefault();
         UpdateAssistantContext(); OnPropertyChanged(nameof(IsWelcomeVisible));
@@ -760,14 +762,23 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (Workspace == null) return;
         var workspace = Workspace;
-        var revision = XamlAnalysis.IndexRevision;
-        var buffers = _store.Documents.ToDictionary(d => d.Path, d => d.Content, StringComparer.OrdinalIgnoreCase);
-        var index = await Task.Run(() => _indexer.IndexAsync(workspace, buffers, _lifetime.Token));
-        if (!ReferenceEquals(workspace, Workspace) || revision != XamlAnalysis.IndexRevision) return;
-        WpfExplorer.SetIndex(index); _xaml.Index = index;
-        XamlAnalysis.MarkIndexRefreshed();
-        RefreshEditorDiagnostics(); RefreshAllRelated();
-        XamlAnalysis.Schedule();
+        // A change during the scan outdates its result, so scan again. Closing a document always causes one:
+        // the language client reports a semantic change, and the request it posts lands while the close waits here.
+        // A save also raises several watcher events in a few milliseconds, so give those a moment to settle first.
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(50, _lifetime.Token);
+            var revision = XamlAnalysis.IndexRevision;
+            var buffers = _store.Documents.ToDictionary(d => d.Path, d => d.Content, StringComparer.OrdinalIgnoreCase);
+            var index = await Task.Run(() => _indexer.IndexAsync(workspace, buffers, _lifetime.Token));
+            if (!ReferenceEquals(workspace, Workspace)) return;
+            if (revision != XamlAnalysis.IndexRevision) continue;
+            WpfExplorer.SetIndex(index); _xaml.Index = index;
+            XamlAnalysis.MarkIndexRefreshed();
+            RefreshEditorDiagnostics(); RefreshAllRelated();
+            XamlAnalysis.Schedule();
+            return;
+        }
     });
     [RelayCommand] private Task RenameResourceAsync() => GuardAsync(async () =>
     {
