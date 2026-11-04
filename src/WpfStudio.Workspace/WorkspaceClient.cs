@@ -94,7 +94,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         try
         {
             if (_disposed) return;
-            StopWorker();
+            await StopWorkerAndWaitAsync().ConfigureAwait(false);
             lock (_bufferGate) { _buffers.Clear(); _nameProjections.Clear(); }
             _lastLoad = null;
         }
@@ -429,7 +429,16 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         return WorkerHostLocator.Find("WpfStudio.WorkspaceHost", "WorkspaceHost", "net10.0", [current, "Debug", "Release"], [".dll"], []);
     }
 
-    private void StopWorker()
+    private void StopWorker() => DetachWorker()?.Dispose();
+
+    // The worker's working directory is the workspace, and a killed process takes a moment to exit, longer with Server GC.
+    // Waiting for it means the folder is free once a solution is closed.
+    private async Task StopWorkerAndWaitAsync()
+    {
+        if (DetachWorker() is { } worker) await worker.StopAsync(TimeSpan.Zero).ConfigureAwait(false);
+    }
+
+    private WorkerProcessHost? DetachWorker()
     {
         var worker = _worker;
         if (worker is not null) _stoppedWorkerError = worker.ErrorTail;
@@ -438,7 +447,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         _rpc?.Dispose(); _rpc = null;
         lock (_bufferGate) _acceptedDocumentTexts.Clear();
         if (worker is not null) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }
-        worker?.Dispose();
+        return worker;
     }
 
     public async ValueTask DisposeAsync()
@@ -447,7 +456,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         // Cancelling the shutdown token ends every bounded call. A caller that still holds the lock after that is
         // stuck in the worker; killing the worker is what releases it, so do not wait forever to do so.
         bool acquired = await _lifecycle.WaitAsync(_disposeTimeout).ConfigureAwait(false);
-        try { if (_disposed) return; _disposed = true; StopWorker(); }
+        try { if (_disposed) return; _disposed = true; await StopWorkerAndWaitAsync().ConfigureAwait(false); }
         finally { if (acquired) _lifecycle.Release(); }
     }
 }
