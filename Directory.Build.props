@@ -30,6 +30,10 @@
     <GlobalAnalyzerConfigFiles Include="$(MSBuildThisFileDirectory)analyzers.globalconfig" />
     <PackageReference Include="WpfAnalyzers" Version="4.1.1" PrivateAssets="all" />
   </ItemGroup>
+  <!-- Every test assembly, so that no test run can evict the saved workspace models of the person running it. -->
+  <ItemGroup Condition="'$(IsTestCode)' == 'true' And $(MSBuildProjectName.EndsWith('.Tests'))">
+    <Compile Include="$(MSBuildThisFileDirectory)tests\Shared\IsolatedWorkspaceCache.cs" Link="Shared\IsolatedWorkspaceCache.cs" />
+  </ItemGroup>
   <!-- Product code only: test harnesses own their STA loops and launch their own fixtures, so these rules have nothing to protect there. -->
   <ItemGroup Condition="'$(IsProductCode)' == 'true'">
     <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" PrivateAssets="all" />
