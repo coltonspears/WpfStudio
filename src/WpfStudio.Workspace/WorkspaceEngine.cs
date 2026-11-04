@@ -267,6 +267,10 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             // Saved off the request path; a failure only means the next start loads from MSBuild again.
             var evaluated = new Dictionary<string, ProjectDiscovery.EvaluatedProject?>(StringComparer.OrdinalIgnoreCase);
             foreach (var projectPath in paths) evaluated[projectPath] = await Evaluate(projectPath).ConfigureAwait(false);
+            // MSBuild also loads references the solution file does not list, and a cached start needs their evaluations for the
+            // same XAML checks. One that failed stays out instead of stopping the save, as it did before these were saved.
+            foreach (var projectPath in loadedProjects.Select(project => project.FilePath).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Where(item => !evaluated.ContainsKey(item)))
+                if (await Evaluate(projectPath).ConfigureAwait(false) is { } reference) evaluated[projectPath] = reference;
             var saved = models.ToArray();
             Task.Run(() => SolutionCache.Write(request, sdk, fresh, evaluated, saved), CancellationToken.None)
                 .Forget(fault => Console.Error.WriteLine("Workspace cache: " + fault.Message));

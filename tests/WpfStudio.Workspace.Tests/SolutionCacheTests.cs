@@ -62,6 +62,32 @@ public sealed class SolutionCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task AWorkspaceStartedFromItsSavedModelKeepsAReferenceOutsideTheSolutionAvailable()
+    {
+        var solution = Path.Combine(_root, "Shop.slnx");
+        var app = Path.Combine(_root, "App", "App.csproj");
+        var library = Path.Combine(_root, "Library", "Library.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(app)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(library)!);
+        await File.WriteAllTextAsync(app, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\"..\\Library\\Library.csproj\" /></ItemGroup></Project>");
+        await File.WriteAllTextAsync(library, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        await File.WriteAllTextAsync(Path.Combine(_root, "Library", "Value.cs"), "namespace Library; public sealed class Value { }");
+        await File.WriteAllTextAsync(solution, "<Solution><Project Path=\"App/App.csproj\" /></Solution>");
+        Assert.Equal(0, (await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(_root, "restore", app), CancellationToken.None)).ExitCode);
+        await using (var first = new WorkspaceClient())
+        {
+            await first.LoadAsync(new LoadWorkspaceRequest(solution));
+            await WaitForSavedModelAsync(solution);
+        }
+
+        await using var client = new WorkspaceClient();
+        Assert.True((await client.LoadAsync(new LoadWorkspaceRequest(solution, UseCache: true))).Cached);
+
+        var analysis = await client.AnalyzeXamlProjectAsync(new(1, []));
+        Assert.True(analysis.Accepted, analysis.Status);
+    }
+
+    [Fact]
     public async Task VerifyingDocumentsNotYetLoadedOnAnUnchangedDiskChangesNothing()
     {
         var project = Path.Combine(_root, "Lib", "Lib.csproj");
