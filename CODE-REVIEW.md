@@ -54,6 +54,7 @@ Work landed in PRs coltonspears/WpfStudio#13 through #25 and is tracked here aga
 | M1–M6, M9, M10 | MVVM pass; see the fix log | #20 |
 | S3–S10, S12, S14, S15, S18, T6, T7, B72–B74 | Large-class and design pass; see the fix log | #21–#25 |
 | Warnings as errors | `TreatWarningsAsErrors` on `src/` and `tests/`, with curated analyzers; see the fix log | #26 |
+| B75 | Closing a XAML file no longer discards its own re-index; see the fix log | #28 |
 
 ### Partly done
 
@@ -307,6 +308,7 @@ Ordered by impact. "Confirmed" means the code path was read end to end and the f
 | B66 | `GitService.cs:502-507` | **Possible.** stdin written (`blame --contents -`, `commit --file=-`); if git exits first, `WriteAsync` throws `IOException` which is rethrown, replacing git's stderr. | Blame on a path not in HEAD → "pipe has been ended" instead of git's message. |
 | B67 | `Runtime/Terminal/TerminalSurface.cs:38-44` | Design. Any WebView2 initialisation failure disposes the user's shell session. | Transient renderer failure kills the terminal instead of leaving it recoverable. |
 | B68 | `Runtime/Inspection/InspectionSession.cs:71,373-377,418` | Design. First response slower than 3 s closes the session permanently; no reconnect path. | A `tree` snapshot of a large app or a target UI thread busy for 4 s ends live inspection. |
+| B75 | `ViewModels/ShellViewModel.cs` (`CloseDocumentAsync`, `RefreshWpfAsync`) | Confirmed by test. Closing a document makes the language client report a semantic change. The request that posts lands during the close's own re-index, so `RefreshWpfAsync` discarded the result every time on the real dispatcher. | Save and immediately close a fixed XAML file: the WPF index keeps the old text, and the old `XAML001` shows until the watcher reports the save. |
 
 ### Performance defects worth fixing
 
@@ -468,4 +470,12 @@ Analyzers and warnings as errors:
 - `analyzers.globalconfig` is the one place rule severities live, with a reason for each rule turned off. Adopted: .NET analyzers at `Recommended`, curated; `WpfAnalyzers`; `Microsoft.CodeAnalysis.BannedApiAnalyzers`; IDE0005, IDE0051, IDE0052 and IDE0059. Measured and rejected: `IDisposableAnalyzers` (358 hits, no real leak), `Meziantou.Analyzer` (11,161 hits, duplicates and style) and `Roslynator` (1,208 hits, style). `CA2007` is off because `ConfigureAwait(false)` in a view model is the crash fixed by B69 and B70.
 - `BannedSymbols.txt` makes this review's decisions fail the build: `Application.MainWindow` (B70), `Clipboard` and shell `Process.Start` (C8), dialogs (A8), `Dispatcher.Invoke` (A9) and `SemaphoreSlim.Wait` (A4). Each owning class carries one suppression with its reason.
 - Two unobserved faults found and fixed: `EditorViewModel.ProjectDiagnosticsChanged` and `TerminalSurface`'s pump. Two test races fixed: `PromptWorksWithoutAnOwnerOrTheThemeBrushes` and `ManifestWatcherInvalidatesCurrentSnapshotAndCloseDetachesIt`.
-- Shell tests that stay intermittent, measured over 20 runs on `main` and 20 on the branch: `WatchedModelChangeRestoresHealthyEditor` 8 and 6, `BindingNavigationAndExplicitFixes` 1 and 1. `SavingAndClosingAFixedXamlFile` failed 2 in 50 on the branch and 0 in 20 on `main`, with `Collection was modified` on `Shell.Diagnostics`. Thirty instrumented runs did not reproduce it, so its writer is not identified. The likely cause is the tests' inline dispatcher, which runs posted work on whatever thread posted it, but that is unconfirmed.
+- Shell tests that stay intermittent, measured over 20 runs on `main` and 20 on the branch: `WatchedModelChangeRestoresHealthyEditor` 8 and 6, `BindingNavigationAndExplicitFixes` 1 and 1. `SavingAndClosingAFixedXamlFile` failed 2 in 50 on the branch and 0 in 20 on `main`, with `Collection was modified` on `Shell.Diagnostics`; see B75 below for the cause.
+
+B75, the cause of the `SavingAndClosingAFixedXamlFile` failures:
+
+- The note above once blamed the tests' inline dispatcher, which was only half the cause. A recorded stack did show the writer: the file watcher's delete check posts a request, and `InlineDispatcher` runs it on the watcher's thread. But an empty list cannot throw that error, so the list must have held the old `XAML001` at that moment, and that is a product bug.
+- On the real dispatcher, the close's own language-service close posted a `Request()` that landed during the close's re-index, and `RefreshWpfAsync` discarded the result. This happened in 96 of 96 cold runs. The old error stayed hidden only when the watcher had already reported the save. `InlineDispatcher` hid the bug, because it ran that request before the revision was read.
+- `CloseDocumentAsync` now marks the file's index issues stale before exposing them. `RefreshWpfAsync` scans up to three times, 50 ms apart, instead of giving up. If all three go out of date, the index stays behind until the next refresh, but the old error stays hidden.
+- The test now runs on a real dispatcher thread (`ShellTestContext.OnUiThreadAsync`). `AnOldIndexErrorStaysHiddenWhenTheWatcherHasNotReportedTheSaveYet` reproduces the bug on every run without depending on timing, and `AWatchedFileChangeRewritesTheIssueListsOnlyOnTheUiThread` fails if a watched change rewrites the issue lists off the UI thread. Breaking each part of the fix failed the matching test 3 times of 3.
+- Most Shell tests still use `InlineDispatcher`, so they cannot see ordering bugs of this kind.

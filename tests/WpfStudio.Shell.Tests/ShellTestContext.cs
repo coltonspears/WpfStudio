@@ -1,3 +1,4 @@
+using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
@@ -34,6 +35,34 @@ internal sealed class ShellTestContext : IAsyncDisposable
         Store = _services.GetRequiredService<DocumentStore>();
         Workspace = _services.GetRequiredService<WorkspaceClient>();
         Xaml = _services.GetRequiredService<XamlCompletionService>();
+    }
+    /// <summary>
+    /// Runs a test on its own dispatcher thread with the app's dispatcher, so work posted from a file watcher or timer waits its turn there.
+    /// <see cref="InlineDispatcher"/> runs that work on the posting thread instead, where it can rewrite a collection while the test reads it.
+    /// </summary>
+    public static Task OnUiThreadAsync(Func<ShellTestContext, Task> test, Action<IServiceCollection>? configure = null)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+            dispatcher.BeginInvoke(async () =>
+            {
+                try
+                {
+                    await using (var context = new ShellTestContext(configure: services => { services.AddSingleton<IUiDispatcher>(new UiDispatcher(dispatcher)); configure?.Invoke(services); }))
+                        await test(context);
+                    completion.SetResult();
+                }
+                catch (Exception exception) { completion.SetException(exception); }
+                finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
+            });
+            System.Windows.Threading.Dispatcher.Run();
+        }) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task.WaitAsync(TimeSpan.FromMinutes(2));
     }
     public async Task<string> CreateFileAsync(string name, string content)
     {
