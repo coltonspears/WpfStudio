@@ -198,7 +198,7 @@ public sealed partial class WorkspaceEngine
 
     private async Task<SymbolSnapshot> CaptureSymbolSnapshotAsync(SymbolReferenceRequest request, CancellationToken token)
     {
-        var refresh = await RefreshDiskDocumentsAsync(new(), token).ConfigureAwait(false);
+        var refresh = await this.RefreshAllDiskDocumentsAsync(token).ConfigureAwait(false);
         // Public refresh calls are reported by WorkspaceClient after their response.
         // This implicit refresh must notify independently, even if the rest of the
         // symbol operation fails or is cancelled. Both refresh locks are released.

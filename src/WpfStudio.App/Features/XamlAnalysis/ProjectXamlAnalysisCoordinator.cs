@@ -244,7 +244,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
                     await _workspace.UpdateDocumentAsync(new(document.State.Path, document.Text, document.Version, Analyze: false), token);
                     if (!Current()) return;
                 }
-                disk = await _workspace.RefreshDiskDocumentsAsync(new(dirtyModels.Length == 0 ? null : dirtyModels), token);
+                disk = dirtyModels.Length == 0 ? await _workspace.RefreshAllDiskDocumentsAsync(token)
+                    : await _workspace.RefreshDiskDocumentsAsync(new(dirtyModels), token);
             }
             finally { Interlocked.Decrement(ref _synchronizing); }
             if (!Current()) return;

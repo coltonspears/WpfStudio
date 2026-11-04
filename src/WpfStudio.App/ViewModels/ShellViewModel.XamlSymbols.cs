@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
+using WpfStudio.Workspace;
 
 using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.XamlAnalysis;
@@ -48,7 +49,7 @@ public sealed partial class ShellViewModel
         if (!current()) throw new InvalidOperationException("The document or project context changed. Request the symbol operation again.");
         // Settle closed-file types and their public invalidation notifications
         // before capturing the semantic snapshot used by the query and review.
-        var refresh = await _workspace.RefreshDiskDocumentsAsync(new(), _lifetime.Token);
+        var refresh = await _workspace.RefreshAllDiskDocumentsAsync(_lifetime.Token);
         await _dispatcher.InvokeAsync(() => { }, _lifetime.Token);
         if (!current()) throw new InvalidOperationException("The document or project context changed. Request the symbol operation again.");
         if (!refresh.Accepted || refresh.Truncated || refresh.PendingFiles != 0)

@@ -61,6 +61,29 @@ public sealed class SolutionCacheTests : IDisposable
         Assert.False((await client.LoadAsync(new LoadWorkspaceRequest(project, UseCache: true))).Cached);
     }
 
+    [Fact]
+    public async Task VerifyingDocumentsNotYetLoadedOnAnUnchangedDiskChangesNothing()
+    {
+        var project = Path.Combine(_root, "Lib", "Lib.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+        await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        await File.WriteAllTextAsync(Path.Combine(_root, "Lib", "Value.cs"), "namespace Lib; public sealed class Value { }");
+        Assert.Equal(0, (await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(_root, "restore", project), CancellationToken.None)).ExitCode);
+        await using (var first = new WorkspaceClient())
+        {
+            await first.LoadAsync(new LoadWorkspaceRequest(project));
+            await WaitForSavedModelAsync(project);
+        }
+
+        await using var client = new WorkspaceClient();
+        Assert.True((await client.LoadAsync(new LoadWorkspaceRequest(project, UseCache: true))).Cached);
+
+        // A cached start has compiled nothing, so no document's text is in memory yet.
+        var refresh = await client.RefreshDiskDocumentsAsync(new());
+        Assert.True(refresh.Accepted, refresh.Status);
+        Assert.False(refresh.Changed);
+    }
+
     // The worker saves the model after answering the load, so it must stay alive until the file appears.
     // Other test classes may start workers while this class's cache folder is set, so wait for this project's file.
     private static async Task WaitForSavedModelAsync(string project)

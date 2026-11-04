@@ -149,12 +149,62 @@ public sealed class XamlProjectAnalysisIntegrationTests
     }
 
     [Fact]
-    public async Task BoundedModelRefreshContinuesItsSweepAndWithholdsIncompleteTypeContexts()
+    public async Task BoundedVerificationContinuesWithoutWithholdingTypeContextsOrReportingAChange()
     {
         string xaml = View("Name");
         await using var fixture = await Fixture.CreateAsync(new() { ["View.xaml"] = xaml }, additionalModel: true);
+        var before = await fixture.Client.AnalyzeXamlProjectAsync(new(1, []));
+
         var first = await fixture.Client.RefreshDiskDocumentsAsync(new(MaximumFiles: 1));
         Assert.True(first.Accepted, first.Status);
+        Assert.False(first.Changed);
+        Assert.Equal(1, first.RefreshedFiles);
+        Assert.True(first.Truncated);
+        Assert.Equal(1, first.PendingFiles);
+        Assert.False(string.IsNullOrWhiteSpace(first.Status));
+        var partial = await fixture.Client.AnalyzeXamlProjectAsync(new(2, []));
+        Assert.Equal(before.SemanticRevision, partial.SemanticRevision);
+        Assert.Equal("Analyzed", FileResult(partial, fixture.View("View.xaml"), fixture.Project).State);
+        var editor = await fixture.Client.AnalyzeXamlAsync(new(fixture.View("View.xaml"), xaml, 1, fixture.Project));
+        Assert.True(editor.Accepted, editor.Status);
+
+        var second = await fixture.Client.RefreshDiskDocumentsAsync(new(MaximumFiles: 1));
+        Assert.True(second.Accepted, second.Status);
+        Assert.False(second.Changed);
+        Assert.Equal(1, second.RefreshedFiles);
+        Assert.False(second.Truncated);
+        Assert.Equal(0, second.PendingFiles);
+        var complete = await fixture.Client.AnalyzeXamlProjectAsync(new(3, []));
+        Assert.Equal(before.SemanticRevision, complete.SemanticRevision);
+        Assert.Equal("Analyzed", FileResult(complete, fixture.View("View.xaml"), fixture.Project).State);
+    }
+
+    [Fact]
+    public async Task VerificationStillFindsAChangeInAFileItReachesLater()
+    {
+        string xaml = View("Name");
+        await using var fixture = await Fixture.CreateAsync(new() { ["View.xaml"] = xaml }, additionalModel: true);
+        string path = fixture.View("View.xaml");
+        Assert.Empty(FileResult(await fixture.Client.AnalyzeXamlProjectAsync(new(1, [])), path, fixture.Project).Diagnostics);
+        await File.WriteAllTextAsync(fixture.Models[0], Model("Code"));
+
+        var refresh = await fixture.Client.RefreshAllDiskDocumentsAsync(CancellationToken.None);
+
+        Assert.True(refresh.Changed);
+        Assert.False(refresh.Truncated);
+        AssertMissingMember(FileResult(await fixture.Client.AnalyzeXamlProjectAsync(new(2, [])), path, fixture.Project), xaml, "Name");
+    }
+
+    [Fact]
+    public async Task AnOverBudgetRefreshOfChangedFilesStillWithholdsTheirTypeContexts()
+    {
+        string xaml = View("Name");
+        await using var fixture = await Fixture.CreateAsync(new() { ["View.xaml"] = xaml }, additionalModel: true);
+        string[] changed = [fixture.Models[0], Path.Combine(Path.GetDirectoryName(fixture.Models[0])!, "Additional.cs")];
+
+        var first = await fixture.Client.RefreshDiskDocumentsAsync(new(changed, MaximumFiles: 1));
+        Assert.True(first.Accepted, first.Status);
+        Assert.True(first.Changed);
         Assert.Equal(1, first.RefreshedFiles);
         Assert.True(first.Truncated);
         Assert.False(string.IsNullOrWhiteSpace(first.Status));
@@ -172,6 +222,36 @@ public sealed class XamlProjectAnalysisIntegrationTests
         var complete = FileResult(await fixture.Client.AnalyzeXamlProjectAsync(new(2, [])), fixture.View("View.xaml"), fixture.Project);
         Assert.Equal("Analyzed", complete.State);
         Assert.Empty(complete.Diagnostics);
+    }
+
+    [Fact]
+    public async Task SymbolOperationsVerifyEveryFileOfAWorkspaceLargerThanOneRefresh()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "WpfStudio-XamlProject-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string project = Path.Combine(directory, "Large.csproj");
+            await File.WriteAllTextAsync(project, "<Project Sdk='Microsoft.NET.Sdk'><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+            // One past what a single refresh may read.
+            for (int index = 0; index < 2049; index++)
+                await File.WriteAllTextAsync(Path.Combine(directory, $"Type{index}.cs"), $"namespace Large; public class Type{index} {{ }}");
+            string source = Path.Combine(directory, "Type0.cs");
+            Assert.Equal(0, (await new BuildService().RunAsync(new(project, BuildOperation.Restore))).ExitCode);
+            await using var client = new WorkspaceClient();
+            await client.LoadAsync(new(project));
+
+            var references = await client.FindSymbolReferencesAsync(new(source, (await File.ReadAllTextAsync(source)).IndexOf("Type0", StringComparison.Ordinal), 0));
+            Assert.True(references.SymbolFound);
+            Assert.DoesNotContain(references.Warnings, warning => warning.Contains("incomplete", StringComparison.OrdinalIgnoreCase));
+
+            var refresh = await client.RefreshAllDiskDocumentsAsync(CancellationToken.None);
+            Assert.True(refresh.Accepted, refresh.Status);
+            Assert.False(refresh.Changed);
+            Assert.False(refresh.Truncated);
+            Assert.Equal(0, refresh.PendingFiles);
+        }
+        finally { try { Directory.Delete(directory, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 
     [Fact]
