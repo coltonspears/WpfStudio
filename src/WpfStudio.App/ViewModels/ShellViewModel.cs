@@ -139,7 +139,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public string WindowTitle => Workspace == null ? "WpfStudio" : $"{Path.GetFileNameWithoutExtension(Workspace.Path)} — WpfStudio";
     public bool HasWorkspace => Workspace != null;
     public bool IsWelcomeVisible => Documents.Count == 0;
-    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { Messenger.Send(new WorkspaceChangedMessage(value)); NotifyWorkspaceSummary(); XamlAnalysis.Reset(value); }
+    partial void OnWorkspaceChanged(WorkspaceSnapshot? value) { Messenger.Send(new WorkspaceChangedMessage(value)); NotifyWorkspaceSummary(); _partialPropertySupport.Clear(); XamlAnalysis.Reset(value); }
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
     partial void OnConfigurationChanged(string value) { if (!string.IsNullOrWhiteSpace(value)) ScheduleContextReload(); }
     partial void OnTargetFrameworkChanged(string? value) { if (value != null) ScheduleContextReload(); }
@@ -305,6 +305,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     // A cached start is replaced by a full MSBuild load while the editor stays usable.
     private async Task RefreshSavedProjectModelAsync(string path, string configuration)
     {
+        // Project files that change meanwhile are read by a refresh of their own once this one is done.
+        _projectRefreshRunning = true;
         try
         {
             var snapshot = await _workspace.RefreshAsync(new(path, configuration), _lifetime.Token);
@@ -324,6 +326,11 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             AppendOutput("Project model refresh: " + exception.Message);
             // The saved model stays in use, so the status must stop promising a refresh.
             if (_statusShowsModelRefresh && Workspace is { } current) Status = $"{Projects.Count} projects · SDK {current.SdkVersion} · project model refresh failed; see Output";
+        }
+        finally
+        {
+            _projectRefreshRunning = false;
+            if (_projectRefreshAgain) { _projectRefreshAgain = false; ScheduleProjectModelRefresh(); }
         }
     }
     private void ApplyWorkspaceProjects(string? startupPath)
@@ -651,42 +658,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         WpfExplorer.SetIssues(CurrentWpfIndexDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentEditorDiagnostics(xamlOnly: true)).Distinct());
     }
-    [RelayCommand] private Task GoToDefinitionAsync() => GuardAsync(async () =>
-    {
-        var document = ActiveDocument;
-        if (document == null) return;
-        if (document.State.Extension == ".xaml")
-        {
-            var current = document.State;
-            var version = current.Version;
-            var contextRevision = document.XamlContextRevision;
-            int caret = current.CaretOffset;
-            if (_workspace.IsConnected)
-            {
-                try
-                {
-                    var definitions = await document.XamlDefinitionAsync(caret);
-                    if (document != ActiveDocument || current.Version != version || current.CaretOffset != caret || document.XamlContextRevision != contextRevision) return;
-                    if (definitions.Count > 0)
-                    {
-                        await NavigateAsync(definitions[0].Path, definitions[0].Line, definitions[0].Column);
-                        return;
-                    }
-                }
-                catch (Exception ex) { AppendOutput("XAML definition: " + ex.Message); }
-            }
-            if (document != ActiveDocument || current.Version != version || current.CaretOffset != caret || document.XamlContextRevision != contextRevision) return;
-            // The resource index is usable offline only while its source still matches this buffer.
-            var usage = WpfExplorer.Index?.Texts.TryGetValue(current.Path, out var indexed) == true && indexed == current.Content
-                ? WpfExplorer.Index.Usages.FirstOrDefault(u => u.Path.Equals(current.Path, StringComparison.OrdinalIgnoreCase) && caret >= u.Start && caret <= u.Start + u.Length) : null;
-            var declaration = usage?.ResolvedPath == null ? null : WpfExplorer.Index!.Resources.FirstOrDefault(r => r.Path == usage.ResolvedPath && r.ValueStart == usage.ResolvedDeclarationStart);
-            if (declaration != null) await NavigateAsync(declaration.Path, declaration.Line, 1); else Status = "This XAML reference could not be resolved statically";
-            return;
-        }
-        await document.SyncAsync(_lifetime.Token); var state = document.State;
-        var results = await _workspace.GetDefinitionAsync(new(state.Path, state.CaretOffset, state.Version), _lifetime.Token);
-        if (results.Count > 0) await NavigateAsync(results[0].Path, results[0].Line, results[0].Column); else Status = "No source definition found";
-    });
     [RelayCommand] private Task FindReferencesAsync() => GuardAsync(FindLanguageSymbolReferencesAsync);
     [RelayCommand] private Task FormatAsync() => GuardAsync(FormatActiveDocumentAsync);
     [RelayCommand] private Task RenameSymbolAsync() => GuardAsync(RenameLanguageSymbolAsync);
@@ -813,29 +784,53 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         IsScaffoldOpen = false;
         if (await PreviewAsync("Create WPF files", changes, AddDataTemplate ? "Merge the generated Templates.xaml dictionary into application resources to activate the view mapping." : "")) { await ApplyChangesAsync(changes); Status = "Created in editor buffers. Save All to write the files."; }
     });
+    // Whether a project can use partial [ObservableProperty] properties, which takes an MSBuild evaluation to find out.
+    private readonly Dictionary<string, bool> _partialPropertySupport = new(StringComparer.OrdinalIgnoreCase);
+    private async Task<bool> SupportsPartialPropertiesAsync(EditorViewModel document)
+    {
+        var owners = Projects.Where(p => p.Files.Any(f => f.Path.Equals(document.State.Path, StringComparison.OrdinalIgnoreCase))).ToArray();
+        if (owners.Length != 1) return false;
+        if (_partialPropertySupport.TryGetValue(owners[0].ProjectPath, out var known)) return known;
+        var context = await ScaffoldProjectContext.TryEvaluateAsync(owners[0].ProjectPath, _lifetime.Token);
+        return _partialPropertySupport[owners[0].ProjectPath] = context?.SupportsPartialProperties == true;
+    }
     [RelayCommand] private Task InsertPropertyAsync() => GuardAsync(async () =>
     {
         var document = ActiveDocument;
-        if (document == null || document.IsReadOnly || document.State.Extension != ".cs") return;
+        if (document == null || document.IsReadOnly || document.State.Extension != ".cs") { Status = "Open a C# file to insert an observable property"; return; }
+        bool partial = await SupportsPartialPropertiesAsync(document);
+        if (!ReferenceEquals(document, ActiveDocument)) return;
+        // With the editor on screen the member is a snippet: it goes where a member belongs, at the indentation of its
+        // neighbours, and its type and name are typed in place rather than asked for in a dialog.
+        if (document.InsertMember(WpfStudio.Core.Text.SnippetCatalog.Find(partial ? "obsprop" : "obsfield", ".cs")!, "CommunityToolkit.Mvvm.ComponentModel"))
+        { Status = "Type the property's type and name. Tab moves between them; Enter finishes."; return; }
         var name = await _dialogs.PromptAsync("Observable property", "Property name:", "Title"); if (string.IsNullOrWhiteSpace(name)) return;
         if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z_][A-Za-z0-9_]*$")) throw new ArgumentException("Enter a valid property name.");
-        var owners = Projects.Where(p => p.Files.Any(f => f.Path.Equals(document.State.Path, StringComparison.OrdinalIgnoreCase))).ToArray();
-        var owner = owners.Length == 1 ? owners[0] : null;
-        var context = owner == null ? null : await ScaffoldProjectContext.TryEvaluateAsync(owner.ProjectPath, _lifetime.Token);
-        var state = document.State; var template = ScaffoldTemplates.Property(name, context?.SupportsPartialProperties == true).Replace("[ObservableProperty]", "[CommunityToolkit.Mvvm.ComponentModel.ObservableProperty]", StringComparison.Ordinal);
-        var changes = new[] { new FileChange(state.Path, state.Content, state.Content.Insert(state.CaretOffset, template), "Insert an observable property") };
+        var template = ScaffoldTemplates.Property(name, partial).Replace("[ObservableProperty]", "[CommunityToolkit.Mvvm.ComponentModel.ObservableProperty]", StringComparison.Ordinal);
+        var changes = new[] { MemberChange(document, template, "Insert an observable property") };
         if (await PreviewAsync("Insert observable property", changes, "Place inside a view model derived from ObservableObject. Partial properties require a partial class and the CommunityToolkit.Mvvm namespace.")) await ApplyChangesAsync(changes);
     });
     [RelayCommand] private Task InsertCommandAsync() => GuardAsync(async () =>
     {
         var document = ActiveDocument;
-        if (document == null || document.IsReadOnly || document.State.Extension != ".cs") return;
+        if (document == null || document.IsReadOnly || document.State.Extension != ".cs") { Status = "Open a C# file to insert a relay command"; return; }
+        if (document.InsertMember(WpfStudio.Core.Text.SnippetCatalog.Find("relayasync", ".cs")!, "CommunityToolkit.Mvvm.Input"))
+        { Status = "Type the command's name, then its body. Tab moves on; Enter finishes."; return; }
         var name = await _dialogs.PromptAsync("Relay command", "Command method name:", "Refresh"); if (string.IsNullOrWhiteSpace(name)) return;
         if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z_][A-Za-z0-9_]*$")) throw new ArgumentException("Enter a valid method name.");
-        var state = document.State; var snippet = $"    [CommunityToolkit.Mvvm.Input.RelayCommand]\n    private async System.Threading.Tasks.Task {name}Async(System.Threading.CancellationToken cancellationToken)\n    {{\n        await System.Threading.Tasks.Task.CompletedTask;\n    }}\n";
-        var changes = new[] { new FileChange(state.Path, state.Content, state.Content.Insert(state.CaretOffset, snippet), "Insert a generated relay command") };
+        var snippet = $"    [CommunityToolkit.Mvvm.Input.RelayCommand]\n    private async System.Threading.Tasks.Task {name}Async(System.Threading.CancellationToken cancellationToken)\n    {{\n        await System.Threading.Tasks.Task.CompletedTask;\n    }}\n";
+        var changes = new[] { MemberChange(document, snippet, "Insert a generated relay command") };
         if (await PreviewAsync("Insert relay command", changes, "Place inside a partial view model. Add the command's implementation after generation.")) await ApplyChangesAsync(changes);
     });
+    /// <summary>A member written where one belongs near the caret, for review. <paramref name="template"/> is indented by four spaces, as the scaffolding templates are.</summary>
+    private static FileChange MemberChange(EditorViewModel document, string template, string description)
+    {
+        var state = document.State;
+        var newLine = state.Content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var member = string.Join("\n", template.Split('\n').Select(line => line.StartsWith("    ", StringComparison.Ordinal) ? line[4..] : line));
+        var place = MemberPlacement.Find(state.Content, state.CaretOffset, "    ", newLine);
+        return new FileChange(state.Path, state.Content, MemberPlacement.Apply(state.Content, place, member, newLine), description);
+    }
     [RelayCommand] private Task ImportAssetAsync() => GuardAsync(async () =>
     {
         if (StartupProject == null) return;

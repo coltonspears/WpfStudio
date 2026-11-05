@@ -37,6 +37,10 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
     private readonly HashSet<DocumentState> _trackedDocuments = [];
     private readonly HashSet<string> _invalidIndexPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _dirtyModelPaths = new(StringComparer.OrdinalIgnoreCase);
+    // Source files whose change asked for a reload, and those a reload then showed belong to no project. Saving a file
+    // no project compiles would otherwise ask for a reload every time.
+    private readonly HashSet<string> _reloadCauses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _unownedSources = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _indexTextHashes = new(StringComparer.OrdinalIgnoreCase);
     private bool _indexDiagnosticsInvalid;
     private sealed record DiagnosticOrigin(XamlFileAnalysisResult File, WorkspaceSnapshot Workspace, long SourceEpoch);
@@ -89,7 +93,20 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
         _scheduler.Invalidate();
         Interlocked.Increment(ref _indexRevision);
         _sourceWatcher?.Dispose(); _sourceWatcher = null;
-        if (!string.Equals(_diagnosticWorkspace?.Path, workspace?.Path, StringComparison.OrdinalIgnoreCase)) _host.ForgetIndexedState();
+        if (!string.Equals(_diagnosticWorkspace?.Path, workspace?.Path, StringComparison.OrdinalIgnoreCase))
+        {
+            _host.ForgetIndexedState();
+            lock (_unownedSources) _unownedSources.Clear();
+        }
+        else if (workspace is not null && _reloadCauses.Count > 0)
+        {
+            // The model was reloaded and still does not list these files, so they are not what makes it out of date.
+            var known = workspace.Projects.SelectMany(project => project.Files).Select(file => file.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            lock (_unownedSources)
+                foreach (var cause in _reloadCauses)
+                    if (!known.Contains(cause) && File.Exists(cause)) _unownedSources.Add(cause);
+        }
+        _reloadCauses.Clear();
         _diagnosticWorkspace = workspace;
         ProjectReloadRequired = false;
         ProjectTypesPending = false;
@@ -113,6 +130,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
             // Invalidate before dispatching: a completed scan must not race a
             // queued UI notification about changed source bytes.
             if (_disposed || !ReferenceEquals(workspace, _host.Workspace)) return;
+            // A source file no project lists was written again. The last reload already showed that it changes nothing.
+            if (change is { RequiresReload: true, Path: { } unowned } && IsUnowned(unowned)) return;
             _scheduler.Invalidate();
             Interlocked.Increment(ref _indexRevision);
             Interlocked.Increment(ref _sourceEpoch);
@@ -122,10 +141,15 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
             {
                 if (_disposed || !ReferenceEquals(workspace, _host.Workspace)) return;
                 if (change.Path is null) _indexDiagnosticsInvalid = true; else _invalidIndexPaths.Add(change.Path);
-                if (change.RequiresReload) ProjectReloadRequired = true;
+                if (change.RequiresReload)
+                {
+                    ProjectReloadRequired = true;
+                    if (change.Path is { } cause && Path.GetExtension(cause).ToLowerInvariant() is ".cs" or ".xaml") _reloadCauses.Add(cause);
+                }
                 if (change.Path is null || Path.GetExtension(change.Path).Equals(".cs", StringComparison.OrdinalIgnoreCase)) ProjectTypesPending = true;
                 if (change.Path is { } changedPath && Path.GetExtension(changedPath).Equals(".cs", StringComparison.OrdinalIgnoreCase)) _dirtyModelPaths.Add(changedPath);
                 if (ProjectReloadRequired || ProjectTypesPending) _host.XamlContextsChanged();
+                if (change.RequiresReload) _host.ProjectFilesChanged();
                 Request();
             });
         }, reconcile: () => _dispatcher.Post(() =>
@@ -136,6 +160,24 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
             _logger.LogError(exception, "Source change notification failed");
             _dispatcher.Post(() => { if (!_disposed) _host.AppendOutput("Source watcher: " + exception.Message); });
         });
+    }
+
+    // Read on the watcher's thread while the dispatcher may be adding to it.
+    private bool IsUnowned(string path) { lock (_unownedSources) return _unownedSources.Contains(path); }
+
+    /// <summary>
+    /// Waits, for a bounded time, until the C# files a watcher reported have been read into the project's types. A symbol
+    /// query that arrives just after a save waits for this instead of being turned away. False when they are still unread.
+    /// </summary>
+    public async Task<bool> WaitForProjectTypesAsync(TimeSpan limit, CancellationToken token)
+    {
+        if (!ProjectTypesPending) return true;
+        if (_disposed || ProjectReloadRequired || _host.IsLoading || _host.Workspace is null || !_workspace.IsConnected) return false;
+        // Skip the debounce: the reading is the first thing the scan does.
+        _ = _scheduler.Schedule(immediate: true);
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (ProjectTypesPending && !_disposed && waited.Elapsed < limit) await Task.Delay(25, token);
+        return !ProjectTypesPending;
     }
 
     private static IEnumerable<string> ProjectContextFiles(WorkspaceSnapshot workspace)

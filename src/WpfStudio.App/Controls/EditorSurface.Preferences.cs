@@ -50,6 +50,7 @@ public sealed partial class EditorSurface
             if (preferences.ShowFolding && !_folding.IsInstalled) _folding.Install();
             else if (!preferences.ShowFolding && _folding.IsInstalled) _folding.Uninstall(vm.State);
         }
+        _guides.Refresh(); // Bracket, occurrence and indentation guides each have a setting.
     }
 
     /// <summary>Applies tidying edits as one undoable change, so the caret and selection stay in place.</summary>

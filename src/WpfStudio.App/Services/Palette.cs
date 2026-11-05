@@ -61,6 +61,11 @@ public sealed record Palette
         ("SyntaxParameter",       "#8FC6EA", "#1E6894"),
         ("InlayHintBrush",        "#8A8F9B", "#767B86"),
         ("InlayHintBackgroundBrush","#26282F", "#EFF0F3"),
+        // Quiet editor guides: the bracket pair at the caret, other uses of the selected word, and indentation levels.
+        ("BracketMatchBrush",     "#3A4072", "#D2D6F8"),
+        ("BracketMatchBorderBrush","#5E66BE", "#9BA2E6"),
+        ("OccurrenceBrush",       "#31343F", "#E4E6EE"),
+        ("IndentGuideBrush",      "#2A2C33", "#E6E7EC"),
         // Code folding: gutter chevrons, the band over a region about to fold, and the folded-block pill.
         ("FoldMarkerBrush",       "#4A4E58", "#B4B7BF"),
         ("FoldMarkerHotBrush",    "#9397A1", "#5B5F69"),

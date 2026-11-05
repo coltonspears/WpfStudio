@@ -81,7 +81,7 @@ public sealed class EditorCompletionTests
                 Assert.NotNull(change);
                 return (completions.Version, change);
             }, "(");
-            editor.TextArea.PerformTextInput("\"hello\");");
+            Type(editor, "\"hello\");");
             await commit;
             Assert.Contains("System.Console.WriteLine(\"hello\");", state.Content);
         }
@@ -99,8 +99,8 @@ public sealed class EditorCompletionTests
         var response = new TaskCompletionSource<(long, TextEdit)>(TaskCreationOptions.RunContinuationsAsynchronously);
         long version = state.Version;
         Task commit = editor.CommitCompletionAsync(_ => response.Task, "(");
-        editor.TextArea.PerformTextInput("42");
-        editor.TextArea.PerformTextInput(");");
+        Type(editor, "42");
+        Type(editor, ");");
         Assert.Equal("Con", editor.Text);
         response.SetResult((version, new TextEdit(0, 3, "Console.WriteLine")));
         await commit;
@@ -119,9 +119,9 @@ public sealed class EditorCompletionTests
         var response = new TaskCompletionSource<(long, TextEdit)>(TaskCreationOptions.RunContinuationsAsynchronously);
         long version = state.Version;
         Task commit = editor.CommitCompletionAsync(_ => response.Task, "(");
-        editor.TextArea.PerformTextInput("45");
+        Type(editor, "45");
         System.Windows.Documents.EditingCommands.Backspace.Execute(null, editor.TextArea);
-        editor.TextArea.PerformTextInput("2)");
+        Type(editor, "2)");
         Assert.Equal("Con", editor.Text);
         response.SetResult((version, new TextEdit(0, 3, "Console.WriteLine")));
         await commit;
@@ -141,11 +141,12 @@ public sealed class EditorCompletionTests
         var response = new TaskCompletionSource<(long, TextEdit)>(TaskCreationOptions.RunContinuationsAsynchronously);
         long version = first.Version;
         Task commit = editor.CommitCompletionAsync(_ => response.Task, "(");
-        editor.TextArea.PerformTextInput("typed");
+        Type(editor, "typed");
         editor.ViewModel = secondModel;
         response.SetResult((version, new TextEdit(0, 3, "Console.WriteLine")));
         await commit;
-        Assert.Equal("Con(typed", first.Content);
+        // The replayed parenthesis brings its closing one, as it would have had it been typed into the buffer directly.
+        Assert.Equal("Con(typed)", first.Content);
         Assert.Equal("second", second.Content);
         Assert.Equal("second", editor.Text);
     });
@@ -160,12 +161,18 @@ public sealed class EditorCompletionTests
         editor.CaretOffset = 3;
         var response = new TaskCompletionSource<(long, TextEdit)>(TaskCreationOptions.RunContinuationsAsynchronously);
         Task commit = editor.CommitCompletionAsync(_ => response.Task, "(");
-        editor.TextArea.PerformTextInput("1)");
+        Type(editor, "1)");
         response.SetException(new InvalidOperationException("Worker disconnected"));
         await commit;
         Assert.Equal("Con(1)", state.Content);
         Assert.Contains("Worker disconnected", model.LanguageStatus);
     });
+
+    /// <summary>Types text as a keyboard delivers it: one character at a time, which is what bracket pairing and typing over a closing bracket act on.</summary>
+    private static void Type(EditorSurface editor, string text)
+    {
+        foreach (char character in text) editor.TextArea.PerformTextInput(character.ToString());
+    }
 
     private static Task OnDispatcherAsync(Func<Task> action)
     {

@@ -147,6 +147,12 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
                 Assert.Empty(bindingErrors.Messages);
                 return;
             }
+            if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_EDITOR_ONLY") == "1")
+            {
+                await VerifyEditorNavigationAsync(root, window, manager, shell);
+                Assert.Empty(bindingErrors.Messages);
+                return;
+            }
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_XAML_EDITING_ONLY") == "1")
             {
                 await VerifyXamlEditingAsync(root, data, window, shell, dialogs, provider.GetRequiredService<WorkspaceClient>());

@@ -16,6 +16,8 @@ public interface IProjectXamlAnalysisHost
     void DiagnosticsChanged();
     /// <summary>Reload-required or types-pending changed: open XAML editors must be told which project contexts they can use.</summary>
     void XamlContextsChanged();
+    /// <summary>A project file, or the set of source files, changed on disk: the loaded project model no longer describes the workspace.</summary>
+    void ProjectFilesChanged() { }
     /// <summary>XAML resources may have changed on disk or in the project.</summary>
     void InvalidateXamlResources();
     /// <summary>The set or text of open XAML documents changed, so resource overlays must follow.</summary>

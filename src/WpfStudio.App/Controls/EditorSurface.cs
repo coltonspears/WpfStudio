@@ -63,7 +63,8 @@ public sealed partial class EditorSurface : TextEditor
         InitializePreferenceChrome();
         _folding = new EditorFolding(this);
         _hover = new EditorHover(this);
-        _completion = new EditorCompletion(this, _hover, new EditorTyping(this));
+        _typing = new EditorTyping(this);
+        _completion = new EditorCompletion(this, _hover, _typing);
         _lineSuggestion = new EditorLineSuggestion(this, () => _completion.IsWindowOpen || _completion.IsPending); TextArea.TextView.ElementGenerators.Add(_lineSuggestion);
         TextChanged += OnEditorTextChanged;
         TextArea.Caret.PositionChanged += (_, _) => { _lineSuggestion.OnCaretMoved(); if (ViewModel is { } vm && !_syncing) vm.ReportCaret(TextArea.Caret.Line, TextArea.Caret.Column, CaretOffset); };
@@ -75,6 +76,7 @@ public sealed partial class EditorSurface : TextEditor
         };
         TextArea.TextEntering += _completion.OnTextEntering;
         CommandManager.AddPreviewExecutedHandler(TextArea, _completion.OnPreviewExecuted);
+        InitializeEditing();
         PreviewMouseDown += (_, _) => { _completion.CancelPending(); _hover.Cancel(); };
         LostKeyboardFocus += (_, _) => { _completion.CancelPending(); _lineSuggestion.Cancel(); };
         PreviewKeyDown += OnPreviewKeyDown;
@@ -98,6 +100,8 @@ public sealed partial class EditorSurface : TextEditor
     internal Task CommitCompletionAsync(Func<CancellationToken, Task<(long Version, TextEdit Edit)>> resolve, string? punctuation = null) => _completion.CommitAsync(resolve, punctuation);
     internal BlameHistoryCard? CreateHistoryCard(string name, int first, int last, BlameHistory history) => _annotations.CreateHistoryCard(name, first, last, history);
     internal LineChangeCard CreateChangeCard(LineChange change) => _annotations.CreateChangeCard(change);
+    internal bool IsHistoryPopupOpen => _annotations.IsHistoryOpen;
+    internal void CloseAnnotationPopups() => _annotations.ClosePopups();
     private static void Changed(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {
         var surface = (EditorSurface)owner;
@@ -123,11 +127,13 @@ public sealed partial class EditorSurface : TextEditor
         ViewModel.GitChanged += _annotations.OnGitChanged;
         ViewModel.CodeLensChanged += _annotations.ApplyCodeLens;
         ViewModel.ApplyReplacements = ApplyReplacements;
+        ViewModel.MemberSnippetInserter = InsertRequestedMember;
         _trackedDocument = Document; Document.Changed += OnDocumentChanged;
         _hints.Enabled = ViewModel.ShowInlayHints;
         ApplyDecorations();
         _folding.Install();
         _annotations.UpdateChangeMargin(); _annotations.ApplyCodeLens();
+        _guides.Refresh();
         _syncing = false; Navigate();
     }
     private void Detach()
@@ -149,6 +155,7 @@ public sealed partial class EditorSurface : TextEditor
             _attached.GitChanged -= _annotations.OnGitChanged;
             _attached.CodeLensChanged -= _annotations.ApplyCodeLens;
             if (_attached.ApplyReplacements == ApplyReplacements) _attached.ApplyReplacements = null;
+            if (_attached.MemberSnippetInserter == InsertRequestedMember) _attached.MemberSnippetInserter = null;
             _folding.Uninstall(_attached.State);
         }
         if (_trackedDocument != null) { _trackedDocument.Changed -= OnDocumentChanged; _trackedDocument = null; }
@@ -222,6 +229,7 @@ public sealed partial class EditorSurface : TextEditor
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (_completion.IsPending && e.Key == Key.Escape) { _completion.CancelPending(); e.Handled = true; return; }
+        if (HandleEditingKey(e)) { e.Handled = true; return; }
         if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && (TryExpandSnippet() || (!_completion.IsWindowOpen && _lineSuggestion.TryAccept()))) e.Handled = true;
         else if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _completion.Show(); }
         else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ViewModel is { IsCSharp: true } csharp)

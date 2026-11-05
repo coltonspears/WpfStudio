@@ -1,5 +1,4 @@
-using System.Runtime.CompilerServices;
-using WpfStudio.App.Services;
+using System.IO;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 using WpfStudio.Workspace;
@@ -13,8 +12,6 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class ShellViewModel
 {
     private long _symbolSemanticRevision;
-    private sealed record SymbolReferenceOrigin(WorkspaceSnapshot? Workspace);
-    private readonly ConditionalWeakTable<NavigationResult, SymbolReferenceOrigin> _symbolReferenceOrigins = new();
 
     private Func<bool> CaptureSymbolContext(EditorViewModel editor, bool includeSemantic = true)
     {
@@ -28,12 +25,12 @@ public sealed partial class ShellViewModel
         var contextRevision = editor.XamlContextRevision;
         var connected = _workspace.IsConnected;
         var reloadRequired = XamlAnalysis.ProjectReloadRequired;
-        var typesPending = XamlAnalysis.ProjectTypesPending;
         var openEditors = Documents.ToArray();
         var buffers = _store.Documents.Select(document => (Document: document, document.Version)).ToArray();
+        // Changed files being read is not a change in itself: when one did change, the semantic revision and source epoch say so.
         return () => !_disposed && ReferenceEquals(ActiveDocument, editor) && _store.Find(source.Path) == source
             && ReferenceEquals(Workspace, workspace) && Configuration == configuration
-            && XamlAnalysis.ProjectReloadRequired == reloadRequired && XamlAnalysis.ProjectTypesPending == typesPending
+            && XamlAnalysis.ProjectReloadRequired == reloadRequired
             && editor.SelectionRevision == selection && editor.XamlProjectRevision == projectRevision
             && Documents.Count == openEditors.Length && openEditors.All(Documents.Contains)
             && buffers.All(buffer => _store.Find(buffer.Document.Path) == buffer.Document && buffer.Document.Version == buffer.Version)
@@ -41,8 +38,18 @@ public sealed partial class ShellViewModel
                 && semanticRevision == Volatile.Read(ref _symbolSemanticRevision) && sourceEpoch == XamlAnalysis.SourceEpoch);
     }
 
-    private async Task SynchronizeSymbolBuffersAsync(EditorViewModel editor)
+    /// <summary>
+    /// Brings the worker up to date with the open buffers and with source files changed on disk. A search can go ahead on
+    /// an incomplete reading and say so, which is what the returned note is for; an edit cannot, so it throws instead.
+    /// </summary>
+    private async Task<string?> SynchronizeSymbolBuffersAsync(EditorViewModel editor, bool requireComplete = true)
     {
+        // A save a moment ago is still being read. Waiting for that is quicker than asking the user to try again.
+        if (XamlAnalysis.ProjectTypesPending)
+        {
+            Status = "Reading changed source files…";
+            await XamlAnalysis.WaitForProjectTypesAsync(TimeSpan.FromSeconds(8), _lifetime.Token);
+        }
         var current = CaptureSymbolContext(editor, includeSemantic: false);
         var synchronized = await _workspace.ReconcileNameProjectionsAsync(OpenLanguageBuffers(), _lifetime.Token);
         if (!synchronized.Accepted) throw new InvalidOperationException(synchronized.Status ?? "Editor buffers could not be synchronized.");
@@ -52,8 +59,10 @@ public sealed partial class ShellViewModel
         var refresh = await _workspace.RefreshAllDiskDocumentsAsync(_lifetime.Token);
         await _dispatcher.InvokeAsync(() => { }, _lifetime.Token);
         if (!current()) throw new InvalidOperationException("The document or project context changed. Request the symbol operation again.");
-        if (!refresh.Accepted || refresh.Truncated || refresh.PendingFiles != 0)
-            throw new InvalidOperationException(refresh.Status ?? "Project source refresh is incomplete. Refresh or reload the workspace before finding or renaming symbols.");
+        if (refresh.Accepted && !refresh.Truncated && refresh.PendingFiles == 0) return null;
+        if (requireComplete)
+            throw new InvalidOperationException(refresh.Status ?? "Some changed source files could not be read yet. Try again in a moment.");
+        return refresh.Status ?? "Some changed source files could not be read yet, so results may be incomplete.";
     }
 
     private IReadOnlyList<XamlDocumentOverlay> SymbolXamlOverlays() => _xamlResources.Capture().Overlays;
@@ -61,16 +70,6 @@ public sealed partial class ShellViewModel
     private UpdateDocumentRequest[] OpenLanguageBuffers() => Documents
         .Where(document => (document.IsCSharp || document.IsXaml) && !document.IsReadOnly)
         .Select(document => new UpdateDocumentRequest(document.State.Path, document.State.Content, document.State.Version, Analyze: false)).ToArray();
-
-    private bool CanQueryLanguageSymbols()
-    {
-        if (XamlAnalysis.ProjectReloadRequired || XamlAnalysis.ProjectTypesPending)
-        {
-            Status = "Project sources changed. Refresh or reload the workspace before finding or renaming symbols.";
-            return false;
-        }
-        return true;
-    }
 
     private async Task FindLanguageSymbolReferencesAsync()
     {
@@ -81,13 +80,33 @@ public sealed partial class ShellViewModel
             else Status = "Symbol references are unavailable while the language worker is disconnected.";
             return;
         }
-        if (!CanQueryLanguageSymbols()) return;
-        await SynchronizeSymbolBuffersAsync(editor);
-        var current = CaptureSymbolContext(editor);
-        var state = editor.State;
-        var result = await _workspace.FindSymbolReferencesAsync(new(state.Path, state.CaretOffset, state.Version,
-            state.Content, editor.XamlProjectPath, SymbolXamlOverlays()), _lifetime.Token);
-        if (!current()) { Status = "The document or its types changed. Find references again."; return; }
+        // A search reads and changes nothing, so it runs on the model that is loaded and says what that may leave out.
+        var notes = new List<string>();
+        if (XamlAnalysis.ProjectReloadRequired)
+        {
+            notes.Add(RefreshesProjectModel ? "Project files changed on disk and the project model is being refreshed; files added or removed since it was loaded are not covered yet."
+                : "Project files changed on disk; files added or removed since the workspace was loaded are not covered until it is reloaded.");
+            ScheduleProjectModelRefresh();
+        }
+        SymbolReferenceResult? result = null;
+        // A file read from disk while the search ran outdates it. That settles by itself, so look again rather than hand the retry to the user.
+        for (int attempt = 0; attempt < 3 && result is null; attempt++)
+        {
+            if (!ReferenceEquals(ActiveDocument, editor)) return;
+            string? incomplete;
+            try { incomplete = await SynchronizeSymbolBuffersAsync(editor, requireComplete: false); }
+            // The project model was swapped, or a buffer changed, while the buffers were being synchronized.
+            catch (InvalidOperationException) when (attempt < 2 && ReferenceEquals(ActiveDocument, editor)) { continue; }
+            if (incomplete is not null && !notes.Contains(incomplete)) notes.Add(incomplete);
+            var current = CaptureSymbolContext(editor);
+            var state = editor.State;
+            Status = "Finding references…";
+            var found = await _workspace.FindSymbolReferencesAsync(new(state.Path, state.CaretOffset, state.Version,
+                state.Content, editor.XamlProjectPath, SymbolXamlOverlays()), _lifetime.Token);
+            if (current()) result = found;
+        }
+        if (result is null) { Status = "The document or its types kept changing. Find references again."; return; }
+        if (notes.Count > 0) result = result with { Warnings = [.. notes, .. result.Warnings] };
         if (editor.IsXaml && !result.SymbolFound) { FindResourceReferences(result.Warnings); return; }
         PublishSymbolReferences(result);
     }
@@ -100,7 +119,6 @@ public sealed partial class ShellViewModel
             var item = new NavigationResult(location.Path, location.Line, location.Column, location.DisplayText ?? "Reference",
                 location.Start, location.ExpectedTextHash, location.ProjectPath, location.ProjectName);
             SearchResults.Add(item);
-            _symbolReferenceOrigins.Add(item, new(Workspace));
         }
         ToolRequested?.Invoke(Workbenches.Search);
         Status = $"{result.Locations.Count} symbol reference(s)" + SymbolWarnings(result.Warnings);
@@ -138,7 +156,14 @@ public sealed partial class ShellViewModel
             else Status = "Symbol rename is unavailable while the language worker is disconnected.";
             return;
         }
-        if (!CanQueryLanguageSymbols()) return;
+        // A rename edits every use, so it needs a project model that lists every file.
+        if (XamlAnalysis.ProjectReloadRequired)
+        {
+            ScheduleProjectModelRefresh();
+            Status = RefreshesProjectModel ? "Project files changed on disk. The project model is being refreshed; rename again when it has finished."
+                : "Project files changed on disk. Reload the workspace before renaming symbols.";
+            return;
+        }
         await SynchronizeSymbolBuffersAsync(editor);
         var current = CaptureSymbolContext(editor);
         var state = editor.State;
@@ -249,23 +274,25 @@ public sealed partial class ShellViewModel
             await NavigateAsync(result.Path, result.Line, result.Column);
             return;
         }
-        bool WorkspaceCurrent() => !_disposed && !XamlAnalysis.ProjectReloadRequired && !XamlAnalysis.ProjectTypesPending
-            && (!_symbolReferenceOrigins.TryGetValue(result, out var origin) || ReferenceEquals(origin.Workspace, Workspace));
-        var workspace = Workspace;
-        var text = _store.Find(result.Path)?.Content ?? await ProjectXamlDiagnosticText.ReadAsync(result.Path, _lifetime.Token);
-        if (!WorkspaceCurrent() || !ReferenceEquals(workspace, Workspace) || text is null || ProjectXamlAnalysisCoordinator.TextHash(text) != result.ExpectedTextHash)
-        { Status = "The reference source or project changed. Find references again before navigating."; return; }
+        if (!File.Exists(result.Path) && _store.Find(result.Path) is null) { Status = "That file no longer exists. Find references again."; return; }
         RecordNavigationOrigin();
         await OpenDocumentAsync(result.Path);
-        if (ActiveDocument is not { } editor || !editor.State.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase)
-            || !WorkspaceCurrent() || !ReferenceEquals(workspace, Workspace) || ProjectXamlAnalysisCoordinator.TextHash(editor.State.Content) != result.ExpectedTextHash)
-        { Status = "The reference source or project changed. Find references again before navigating."; return; }
-        if (editor.IsXaml && result.ProjectPath is { } projectPath)
-        {
-            var projects = editor.XamlProjects.Where(project => project.ProjectPath.Equals(projectPath, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (projects.Length != 1) { Status = "The reference project context is unavailable. Reload the workspace and find references again."; return; }
-            editor.XamlProject = projects[0];
-        }
-        editor.Navigate(result.Start);
+        if (ActiveDocument is not { } editor || !editor.State.Path.Equals(result.Path, StringComparison.OrdinalIgnoreCase)) return;
+        // The project the reference was found in is the context its XAML is read in, while that project is still loaded.
+        if (editor.IsXaml && result.ProjectPath is { } projectPath
+            && editor.XamlProjects.Where(project => project.ProjectPath.Equals(projectPath, StringComparison.OrdinalIgnoreCase)).ToArray() is [var context])
+            editor.XamlProject = context;
+        if (ProjectXamlAnalysisCoordinator.TextHash(editor.State.Content) == result.ExpectedTextHash) { editor.Navigate(result.Start); return; }
+        // The text is not what was searched. Its line is the best guess left, and going there beats refusing to go anywhere.
+        editor.Navigate(OffsetOf(editor.State.Content, result.Line, result.Column));
+        Status = "This file changed since the search, so the reference may have moved. Find references again for exact positions.";
+    }
+
+    /// <summary>The offset of a one-based line and column, clamped to the text.</summary>
+    private static int OffsetOf(string text, int line, int column)
+    {
+        int offset = 0;
+        for (int i = 1; i < line; i++) { int next = text.IndexOf('\n', offset); if (next < 0) break; offset = next + 1; }
+        return Math.Min(text.Length, offset + Math.Max(0, column - 1));
     }
 }

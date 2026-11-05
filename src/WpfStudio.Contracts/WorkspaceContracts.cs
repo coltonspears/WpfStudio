@@ -40,7 +40,8 @@ public sealed record WorkspaceDiagnostic(string Id, string Message, string Sever
 public sealed record WorkspaceDiagnosticEvent(string Path, long Version, IReadOnlyList<WorkspaceDiagnostic> Diagnostics);
 /// <summary><paramref name="Origin"/> says where the entry comes from: its namespace, or the type a member belongs to.</summary>
 public sealed record CompletionEntry(string Id, string DisplayText, string InsertText, string? Description, IReadOnlyList<string> Tags, bool Recommended = false, string? Origin = null);
-public sealed record CompletionResult(long Version, int Start, int Length, IReadOnlyList<CompletionEntry> Items);
+/// <summary><paramref name="Incomplete"/> means more entries matched than were sent, so the list must be asked for again as more is typed.</summary>
+public sealed record CompletionResult(long Version, int Start, int Length, IReadOnlyList<CompletionEntry> Items, bool Incomplete = false);
 public sealed record CompletionEditRequest(string Path, long Version, string ItemId);
 public sealed record TextEdit(int Start, int Length, string NewText);
 /// <summary>Edits to one file. <paramref name="Create"/> marks a new file whose edits insert its whole text.</summary>
@@ -50,6 +51,11 @@ public sealed record SignatureEntry(string Label, string? Documentation, IReadOn
 public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures);
 public sealed record SourceLocation(string Path, int Start, int Length, int Line, int Column, string? DisplayText = null,
     string? ExpectedTextHash = null, string? ProjectPath = null, string? ProjectName = null);
+/// <summary>
+/// Where a symbol is declared. With no locations, <paramref name="Status"/> says why; with some, it may say they are a best
+/// guess. <paramref name="Resolved"/> is false when the name at the position did not resolve to a symbol at all.
+/// </summary>
+public sealed record DefinitionResult(IReadOnlyList<SourceLocation> Locations, string? Status = null, bool Resolved = true);
 public sealed record SymbolReferenceRequest(string Path, int Position, long Version, string? Text = null,
     string? ProjectPath = null, IReadOnlyList<XamlDocumentOverlay>? XamlOverlays = null);
 public sealed record SymbolReferenceResult(IReadOnlyList<SourceLocation> Locations, IReadOnlyList<string> Warnings, bool SymbolFound = true);
@@ -110,6 +116,8 @@ public interface IWorkspaceRpc
     Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<QuickInfoResult?> GetQuickInfoAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
+    /// <summary>As <see cref="GetDefinitionAsync"/>, and says why when there is nowhere to go.</summary>
+    Task<DefinitionResult> FindDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     /// <summary>Implementations of an interface or abstract member, overrides of a virtual member, or types derived from the type at the position.</summary>
     Task<IReadOnlyList<SourceLocation>> FindImplementationsAsync(DocumentPositionRequest request, CancellationToken cancellationToken);

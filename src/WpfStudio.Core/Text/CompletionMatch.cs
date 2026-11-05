@@ -3,11 +3,17 @@ namespace WpfStudio.Core.Text;
 /// <summary>Which parts of a completion's name match what has been typed, so the list can show why an entry is there.</summary>
 public static class CompletionMatch
 {
-    /// <summary>The typed text where it appears whole; otherwise each of its letters in order, as "OFD" matches OpenFileDialog. Empty if neither fits.</summary>
+    /// <summary>
+    /// The typed text where it appears whole, at the start of a word when it does that anywhere ("o" is the O of
+    /// DesignerSerializationOptions, not the one in Serialization); otherwise each of its letters in order, as "OFD"
+    /// matches OpenFileDialog. Empty if neither fits.
+    /// </summary>
     public static IReadOnlyList<(int Start, int Length)> Ranges(string text, string query)
     {
         if (query.Length == 0) return [];
         int whole = text.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+        for (int at = whole; at > 0; at = text.IndexOf(query, at + 1, StringComparison.OrdinalIgnoreCase))
+            if (char.IsUpper(text[at]) && !char.IsUpper(text[at - 1]) || !char.IsLetterOrDigit(text[at - 1])) { whole = at; break; }
         if (whole >= 0) return [(whole, query.Length)];
         var ranges = new List<(int Start, int Length)>();
         int next = 0;

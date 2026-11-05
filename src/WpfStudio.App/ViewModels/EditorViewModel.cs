@@ -208,6 +208,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// <summary>Asks the attached editor to expand a snippet at the caret, wrapping any selection the snippet supports.</summary>
     public event Action<WpfStudio.Core.Text.CodeSnippet>? SnippetRequested;
     public void InsertSnippet(WpfStudio.Core.Text.CodeSnippet snippet) => SnippetRequested?.Invoke(snippet);
+    /// <summary>
+    /// Set by the attached editor: writes a member snippet where a member belongs, adding the using it needs, and returns
+    /// true. Without an editor on screen there is nowhere to edit a snippet's fields, and callers fall back to a reviewed edit.
+    /// </summary>
+    public Func<WpfStudio.Core.Text.CodeSnippet, string?, bool>? MemberSnippetInserter { get; set; }
+    public bool InsertMember(WpfStudio.Core.Text.CodeSnippet snippet, string? requiredUsing = null) => !IsReadOnly && MemberSnippetInserter?.Invoke(snippet, requiredUsing) == true;
     private void ContentChanged(object? sender, EventArgs e)
     {
         if (_disposed) return;

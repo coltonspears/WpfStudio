@@ -105,6 +105,18 @@ public class WorkspaceIntegrationTests
         var generatedDefinition = await client.GetDefinitionAsync(new DocumentPositionRequest(view, source.IndexOf(".Name", StringComparison.Ordinal) + 2, 1));
         Assert.NotEmpty(generatedDefinition);
         Assert.All(generatedDefinition, d => Assert.True(File.Exists(d.Path)));
+        // The Toolkit generates Name from the field, and the field is the code its author wrote: that is where the definition is.
+        var modelPath = Path.Combine(directory, "MainViewModel.cs");
+        var origin = Assert.Single(generatedDefinition);
+        Assert.Equal(modelPath, origin.Path, ignoreCase: true);
+        Assert.Equal((await File.ReadAllTextAsync(modelPath)).IndexOf("name =", StringComparison.Ordinal), origin.Start);
+        // A generated file is still somewhere to navigate from: its snapshot leads back into the project's source.
+        var generatedFile = snapshot.Projects[0].Files.First(f => f.Kind == "Generated" && f.Name.Contains("MainViewModel", StringComparison.Ordinal));
+        var generatedText = await File.ReadAllTextAsync(generatedFile.Path);
+        var fieldUse = System.Text.RegularExpressions.Regex.Match(generatedText, @"=>\s*name\b");
+        Assert.True(fieldUse.Success, generatedText);
+        var fromGenerated = await client.FindDefinitionAsync(new DocumentPositionRequest(generatedFile.Path, fieldUse.Index + fieldUse.Length - 2, 0));
+        Assert.Equal(modelPath, Assert.Single(fromGenerated.Locations).Path, ignoreCase: true);
 
         var completionSource = source.Replace("new MainViewModel().Name", "new MainViewModel().Na");
         await client.UpdateDocumentAsync(new UpdateDocumentRequest(view, completionSource, 2));

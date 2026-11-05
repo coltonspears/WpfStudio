@@ -236,7 +236,7 @@ public sealed class XamlSymbolRefactoringTests
     }
 
     [Fact]
-    public async Task ReferenceNavigationPreservesLinkedProjectContextAndRejectsChangedText()
+    public async Task ReferenceNavigationPreservesLinkedProjectContextAndGoesToTheLineWhenTheTextChanged()
     {
         await using var test = new ShellTestContext();
         string view = await test.CreateFileAsync("Shared.xaml", Markup);
@@ -257,11 +257,19 @@ public sealed class XamlSymbolRefactoringTests
         await test.Shell.NavigateSearchCommand.ExecuteAsync(result);
         Assert.Equal(second, editor.XamlProjectPath);
         Assert.Equal(at, editor.State.CaretOffset);
+        // The text is no longer what was searched. The reference's line and column are the best guess left, and the status says so.
         editor.State.Content = "<!-- new -->" + Markup;
         editor.State.CaretOffset = 0;
         await test.Shell.NavigateSearchCommand.ExecuteAsync(result);
-        Assert.Equal(0, editor.State.CaretOffset);
+        Assert.Equal(at, editor.State.CaretOffset);
+        Assert.Contains("may have moved", test.Shell.Status);
         Assert.Contains("Find references again", test.Shell.Status);
+        // A file that is gone is nowhere to go.
+        await test.Shell.CloseDocumentAsync(editor, discardChanges: true);
+        File.Delete(view);
+        await test.Shell.NavigateSearchCommand.ExecuteAsync(result);
+        Assert.Empty(test.Shell.Documents);
+        Assert.Contains("no longer exists", test.Shell.Status);
         Assert.Empty(test.Dialogs.Errors);
     }
 

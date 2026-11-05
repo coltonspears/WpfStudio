@@ -11,7 +11,7 @@ internal sealed class EditorHover
 {
     private readonly EditorSurface _owner;
     private CancellationTokenSource? _request;
-    private readonly ToolTip _signature = new() { Placement = PlacementMode.MousePoint, StaysOpen = false };
+    private readonly ToolTip _signature = new() { Placement = PlacementMode.Top, StaysOpen = false };
     // Hover information is a popup the editor owns, below the pointer. A tooltip at the pointer covered the
     // text, ended the hover and reopened on the next one, so it flashed; ToolTipService could also close it.
     private readonly Popup _popup = new()
@@ -85,9 +85,19 @@ internal sealed class EditorHover
         _signature.IsOpen = false;
     }
 
+    /// <summary>Signature help sits just above the caret, where the arguments are being typed, wherever the pointer happens to be.</summary>
     public void ShowSignature(string text)
     {
-        _signature.Content = text; _signature.PlacementTarget = _owner; _signature.IsOpen = true;
+        var view = _owner.TextArea.TextView;
+        var caret = _owner.TextArea.Caret.CalculateCaretRectangle();
+        caret.Offset(-view.HorizontalOffset, -view.VerticalOffset);
+        _signature.IsOpen = false;
+        _signature.Content = text;
+        _signature.FontFamily = _owner.FontFamily;
+        _signature.PlacementTarget = view;
+        _signature.PlacementRectangle = caret;
+        _signature.VerticalOffset = -4;
+        _signature.IsOpen = true;
     }
 
     public void CloseSignature() => _signature.IsOpen = false;

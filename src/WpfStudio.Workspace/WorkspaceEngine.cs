@@ -7,7 +7,6 @@ using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
-using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Formatting;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
@@ -461,12 +460,13 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var prefix = text.ToString(TextSpan.FromBounds(list.Span.Start, Math.Clamp(request.Position, list.Span.Start, list.Span.End)));
         var origins = await CompletionOrigins.FindAsync(document, list.Span.Start, cancellationToken).ConfigureAwait(false);
         var items = new List<CompletionEntry>();
+        var (matching, incomplete) = CompletionMatching.Select(list.ItemsList, prefix, CompletionEntries);
         lock (_gate)
         {
             if (!_completions.IsLatest(generation) || _pages.Pending || !ReferenceEquals(document.Project.Solution, CurrentSolution))
                 return new CompletionResult(request.Version, request.Position, 0, []);
             var open = new OpenCompletionList(document, []);
-            foreach (var item in list.ItemsList.Where(i => prefix.Length == 0 || i.FilterText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Take(1500))
+            foreach (var item in matching)
             {
                 var id = _completions.Add(document, request.Version, item);
                 open.Items[id] = item;
@@ -476,8 +476,11 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             }
             OpenCompletions = open;
         }
-        return new CompletionResult(request.Version, list.Span.Start, list.Span.Length, items);
+        return new CompletionResult(request.Version, list.Span.Start, list.Span.Length, items, incomplete);
     }
+
+    // The popup filters what it was given as more is typed, so this bounds one reply, not what can be found.
+    private const int CompletionEntries = 1500;
 
     public async Task<TextEdit?> GetCompletionEditAsync(CompletionEditRequest request, CancellationToken cancellationToken)
     {
@@ -513,18 +516,6 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             method.Parameters.Select(p => new SignatureParameter(p.Name, p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), null)).ToArray())).ToArray();
         var active = argumentList.Arguments.GetSeparators().Count(s => s.SpanStart < request.Position);
         return new SignatureHelpResult(request.Version, active, signatures);
-    }
-
-    public async Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken)
-    {
-        await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
-        var document = GetDocument(request.Path, request.Version);
-        var symbol = await SymbolFinder.FindSymbolAtPositionAsync(document, request.Position, cancellationToken).ConfigureAwait(false);
-        if (symbol is null) return [];
-        var source = await SymbolFinder.FindSourceDefinitionAsync(symbol, document.Project.Solution, cancellationToken).ConfigureAwait(false) ?? symbol;
-        if (source is IFieldSymbol field && await GetProjectedNameDefinitionAsync(document.Project, field, cancellationToken).ConfigureAwait(false) is { } projected)
-            return projected;
-        return await Task.WhenAll(source.Locations.Where(l => l.IsInSource).Select(l => ToLocationAsync(l, source.ToDisplayString(), cancellationToken))).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken)
