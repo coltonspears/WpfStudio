@@ -9,6 +9,9 @@ public sealed class CompletionMatchTests
     {
         Assert.Equal([(0, 2)], CompletionMatch.Ranges("Obsolete", "ob"));
         Assert.Equal([(4, 4)], CompletionMatch.Ranges("OpenFileDialog", "file"));
+        // The start of a word is what the typing meant, over the same letters earlier inside one.
+        Assert.Equal([(21, 1)], CompletionMatch.Ranges("DesignerSerializationOptions", "o"));
+        Assert.Equal([(1, 2)], CompletionMatch.Ranges("Assert", "ss"));
     }
 
     [Fact]

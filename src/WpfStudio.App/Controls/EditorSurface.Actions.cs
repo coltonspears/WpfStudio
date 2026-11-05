@@ -58,6 +58,13 @@ public sealed partial class EditorSurface
         InsertSnippet(snippet, CaretOffset, 0);
         Focus();
     }
+    private bool InsertRequestedMember(CodeSnippet snippet, string? requiredUsing)
+    {
+        if (IsReadOnly || !ReferenceEquals(ViewModel, _attached)) return false;
+        _completion.CancelPending(); _completion.CloseWindow();
+        InsertMemberSnippet(snippet, requiredUsing);
+        return true;
+    }
     /// <summary>Replaces <paramref name="length"/> characters at <paramref name="start"/> with an interactive snippet: Tab moves between fields, Enter or Esc finishes.</summary>
     internal void InsertSnippet(CodeSnippet snippet, int start, int length)
     {
@@ -68,7 +75,8 @@ public sealed partial class EditorSurface
         {
             switch (part)
             {
-                case SnippetLiteral literal: expansion.Elements.Add(new SnippetTextElement { Text = literal.Text }); break;
+                // Snippet bodies are written with four spaces a level. Tabs become this editor's own indentation as they are inserted.
+                case SnippetLiteral literal: expansion.Elements.Add(new SnippetTextElement { Text = SnippetIndentation().Replace(literal.Text, match => new string('\t', match.Length / 4)) }); break;
                 case SnippetField field: expansion.Elements.Add(fields[field.Name] = new SnippetReplaceableTextElement { Text = field.Default }); break;
                 case SnippetMirror mirror: expansion.Elements.Add(new SnippetBoundElement { TargetElement = fields[mirror.Name] }); break;
                 case SnippetCaret: expansion.Elements.Add(new SnippetCaretElement()); break;
@@ -83,4 +91,7 @@ public sealed partial class EditorSurface
         }
         TextArea.Caret.BringCaretToView();
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<=\n)(?:    )+")]
+    private static partial System.Text.RegularExpressions.Regex SnippetIndentation();
 }

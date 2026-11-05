@@ -1,6 +1,5 @@
 using System.IO;
 using CommunityToolkit.Mvvm.Input;
-using WpfStudio.App.Features.Workbench;
 using WpfStudio.Core.Documents;
 
 namespace WpfStudio.App.ViewModels;
@@ -53,10 +52,7 @@ public sealed partial class ShellViewModel
         var results = await _workspace.FindImplementationsAsync(new(state.Path, state.CaretOffset, state.Version), _lifetime.Token);
         if (results.Count == 0) { Status = "No implementations found"; return; }
         if (results.Count == 1) { await NavigateAsync(results[0].Path, results[0].Line, results[0].Column); return; }
-        SearchResults.Clear();
-        foreach (var location in results)
-            SearchResults.Add(new NavigationResult(location.Path, location.Line, location.Column, location.DisplayText ?? "Implementation"));
-        ToolRequested?.Invoke(Workbenches.Search);
+        ShowResults(Count(results.Count, "implementation", "implementations"), results.Select(location => ResultFor(location, "Implementation") with { Start = 0, ExpectedTextHash = null }));
         Status = $"{results.Count} implementation(s)";
     });
 }

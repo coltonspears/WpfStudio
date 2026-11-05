@@ -56,7 +56,9 @@ public sealed class InspectionSourceVerifier(IInspectionSourceHost host, Documen
         Func<string, string, XamlRuntimeSourceResult> locate, CancellationToken token)
     {
         var workspace = _workspace; var sources = _buildSources;
-        bool Current() => isCurrent() && ReferenceEquals(workspace, host.Workspace) && ReferenceEquals(sources, _buildSources);
+        // The same solution or project, as opposed to the same snapshot of it: the project model is refreshed while the
+        // application runs, and what proves a location is the build inputs captured at launch, checked below.
+        bool Current() => isCurrent() && string.Equals(workspace?.Path, host.Workspace?.Path, StringComparison.OrdinalIgnoreCase) && ReferenceEquals(sources, _buildSources);
         if (!Current() || workspace == null) return (null, "The workspace changed since this application was built. Launch with inspection again to verify source.");
         var resolved = await InspectionSourceResolver.ResolveAsync(hint, modules, token);
         if (!Current()) return (null, "Source verification cancelled because the inspection context changed.");

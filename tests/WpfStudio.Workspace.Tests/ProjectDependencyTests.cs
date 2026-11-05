@@ -61,6 +61,33 @@ public class ProjectDependencyTests
     [InlineData(null, false)]
     public void RecognizesNetFrameworkTargets(string? framework, bool expected) => Assert.Equal(expected, ProjectDiscovery.IsNetFrameworkTarget(framework));
 
+    [Theory]
+    [InlineData("Debug", "bin/Debug/App.exe")]
+    [InlineData("Release", "bin/AnyCPU/Release/App.exe")]
+    public void ALegacyBuildIsFoundWhereItsSolutionPutIt(string configuration, string expected)
+    {
+        string directory = Directory.CreateTempSubdirectory("WpfStudio.BuiltAssembly.").FullName;
+        string project = Path.Combine(directory, "App.csproj");
+        foreach (string built in new[] { "bin/Debug/App.exe", "bin/AnyCPU/Release/App.exe", "bin/Debug/Other.exe" })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(directory, built))!);
+            File.WriteAllText(Path.Combine(directory, built), "");
+        }
+        string evaluated = Path.Combine(directory, "bin", "x86", configuration, "App.exe");
+        var legacy = new WorkspaceProject("1", "App", project, "", evaluated, true, [], IsSdkStyle: false);
+
+        Assert.Equal(Path.GetFullPath(Path.Combine(directory, expected)), Path.GetFullPath(ProjectDiscovery.FindBuiltAssembly(legacy, configuration)!));
+        // Nothing of that configuration: keep the evaluated path, so the first build is found there.
+        Assert.Equal(evaluated, ProjectDiscovery.FindBuiltAssembly(legacy, "Staging"));
+        // An SDK-style project's evaluation is already exact, even before its first build.
+        Assert.Equal(evaluated, ProjectDiscovery.FindBuiltAssembly(legacy with { IsSdkStyle = true }, configuration));
+        // What is there wins.
+        Directory.CreateDirectory(Path.GetDirectoryName(evaluated)!);
+        File.WriteAllText(evaluated, "");
+        Assert.Equal(evaluated, ProjectDiscovery.FindBuiltAssembly(legacy, configuration));
+        Directory.Delete(directory, recursive: true);
+    }
+
     [Fact]
     public void LegacyProjectsTargetNetFrameworkWithoutATargetFramework()
     {

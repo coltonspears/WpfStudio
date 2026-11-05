@@ -1,6 +1,5 @@
 using System.IO;
 using System.Reflection;
-using System.Runtime.Loader;
 using WpfStudio.Contracts;
 using WpfStudio.PreviewDependencies;
 
@@ -27,18 +26,7 @@ internal sealed partial class PreviewAssemblyResolver
     private void StageDependencies(PreviewRequest request)
     {
         _searchDirectories = PreviewDependencyCatalog.SearchDirectories(request);
-        foreach (var asset in PreviewDependencyCatalog.Read(request).Assets)
-        {
-            string destination = PreviewDependencyCatalog.Within(_directory!, asset.RelativePath);
-            if (File.Exists(destination)) continue;
-            if (!File.Exists(asset.Source))
-            {
-                _missingDependencies[Path.GetFileNameWithoutExtension(asset.RelativePath)] = asset.Source;
-                continue;
-            }
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(asset.Source, destination);
-        }
+        foreach (var missing in PreviewOutputStage.StageReferences(request, _directory!)) _missingDependencies[missing.Key] = missing.Value;
     }
 
     /// <summary>
@@ -104,7 +92,7 @@ internal sealed partial class PreviewAssemblyResolver
                 if (AppDomain.CurrentDomain.GetAssemblies().Any(assembly => string.Equals(assembly.GetName().Name, library.Name, StringComparison.OrdinalIgnoreCase))) continue;
                 // Load by name first so the build's dependency manifest picks the copy a real run would use.
                 try { Assembly.Load(AssemblyName.GetAssemblyName(library.Path)); }
-                catch (FileNotFoundException) { AssemblyLoadContext.Default.LoadFromAssemblyPath(library.Path); }
+                catch (FileNotFoundException) { LoadFromPath(library.Path); }
             }
             catch (Exception exception) when (exception is FileNotFoundException or FileLoadException or BadImageFormatException)
             {
@@ -122,7 +110,7 @@ internal sealed partial class PreviewAssemblyResolver
     {
         var written = File.GetLastWriteTimeUtc(path);
         if (_libraries.TryGetValue(path, out var cached) && cached.Written == written) return cached.Library;
-        var library = XamlNamespaceIndex.ReadLibrary(path);
+        var library = ReadLibraryMetadata(path);
         _libraries[path] = (written, library);
         return library;
     }

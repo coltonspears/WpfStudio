@@ -9,6 +9,8 @@ WpfStudio combines the following packages. Their licenses remain with their resp
 | CommunityToolkit.Mvvm | 8.4.2 | [CommunityToolkit/dotnet](https://github.com/CommunityToolkit/dotnet), MIT |
 | Microsoft.CodeAnalysis / Roslyn | 5.9.0 | [dotnet/roslyn](https://github.com/dotnet/roslyn), MIT |
 | Microsoft.Build.Locator | 1.11.2 | [microsoft/MSBuildLocator](https://github.com/microsoft/MSBuildLocator), MIT |
+| Newtonsoft.Json | 13.0.4 | [JamesNK/Newtonsoft.Json](https://github.com/JamesNK/Newtonsoft.Json), MIT; the .NET Framework preview host |
+| PolySharp | 1.15.0 | [Sergio0694/PolySharp](https://github.com/Sergio0694/PolySharp), MIT; compile-time language support in the .NET Framework preview host |
 | StreamJsonRpc | 2.25.29 | [microsoft/vs-streamjsonrpc](https://github.com/microsoft/vs-streamjsonrpc), MIT |
 | Microsoft.Diagnostics.Runtime (ClrMD) | 4.1.745802 | [microsoft/clrmd](https://github.com/microsoft/clrmd), MIT; managed dump/snapshot analysis in the isolated profiling worker |
 | Microsoft.Diagnostics.NETCore.Client | 0.2.661903 | [dotnet/diagnostics](https://github.com/dotnet/diagnostics), MIT; transitive profiling dependency |

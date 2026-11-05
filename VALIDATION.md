@@ -2,6 +2,34 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## .NET Framework preview host (2026-11-05)
+
+Previewing a net48 project using DevExpress failed with `Method not found: 'System.String System.AppDomainSetup.get_AppDomainManagerType()'`. The .NET 10 host loaded the Framework build of `DevExpress.Xpf.Core`, whose `ApplicationThemeHelper.GetIsWebApp` reads that .NET Framework-only property during theme setup. A real net48 `SimpleButton` reproduced the exact message through the real client and host before any change.
+
+| Check | Result |
+| --- | --- |
+| Clean checkout of `main` plus this change, restored and built from nothing | 0 warnings, 0 errors |
+| Preview suite, including 16 cases with real net48 fixtures | 277 passed |
+| Loaded app UI | Passed on the clean checkout |
+| Inspection | 222 passed |
+| Core, Workspace, Runtime, Database, Shell, NativeView, Profiling, Code Assist | Only the failures below |
+| `tools/Publish.ps1` on the clean checkout | Succeeded. The package adds 43 files and 7.1 MB in `PreviewHost.Framework`, with license notices |
+| Packaged 64-bit and 32-bit hosts | Each passed a native attach, focus and detach case |
+| Preview suite with `WPFSTUDIO_PREVIEW_HOST_UNDER_TEST` on this host | 184 of 272 passed. The failures load .NET fixtures, which cannot run on .NET Framework |
+
+Failures in the full run, none in code this change touches: `ConflictsParseWithAndWithoutBaseAndResolve`, `CSharpFoldsBlocksRegionsUsingsAndComments` and `AutomaticReloadAppliesOnlyToFilesWithoutUnsavedEdits` (known, fixed by PR #37), `WatchedModelChangeRestoresHealthyEditor…` (known to be intermittent), and `TerminalDisposalTests.BackgroundDisposalClearsBoundSessions…` once, which then passed 6 of 6 alone. `LiveEditingLifetimeTests.OperationLimitKeepsOriginalOutcomes…` failed once on this change and once on an untouched `main`, so it is intermittent on both.
+
+Real solutions, read without building or editing them:
+
+| Project | Result |
+| --- | --- |
+| A legacy net48 application using DevExpress 24.1, Source and Compiled, through the real client | Rendered 386 and 358 visual nodes in 14 s and 11 s on first render, with its `LayoutControl` and `GridControl` |
+| A legacy WinExe with default Prefer32Bit, through the loaded shell | Found the build in `bin\Debug` where evaluation said `bin\x86\Debug`, and chose the 32-bit host. It then correctly reported a missing 24.1 theme assembly: only 24.2 is installed on this machine, so the application cannot run here either |
+
+The tests found two faults an ordinary port would have shipped. The engine bound to the transport's `System.Memory` through `array.Contains` as soon as that package was referenced, and a project's older `Newtonsoft.Json` blocked the engine's own copy until the lookup was registered in the domain manager. Rebuilding and publishing found two more in the project files: naming the framework on a project reference built the host twice into one `obj` folder, and restoring the application with `-r win-x64` removed the 32-bit host's inferred runtime target.
+
+Not exercised: clicking through a Framework preview by hand in the running application (native interaction is covered by process tests only), and data-bound DevExpress grids through a scenario factory.
+
 ## Code Assist line model 4.0.0 (2026-11-05)
 
 Line model 4.0.0 read exactly what 3.0.0 read, by dataset hash. It is a 6-layer transformer with a copy head instead of a GRU, and a learned gate scores each finished line. The aim was more whole lines and fewer lone words and accessors.

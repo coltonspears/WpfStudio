@@ -106,4 +106,4 @@ The Properties inspector identifies these declarations as a **design baseline**,
 
 `d:DesignInstance`, `CreateList`, and `d:DesignData` are not instantiated by the preview in this increment. Their faux-type, real-construction and sample-file semantics require further support. Language-service use of a declared design type remains separate from constructing a preview object. This distinction follows the documented [design-time data model](https://learn.microsoft.com/en-us/visualstudio/xaml-tools/xaml-designtime-data?view=visualstudio).
 
-The preview host currently targets .NET 10 on Windows. Scenarios do not establish other-runtime/architecture fidelity, native input fidelity, or application-startup equivalence.
+Scenarios run on the host chosen for the build: [.NET Framework projects](xaml-preview-dependencies.md#net-framework-projects) on .NET Framework, everything else on .NET 10. They do not establish native input fidelity or application-startup equivalence.

@@ -36,6 +36,8 @@ public sealed partial class EditorSurface : TextEditor
     private readonly EditorFolding _folding;
     private readonly EditorHover _hover;
     private readonly EditorCompletion _completion;
+    private readonly EditorSignatureHelp _signature;
+    private readonly SearchPanel _search;
     private readonly EditorLineSuggestion _lineSuggestion;
     private TextDocument? _trackedDocument;
     public EditorSurface()
@@ -54,7 +56,10 @@ public sealed partial class EditorSurface : TextEditor
         TextArea.SelectionCornerRadius = 2;
         foreach (var rule in TextArea.LeftMargins.OfType<System.Windows.Shapes.Line>().ToArray()) rule.Visibility = Visibility.Collapsed;
         foreach (var numbers in TextArea.LeftMargins.OfType<LineNumberMargin>()) numbers.Margin = new Thickness(6, 0, 14, 0);
-        SearchPanel.Install(TextArea);
+        _search = SearchPanel.Install(TextArea);
+        // The panel's own marker is a light green that hides the text it marks on a dark surface.
+        if (TryFindResource("FindMatchBrush") is Brush findMatch) _search.MarkerBrush = findMatch;
+        EditorReplace.Attach(_search, TextArea, () => !IsReadOnly, status => { if (status.Length > 0 && ViewModel is { } vm) vm.LanguageStatus = status; });
         _margin = new DebugMargin(this); TextArea.LeftMargins.Insert(0, _margin);
         _diagnostics = new DiagnosticRenderer(this); TextArea.TextView.BackgroundRenderers.Add(_diagnostics);
         TextArea.TextView.LineTransformers.Add(_semantic);
@@ -63,7 +68,9 @@ public sealed partial class EditorSurface : TextEditor
         InitializePreferenceChrome();
         _folding = new EditorFolding(this);
         _hover = new EditorHover(this);
-        _completion = new EditorCompletion(this, _hover, new EditorTyping(this));
+        _typing = new EditorTyping(this);
+        _signature = new EditorSignatureHelp(this);
+        _completion = new EditorCompletion(this, _typing, _signature);
         _lineSuggestion = new EditorLineSuggestion(this, () => _completion.IsWindowOpen || _completion.IsPending); TextArea.TextView.ElementGenerators.Add(_lineSuggestion);
         TextChanged += OnEditorTextChanged;
         TextArea.Caret.PositionChanged += (_, _) => { _lineSuggestion.OnCaretMoved(); if (ViewModel is { } vm && !_syncing) vm.ReportCaret(TextArea.Caret.Line, TextArea.Caret.Column, CaretOffset); };
@@ -75,8 +82,9 @@ public sealed partial class EditorSurface : TextEditor
         };
         TextArea.TextEntering += _completion.OnTextEntering;
         CommandManager.AddPreviewExecutedHandler(TextArea, _completion.OnPreviewExecuted);
+        InitializeEditing();
         PreviewMouseDown += (_, _) => { _completion.CancelPending(); _hover.Cancel(); };
-        LostKeyboardFocus += (_, _) => { _completion.CancelPending(); _lineSuggestion.Cancel(); };
+        LostKeyboardFocus += (_, _) => { _completion.CancelPending(); _lineSuggestion.Cancel(); _signature.Close(); };
         PreviewKeyDown += OnPreviewKeyDown;
         Loaded += (_, _) =>
         {
@@ -98,6 +106,10 @@ public sealed partial class EditorSurface : TextEditor
     internal Task CommitCompletionAsync(Func<CancellationToken, Task<(long Version, TextEdit Edit)>> resolve, string? punctuation = null) => _completion.CommitAsync(resolve, punctuation);
     internal BlameHistoryCard? CreateHistoryCard(string name, int first, int last, BlameHistory history) => _annotations.CreateHistoryCard(name, first, last, history);
     internal LineChangeCard CreateChangeCard(LineChange change) => _annotations.CreateChangeCard(change);
+    internal bool IsHistoryPopupOpen => _annotations.IsHistoryOpen;
+    internal EditorSignatureHelp SignatureHelp => _signature;
+    internal SearchPanel FindPanel => _search;
+    internal void CloseAnnotationPopups() => _annotations.ClosePopups();
     private static void Changed(DependencyObject owner, DependencyPropertyChangedEventArgs args)
     {
         var surface = (EditorSurface)owner;
@@ -123,16 +135,19 @@ public sealed partial class EditorSurface : TextEditor
         ViewModel.GitChanged += _annotations.OnGitChanged;
         ViewModel.CodeLensChanged += _annotations.ApplyCodeLens;
         ViewModel.ApplyReplacements = ApplyReplacements;
+        ViewModel.MemberSnippetInserter = InsertRequestedMember;
         _trackedDocument = Document; Document.Changed += OnDocumentChanged;
         _hints.Enabled = ViewModel.ShowInlayHints;
         ApplyDecorations();
         _folding.Install();
         _annotations.UpdateChangeMargin(); _annotations.ApplyCodeLens();
+        _guides.Refresh();
         _syncing = false; Navigate();
     }
     private void Detach()
     {
         _hover.Cancel();
+        _signature.Close();
         _annotations.ClosePopups();
         _lineSuggestion.Cancel();
         _completion.CancelPending();
@@ -149,6 +164,7 @@ public sealed partial class EditorSurface : TextEditor
             _attached.GitChanged -= _annotations.OnGitChanged;
             _attached.CodeLensChanged -= _annotations.ApplyCodeLens;
             if (_attached.ApplyReplacements == ApplyReplacements) _attached.ApplyReplacements = null;
+            if (_attached.MemberSnippetInserter == InsertRequestedMember) _attached.MemberSnippetInserter = null;
             _folding.Uninstall(_attached.State);
         }
         if (_trackedDocument != null) { _trackedDocument.Changed -= OnDocumentChanged; _trackedDocument = null; }
@@ -222,6 +238,10 @@ public sealed partial class EditorSurface : TextEditor
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (_completion.IsPending && e.Key == Key.Escape) { _completion.CancelPending(); e.Handled = true; return; }
+        if (HandleEditingKey(e)) { e.Handled = true; return; }
+        // While signature help shows several overloads, Up and Down step through them, as long as no completion list wants the keys.
+        if (e.Key is Key.Up or Key.Down && Keyboard.Modifiers == ModifierKeys.None && !_completion.IsWindowOpen && _signature.Cycle(e.Key == Key.Up ? -1 : 1)) { e.Handled = true; return; }
+        if (e.Key == Key.Space && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift)) { e.Handled = true; _signature.Trigger(); return; }
         if (e.Key == Key.Tab && Keyboard.Modifiers == ModifierKeys.None && (TryExpandSnippet() || (!_completion.IsWindowOpen && _lineSuggestion.TryAccept()))) e.Handled = true;
         else if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; _completion.Show(); }
         else if (e.Key == Key.OemPeriod && Keyboard.Modifiers == ModifierKeys.Control && ViewModel is { IsCSharp: true } csharp)
@@ -233,9 +253,9 @@ public sealed partial class EditorSurface : TextEditor
             if (ViewModel is { } vm) vm.RefreshQuickFixesAsync(CaretOffset).Forget(vm.ReportFault);
             ContextMenu.PlacementTarget = this; ContextMenu.IsOpen = true; e.Handled = true;
         }
-        else if (e.Key == Key.Escape) { _completion.CloseWindow(); _hover.Cancel(); _lineSuggestion.Cancel(); }
+        else if (e.Key == Key.Escape) { _completion.CloseWindow(); _hover.Cancel(); _lineSuggestion.Cancel(); _signature.Close(); }
     }
-    private void OnWindowDeactivated(object? sender, EventArgs e) => _hover.Cancel();
+    private void OnWindowDeactivated(object? sender, EventArgs e) { _hover.Cancel(); _signature.Close(); }
     /// <summary>Takes the view model's decorations when they describe the current text; later edits shift them.</summary>
     private void ApplyDecorations()
     {

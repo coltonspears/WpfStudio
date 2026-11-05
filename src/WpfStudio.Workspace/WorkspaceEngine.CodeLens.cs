@@ -153,25 +153,5 @@ public sealed partial class WorkspaceEngine
         .Any(attribute => attribute.Name.ToString().Split('.')[^1] is var simple && (simple == name || simple == name + "Attribute"));
 
     /// <summary>The symbol and the members CommunityToolkit.Mvvm generates from it, which XAML binds to instead.</summary>
-    private static IEnumerable<ISymbol> Related(ISymbol symbol)
-    {
-        yield return symbol;
-        if (symbol.ContainingType is not { } type) yield break;
-        bool Has(string attribute) => symbol.GetAttributes().Any(a => a.AttributeClass?.Name == attribute + "Attribute" || a.AttributeClass?.Name == attribute);
-        string? generated = symbol switch
-        {
-            IFieldSymbol field when Has("ObservableProperty") => PropertyName(field.Name),
-            IMethodSymbol method when Has("RelayCommand") => (method.Name.EndsWith("Async", StringComparison.Ordinal) && method.Name.Length > 5 ? method.Name[..^5] : method.Name) + "Command",
-            _ => null
-        };
-        if (generated is null) yield break;
-        foreach (var member in type.GetMembers(generated).OfType<IPropertySymbol>()) yield return member;
-    }
-
-    // The Toolkit's field-to-property naming: _name, m_name and name become Name.
-    private static string PropertyName(string field)
-    {
-        var name = field.StartsWith("m_", StringComparison.Ordinal) ? field[2..] : field.TrimStart('_');
-        return name.Length == 0 ? field : char.ToUpperInvariant(name[0]) + name[1..];
-    }
+    private static IEnumerable<ISymbol> Related(ISymbol symbol) => ToolkitMembers.Related(symbol);
 }

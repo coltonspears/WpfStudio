@@ -208,6 +208,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// <summary>Asks the attached editor to expand a snippet at the caret, wrapping any selection the snippet supports.</summary>
     public event Action<WpfStudio.Core.Text.CodeSnippet>? SnippetRequested;
     public void InsertSnippet(WpfStudio.Core.Text.CodeSnippet snippet) => SnippetRequested?.Invoke(snippet);
+    /// <summary>
+    /// Set by the attached editor: writes a member snippet where a member belongs, adding the using it needs, and returns
+    /// true. Without an editor on screen there is nowhere to edit a snippet's fields, and callers fall back to a reviewed edit.
+    /// </summary>
+    public Func<WpfStudio.Core.Text.CodeSnippet, string?, bool>? MemberSnippetInserter { get; set; }
+    public bool InsertMember(WpfStudio.Core.Text.CodeSnippet snippet, string? requiredUsing = null) => !IsReadOnly && MemberSnippetInserter?.Invoke(snippet, requiredUsing) == true;
     private void ContentChanged(object? sender, EventArgs e)
     {
         if (_disposed) return;
@@ -390,12 +396,14 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (State.Extension != ".cs" || !_workspace.IsConnected) return null;
         return await _workspace.GetCompletionDetailsAsync(new(State.Path, version, entry.Id), token);
     }
-    public async Task<string?> SignatureAsync(int offset, CancellationToken token = default)
+    /// <summary>The overloads of the call the offset is in, with the argument being typed; null outside a call, or when the answer is for older text.</summary>
+    public async Task<SignatureHelpResult?> SignatureHelpAsync(int offset, CancellationToken token = default)
     {
-        if (State.Extension != ".cs" || !_workspace.IsConnected) return null;
+        if (State.Extension != ".cs" || IsReadOnly || _disposed || !_workspace.IsConnected) return null;
         await SyncAsync(token);
-        var result = await _workspace.GetSignatureHelpAsync(new(State.Path, offset, State.Version), token);
-        return result.Version == State.Version ? string.Join(Environment.NewLine, result.Signatures.Take(6).Select(s => s.Label)) : null;
+        long version = State.Version;
+        var result = await _workspace.GetSignatureHelpAsync(new(State.Path, Math.Clamp(offset, 0, State.Content.Length), version), token);
+        return result.Version == version && version == State.Version && result.Signatures.Count > 0 ? result : null;
     }
     /// <summary>Evaluates an expression while the debugger is paused; set by the shell. Returns null when unavailable.</summary>
     public Func<string, CancellationToken, Task<string?>>? DataTipEvaluator { get; set; }

@@ -232,6 +232,38 @@ public sealed class ProjectXamlAnalysisLifecycleTests
     }
 
     [Fact]
+    public async Task LostNotificationsOnlyAskForAReloadWhenTheProjectsFilesChanged()
+    {
+        await using var fixture = new WatcherFixture();
+        var source = await fixture.WriteAsync("app/Model.cs", "class Model { }");
+        var project = await fixture.WriteAsync("app/App.csproj", "<Project />");
+        // In the project's folder since before it was loaded, and compiled by nothing.
+        await fixture.WriteAsync("app/Notes.cs", "// not in the project");
+        await Task.Delay(50);
+        using var watcher = new KnownSourceFileWatcher([source, project], _ => { }, TimeSpan.Zero);
+
+        // A build's burst under bin and obj is what loses notifications, and it changes nothing a reload would pick up.
+        await fixture.WriteAsync("app/obj/Debug/Model.g.cs", "class Generated { }");
+        await fixture.WriteAsync("app/bin/Debug/App.dll", "");
+        await File.WriteAllTextAsync(source, "class Model { int changed; }");
+        Assert.False(watcher.MembershipChanged());
+
+        await fixture.WriteAsync("app/Added.cs", "class Added { }");
+        Assert.True(watcher.MembershipChanged());
+        File.Delete(Path.Combine(fixture.Root, "app", "Added.cs"));
+        Assert.False(watcher.MembershipChanged());
+
+        await Task.Delay(50);
+        await File.WriteAllTextAsync(project, "<Project><PropertyGroup /></Project>");
+        Assert.True(watcher.MembershipChanged());
+        // Seen once: the next look starts from there.
+        Assert.False(watcher.MembershipChanged());
+
+        File.Delete(source);
+        Assert.True(watcher.MembershipChanged());
+    }
+
+    [Fact]
     public async Task DisposedWatcherDoesNotObserveSubsequentWrites()
     {
         await using var fixture = new WatcherFixture();

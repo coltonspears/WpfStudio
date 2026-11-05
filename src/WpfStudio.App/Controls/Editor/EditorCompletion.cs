@@ -11,7 +11,7 @@ using WpfStudio.Core.Text;
 namespace WpfStudio.App.Controls.Editor;
 
 /// <summary>The completion popup and signature help, and accepting an entry whose edit arrives asynchronously.</summary>
-internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, EditorTyping typing)
+internal sealed class EditorCompletion(EditorSurface owner, EditorTyping typing, EditorSignatureHelp signature)
 {
     // Rests on an entry before asking the worker about it, so walking the list does not ask about every row on the way.
     private static readonly TimeSpan DetailsDelay = TimeSpan.FromMilliseconds(60);
@@ -27,12 +27,19 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
     public bool IsPending => _input.IsPending;
     private EditorSurface Surface => owner;
 
-    public void OnTextEntered(object? sender, TextCompositionEventArgs e)
+    public void OnTextEntered(object? sender, TextCompositionEventArgs e) => Typed(e.Text);
+
+    /// <summary>What follows a typed character: signature help inside a call, and the completion list as a name begins.</summary>
+    private void Typed(string text)
     {
         if (_input.IsReplaying || _input.IsPending) return;
-        if (e.Text is "(" or ",") Observe(ShowSignatureAsync());
-        else if (e.Text == ")") hover.CloseSignature();
-        if (_window == null && e.Text.Length == 1 && (e.Text[0] is '.' or '<' or '{' || char.IsLetter(e.Text[0]))) Observe(ShowCompletionAsync());
+        // Once open, signature help follows the caret by itself, including out of the call.
+        if (text is "(" or ",") signature.Trigger();
+        if (_window != null || text.Length != 1 || owner.ViewModel is not { } vm) return;
+        // A dot always lists members. XAML also lists after < and {; names list as they are typed unless that is turned off.
+        bool opens = text[0] == '.' || vm.IsXaml && text[0] is '<' or '{'
+            || (char.IsLetter(text[0]) || text[0] == '_') && vm.Preferences?.CompleteWhileTyping != false;
+        if (opens) Observe(ShowCompletionAsync());
     }
 
     public void OnTextEntering(object? sender, TextCompositionEventArgs args)
@@ -43,7 +50,10 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
             if (IsUnconfirmed(_window)) _window.Close();
             else _window.CompletionList.RequestInsertion(args);
         }
-        if (!args.Handled && typing.TryApply(_input.IsReplaying ? owner.AttachedModel : owner.ViewModel, args.Text)) args.Handled = true;
+        if (args.Handled || !typing.TryApply(_input.IsReplaying ? owner.AttachedModel : owner.ViewModel, args.Text)) return;
+        args.Handled = true;
+        // The editor only announces text it inserted itself, so a character typed as part of a planned edit is announced here.
+        Typed(args.Text);
     }
 
     public void OnPreviewExecuted(object sender, ExecutedRoutedEventArgs args)
@@ -79,15 +89,18 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
             _window?.Close();
             var end = vm.State.Extension == ".xaml" ? Math.Clamp(result.Start + result.Length, caret, owner.Document.TextLength) : caret;
             var window = new CompletionWindow(owner.TextArea) { StartOffset = result.Start, EndOffset = end, CloseWhenCaretAtBeginning = true, MaxHeight = WindowHeight };
-            foreach (var item in result.Items.Take(250)) window.CompletionList.CompletionData.Add(new StudioCompletion(this, item, result.Version, contextRevision));
-            // C# snippets join the list outside member access, as in Visual Studio; Tab or Enter expands them.
-            if (vm.IsCSharp && (result.Start == 0 || owner.Document.GetCharAt(result.Start - 1) != '.'))
-                foreach (var snippet in SnippetCatalog.For(".cs")) window.CompletionList.CompletionData.Add(new SnippetCompletion(owner, snippet));
+            Fill(window.CompletionList, vm, result, contextRevision);
             var list = window.CompletionList;
             if (owner.TryFindResource("CodeCompletionList") is Style rows) list.Style = rows;
             window.Width = CompletionRow.WidthFor(list.CompletionData.OfType<CompletionRow>().ToArray());
             window.SourceInitialized += (_, _) => { if (owner.TryFindResource(Palette.ResourceKey) is Palette palette) WindowChromeService.ApplyFrame(window, palette); };
-            void FollowTyping(object? sender, EventArgs args) => CompletionLabel.SetQuery(window, TypedInto(window));
+            // More matched than one reply carries. What is typed next narrows it, so the list is asked for again with that.
+            bool incomplete = result.Incomplete;
+            void FollowTyping(object? sender, EventArgs args)
+            {
+                CompletionLabel.SetQuery(window, TypedInto(window));
+                if (incomplete) Observe(RefillAsync(window, contextRevision, more => incomplete = more));
+            }
             owner.TextArea.Caret.PositionChanged += FollowTyping;
             window.Closed += (_, _) =>
             {
@@ -102,6 +115,41 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
             list.SelectedItem = recommended ?? list.SelectedItem ?? list.CompletionData.FirstOrDefault();
             _unconfirmed = list.SelectedItem;
             _openedAt = caret;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { if (vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
+    }
+
+    private void Fill(CompletionList list, EditorViewModel vm, CompletionResult result, long contextRevision)
+    {
+        foreach (var item in result.Items) list.CompletionData.Add(new StudioCompletion(this, item, result.Version, contextRevision));
+        // C# snippets join the list outside member access, as in Visual Studio; Tab or Enter expands them.
+        if (vm.IsCSharp && (result.Start == 0 || owner.Document.GetCharAt(result.Start - 1) != '.'))
+            foreach (var snippet in SnippetCatalog.For(".cs")) list.CompletionData.Add(new SnippetCompletion(owner, snippet));
+    }
+
+    /// <summary>Replaces the entries of an open list whose first reply was cut short, now that more of the name is typed.</summary>
+    private async Task RefillAsync(CompletionWindow window, long contextRevision, Action<bool> stillIncomplete)
+    {
+        if (owner.ViewModel is not { } vm || _window != window || owner.CaretOffset <= window.StartOffset) return;
+        CancelRequest(); _request = new();
+        var token = _request.Token;
+        try
+        {
+            // The caret moves before the buffer reaches the model, and fast typing should ask once.
+            await Task.Delay(30, token);
+            int caret = owner.CaretOffset;
+            long version = vm.State.Version;
+            var result = await vm.CompleteAsync(caret, token);
+            if (token.IsCancellationRequested || _window != window || vm != owner.ViewModel || version != vm.State.Version || caret != owner.CaretOffset
+                || result.Start != window.StartOffset || result.Items.Count == 0 || vm.IsXaml && contextRevision != vm.XamlContextRevision) return;
+            var list = window.CompletionList;
+            list.CompletionData.Clear();
+            Fill(list, vm, result, contextRevision);
+            stillIncomplete(result.Incomplete);
+            // The list narrows what it last showed when the typed text only grew, so start it from every new entry.
+            list.SelectItem("");
+            list.SelectItem(TypedInto(window));
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
@@ -131,20 +179,6 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!token.IsCancellationRequested && vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
-    }
-
-    private async Task ShowSignatureAsync()
-    {
-        if (owner.ViewModel is not { } vm) return;
-        long version = vm.State.Version;
-        int caret = owner.CaretOffset;
-        try
-        {
-            var text = await vm.SignatureAsync(caret);
-            if (vm != owner.ViewModel || vm.State.Version != version || caret != owner.CaretOffset || !owner.IsKeyboardFocusWithin) return;
-            if (!string.IsNullOrEmpty(text)) hover.ShowSignature(text);
-        }
-        catch (Exception ex) { if (vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
     }
 
     private Task AcceptCompletionAsync(CompletionEntry entry, long version, long contextRevision, ISegment segment, EventArgs insertionRequest)
@@ -194,8 +228,11 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
         catch (Exception exception) { vm.LanguageStatus = exception.Message; }
         finally
         {
-            if (_input.IsCurrent(pending)) Replay(pending);
+            bool replayed = _input.IsCurrent(pending);
+            if (replayed) Replay(pending);
             pending.Cancellation.Dispose();
+            // A name accepted by typing its opening bracket starts a call, as typing the bracket after the name would have.
+            if (replayed && punctuation is "(" && ReferenceEquals(owner.ViewModel, vm)) signature.Trigger();
         }
     }
     public void CancelPending()

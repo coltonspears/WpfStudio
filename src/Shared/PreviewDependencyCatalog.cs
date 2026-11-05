@@ -1,8 +1,12 @@
 using System.IO;
+#if !NETFRAMEWORK
 using System.Runtime.InteropServices;
+#endif
 using System.Security.Cryptography;
 using System.Text;
+#if !NETFRAMEWORK
 using System.Text.Json;
+#endif
 using WpfStudio.Contracts;
 
 namespace WpfStudio.PreviewDependencies;
@@ -36,8 +40,10 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
         string depsPath = Path.ChangeExtension(assembly, ".deps.json");
         inputs.Add(depsPath);
         var selected = new Dictionary<string, (PreviewDependencyAsset Asset, int Rank)>(StringComparer.OrdinalIgnoreCase);
+#if !NETFRAMEWORK
         using (var deps = ReadJson(depsPath))
             if (deps is not null) AddPackageAssets(request, deps, depsPath, output, selected, inputs);
+#endif
         AddReferences(request.References, output, selected);
         foreach (var item in selected.Values) inputs.Add(item.Asset.Source);
         // A rebuilt or newly added assembly in a HintPath folder must restart the preview like an output change.
@@ -69,6 +75,7 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
         }
     }
 
+#if !NETFRAMEWORK
     private static void AddPackageAssets(PreviewRequest request, JsonDocument deps, string depsPath, string output, Dictionary<string, (PreviewDependencyAsset Asset, int Rank)> selected, HashSet<string> inputs)
     {
         string? assetsPath = request.ProjectAssetsPath ?? (request.ProjectDirectory is null ? null : Path.Combine(request.ProjectDirectory, "obj", "project.assets.json"));
@@ -127,6 +134,7 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
             }
         }
     }
+#endif
 
     public string Fingerprint()
     {
@@ -148,6 +156,7 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
         if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("A preview dependency escapes its package directory.");
         return path;
     }
+#if !NETFRAMEWORK
     private static JsonDocument? ReadJson(string path)
     {
         if (!File.Exists(path)) return null;
@@ -155,4 +164,5 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
         using var stream = File.OpenRead(path);
         return JsonDocument.Parse(stream, new JsonDocumentOptions { MaxDepth = 64 });
     }
+#endif
 }

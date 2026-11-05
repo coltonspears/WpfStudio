@@ -32,6 +32,9 @@ internal sealed class ShellTestContext : IAsyncDisposable
         configure?.Invoke(services);
         _services = services.BuildServiceProvider();
         Shell = _services.GetRequiredService<ShellViewModel>();
+        // A test that adds a file to a loaded project decides for itself when the projects are loaded again. Left on, the
+        // refresh would start an MSBuild load in the background of every such test and swap the workspace under it.
+        Shell.Editor.AutoRefreshProject = false;
         Store = _services.GetRequiredService<DocumentStore>();
         Workspace = _services.GetRequiredService<WorkspaceClient>();
         Xaml = _services.GetRequiredService<XamlCompletionService>();

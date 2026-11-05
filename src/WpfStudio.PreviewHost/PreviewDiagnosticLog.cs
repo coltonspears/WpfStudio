@@ -46,7 +46,16 @@ internal sealed class PreviewDiagnosticLog : IDisposable
         int? column = sourceCoordinates && exception is XmlException xmlError ? xmlError.LinePosition : null;
         // XamlReader positions refer to transformed markup, so never present them
         // as precise positions in the original source buffer.
-        Add(new PreviewDiagnostic(exception.GetBaseException().Message, "Error", line, column));
+        var cause = exception.GetBaseException();
+        Add(new PreviewDiagnostic(cause.Message + Origin(cause), "Error", line, column));
+    }
+
+    /// <summary>A runtime mismatch names the member that is missing, which says nothing about whose code wanted it.</summary>
+    private static string Origin(Exception exception)
+    {
+        if (exception is not (MissingMemberException or TypeLoadException)) return "";
+        var type = new StackTrace(exception, false).GetFrames()?.Select(frame => frame.GetMethod()?.DeclaringType).FirstOrDefault(declaring => declaring is not null);
+        return type is null ? "" : $" Called from {type.FullName} in {type.Assembly.GetName().Name}.";
     }
 
     public void Dispose()
@@ -60,17 +69,17 @@ internal sealed class PreviewDiagnosticLog : IDisposable
     private sealed class BindingTraceListener(Action<string> report) : TraceListener
     {
         public override void Write(string? message) { }
-        public override void WriteLine(string? message) { if (!string.IsNullOrWhiteSpace(message)) report(message); }
+        public override void WriteLine(string? message) { if (!string.IsNullOrWhiteSpace(message)) report(message!); }
         public override void TraceEvent(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, string? message)
         {
-            if (Keep(eventType, id) && !string.IsNullOrWhiteSpace(message)) report(Limit(message, 4096));
+            if (Keep(eventType, id) && !string.IsNullOrWhiteSpace(message)) report(Limit(message!, 4096));
         }
         public override void TraceEvent(TraceEventCache? eventCache, string source, TraceEventType eventType, int id, string? format, params object?[]? args)
         {
             if (!Keep(eventType, id) || string.IsNullOrWhiteSpace(format)) return;
             // Composite formatting may execute arbitrary application ToString or
             // IFormattable implementations. Preserve bounded text and safe facts.
-            var text = Limit(format, 3072);
+            var text = Limit(format!, 3072);
             if (args is { Length: > 0 }) text += " | " + string.Join(", ", args.Take(16).Select(Describe));
             report(Limit(text, 4096));
         }

@@ -70,7 +70,11 @@ internal static class CompiledPreview
         // Source renders reuse their isolated host. The resource identity is
         // immutable, but reapplying that same identity is safe.
         if (Assembly.GetEntryAssembly() == assembly && Application.ResourceAssembly == assembly) return;
-        var hostAssembly = typeof(CompiledPreview).Assembly;
+#if NETFRAMEWORK
+        Assembly? hostAssembly = null; // The project's domain has no entry assembly until this method gives it one.
+#else
+        Assembly? hostAssembly = typeof(CompiledPreview).Assembly;
+#endif
         if (Assembly.GetEntryAssembly() != hostAssembly)
             throw new InvalidOperationException("Compiled preview requires a fresh isolated preview host before setting application resource identity.");
 
@@ -78,15 +82,21 @@ internal static class CompiledPreview
         // assembly is available. The public .NET API lets this dedicated host
         // supply that identity without running the project's Main or App.
         // The WPF setter also initializes its internal pack-URI resource identity.
-        Assembly.SetEntryAssembly(null);
+        SetEntryAssembly(null);
         try { Application.ResourceAssembly = assembly; }
         catch (InvalidOperationException exception)
         {
-            Assembly.SetEntryAssembly(hostAssembly);
+            SetEntryAssembly(hostAssembly);
             throw new InvalidOperationException("The preview host already initialized WPF application resources. Refresh to start a fresh compiled preview process.", exception);
         }
-        Assembly.SetEntryAssembly(assembly);
+        SetEntryAssembly(assembly);
     }
+
+#if NETFRAMEWORK
+    private static void SetEntryAssembly(Assembly? assembly) => PreviewAppDomainManager.SetEntryAssembly(assembly);
+#else
+    private static void SetEntryAssembly(Assembly? assembly) => Assembly.SetEntryAssembly(assembly);
+#endif
 
     private static ResourceDictionary? LoadApplicationResources(Assembly assembly, string resourcePath, bool optional)
     {

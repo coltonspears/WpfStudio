@@ -33,6 +33,9 @@ internal sealed class EditorAnnotations
     private IReadOnlyList<BlameLine>? _blameShown;
     private readonly Popup _changePopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Right, PopupAnimation = PopupAnimation.Fade };
     private readonly Popup _historyPopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.Fade };
+    // What each open popup shows, so news from Git that leaves it true does not close it under the reader.
+    private LineChange? _shownChange;
+    private (int First, int Last, string Summary)? _shownHistory;
 
     public EditorAnnotations(EditorSurface owner)
     {
@@ -48,6 +51,8 @@ internal sealed class EditorAnnotations
     public void CloseChangePopup() => _changePopup.IsOpen = false;
 
     public void ClosePopups() { _changePopup.IsOpen = false; _historyPopup.IsOpen = false; }
+
+    public bool IsHistoryOpen => _historyPopup.IsOpen;
 
     public void ClearCodeLens() => _lenses = [];
 
@@ -89,14 +94,40 @@ internal sealed class EditorAnnotations
 
     public void OnGitChanged()
     {
-        _changePopup.IsOpen = false; // Its change no longer describes the file.
-        _historyPopup.IsOpen = false;
+        var vm = _owner.ViewModel;
+        // Git reports again after every save and refresh, usually with nothing new. A popup closes only when what it shows stopped being true.
+        if (_changePopup.IsOpen && (_shownChange is null || vm?.LineChanges.Contains(_shownChange) != true)) _changePopup.IsOpen = false;
         _changeMargin.Update(); // The margin appears once the file is known to be in a repository.
         // Line changes arrive after every edit, and only the margin shows those.
-        if (ReferenceEquals(_blameShown, _owner.ViewModel?.Blame)) return;
-        _blameShown = _owner.ViewModel?.Blame;
+        if (ReferenceEquals(_blameShown, vm?.Blame)) return;
+        _blameShown = vm?.Blame;
+        if (_historyPopup.IsOpen && (_shownHistory is not { } shown || vm is null
+            || GitBlame.Summarize(vm.Blame, shown.First, shown.Last)?.Describe(DateTimeOffset.Now) != shown.Summary)) _historyPopup.IsOpen = false;
         _owner.TextArea.TextView.Redraw(); // Lens rows show the new blame.
     }
+
+    /// <summary>
+    /// Runs <paramref name="action"/> when the element is clicked: pressed and released on it. The press is marked handled so
+    /// the caret stays where it is. Acting on the release matters for popups: one opened while the button is down is
+    /// closed again by the release, so it only stayed open for as long as the button was held.
+    /// </summary>
+    private static void OnClick(FrameworkElement element, Action action)
+    {
+        bool pressed = false;
+        element.MouseLeftButtonDown += (_, e) => { pressed = true; e.Handled = true; };
+        element.MouseLeave += (_, _) => pressed = false;
+        element.MouseLeftButtonUp += (_, e) =>
+        {
+            if (!pressed) return;
+            pressed = false;
+            e.Handled = true;
+            action();
+        };
+    }
+
+    /// <summary>Opens a popup once the click that asked for it is over.</summary>
+    private void OpenAfterClick(Popup popup) =>
+        _ = _owner.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () => { if (popup.Child is not null) popup.IsOpen = true; });
 
     /// <summary>The lens row for the declarations starting on one line: counts, then Git history.</summary>
     private UIElement? CreateLensRow(IReadOnlyList<TrackedLens> lenses)
@@ -113,7 +144,7 @@ internal sealed class EditorAnnotations
                 Separator();
                 var block = LensLink(text + (lenses.Count > 1 ? $" ({entry.Name})" : ""));
                 block.ToolTip = $"Find references to {entry.Name}, including bindings and event handlers in XAML.";
-                block.MouseLeftButtonDown += (_, e) => { e.Handled = true; vm.RequestCodeLens(entry, lens.Position); };
+                OnClick(block, () => vm.RequestCodeLens(entry, lens.Position));
                 row.Children.Add(block);
             }
         if (vm.ShowInlineBlame)
@@ -128,7 +159,7 @@ internal sealed class EditorAnnotations
                 Separator();
                 var block = LensLink(history.Describe(DateTimeOffset.Now));
                 block.ToolTip = "Show who changed " + lens.Entry.Name + " and when";
-                block.MouseLeftButtonDown += (_, e) => { e.Handled = true; ShowHistory(block, lens.Entry.Name, first, last, history); };
+                OnClick(block, () => ShowHistory(block, lens.Entry.Name, first, last, history));
                 row.Children.Add(block);
             }
         }
@@ -142,15 +173,22 @@ internal sealed class EditorAnnotations
         block.Cursor = Cursors.Hand;
         block.MouseEnter += (_, _) => block.TextDecorations = TextDecorations.Underline;
         block.MouseLeave += (_, _) => block.TextDecorations = null;
-        return block; // Click handlers mark the press handled, so the caret stays where it is.
+        return block; // OnClick marks the press handled, so the caret stays where it is.
     }
 
     private void ShowHistory(FrameworkElement anchor, string name, int first, int last, BlameHistory history)
     {
         if (CreateHistoryCard(name, first, last, history) is not { } card) return;
+        var view = _owner.TextArea.TextView;
+        // Placed against the text view, not the link: a redraw replaces the lens row, and a popup must not hang from an element that is gone.
+        if (!anchor.IsDescendantOf(view)) return;
+        var place = anchor.TransformToAncestor(view).TransformBounds(new Rect(anchor.RenderSize));
+        _historyPopup.IsOpen = false;
         _historyPopup.Child = new ContentPresenter { Content = card };
-        _historyPopup.PlacementTarget = anchor;
-        _historyPopup.IsOpen = true;
+        _historyPopup.PlacementTarget = view;
+        _historyPopup.PlacementRectangle = place;
+        _shownHistory = (first, last, history.Describe(DateTimeOffset.Now));
+        OpenAfterClick(_historyPopup);
     }
 
     public BlameHistoryCard? CreateHistoryCard(string name, int first, int last, BlameHistory history)
@@ -202,12 +240,14 @@ internal sealed class EditorAnnotations
 
     private void ShowChange(LineChange change, int line)
     {
+        _changePopup.IsOpen = false;
         _changePopup.Child = new ContentPresenter { Content = CreateChangeCard(change) };
         _changePopup.PlacementTarget = _changeMargin;
         var visual = _owner.TextArea.TextView.GetVisualLine(line);
         _changePopup.VerticalOffset = visual is null ? 0 : visual.VisualTop - _owner.TextArea.TextView.VerticalOffset;
         _changePopup.HorizontalOffset = 4;
-        _changePopup.IsOpen = true;
+        _shownChange = change;
+        OpenAfterClick(_changePopup);
     }
 
     public LineChangeCard CreateChangeCard(LineChange change)
@@ -261,10 +301,22 @@ internal sealed class EditorAnnotations
             line = TextView?.GetVisualLineFromVisualTop(e.GetPosition(TextView).Y + TextView.VerticalOffset)?.FirstDocumentLine.LineNumber ?? -1;
             return owner.ViewModel is { } vm ? LineChanges.At(vm.LineChanges, line, owner.Document.LineCount).FirstOrDefault() : null;
         }
+        // The change under the press. Its popup opens on the release: opened on the press, the release would close it again.
+        private LineChange? _pressed;
         protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
         {
-            if (ChangeAt(e, out var line) is { } change) { annotations.ShowChange(change, line); e.Handled = true; }
+            _pressed = ChangeAt(e, out _);
+            if (_pressed is not null) e.Handled = true;
         }
+        protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
+        {
+            var pressed = _pressed;
+            _pressed = null;
+            if (pressed is null || ChangeAt(e, out var line) is not { } change || change != pressed) return;
+            annotations.ShowChange(change, line);
+            e.Handled = true;
+        }
+        protected override void OnMouseLeave(MouseEventArgs e) { base.OnMouseLeave(e); _pressed = null; }
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);

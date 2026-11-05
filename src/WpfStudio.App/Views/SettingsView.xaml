@@ -270,6 +270,35 @@
                   <StackPanel><TextBlock Text="Column guide" Style="{StaticResource RowName}" /><TextBlock Text="A vertical line marking a preferred line length." Style="{StaticResource RowNote}" /></StackPanel>
                 </CheckBox>
               </DockPanel>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ShowIndentationGuides}">
+                <StackPanel><TextBlock Text="Indentation guides" Style="{StaticResource RowName}" /><TextBlock Text="A faint line down each level of indentation, so it is clear which block a line belongs to." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.HighlightMatchingBrackets}">
+                <StackPanel><TextBlock Text="Highlight matching brackets" Style="{StaticResource RowName}" /><TextBlock Text="With the caret beside a bracket, brace or parenthesis, marks it and its partner." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.HighlightOccurrences}">
+                <StackPanel><TextBlock Text="Highlight the selected word elsewhere" Style="{StaticResource RowName}" /><TextBlock Text="Select a word, by double-clicking it for instance, and its other occurrences on screen are marked." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="TYPING" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <StackPanel>
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.AutoCloseBrackets}">
+                <StackPanel><TextBlock Text="Close brackets and quotes" Style="{StaticResource RowName}" /><TextBlock Text="In C#, typing ( [ { &quot; or ' also types its closing partner, typing the partner moves past it, and Backspace between an empty pair removes both. Typed over a selection, an opening one wraps it." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.SmartBackspace}">
+                <StackPanel><TextBlock Text="Indentation-aware Backspace and Delete" Style="{StaticResource RowName}" /><TextBlock Text="Backspace on a line of nothing but spaces or tabs removes the line and returns to the end of the line above. In the indentation of a line with text it removes a whole level. Delete at the end of a line joins the next one without its indentation." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.IndentPastedLines}">
+                <StackPanel><TextBlock Text="Indent pasted lines" Style="{StaticResource RowName}" /><TextBlock Text="Several lines of C# or XAML pasted at the start of a line are moved to that line's indentation, keeping their shape. A paste into the middle of a line is left as copied." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
             </StackPanel>
           </Border>
 
@@ -326,6 +355,18 @@
               </CheckBox>
             </StackPanel>
           </Border>
+          <TextBlock Text="COMPLETION AND NAVIGATION" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <StackPanel>
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.CompleteWhileTyping}">
+                <StackPanel><TextBlock Text="Show completions while typing" Style="{StaticResource RowName}" /><TextBlock Text="The list opens as a name is typed. When this is off it opens after a dot, and on Ctrl+Space." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ControlClickNavigation}">
+                <StackPanel><TextBlock Text="Ctrl+Click goes to the definition" Style="{StaticResource RowName}" /><TextBlock Text="Hold Ctrl over a name in C# or XAML to underline it, and click to go where it is declared. When this is off, Ctrl+Click selects the word." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+            </StackPanel>
+          </Border>
         </StackPanel>
       </ScrollViewer>
 
@@ -361,12 +402,21 @@
           </Border>
           <TextBlock Text="CHANGES FROM OTHER PROGRAMS" Style="{StaticResource GroupLabel}" />
           <Border Style="{StaticResource Group}">
-            <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding ExternalChanges.AutoReloadUnchangedFiles}">
-              <StackPanel>
-                <TextBlock Text="Load files without unsaved edits automatically" Style="{StaticResource RowName}" />
-                <TextBlock Text="When this is off, every open file changed on disk is listed above the editors until you choose to load the disk version or keep yours. When it is on, only files you have edited are listed." Style="{StaticResource RowNote}" />
-              </StackPanel>
-            </CheckBox>
+            <StackPanel>
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding ExternalChanges.AutoReloadUnchangedFiles}">
+                <StackPanel>
+                  <TextBlock Text="Load files without unsaved edits automatically" Style="{StaticResource RowName}" />
+                  <TextBlock Text="When this is off, every open file changed on disk is listed above the editors until you choose to load the disk version or keep yours. When it is on, only files you have edited are listed." Style="{StaticResource RowNote}" />
+                </StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.AutoRefreshProject}">
+                <StackPanel>
+                  <TextBlock Text="Refresh the project model when project files change" Style="{StaticResource RowName}" />
+                  <TextBlock Text="When a project file changes, or a source file is added, removed or renamed, the projects are loaded again in the background while the editor keeps working. When this is off, go to definition, references and XAML checks describe the projects as they were until you choose Reload workspace." Style="{StaticResource RowNote}" />
+                </StackPanel>
+              </CheckBox>
+            </StackPanel>
           </Border>
         </StackPanel>
       </ScrollViewer>

@@ -22,12 +22,22 @@ public sealed class DocumentStore
     }
     public IReadOnlyList<DocumentState> Documents => _documents.Values.ToArray();
     public DocumentState? Find(string path) => _documents.GetValueOrDefault(System.IO.Path.GetFullPath(path));
+    // Read without locking anyone out. A file is read here whenever it may have changed on disk, which is the very moment
+    // another program is writing or replacing it; an exclusive read then makes that program's write fail, or Git's checkout.
+    // What is read mid-write may be incomplete; the write's own change notification brings the next, complete, read.
+    private static async Task<byte[]> ReadSharedAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        return buffer.ToArray();
+    }
     public async Task<DocumentState> OpenAsync(string path, CancellationToken cancellationToken = default)
     {
         path = System.IO.Path.GetFullPath(path);
         if (_documents.TryGetValue(path, out var existing)) return existing;
         if (new FileInfo(path).Length > 16 * 1024 * 1024) throw new IOException("Files larger than 16 MiB should be opened in a specialized editor.");
-        var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+        var bytes = await ReadSharedAsync(path, cancellationToken);
         if (bytes.Length > 16 * 1024 * 1024) throw new IOException("Files larger than 16 MiB should be opened in a specialized editor.");
         using var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, true);
         var text = await reader.ReadToEndAsync(cancellationToken);
@@ -55,7 +65,7 @@ public sealed class DocumentStore
                 throw new IOException($"{document.Name} is locked while the inspection build reads it. Your edits are kept; save again when the build finishes.");
             if (File.Exists(document.Path))
             {
-                var current = Hash(await File.ReadAllBytesAsync(document.Path, cancellationToken));
+                var current = Hash(await ReadSharedAsync(document.Path, cancellationToken));
                 if (!overwriteExternal && current != document.DiskHash) throw new ExternalFileChangedException(document.Path);
             }
             else if (document.DiskHash != null && !overwriteExternal) throw new ExternalFileChangedException(document.Path);
@@ -81,13 +91,13 @@ public sealed class DocumentStore
     public async Task<bool> IsExternallyChangedAsync(DocumentState document, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(document.Path)) return document.DiskHash != null;
-        return Hash(await File.ReadAllBytesAsync(document.Path, cancellationToken)) != document.DiskHash;
+        return Hash(await ReadSharedAsync(document.Path, cancellationToken)) != document.DiskHash;
     }
     /// <summary>The file's current text and hash, or null when it no longer exists.</summary>
     public async Task<(string Text, string Hash, Encoding Encoding)?> ReadDiskAsync(DocumentState document, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(document.Path)) return null;
-        var bytes = await File.ReadAllBytesAsync(document.Path, cancellationToken);
+        var bytes = await ReadSharedAsync(document.Path, cancellationToken);
         using var reader = new StreamReader(new MemoryStream(bytes), document.Encoding, true);
         var text = await reader.ReadToEndAsync(cancellationToken);
         var encoding = reader.CurrentEncoding;
@@ -97,7 +107,7 @@ public sealed class DocumentStore
     public async Task ReloadAsync(DocumentState document, CancellationToken cancellationToken = default)
     {
         var version = document.Version;
-        var bytes = await File.ReadAllBytesAsync(document.Path, cancellationToken);
+        var bytes = await ReadSharedAsync(document.Path, cancellationToken);
         using var reader = new StreamReader(new MemoryStream(bytes), document.Encoding, true);
         var content = await reader.ReadToEndAsync(cancellationToken);
         if (document.Version != version) throw new InvalidOperationException("The document was edited while reloading. Retry the reload.");
