@@ -61,6 +61,26 @@ public sealed record PreviewPropertyEdit(long Version, string NodeId, string Pro
 public sealed record PreviewEditResult(bool Success, PreviewSnapshot Snapshot, PreviewInspection Inspection, string? Error = null);
 public sealed record PreviewPropertyValidation(bool Success, string? Error = null);
 
+// The .NET Framework runtime has no default interface methods. Its host implements every member anyway.
+#if NETFRAMEWORK
+public interface IPreviewRpc
+{
+    Task<PreviewHostSession> GetSessionAsync(CancellationToken cancellationToken);
+    Task<PreviewSurfaceResponse> UpdateSurfaceAsync(PreviewSurfaceRequest request, CancellationToken cancellationToken);
+    Task<PreviewSurfaceHeartbeat> HeartbeatSurfaceAsync(PreviewSurfaceHeartbeatRequest request, CancellationToken cancellationToken);
+    Task<PreviewSnapshot> RenderAsync(PreviewRequest request, CancellationToken cancellationToken);
+    Task<PreviewSnapshot> CaptureAsync(PreviewCaptureRequest request, CancellationToken cancellationToken);
+    Task<PreviewInspection> InspectAsync(PreviewNodeRequest request, CancellationToken cancellationToken);
+    Task<PreviewInspection> PickAsync(PreviewPickRequest request, CancellationToken cancellationToken);
+    Task<PreviewEditResult> SetPropertyAsync(PreviewPropertyEdit request, CancellationToken cancellationToken);
+    Task<PreviewPropertyValidation> ValidatePropertyAsync(PreviewPropertyEdit request, CancellationToken cancellationToken);
+    Task<PreviewLayoutValidationResult> ValidateLayoutEditAsync(PreviewLayoutValidationRequest request, CancellationToken cancellationToken);
+    Task<WpfStudio.Inspection.Protocol.AppearanceResponse> GetAppearanceAsync(
+        WpfStudio.Inspection.Protocol.AppearanceRequest request, CancellationToken cancellationToken);
+    Task<WpfStudio.Inspection.Protocol.BindingSourceResponse> GetBindingSourceAsync(
+        WpfStudio.Inspection.Protocol.BindingSourceRequest request, CancellationToken cancellationToken);
+}
+#else
 public interface IPreviewRpc
 {
     Task<PreviewHostSession> GetSessionAsync(CancellationToken cancellationToken) =>
@@ -83,3 +103,4 @@ public interface IPreviewRpc
     Task<WpfStudio.Inspection.Protocol.BindingSourceResponse> GetBindingSourceAsync(
         WpfStudio.Inspection.Protocol.BindingSourceRequest request, CancellationToken cancellationToken);
 }
+#endif

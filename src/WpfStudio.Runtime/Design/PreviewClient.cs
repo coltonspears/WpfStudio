@@ -30,6 +30,7 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
     private PreviewShadowDirectory? _shadowDirectory;
     private JsonRpc? _rpc;
     private IPreviewRpc? _proxy;
+    private PreviewRuntime _runtime;
     private string? _assembly;
     private string? _assemblyStamp;
     private string? _projectDirectory;
@@ -109,14 +110,20 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
             {
                 if (render is not null) await PrepareRenderAsync(deadline.Token, lifetime.Token).ConfigureAwait(false);
                 string? assemblyStamp = render is null ? null : await Task.Run(() => PreviewDependencyCatalog.Read(render).Fingerprint(), deadline.Token).ConfigureAwait(false);
-                if (render != null && (_proxy == null || ProcessId == null || render.Mode == PreviewMode.Compiled || render.Scenario is not null || _scenarioActive ||
+                // An explicitly chosen host serves everything it is asked to.
+                var runtime = render is null || hostPath is not null ? PreviewRuntime.DotNet
+                    : await Task.Run(() => PreviewHostSelection.Select(render.AssemblyPath), deadline.Token).ConfigureAwait(false);
+                if (render != null && (_proxy == null || ProcessId == null || runtime != _runtime || render.Mode == PreviewMode.Compiled || render.Scenario is not null || _scenarioActive ||
                     !string.Equals(_assembly, render.AssemblyPath, StringComparison.OrdinalIgnoreCase) ||
                     _assemblyStamp != assemblyStamp ||
                     _mode != render.Mode || !string.Equals(_applicationResourcePath, render.ApplicationResourcePath, StringComparison.Ordinal) ||
                     !string.Equals(_projectDirectory, render.ProjectDirectory, StringComparison.OrdinalIgnoreCase)))
                 {
                     await StopCoreAsync().ConfigureAwait(false);
-                    await StartAsync(deadline.Token).ConfigureAwait(false);
+                    // A first render on .NET Framework compiles every library it touches, and a vendor suite's are large.
+                    if (runtime != PreviewRuntime.DotNet && requestTimeout is null) deadline.CancelAfter(_timeout * 2);
+                    await StartAsync(runtime, deadline.Token).ConfigureAwait(false);
+                    _runtime = runtime;
                     _assembly = render.AssemblyPath; _assemblyStamp = assemblyStamp; _projectDirectory = render.ProjectDirectory;
                     _mode = render.Mode; _applicationResourcePath = render.ApplicationResourcePath;
                     _scenarioActive = render.Scenario is not null;
@@ -180,10 +187,10 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
     private sealed class SupersededRequestException(CancellationToken token)
         : OperationCanceledException("A newer preview request superseded this one.", token);
 
-    private async Task StartAsync(CancellationToken token)
+    private async Task StartAsync(PreviewRuntime runtime, CancellationToken token)
     {
-        var host = hostPath ?? FindHost();
-        if (!File.Exists(host)) throw new FileNotFoundException("Build WpfStudio.PreviewHost before opening the designer.", host);
+        var host = hostPath ?? FindHost(runtime);
+        if (!File.Exists(host)) throw new FileNotFoundException($"Build {Path.GetFileNameWithoutExtension(host)} before opening the designer.", host);
         string sessionId = Guid.NewGuid().ToString("N");
         var shadow = PreviewShadowDirectory.Create();
         _shadowDirectory = shadow;
@@ -219,9 +226,17 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         await ValidateSessionAsync(lease, token).ConfigureAwait(false);
     }
 
-    private static string FindHost()
+    private static string FindHost(PreviewRuntime runtime)
     {
         var configuration = typeof(PreviewClient).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
+        if (runtime != PreviewRuntime.DotNet)
+        {
+            // Both executables share one packaged folder. The .NET host's folder has neither, so the two can never be confused.
+            string name = runtime == PreviewRuntime.NetFramework32 ? "WpfStudio.PreviewHost.Framework32" : "WpfStudio.PreviewHost.Framework";
+            return WorkerHostLocator.Find(name, "PreviewHost.Framework", "net48", [configuration], [".exe"],
+                [name + ".exe.config", "WpfStudio.PreviewHost.dll", "WpfStudio.Contracts.dll", "WpfStudio.Wpf.PropertyEditing.dll", "WpfStudio.Wpf.Diagnostics.dll",
+                 "WpfStudio.Inspection.Protocol.dll", "StreamJsonRpc.dll", "Newtonsoft.Json.dll"]);
+        }
         // Transitive project references can copy an apphost executable without its managed entry point. Skip those
         // incomplete outputs and continue to the packaged or development host directory.
         return WorkerHostLocator.Find("WpfStudio.PreviewHost", "PreviewHost", "net10.0-windows", [configuration], [".exe", ".dll"],

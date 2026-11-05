@@ -5,7 +5,8 @@ editor talks to `IPreviewRpc` over a single current-user-only
 named pipe. Disconnect ends the process; the client terminates an owned host when
 rendering is cancelled or times out. Project constructors never run in the IDE.
 
-The current host targets .NET 10 on Windows. It supports loose WPF XAML,
+This project is the host for .NET on Windows and, built for net48, the engine of the
+[.NET Framework host](#net-framework-host). It supports loose WPF XAML,
 Window/Page content, resource dictionaries, dependency-property inspection,
 binding status, element picking and reversible preview-only property overrides.
 Source identities attached during parsing survive templates without changing
@@ -108,11 +109,58 @@ through an existing TwoWay binding. See [preview scenarios](../../docs/xaml-prev
 for configuration and design-time value support. Factory discovery never loads
 project code into the IDE. The host does not infer project application startup,
 dependency-injection composition or a running application's state.
-It does not promise .NET Framework or arbitrary project runtime/bitness fidelity.
-Supporting those requires separate host builds selected by project target runtime
-and architecture, while retaining the transport-neutral records in
-`WpfStudio.Contracts/PreviewContracts.cs`. The inspection logic in `PreviewEngine`
-can then be extracted for an opt-in running-application agent.
+It does not promise fidelity for .NET versions before 10. The inspection logic in
+`PreviewEngine` can be extracted for an opt-in running-application agent.
+
+## .NET Framework host
+
+A build for .NET Framework cannot be previewed on .NET: a library written for it can
+call members .NET does not have, such as `AppDomainSetup.AppDomainManagerType`, which
+DevExpress reads while initializing its themes. `PreviewHostSelection` reads the built
+assembly and `PreviewClient` starts the matching executable:
+
+| Project | Role |
+| --- | --- |
+| `WpfStudio.PreviewHost.Framework` | The process and its JSON-RPC transport, AnyCPU |
+| `WpfStudio.PreviewHost.Framework32` | The same, in a 32-bit process |
+| `WpfStudio.PreviewHost` (net48) | The engine, the same source as the .NET host |
+
+The difficulty is that .NET Framework has one binder per application domain, and
+StreamJsonRpc brings about 25 libraries that real projects also use at other versions:
+`System.Memory`, `Newtonsoft.Json`, `System.Text.Json` and so on. So there are two domains.
+The default domain holds the pipe and the transport and never loads project code. The first
+render copies the output and creates a second domain with the output as its application
+base and the build's configuration file, so project code binds exactly as in its own process.
+`FrameworkEngineServer` runs the ordinary `PreviewEngine` there on its own STA thread.
+
+Calls cross between the domains as a method name and JSON text, so the contract records
+need no serialization support. The method list comes from `IPreviewRpc`, so a new
+method needs nothing here.
+
+**The engine's references are the isolation.** On net48 this project references only
+.NET Framework, its own libraries and `Newtonsoft.Json`, whose private copy loads side by
+side with a project's other version. Keeping the transport's packages out of this project
+is what makes that a compile-time fact: with `System.Memory` merely referenced, C# binds
+`array.Contains(...)` to a method in it, and the engine would need the package at run time.
+Metadata reading needs `System.Reflection.Metadata`, so the engine asks the default domain
+to do that through `FrameworkHostServices`. `Directory.Build.targets` and
+`src/Shared/NetFrameworkCompatibility.cs` provide the newer language and library members as
+source, compiled into each assembly. Do not add a package to the net48 engine.
+
+`PreviewAppDomainManager` is the project domain's manager. It registers the side-by-side
+lookup before any engine code runs, and answers `Assembly.GetEntryAssembly()`, which is
+how the project becomes the application: WPF only accepts `Application.ResourceAssembly`
+while there is no entry assembly, and .NET Framework has no `Assembly.SetEntryAssembly`.
+
+To run the whole Preview suite against this host (tests that load .NET fixtures are
+expected to fail, because those builds cannot run on .NET Framework):
+
+```powershell
+$env:WPFSTUDIO_PREVIEW_HOST_UNDER_TEST = (Resolve-Path src/WpfStudio.PreviewHost.Framework/bin/Debug/net48/WpfStudio.PreviewHost.Framework.exe).Path
+dotnet test tests/WpfStudio.Preview.Tests/WpfStudio.Preview.Tests.csproj
+```
+
+`FrameworkPreviewTests` needs no setting: real net48 fixtures choose this host themselves.
 
 Validate with:
 

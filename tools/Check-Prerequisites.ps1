@@ -61,6 +61,10 @@ $previewFiles = @('WpfStudio.PreviewHost.exe', 'WpfStudio.PreviewHost.dll', 'Wpf
 $previewPresent = @($previewFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ApplicationDirectory "PreviewHost/$_") -PathType Leaf) }).Count -eq 0
 Add-Check 'XAML Designer: preview host' $false $previewPresent $(if ($previewPresent) { 'Isolated WPF preview host found in PreviewHost/.' } else { 'Restore the complete PreviewHost/ directory from the portable package, or rebuild/republish. Source editing and diagnostics remain available.' })
 
+$frameworkPreviewFiles = @('WpfStudio.PreviewHost.Framework.exe', 'WpfStudio.PreviewHost.Framework.exe.config', 'WpfStudio.PreviewHost.Framework32.exe', 'WpfStudio.PreviewHost.Framework32.exe.config', 'WpfStudio.PreviewHost.dll', 'WpfStudio.Contracts.dll', 'StreamJsonRpc.dll', 'Newtonsoft.Json.dll')
+$frameworkPreviewPresent = @($frameworkPreviewFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ApplicationDirectory "PreviewHost.Framework/$_") -PathType Leaf) }).Count -eq 0
+Add-Check 'XAML Designer: .NET Framework preview host' $false $frameworkPreviewPresent $(if ($frameworkPreviewPresent) { 'Preview host for .NET Framework projects found in PreviewHost.Framework/.' } else { 'Restore the complete PreviewHost.Framework/ directory from the portable package, or rebuild/republish. .NET Framework projects cannot be previewed without it.' })
+
 $inspectionFiles = @('WpfStudio.Inspection.StartupHook.dll', 'WpfStudio.Inspection.Agent.dll', 'WpfStudio.Inspection.Protocol.dll', 'WpfStudio.Wpf.PropertyEditing.dll', 'WpfStudio.Wpf.Diagnostics.dll')
 $inspectionPresent = @($inspectionFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ApplicationDirectory "Inspection/$_") -PathType Leaf) }).Count -eq 0
 Add-Check 'Live XAML: inspection agent' $false $inspectionPresent $(if ($inspectionPresent) { 'Launch-time inspection components found in Inspection/. The target application requires its own compatible .NET Desktop runtime.' } else { 'Restore the complete Inspection/ directory from the portable package, or rebuild/republish. Source editing and preview remain available.' })

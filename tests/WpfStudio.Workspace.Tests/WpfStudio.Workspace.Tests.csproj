@@ -21,6 +21,8 @@
   <ItemGroup>
     <!-- Preview namespace selection is plain metadata reading, so it is tested here without starting WPF. -->
     <Compile Include="..\..\src\Shared\XamlNamespaceIndex.cs" Link="Preview\XamlNamespaceIndex.cs" />
+    <Compile Include="..\..\src\Shared\XamlNamespaceLibrary.cs" Link="Preview\XamlNamespaceLibrary.cs" />
+    <Compile Include="..\..\src\Shared\XamlNamespaceLibraryReader.cs" Link="Preview\XamlNamespaceLibraryReader.cs" />
   </ItemGroup>
 
   <ItemGroup>

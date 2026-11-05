@@ -63,7 +63,7 @@ internal sealed class PreviewScenarioActivation
 
     private static void ValidateName(string? value, int maximumLength, string description)
     {
-        if (string.IsNullOrWhiteSpace(value) || value.Length > maximumLength || value != value.Trim() || value.Any(char.IsControl))
+        if (string.IsNullOrWhiteSpace(value) || value!.Length > maximumLength || value != value.Trim() || value.Any(char.IsControl))
             throw new InvalidOperationException($"The scenario {description} must be nonempty, have no surrounding whitespace or control characters, and be at most {maximumLength} characters.");
     }
 
@@ -127,7 +127,7 @@ internal sealed class PreviewScenarioActivation
         return value;
     }
 
-    private static bool IsAsyncResult(Type type) => typeof(Task).IsAssignableFrom(type) || type == typeof(ValueTask) ||
-        type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ValueTask<>) ||
-        type.GetMethod("GetAwaiter", BindingFlags.Public | BindingFlags.Instance, Type.EmptyTypes) is not null;
+    // ValueTask and every other awaitable have a GetAwaiter method.
+    private static bool IsAsyncResult(Type type) => typeof(Task).IsAssignableFrom(type) ||
+        type.GetMethod("GetAwaiter", BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null) is not null;
 }

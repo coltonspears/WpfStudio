@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The same host in a 32-bit process, for projects built for x86 or with Prefer32Bit, the default of legacy WPF applications. Everything else in its folder is AnyCPU. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <!-- The SDK infers this one for an x86 net48 executable, but only a declared one survives restoring the application with -r win-x64. -->
+    <RuntimeIdentifiers>win-x86</RuntimeIdentifiers>
+    <ApplicationManifest>../WpfStudio.PreviewHost/app.manifest</ApplicationManifest>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WpfStudio.PreviewHost.Framework/WpfStudio.PreviewHost.Framework.csproj" />
+  </ItemGroup>
+</Project>

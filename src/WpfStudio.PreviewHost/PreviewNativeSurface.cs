@@ -58,7 +58,7 @@ internal sealed partial class PreviewNativeSurface(PreviewScene scene, Dispatche
                 case PreviewSurfaceAction.FocusLast:
                     RequireAttachedBridge(request);
                     if (!Guid.TryParseExact(request.FocusToken, "N", out _) ||
-                        PreviewNativeMethods.GetProp(new nint(request.ParentHandle), "WpfStudio.PreviewFocus." + request.FocusToken) != new nint(1))
+                        PreviewNativeMethods.GetProp((nint)request.ParentHandle, "WpfStudio.PreviewFocus." + request.FocusToken) != (nint)1)
                         return Respond(true, "Keyboard entry was superseded before the preview received focus.");
                     bool focused = ((IKeyboardInputSink)scene.Surface!).TabInto(new TraversalRequest(
                         request.Action == PreviewSurfaceAction.FocusLast ? FocusNavigationDirection.Last : FocusNavigationDirection.First));
@@ -81,11 +81,11 @@ internal sealed partial class PreviewNativeSurface(PreviewScene scene, Dispatche
 
     public bool CurrentSurface(PreviewSurfaceIdentity? identity) => !scene.IsClosed && identity is not null &&
         identity == _surfaceIdentity && identity.SessionId == session.SessionId && identity.Version == scene.Version &&
-        scene.Surface is { IsDisposed: false } && scene.Surface.Handle != 0 && scene.Viewport is not null && scene.Root is not null;
+        scene.Surface is { IsDisposed: false } && scene.Surface.Handle != IntPtr.Zero && scene.Viewport is not null && scene.Root is not null;
 
     public void Initialize()
     {
-        if (scene.Surface is not { IsDisposed: false } || scene.Surface.Handle == 0) return;
+        if (scene.Surface is not { IsDisposed: false } || scene.Surface.Handle == IntPtr.Zero) return;
         _surfaceIdentity = new(session.SessionId, scene.Version, Guid.NewGuid().ToString("N"));
         _surfaceSequence = 0;
         _navigationSequence = 0;
@@ -117,9 +117,9 @@ internal sealed partial class PreviewNativeSurface(PreviewScene scene, Dispatche
         if (request.ParentProcessId != session.ParentProcessId || request.ParentHandle == 0 ||
             !Guid.TryParseExact(request.BridgeToken, "N", out _))
             throw new InvalidOperationException("The native preview bridge identity is invalid.");
-        nint parent = new(request.ParentHandle);
+        nint parent = (nint)request.ParentHandle;
         if (!PreviewNativeMethods.OwnedWindow(parent, session.ParentProcessId) ||
-            PreviewNativeMethods.GetProp(parent, "WpfStudio.PreviewBridge." + request.BridgeToken) != new nint(1))
+            PreviewNativeMethods.GetProp(parent, "WpfStudio.PreviewBridge." + request.BridgeToken) != (nint)1)
             throw new InvalidOperationException("The native preview bridge closed or its lease changed.");
         nint parentContext = PreviewNativeMethods.GetWindowDpiAwarenessContext(parent);
         nint childContext = PreviewNativeMethods.GetWindowDpiAwarenessContext(scene.Surface!.Handle);
@@ -137,7 +137,7 @@ internal sealed partial class PreviewNativeSurface(PreviewScene scene, Dispatche
 
     private void RequireAttachedBridge(PreviewSurfaceRequest request)
     {
-        if (_bridgeHandle != new nint(request.ParentHandle) || _bridgeToken != request.BridgeToken ||
+        if (_bridgeHandle != (nint)request.ParentHandle || _bridgeToken != request.BridgeToken ||
             _nativeNavigationToken != request.NavigationToken ||
             PreviewNativeMethods.GetParent(RequireOwnedSurface(request.Surface)) != _bridgeHandle)
             throw new InvalidOperationException("This surface is not attached to the requested bridge.");
@@ -146,7 +146,7 @@ internal sealed partial class PreviewNativeSurface(PreviewScene scene, Dispatche
     private void AttachNativeSurface(PreviewSurfaceRequest request)
     {
         nint hwnd = RequireOwnedSurface(request.Surface);
-        if (_bridgeHandle != 0 && (_bridgeHandle != new nint(request.ParentHandle) || _bridgeToken != request.BridgeToken))
+        if (_bridgeHandle != 0 && (_bridgeHandle != (nint)request.ParentHandle || _bridgeToken != request.BridgeToken))
             throw new InvalidOperationException("Detach the previous native bridge before attaching another one.");
         ValidateBridge(request);
         PreviewNativeMethods.ShowWindow(hwnd, 0);
@@ -155,9 +155,9 @@ internal sealed partial class PreviewNativeSurface(PreviewScene scene, Dispatche
             PreviewNativeMethods.Child | PreviewNativeMethods.ClipChildren | PreviewNativeMethods.ClipSiblings);
         ValidateBridge(request);
         RequireOwnedSurface(request.Surface);
-        PreviewNativeMethods.Reparent(hwnd, new nint(request.ParentHandle));
+        PreviewNativeMethods.Reparent(hwnd, (nint)request.ParentHandle);
         RequireOwnedSurface(request.Surface);
-        _bridgeHandle = new nint(request.ParentHandle);
+        _bridgeHandle = (nint)request.ParentHandle;
         _bridgeToken = request.BridgeToken;
         _nativeNavigationToken = request.NavigationToken;
         _attachment = request;

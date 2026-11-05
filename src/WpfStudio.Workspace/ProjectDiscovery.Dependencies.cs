@@ -51,6 +51,23 @@ public static partial class ProjectDiscovery
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or XmlException or ArgumentException) { return false; }
     }
 
+    /// <summary>
+    /// The build a preview should load. A legacy project evaluated on its own can name a folder its solution never builds to: the WPF
+    /// template defaults Platform to x86 while its only configurations are AnyCPU, so Visual Studio's output is in bin\Debug, not the
+    /// evaluated bin\x86\Debug. With nothing at the evaluated path, this takes the newest build of the configuration under bin.
+    /// </summary>
+    public static string? FindBuiltAssembly(WorkspaceProject project, string configuration)
+    {
+        var target = project.OutputPath;
+        if (project.IsSdkStyle || string.IsNullOrWhiteSpace(target) || File.Exists(target) || Directory.Exists(target)) return target;
+        var bin = Path.Combine(Path.GetDirectoryName(project.ProjectPath)!, "bin");
+        if (!Directory.Exists(bin)) return target;
+        char[] separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+        return Directory.EnumerateFiles(bin, Path.GetFileName(target), SearchOption.AllDirectories)
+            .Where(path => Path.GetRelativePath(bin, path).Split(separators).Contains(configuration, StringComparer.OrdinalIgnoreCase))
+            .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault() ?? target;
+    }
+
     /// <summary>True for a .NET Framework target framework moniker such as net48 or net472. .NET 5 and later use a dotted version.</summary>
     public static bool IsNetFrameworkTarget(string? targetFramework) =>
         targetFramework is { Length: > 3 } && targetFramework.StartsWith("net", StringComparison.OrdinalIgnoreCase) && targetFramework[3..].All(char.IsAsciiDigit);

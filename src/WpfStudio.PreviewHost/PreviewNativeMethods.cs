@@ -9,7 +9,7 @@ internal static class PreviewNativeMethods
     internal const long Child = 0x40000000, Popup = 0x80000000, Visible = 0x10000000;
     internal const long Caption = 0x00C00000, ThickFrame = 0x00040000, ClipChildren = 0x02000000, ClipSiblings = 0x04000000;
     internal const uint NoZOrder = 0x0004, NoActivate = 0x0010, FrameChanged = 0x0020;
-    internal static readonly nint PerMonitorV2 = new(-4);
+    internal static readonly nint PerMonitorV2 = -4;
 
     [DllImport("user32.dll")] internal static extern bool IsWindow(nint hwnd);
     [DllImport("user32.dll")] internal static extern nint GetParent(nint hwnd);
@@ -32,12 +32,12 @@ internal static class PreviewNativeMethods
     [DllImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)] private static extern int SetWindowLong32(nint hwnd, int index, int value);
     [DllImport("kernel32.dll", SetLastError = true)] internal static extern bool GetNamedPipeClientProcessId(SafePipeHandle pipe, out uint processId);
 
-    internal static long Style(nint hwnd) => IntPtr.Size == 8 ? GetWindowLongPtr64(hwnd, -16).ToInt64() : (uint)GetWindowLong32(hwnd, -16);
+    internal static long Style(nint hwnd) => IntPtr.Size == 8 ? (long)GetWindowLongPtr64(hwnd, -16) : (uint)GetWindowLong32(hwnd, -16);
 
     internal static void SetStyle(nint hwnd, long value)
     {
         Marshal.SetLastPInvokeError(0);
-        nint previous = IntPtr.Size == 8 ? SetWindowLongPtr64(hwnd, -16, new nint(value)) : new nint(SetWindowLong32(hwnd, -16, unchecked((int)value)));
+        nint previous = IntPtr.Size == 8 ? SetWindowLongPtr64(hwnd, -16, (nint)value) : SetWindowLong32(hwnd, -16, unchecked((int)value));
         if (previous == 0 && Marshal.GetLastPInvokeError() != 0)
             throw new Win32Exception(Marshal.GetLastPInvokeError(), "Could not update the preview window style.");
     }
