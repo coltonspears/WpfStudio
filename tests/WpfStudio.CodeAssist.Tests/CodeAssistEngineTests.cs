@@ -173,7 +173,8 @@ public sealed class CodeAssistEngineTests : IDisposable
         Assert.False(engine.SuggestsLines);
     }
 
-    private const string PropertyContext = "public sealed class Person\n{\n    public string Name { get; set; }\n    public string Email { get; ";
+    // With the file's opening lines: the newest gate rightly distrusts a fragment with nothing before it.
+    private const string PropertyContext = "using System;\n\nnamespace Demo;\n\npublic sealed class Person\n{\n    public string Name { get; set; }\n    public string Email { get; ";
 
     [Fact]
     public async Task ALineSuggestionStaysOnItsLineAndIsFromTheNewestModel()
@@ -184,13 +185,14 @@ public sealed class CodeAssistEngineTests : IDisposable
         Assert.NotNull(line);
         Assert.StartsWith("set;", line, StringComparison.Ordinal);
         Assert.DoesNotContain('\n', line);
-        Assert.Contains("code-assist-lines 3.0.0 is loaded", engine.Status, StringComparison.Ordinal);
+        Assert.Contains("code-assist-lines 4.0.0 is loaded", engine.Status, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("1.0.0")]
     [InlineData("2.0.0")]
     [InlineData("3.0.0")]
+    [InlineData("4.0.0")]
     public async Task WindowsLineEndingsGiveTheSameSuggestion(string version)
     {
         using var engine = NewEngine();
@@ -203,12 +205,43 @@ public sealed class CodeAssistEngineTests : IDisposable
     [InlineData("1.0.0")]
     [InlineData("2.0.0")]
     [InlineData("3.0.0")]
+    [InlineData("4.0.0")]
     public async Task TabIndentationGivesTheSameSuggestionAsSpaces(string version)
     {
         using var engine = NewEngine();
         await engine.ConfigureAsync(new CodeAssistOptions(true, LineSuggestions: true, LineModelVersion: version));
-        const string tabs = "public sealed class Person\n{\n\tpublic string Name { get; set; }\n\tpublic string Email { get; ";
+        const string tabs = "using System;\n\nnamespace Demo;\n\npublic sealed class Person\n{\n\tpublic string Name { get; set; }\n\tpublic string Email { get; ";
         Assert.Equal(await engine.SuggestLineAsync(PropertyContext, PropertyContext.Length), await engine.SuggestLineAsync(tabs, tabs.Length));
+    }
+
+    [Fact]
+    public async Task WholeLinesAreMarkedFinishedAndAnUnsureLineShowsOnlyItsSurePart()
+    {
+        var model = new AssistModelCatalog(AssistModelCatalog.DefaultDirectory).Resolve(AssistModelKind.Lines, "4.0.0")!;
+        using var generator = TransformerLineGenerator.Load(model);
+        Assert.True(generator.OffersPartialLines);
+        var whole = generator.Generate(PropertyContext, CodeAssistEngine.MaxLineTokens);
+        Assert.Equal(new LineCompletion("set; }", true), whole);
+        const string fragment = "public sealed class Person\n{\n    public string Name { get; set; }\n    public string Email ";
+        Assert.Equal(new LineCompletion("{ get; set; }", false), generator.Generate(fragment, CodeAssistEngine.MaxLineTokens));
+        // Its guess here may be wrong, but it is sure of the part that closes the brace left open, however short that is.
+        const string open = "public partial class Counter\n{\n    public string Name { get; set; }\n    public string Title { get; ";
+        Assert.StartsWith("set;", generator.Generate(open, CodeAssistEngine.MaxLineTokens).Text, StringComparison.Ordinal);
+        // A line it cannot finish in the tokens allowed is not shown at all, not even in part.
+        Assert.Equal(new LineCompletion("", false), generator.Generate(fragment, 2));
+        await Task.CompletedTask;
+    }
+
+    [Fact]
+    public void AGateThatDoesNotFitThisBuildIsRefused()
+    {
+        var model = new AssistModelCatalog(AssistModelCatalog.DefaultDirectory).Resolve(AssistModelKind.Lines, "4.0.0")!;
+        var spec = model.Manifest.Lines!;
+        AssistModel With(LineModelSpec changed) => model with { Manifest = model.Manifest with { Lines = changed } };
+        Assert.Contains("features this WpfStudio does not compute", Assert.Throws<InvalidDataException>(() => TransformerLineGenerator.Load(With(spec with { Gate = spec.Gate! with { Features = ["something_new"] } }))).Message, StringComparison.Ordinal);
+        Assert.Contains("wrong size", Assert.Throws<InvalidDataException>(() => TransformerLineGenerator.Load(With(spec with { Gate = spec.Gate! with { Long = spec.Gate.Long with { Weights = [1.0] } } }))).Message, StringComparison.Ordinal);
+        Assert.Contains("no line gate", Assert.Throws<InvalidDataException>(() => TransformerLineGenerator.Load(With(spec with { Gate = null }))).Message, StringComparison.Ordinal);
+        Assert.Contains("line features version 3", Assert.Throws<InvalidDataException>(() => TransformerLineGenerator.Load(With(spec with { FeatureVersion = 3 }))).Message, StringComparison.Ordinal);
     }
 
     [Fact]

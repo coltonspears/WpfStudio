@@ -29,7 +29,7 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog) : IDisposable
     private static readonly string[] MemberTags = ["Method", "Property", "Field", "Event", "Constant", "EnumMember"];
 
     private readonly ModelSlot<MemberRanker> _members = new("member ranking", MemberRanker.Load);
-    private readonly ModelSlot<LineGenerator> _lines = new("line", LineGenerator.Load);
+    private readonly ModelSlot<ILineGenerator> _lines = new("line", LoadLines);
     private volatile CodeAssistOptions _options = CodeAssistOptions.Off;
 
     public AssistModelCatalog Catalog { get; } = catalog;
@@ -88,6 +88,9 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog) : IDisposable
             return (line.Finished || generator.OffersPartialLines) && WorthOffering(line.Text) ? line.Text : null;
         }, token).ConfigureAwait(false);
     }
+
+    private static ILineGenerator LoadLines(AssistModel model) =>
+        model.Manifest.Lines!.FeatureVersion == TransformerLineGenerator.SupportedFeatureVersion ? TransformerLineGenerator.Load(model) : LineGenerator.Load(model);
 
     // A failure stops here, so a request abandoned at the ranking budget cannot leave a fault nobody observes.
     private Task<TResult?> RunAsync<T, TResult>(ModelSlot<T> slot, Func<AssistModel?> model, Func<T, TResult?> run, CancellationToken token) where T : class, IDisposable where TResult : class => Task.Run(() =>

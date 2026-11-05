@@ -84,9 +84,27 @@ public sealed class CodeAssistEditorTests
         using var engine = NewEngine();
         var preferences = new CodeAssistPreferences(engine, new InlineDispatcher());
         Assert.Equal(["Latest (2.0.0)", "2.0.0", "1.0.0"], preferences.MemberModels.Select(choice => choice.Label));
-        Assert.Equal(["Latest (3.0.0)", "3.0.0", "2.0.0", "1.0.0"], preferences.LineModels.Select(choice => choice.Label));
+        Assert.Equal(["Latest (4.0.0)", "4.0.0", "3.0.0", "2.0.0", "1.0.0"], preferences.LineModels.Select(choice => choice.Label));
         Assert.Equal(CodeAssistSettings.LatestVersion, preferences.SelectedMemberModel!.Version);
-        Assert.Contains("about 3 in 4", preferences.SelectedLineModel!.Limitations, StringComparison.Ordinal);
+        Assert.Contains("about 7 in 10", preferences.SelectedLineModel!.Limitations, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThePageDescribesEveryVersionAndMarksTheOneSelected()
+    {
+        using var engine = NewEngine();
+        var preferences = new CodeAssistPreferences(engine, new InlineDispatcher());
+        Assert.Equal(["2.0.0", "1.0.0"], preferences.MemberModelVersions.Select(version => version.Version));
+        Assert.Equal(["4.0.0", "3.0.0", "2.0.0", "1.0.0"], preferences.LineModelVersions.Select(version => version.Version));
+        Assert.Equal("Trained 3 November 2026, 9.9 MB", preferences.LineModelVersions[1].Headline);
+        Assert.Contains(preferences.LineModelVersions[1].Facts, fact => fact.Label == "How it scored");
+        Assert.Equal([true, false, false, false], preferences.LineModelVersions.Select(version => version.IsSelected));
+
+        preferences.LineModelVersion = "1.0.0";
+        Assert.Equal([false, false, false, true], preferences.LineModelVersions.Select(version => version.IsSelected));
+        Assert.Equal([true, false], preferences.MemberModelVersions.Select(version => version.IsSelected));
+        preferences.LineModelVersion = CodeAssistSettings.LatestVersion;
+        Assert.Equal([true, false, false, false], preferences.LineModelVersions.Select(version => version.IsSelected));
     }
 
     [Fact]
