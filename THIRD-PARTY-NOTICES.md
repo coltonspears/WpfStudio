@@ -9,6 +9,8 @@ WpfStudio combines the following packages. Their licenses remain with their resp
 | CommunityToolkit.Mvvm | 8.4.2 | [CommunityToolkit/dotnet](https://github.com/CommunityToolkit/dotnet), MIT |
 | Microsoft.CodeAnalysis / Roslyn | 5.9.0 | [dotnet/roslyn](https://github.com/dotnet/roslyn), MIT |
 | Microsoft.Build.Locator | 1.11.2 | [microsoft/MSBuildLocator](https://github.com/microsoft/MSBuildLocator), MIT |
+| Newtonsoft.Json | 13.0.4 | [JamesNK/Newtonsoft.Json](https://github.com/JamesNK/Newtonsoft.Json), MIT; the .NET Framework preview host |
+| PolySharp | 1.15.0 | [Sergio0694/PolySharp](https://github.com/Sergio0694/PolySharp), MIT; compile-time language support in the .NET Framework preview host |
 | StreamJsonRpc | 2.25.29 | [microsoft/vs-streamjsonrpc](https://github.com/microsoft/vs-streamjsonrpc), MIT |
 | Microsoft.Diagnostics.Runtime (ClrMD) | 4.1.745802 | [microsoft/clrmd](https://github.com/microsoft/clrmd), MIT; managed dump/snapshot analysis in the isolated profiling worker |
 | Microsoft.Diagnostics.NETCore.Client | 0.2.661903 | [dotnet/diagnostics](https://github.com/dotnet/diagnostics), MIT; transitive profiling dependency |
@@ -23,7 +25,7 @@ WpfStudio combines the following packages. Their licenses remain with their resp
 
 The studio docking templates in `src/WpfStudio.App/Resources/DockStyles.xaml` follow the structure and bindings of AvalonDock's VS2013 theme templates (Ms-PL), and `StudioDockTheme` layers them over that theme at run time. The Ctrl+F find panel template in `StudioTheme.xaml` binds to the same parts and commands as AvalonEdit's default `SearchPanel` template (MIT). The application icon and the vector glyphs in `Controls/Glyph.cs` were drawn for WpfStudio.
 
-The Code Assist models in `src/WpfStudio.CodeAssist/Models` were trained on WpfStudio's own source and contain no Microsoft model weights or predictions; each folder's manifest records its provenance. Microsoft's IntelliCode model bundles are licensed only for its IntelliCode extensions and are not part of this project.
+The Code Assist models in `src/WpfStudio.CodeAssist/Models` contain no Microsoft model weights or predictions, and each folder's manifest records its provenance. They were trained on the owner's own source, and line model 3.0.0 also on three MIT-licensed projects: [dotnet/wpf](https://github.com/dotnet/wpf), [AvalonEdit](https://github.com/icsharpcode/AvalonEdit) and [MaterialDesignInXamlToolkit](https://github.com/MaterialDesignInXAML/MaterialDesignInXamlToolkit). Their license texts are in `tools/licenses` and ship in the portable package's `licenses/`. Microsoft's IntelliCode model bundles are licensed only for its IntelliCode extensions and are not part of this project.
 
 The terminal assets carry their original license files next to the bundled JavaScript. The downloaded debugger distribution carries its own license and notices for bundled Roslyn and .NET components. The Microsoft Edge WebView2 runtime is installed separately and is not redistributed in the portable package. The .NET SDK and SQL Server are also separate installations.
 

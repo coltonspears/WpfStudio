@@ -13,11 +13,24 @@
     <ProjectReference Include="../../src/WpfStudio.Runtime/WpfStudio.Runtime.csproj" />
     <ProjectReference Include="../../src/WpfStudio.Core/WpfStudio.Core.csproj" />
     <ProjectReference Include="Fixtures/Compiled/WpfStudio.PreviewFixture.csproj" ReferenceOutputAssembly="false" />
+    <!-- Build order only. Naming their one framework here would make MSBuild build them a second time, at once, into the same obj folder. -->
+    <ProjectReference Include="Fixtures/Framework/App/WpfStudio.PreviewFrameworkFixture.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="Fixtures/Framework/App32/WpfStudio.PreviewFrameworkFixture32.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="../../src/WpfStudio.PreviewHost.Framework/WpfStudio.PreviewHost.Framework.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="../../src/WpfStudio.PreviewHost.Framework32/WpfStudio.PreviewHost.Framework32.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
     <ProjectReference Include="../../samples/CounterApp/CounterApp.csproj" ReferenceOutputAssembly="false" AdditionalProperties="Configuration=$(Configuration)" />
     <Compile Remove="Fixtures/**/*.cs" />
     <Page Remove="Fixtures/**/*.xaml" />
     <ApplicationDefinition Remove="Fixtures/**/*.xaml" />
   </ItemGroup>
+  <Target Name="CopyFrameworkPreviewFixtures" AfterTargets="Build">
+    <ItemGroup>
+      <FrameworkFixtureFiles Include="$(MSBuildProjectDirectory)/Fixtures/Framework/App/bin/$(Configuration)/net48/**/*" />
+      <FrameworkFixture32Files Include="$(MSBuildProjectDirectory)/Fixtures/Framework/App32/bin/$(Configuration)/net48/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FrameworkFixtureFiles)" DestinationFiles="@(FrameworkFixtureFiles->'$(OutDir)FrameworkFixture/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(FrameworkFixture32Files)" DestinationFiles="@(FrameworkFixture32Files->'$(OutDir)FrameworkFixture32/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
   <Target Name="CopyCompiledPreviewFixture" AfterTargets="Build">
     <ItemGroup>
       <CompiledFixtureFiles Include="$(MSBuildProjectDirectory)/Fixtures/Compiled/bin/$(Configuration)/net10.0-windows/**/*" />

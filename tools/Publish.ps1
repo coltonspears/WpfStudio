@@ -28,9 +28,11 @@ function Invoke-DotNet([string[]]$Arguments) {
 function Export-PackageNotices {
     $noticeDirectory = Join-Path $staging 'licenses'
     New-Item -ItemType Directory -Path $noticeDirectory -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses/AvalonEdit-LICENSE.txt') -Destination $noticeDirectory
+    foreach ($license in @('AvalonEdit-LICENSE.txt', 'dotnet-wpf-LICENSE.txt', 'MaterialDesignInXamlToolkit-LICENSE.txt')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "licenses/$license") -Destination $noticeDirectory
+    }
     $inventory = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($project in @('WpfStudio.App', 'WpfStudio.WorkspaceHost', 'WpfStudio.PreviewHost', 'WpfStudio.ProfilingHost')) {
+    foreach ($project in @('WpfStudio.App', 'WpfStudio.WorkspaceHost', 'WpfStudio.PreviewHost', 'WpfStudio.PreviewHost.Framework', 'WpfStudio.ProfilingHost')) {
         $assetsPath = Join-Path $repository "src/$project/obj/project.assets.json"
         $assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
         foreach ($library in $assets.libraries.PSObject.Properties) {
@@ -87,7 +89,10 @@ try {
     # Preserve the entire worker publication, including Roslyn BuildHost-netcore and its dependency files.
     # ReadyToRun about doubles its size. Roslyn's packages are IL only, so without it every worker start compiles them again.
     Invoke-DotNet @('publish', 'src/WpfStudio.WorkspaceHost/WpfStudio.WorkspaceHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-p:PublishReadyToRun=true', '-o', (Join-Path $staging 'WorkspaceHost'))
-    Invoke-DotNet @('publish', 'src/WpfStudio.PreviewHost/WpfStudio.PreviewHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'PreviewHost'))
+    Invoke-DotNet @('publish', 'src/WpfStudio.PreviewHost/WpfStudio.PreviewHost.csproj', '-c', $Configuration, '-f', 'net10.0-windows', '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'PreviewHost'))
+    # .NET Framework projects preview on the runtime Windows includes, in the bitness they run in. Both executables share their AnyCPU libraries.
+    Invoke-DotNet @('publish', 'src/WpfStudio.PreviewHost.Framework/WpfStudio.PreviewHost.Framework.csproj', '-c', $Configuration, '-o', (Join-Path $staging 'PreviewHost.Framework'))
+    Invoke-DotNet @('publish', 'src/WpfStudio.PreviewHost.Framework32/WpfStudio.PreviewHost.Framework32.csproj', '-c', $Configuration, '-o', (Join-Path $staging 'PreviewHost.Framework'))
     Invoke-DotNet @('publish', 'src/WpfStudio.ProfilingHost/WpfStudio.ProfilingHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'ProfilingHost'))
     # A self-contained x86 worker supports legacy 32-bit Framework dumps even when
     # the machine has only the x64 .NET runtime installed.
@@ -111,6 +116,17 @@ try {
         'PreviewHost/WpfStudio.Wpf.PropertyEditing.dll',
         'PreviewHost/WpfStudio.Wpf.Diagnostics.dll',
         'PreviewHost/WpfStudio.Inspection.Protocol.dll',
+        'PreviewHost.Framework/WpfStudio.PreviewHost.Framework.exe',
+        'PreviewHost.Framework/WpfStudio.PreviewHost.Framework.exe.config',
+        'PreviewHost.Framework/WpfStudio.PreviewHost.Framework32.exe',
+        'PreviewHost.Framework/WpfStudio.PreviewHost.Framework32.exe.config',
+        'PreviewHost.Framework/WpfStudio.PreviewHost.dll',
+        'PreviewHost.Framework/WpfStudio.Contracts.dll',
+        'PreviewHost.Framework/WpfStudio.Inspection.Protocol.dll',
+        'PreviewHost.Framework/WpfStudio.Wpf.PropertyEditing.dll',
+        'PreviewHost.Framework/WpfStudio.Wpf.Diagnostics.dll',
+        'PreviewHost.Framework/StreamJsonRpc.dll',
+        'PreviewHost.Framework/Newtonsoft.Json.dll',
         'Inspection/WpfStudio.Inspection.StartupHook.dll',
         'Inspection/WpfStudio.Inspection.Agent.dll',
         'Inspection/WpfStudio.Inspection.Protocol.dll',
@@ -123,9 +139,9 @@ try {
         'onnxruntime.dll',
         'CodeAssist/Models/members/2.0.0/manifest.json',
         'CodeAssist/Models/members/2.0.0/model.onnx',
-        'CodeAssist/Models/lines/2.0.0/manifest.json',
-        'CodeAssist/Models/lines/2.0.0/model.onnx',
-        'CodeAssist/Models/lines/2.0.0/tokenizer.json'
+        'CodeAssist/Models/lines/3.0.0/manifest.json',
+        'CodeAssist/Models/lines/3.0.0/model.onnx',
+        'CodeAssist/Models/lines/3.0.0/tokenizer.json'
     )
     foreach ($relative in $required) {
         if (-not (Test-Path -LiteralPath (Join-Path $staging $relative))) { throw "Published package is incomplete: $relative is missing." }

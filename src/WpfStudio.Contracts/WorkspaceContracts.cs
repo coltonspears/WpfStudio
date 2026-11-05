@@ -58,9 +58,6 @@ public sealed record SignatureEntry(string Label, string? Documentation, IReadOn
 /// <paramref name="ActiveName"/> is then that name, and null for an argument given by position.
 /// </summary>
 public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures, int ActiveSignature = 0, int Start = -1, string? ActiveName = null);
-/// <summary><paramref name="LineText"/> is the source line the location is on, so a list of locations can show the code and not only where it is.</summary>
-public sealed record SourceLocation(string Path, int Start, int Length, int Line, int Column, string? DisplayText = null,
-    string? ExpectedTextHash = null, string? ProjectPath = null, string? ProjectName = null, string? LineText = null);
 /// <summary>
 /// Where a symbol is declared. With no locations, <paramref name="Status"/> says why; with some, it may say they are a best
 /// guess. <paramref name="Resolved"/> is false when the name at the position did not resolve to a symbol at all.

@@ -27,7 +27,7 @@ public sealed class AssistModelCatalogTests : IDisposable
         var catalog = new AssistModelCatalog(AssistModelCatalog.DefaultDirectory);
         Assert.Empty(catalog.Problems);
         Assert.Equal(["2.0.0", "1.0.0"], catalog.Versions(AssistModelKind.Members).Select(model => model.Manifest.Version));
-        Assert.Equal(["2.0.0", "1.0.0"], catalog.Versions(AssistModelKind.Lines).Select(model => model.Manifest.Version));
+        Assert.Equal(["3.0.0", "2.0.0", "1.0.0"], catalog.Versions(AssistModelKind.Lines).Select(model => model.Manifest.Version));
         foreach (var model in catalog.Versions(AssistModelKind.Members).Concat(catalog.Versions(AssistModelKind.Lines)))
         {
             model.VerifyFiles();

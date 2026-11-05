@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+#if !NETFRAMEWORK
 using System.Text.Json;
+#endif
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -281,7 +283,12 @@ internal sealed class PreviewLayoutEditing(PreviewScene scene, PreviewVisualTree
 
     private static bool SameLocals(IReadOnlyList<object?> first, IReadOnlyList<object?> second) => first.Count == second.Count
         && first.Zip(second).All(pair => ReferenceEquals(pair.First, pair.Second) || pair.First is double or int or Thickness or HorizontalAlignment or VerticalAlignment && pair.First.Equals(pair.Second));
-    private static string Fingerprint(PreviewLayoutEditContext context) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(context with { Token = null }))));
+    private static string Fingerprint(PreviewLayoutEditContext context) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Serialize(context with { Token = null }))));
+#if NETFRAMEWORK
+    private static string Serialize(PreviewLayoutEditContext context) => FrameworkEngineServer.Serialize(context);
+#else
+    private static string Serialize(PreviewLayoutEditContext context) => JsonSerializer.Serialize(context);
+#endif
     private static PreviewBounds Bounds(Point origin, Size size) => new(origin.X, origin.Y, size.Width, size.Height);
     private static bool Positive(Size size) => !size.IsEmpty && double.IsFinite(size.Width) && double.IsFinite(size.Height) && size.Width > 0 && size.Height > 0;
     private static bool FiniteLayoutRect(Rect value) => !value.IsEmpty && double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Width) && double.IsFinite(value.Height);

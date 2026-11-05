@@ -1,4 +1,6 @@
+#if !NETFRAMEWORK
 using System.Text.Json;
+#endif
 
 namespace WpfStudio.Inspection.Protocol;
 
@@ -9,9 +11,13 @@ public static class InspectionProtocol
     public const string PipeVariable = "WPFSTUDIO_INSPECTION_PIPE";
     public const string TokenVariable = "WPFSTUDIO_INSPECTION_TOKEN";
     public const string OwnerVariable = "WPFSTUDIO_INSPECTION_OWNER_PID";
+#if !NETFRAMEWORK
     public static JsonSerializerOptions JsonOptions { get; } = new(JsonSerializerDefaults.Web);
+#endif
 }
 
+// The live-inspection wire format is not part of the .NET Framework preview host.
+#if !NETFRAMEWORK
 public sealed record InspectionMessage(string Kind, long Id, JsonElement Payload, string? Error = null)
 {
     public static InspectionMessage Create<T>(string kind, long id, T payload, string? error = null) =>
@@ -19,6 +25,7 @@ public sealed record InspectionMessage(string Kind, long Id, JsonElement Payload
     public T GetPayload<T>() => Payload.Deserialize<T>(InspectionProtocol.JsonOptions)
         ?? throw new InvalidDataException("The inspection message has no payload.");
 }
+#endif
 
 public sealed record InspectionHello(int ProtocolVersion, string Token, int ProcessId, string RuntimeVersion,
     string AgentVersion, IReadOnlyList<string> Capabilities);

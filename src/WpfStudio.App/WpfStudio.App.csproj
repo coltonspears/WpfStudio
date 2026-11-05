@@ -9,6 +9,9 @@
     <ProjectReference Include="..\WpfStudio.Runtime\WpfStudio.Runtime.csproj" />
     <ProjectReference Include="..\WpfStudio.WorkspaceHost\WpfStudio.WorkspaceHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfStudio.PreviewHost\WpfStudio.PreviewHost.csproj" ReferenceOutputAssembly="false" />
+    <!-- Build order only. Naming their one framework here would make MSBuild build them a second time, at once, into the same obj folder. -->
+    <ProjectReference Include="..\WpfStudio.PreviewHost.Framework\WpfStudio.PreviewHost.Framework.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
+    <ProjectReference Include="..\WpfStudio.PreviewHost.Framework32\WpfStudio.PreviewHost.Framework32.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
     <ProjectReference Include="..\WpfStudio.ProfilingHost\WpfStudio.ProfilingHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfStudio.Inspection.StartupHook\WpfStudio.Inspection.StartupHook.csproj" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
     <ProjectReference Include="..\WpfStudio.Inspection.Agent\WpfStudio.Inspection.Agent.csproj" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained" />
@@ -52,6 +55,14 @@
       <PreviewHostFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.PreviewHost\bin\$(Configuration)\net10.0-windows\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(PreviewHostFiles)" DestinationFiles="@(PreviewHostFiles->'$(OutDir)PreviewHost\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyFrameworkPreviewHost" AfterTargets="Build">
+    <ItemGroup>
+      <FrameworkPreviewHostFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.PreviewHost.Framework\bin\$(Configuration)\net48\**\*" />
+      <FrameworkPreviewHostFiles Include="$(MSBuildProjectDirectory)\..\WpfStudio.PreviewHost.Framework32\bin\$(Configuration)\net48\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FrameworkPreviewHostFiles)" DestinationFiles="@(FrameworkPreviewHostFiles->'$(OutDir)PreviewHost.Framework\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyInspectionAgent" AfterTargets="Build">

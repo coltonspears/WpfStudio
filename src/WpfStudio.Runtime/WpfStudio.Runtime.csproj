@@ -10,6 +10,8 @@
   <ItemGroup>
     <Compile Include="../Shared/PreviewDependencyCatalog.cs" Link="Design/PreviewDependencyCatalog.cs" />
     <Compile Include="../Shared/XamlNamespaceIndex.cs" Link="Design/XamlNamespaceIndex.cs" />
+    <Compile Include="../Shared/XamlNamespaceLibrary.cs" Link="Design/XamlNamespaceLibrary.cs" />
+    <Compile Include="../Shared/XamlNamespaceLibraryReader.cs" Link="Design/XamlNamespaceLibraryReader.cs" />
     <ProjectReference Include="../WpfStudio.Contracts/WpfStudio.Contracts.csproj" />
     <ProjectReference Include="../WpfStudio.Hosting/WpfStudio.Hosting.csproj" />
     <ProjectReference Include="../WpfStudio.Inspection.Protocol/WpfStudio.Inspection.Protocol.csproj" />

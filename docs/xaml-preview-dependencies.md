@@ -42,7 +42,29 @@ If a runtime package is absent from both the output and the recorded package fol
 
 Ordinary source previews also load the built `App.xaml` resource dictionary by default, including merged theme dictionaries. The current view remains source-loaded, while application resources come from the last build; rebuild after editing those resources. **App resources** in preview settings changes or clears that path. A library without a compiled application resource can still render its own resources. Source Windows retain their real Window ancestry for attached behaviors and relative bindings.
 
-This covers SDK-style builds with local outputs inside the selected project directory. The preview host currently runs on .NET 10 Windows x64; dependency discovery does not change that runtime or architecture. Application startup and dependency-injection setup are not executed. For a view whose DataContext normally comes from startup, supply [preview scenario data](xaml-preview-scenarios.md).
+This covers builds with local outputs inside the selected project directory. Application startup and dependency-injection setup are not executed. For a view whose DataContext normally comes from startup, supply [preview scenario data](xaml-preview-scenarios.md).
+
+## .NET Framework projects
+
+A build for .NET Framework previews on .NET Framework, chosen from the built assembly rather than the project file. An assembly built for x86, with Prefer32Bit (the default of a legacy WPF application) or as x86 mixed-mode code previews in a 32-bit process, and anything else in a 64-bit one. The preview's diagnostics name the runtime and bitness. Legacy and SDK-style projects both work, as do applications, whose build output is an `.exe`, and class libraries.
+
+Project code runs in an application domain set up the way its own process would be:
+
+- Its base directory is the copied output, so lookups relative to `AppDomain.BaseDirectory` work.
+- Its configuration file is the build's `.exe.config` or `.dll.config`, so binding redirects, `appSettings` and `AppContext` switches apply.
+- Assemblies bind as they do for the application: the GAC, then the output. A reference no redirect covers still gets the version in the output, as a redirect would have given it.
+- `Assembly.GetEntryAssembly()` returns the project's assembly. Its `Main` and `App` are still not run.
+
+A legacy project's build is looked for at its evaluated path, then under `bin` for the newest build of the selected configuration, because a WPF template's default Platform can name a folder its solution never builds to.
+
+The preview's own libraries stay out of the project's way, so a project can use any version of `Newtonsoft.Json`, `System.Memory` and the like.
+
+Known limits:
+
+- A class library built for AnyCPU previews in a 64-bit process even when the application using it runs in 32 bits. If it needs 32-bit native libraries, preview from the application's project.
+- Assemblies the build did not copy must be in the GAC. A project built against a DevExpress version that is no longer installed, with only its themes left in the GAC at the time, reports the missing theme assembly until it is rebuilt or that version is reinstalled.
+- WPF on .NET Framework has no `BindingDiagnostics.BindingFailed` event, so the **Bindings** panel has the binding's status and path and the WPF trace, but not the per-failure evidence .NET provides.
+- This is process isolation, not a security sandbox: constructors and converters of the project still run on your machine.
 
 ## Reproduce a real solution locally
 
