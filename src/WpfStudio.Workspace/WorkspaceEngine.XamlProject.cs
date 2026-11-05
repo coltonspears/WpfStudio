@@ -40,7 +40,7 @@ public sealed partial class WorkspaceEngine
     /// Paths name files something says changed, and their XAML contexts are withheld until they are read. With no paths
     /// this verifies every known file. Nothing says those changed, so until it finds a difference a verification
     /// withholds nothing and reports no change. Either continues on the next call when its budget runs out;
-    /// <see cref="WorkspaceRpcExtensions.RefreshAllDiskDocumentsAsync"/> runs a verification to its end.
+    /// <see cref="WorkspaceRpcExtensions.RefreshAllDiskDocumentsAsync(IWorkspaceRpc, CancellationToken)"/> runs a verification to its end.
     /// </summary>
     public async Task<RefreshDiskDocumentsResult> RefreshDiskDocumentsAsync(RefreshDiskDocumentsRequest request,
         CancellationToken cancellationToken)

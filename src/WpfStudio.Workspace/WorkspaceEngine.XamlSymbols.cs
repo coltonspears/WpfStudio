@@ -198,11 +198,10 @@ public sealed partial class WorkspaceEngine
 
     private async Task<SymbolSnapshot> CaptureSymbolSnapshotAsync(SymbolReferenceRequest request, CancellationToken token)
     {
-        var refresh = await this.RefreshAllDiskDocumentsAsync(token).ConfigureAwait(false);
         // Public refresh calls are reported by WorkspaceClient after their response.
-        // This implicit refresh must notify independently, even if the rest of the
-        // symbol operation fails or is cancelled. Both refresh locks are released.
-        if (refresh.Changed) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+        // This implicit refresh must notify independently, even if a later part of it or the rest
+        // of the symbol operation fails or is cancelled. Both refresh locks are released.
+        var refresh = await this.RefreshAllDiskDocumentsAsync(() => SemanticStateChanged?.Invoke(this, EventArgs.Empty), token).ConfigureAwait(false);
         Solution solution;
         long revision;
         Dictionary<string, long> versions;
