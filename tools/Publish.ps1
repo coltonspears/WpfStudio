@@ -85,7 +85,8 @@ try {
     $selfContainedValue = if ($SelfContained) { 'true' } else { 'false' }
     Invoke-DotNet @('publish', 'src/WpfStudio.App/WpfStudio.App.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', $staging)
     # Preserve the entire worker publication, including Roslyn BuildHost-netcore and its dependency files.
-    Invoke-DotNet @('publish', 'src/WpfStudio.WorkspaceHost/WpfStudio.WorkspaceHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'WorkspaceHost'))
+    # ReadyToRun about doubles its size. Roslyn's packages are IL only, so without it every worker start compiles them again.
+    Invoke-DotNet @('publish', 'src/WpfStudio.WorkspaceHost/WpfStudio.WorkspaceHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-p:PublishReadyToRun=true', '-o', (Join-Path $staging 'WorkspaceHost'))
     Invoke-DotNet @('publish', 'src/WpfStudio.PreviewHost/WpfStudio.PreviewHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'PreviewHost'))
     Invoke-DotNet @('publish', 'src/WpfStudio.ProfilingHost/WpfStudio.ProfilingHost.csproj', '-c', $Configuration, '-r', 'win-x64', '--self-contained', $selfContainedValue, '-p:PublishSingleFile=false', '-o', (Join-Path $staging 'ProfilingHost'))
     # A self-contained x86 worker supports legacy 32-bit Framework dumps even when
