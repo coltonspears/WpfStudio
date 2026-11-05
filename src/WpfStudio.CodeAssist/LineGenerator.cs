@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.ML.OnnxRuntime;
 
 namespace WpfStudio.CodeAssist;
@@ -9,8 +10,11 @@ public sealed record LineCompletion(string Text, bool Finished);
 /// Continues the current line one token at a time, always taking the likeliest token. The network's probabilities are
 /// mixed with what followed the same few tokens earlier in this file, which is how local names and literals get reused.
 /// </summary>
-internal sealed class LineGenerator : IDisposable
+internal sealed partial class LineGenerator : IDisposable
 {
+    [GeneratedRegex(@"^[ \t]*\t[ \t]*", RegexOptions.Multiline, 1000)]
+    private static partial Regex LeadingTabs();
+
     private static readonly string[] Inputs = ["input_ids", "hidden"];
     private static readonly string[] Outputs = ["logits", "next_hidden"];
     private static readonly int[] HistoryLengths = [6, 5, 4, 3, 2];
@@ -44,6 +48,8 @@ internal sealed class LineGenerator : IDisposable
     {
         // Models learn from text with bare newlines, and a carriage return is a token they have rarely seen.
         string text = code.Replace("\r\n", "\n", StringComparison.Ordinal);
+        // Nearly all training code indents with spaces, so tab indentation reads as code the model has rarely seen.
+        text = LeadingTabs().Replace(text, static indent => indent.Value.Replace("\t", "    ", StringComparison.Ordinal));
         // A token owns the space before it, so a caret after a space leaves a lone space token the model has rarely seen.
         // Asking from before that space lets the model predict it, and the suggestion then drops it again.
         if (!text.EndsWith(' ')) return Continue(text, maxTokens, token);

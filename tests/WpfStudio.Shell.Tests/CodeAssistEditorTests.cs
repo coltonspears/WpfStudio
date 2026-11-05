@@ -84,9 +84,9 @@ public sealed class CodeAssistEditorTests
         using var engine = NewEngine();
         var preferences = new CodeAssistPreferences(engine, new InlineDispatcher());
         Assert.Equal(["Latest (2.0.0)", "2.0.0", "1.0.0"], preferences.MemberModels.Select(choice => choice.Label));
-        Assert.Equal(["Latest (2.0.0)", "2.0.0", "1.0.0"], preferences.LineModels.Select(choice => choice.Label));
+        Assert.Equal(["Latest (3.0.0)", "3.0.0", "2.0.0", "1.0.0"], preferences.LineModels.Select(choice => choice.Label));
         Assert.Equal(CodeAssistSettings.LatestVersion, preferences.SelectedMemberModel!.Version);
-        Assert.Contains("about 7 in 10", preferences.SelectedLineModel!.Limitations, StringComparison.Ordinal);
+        Assert.Contains("about 3 in 4", preferences.SelectedLineModel!.Limitations, StringComparison.Ordinal);
     }
 
     [Fact]

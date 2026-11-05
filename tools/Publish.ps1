@@ -28,7 +28,9 @@ function Invoke-DotNet([string[]]$Arguments) {
 function Export-PackageNotices {
     $noticeDirectory = Join-Path $staging 'licenses'
     New-Item -ItemType Directory -Path $noticeDirectory -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses/AvalonEdit-LICENSE.txt') -Destination $noticeDirectory
+    foreach ($license in @('AvalonEdit-LICENSE.txt', 'dotnet-wpf-LICENSE.txt', 'MaterialDesignInXamlToolkit-LICENSE.txt')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "licenses/$license") -Destination $noticeDirectory
+    }
     $inventory = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($project in @('WpfStudio.App', 'WpfStudio.WorkspaceHost', 'WpfStudio.PreviewHost', 'WpfStudio.ProfilingHost')) {
         $assetsPath = Join-Path $repository "src/$project/obj/project.assets.json"
@@ -123,9 +125,9 @@ try {
         'onnxruntime.dll',
         'CodeAssist/Models/members/2.0.0/manifest.json',
         'CodeAssist/Models/members/2.0.0/model.onnx',
-        'CodeAssist/Models/lines/2.0.0/manifest.json',
-        'CodeAssist/Models/lines/2.0.0/model.onnx',
-        'CodeAssist/Models/lines/2.0.0/tokenizer.json'
+        'CodeAssist/Models/lines/3.0.0/manifest.json',
+        'CodeAssist/Models/lines/3.0.0/model.onnx',
+        'CodeAssist/Models/lines/3.0.0/tokenizer.json'
     )
     foreach ($relative in $required) {
         if (-not (Test-Path -LiteralPath (Join-Path $staging $relative))) { throw "Published package is incomplete: $relative is missing." }
