@@ -83,6 +83,29 @@ public class DocumentTests
     }
 
     [Fact]
+    public async Task AFileAnotherProgramHasOpenForWritingCanStillBeOpenedCheckedAndReloaded()
+    {
+        var directory = DirectoryPath();
+        var path = Path.Combine(directory, "View.cs");
+        await File.WriteAllTextAsync(path, "one");
+        var store = new DocumentStore(directory);
+        // The other program allows readers, as most do while they write; a read that insists on being alone would fail here.
+        await using (var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+        {
+            var document = await store.OpenAsync(path);
+            Assert.Equal("one", document.Content);
+            writer.SetLength(0);
+            await writer.WriteAsync(Encoding.UTF8.GetBytes("two"));
+            await writer.FlushAsync();
+            Assert.True(await store.IsExternallyChangedAsync(document));
+            Assert.Equal("two", (await store.ReadDiskAsync(document))!.Value.Text);
+            await store.ReloadAsync(document);
+            Assert.Equal("two", document.Content);
+            Assert.False(document.IsDirty);
+        }
+    }
+
+    [Fact]
     public async Task EmptyNewDocumentIsDirtyAndRecoveryIgnoresCorruptRecords()
     {
         var directory = DirectoryPath();

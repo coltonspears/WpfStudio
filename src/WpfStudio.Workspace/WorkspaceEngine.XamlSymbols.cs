@@ -56,7 +56,7 @@ public sealed partial class WorkspaceEngine
             var span = reference.Location.SourceSpan;
             var line = content.Text.Lines.GetLinePosition(span.Start);
             locations.Add(new(path, span.Start, span.Length, line.Line + 1, line.Character + 1, symbol.Name,
-                content.Hash, reference.Document.Project.FilePath, reference.Document.Project.Name));
+                content.Hash, reference.Document.Project.FilePath, reference.Document.Project.Name, LineOf(content.Text, line.Line)));
         }
         var identities = new Dictionary<ISymbol, string?>(SymbolEqualityComparer.Default);
         var xamlTexts = new Dictionary<string, (SourceText Text, string Hash)>(StringComparer.OrdinalIgnoreCase);
@@ -70,11 +70,19 @@ public sealed partial class WorkspaceEngine
             if (locations.Count >= SymbolScanOccurrences) { snapshot.Warnings.Add("Reference results reached the 16,384-location limit."); break; }
             var line = content.Text.Lines.GetLinePosition(occurrence.Start);
             locations.Add(new(file.Path, occurrence.Start, occurrence.Length, line.Line + 1, line.Character + 1,
-                symbol.Name, content.Hash, file.Project.FilePath, file.Project.Name));
+                symbol.Name, content.Hash, file.Project.FilePath, file.Project.Name, LineOf(content.Text, line.Line)));
         }
         }
         EnsureSymbolSnapshotCurrent(snapshot);
         return new(locations.Distinct().ToArray(), BoundedWarnings(snapshot.Warnings));
+    }
+
+    /// <summary>The text of a line for a list of locations: without its line break, and cut where no list would show more.</summary>
+    private static string LineOf(SourceText text, int line)
+    {
+        if (line < 0 || line >= text.Lines.Count) return "";
+        var span = text.Lines[line].Span;
+        return text.ToString(new TextSpan(span.Start, Math.Min(span.Length, 2000)));
     }
 
     private async Task<WorkspaceEditResult> RenameWithXamlAsync(RenameRequest request, CancellationToken token)

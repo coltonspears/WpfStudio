@@ -45,8 +45,18 @@ public sealed partial class ShellViewModel
         yield return Key("Show completions", "Ctrl+Space");
         yield return Key("Quick fixes and refactorings", "Ctrl+.");
         yield return Key("Go to definition", "F12");
+        yield return Key("Go to definition with the mouse", "Ctrl+Click");
         yield return Key("Expand a snippet", "Tab");
         yield return Key("Find in file", "Ctrl+F");
+        yield return Key("Replace in file", "Ctrl+H");
+        yield return Key("Show the signature of the call at the caret", "Ctrl+Shift+Space");
+        yield return Key("Duplicate the line or selection", "Ctrl+D");
+        yield return Key("Delete the line", "Ctrl+Shift+K");
+        yield return Key("Move lines up", "Alt+Up");
+        yield return Key("Move lines down", "Alt+Down");
+        yield return Key("Comment or uncomment lines", "Ctrl+/");
+        yield return Key("Open a line below", "Ctrl+Enter");
+        yield return Key("Open a line above", "Ctrl+Shift+Enter");
     }
 
     [RelayCommand] private void ShowSettingsPage(string? page) { if (!string.IsNullOrEmpty(page)) SettingsPage = page; }
@@ -56,7 +66,16 @@ public sealed partial class ShellViewModel
         Editor.PropertyChanged += EditorPreferenceChanged;
         CodeAssist.PropertyChanged += (_, args) => { if (args.PropertyName != nameof(CodeAssistPreferences.Status)) ScheduleSettingsSave(); };
     }
-    private void EditorPreferenceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args) => ScheduleSettingsSave();
+    private void EditorPreferenceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        ScheduleSettingsSave();
+        // Turned on while the project model is already out of date: there is no later change to wait for.
+        if (args.PropertyName == nameof(EditorPreferences.AutoRefreshProject) && _initialized && XamlAnalysis.ProjectReloadRequired)
+        {
+            RefreshXamlContexts();
+            ScheduleProjectModelRefresh();
+        }
+    }
 
     // Settings are written after a short pause, so dragging through font sizes writes once.
     private void ScheduleSettingsSave()

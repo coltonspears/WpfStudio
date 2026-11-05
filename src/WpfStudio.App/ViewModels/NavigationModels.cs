@@ -181,11 +181,46 @@ public sealed partial class ExplorerNode : ObservableObject
         return null;
     }
 }
+/// <summary>
+/// A place a search, a reference query or a navigation found. <see cref="Text"/> is the line of code it is on when that is
+/// known, with <see cref="MatchStart"/> and <see cref="MatchLength"/> saying which part of it was found.
+/// </summary>
 public sealed record NavigationResult(string Path, int Line, int Column, string Text, int Start = 0,
     string? ExpectedTextHash = null, string? ProjectPath = null, string? ProjectName = null)
 {
+    private const int LongLine = 240, LeadIn = 60;
+
     public string FileName => System.IO.Path.GetFileName(Path);
     public string Location => $"{FileName}:{Line}" + (ProjectName is { Length: > 0 } ? $" · {ProjectName}" : "");
+    /// <summary>The file's folder relative to the workspace, shown beside its name above its results.</summary>
+    public string Folder { get; init; } = "";
+    /// <summary>Where in <see cref="Text"/> the found text begins; -1 when the row is not about a part of its line.</summary>
+    public int MatchStart { get; init; } = -1;
+    public int MatchLength { get; init; }
+
+    /// <summary>
+    /// The result showing a source line, without its indentation, and marking <paramref name="length"/> characters from
+    /// column <paramref name="start"/> of it. A very long line is shown around what was found.
+    /// </summary>
+    public NavigationResult WithLine(string line, int start, int length)
+    {
+        var text = line.Trim();
+        start -= line.Length - line.TrimStart().Length;
+        if (length <= 0 || start < 0 || start + length > text.Length) return this with { Text = Shortened(text, 0, out _), MatchStart = -1, MatchLength = 0 };
+        text = Shortened(text, start, out int cut);
+        start -= cut;
+        return this with { Text = text, MatchStart = start, MatchLength = Math.Min(length, text.Length - start) };
+    }
+
+    // The part of a long line around an offset, with an ellipsis where text was left out; cut is how far offsets moved left.
+    private static string Shortened(string text, int around, out int cut)
+    {
+        cut = 0;
+        if (text.Length <= LongLine) return text;
+        int from = Math.Max(0, around - LeadIn), take = Math.Min(text.Length - from, LongLine);
+        cut = from - (from > 0 ? 1 : 0);
+        return string.Concat(from > 0 ? "…" : "", text.AsSpan(from, take), from + take < text.Length ? "…" : "");
+    }
 }
 /// <summary>A quick-open file or command-palette entry.</summary>
 public sealed record PaletteEntry(string Label, string Detail, Func<Task> Execute, string Category = "", string Shortcut = "", string Icon = "", string IconKind = "")

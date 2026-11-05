@@ -941,9 +941,15 @@
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="search:SearchPanel">
    <Border Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="5" Margin="0,4,18,0"
            HorizontalAlignment="Right" VerticalAlignment="Top" Cursor="Arrow" Effect="{StaticResource PopupShadow}" TextElement.Foreground="{DynamicResource TextBrush}">
+    <StackPanel KeyboardNavigation.TabNavigation="Cycle">
     <StackPanel Orientation="Horizontal">
+     <!-- Shown where the editor can replace: opens the row below, as Ctrl+H does. -->
+     <ToggleButton x:Name="ReplaceToggle" Style="{StaticResource IconButton}" Width="20" Height="26" Margin="0,0,3,0" Visibility="Collapsed" TabIndex="9"
+                   IsChecked="{Binding Path=(ed:EditorReplace.IsVisible), RelativeSource={RelativeSource TemplatedParent}}" ToolTip="Replace (Ctrl+H)">
+      <c:Glyph x:Name="ReplaceChevron" Kind="ChevronDown" Width="12" Height="12" RenderTransformOrigin="0.5,0.5"><c:Glyph.RenderTransform><RotateTransform Angle="-90"/></c:Glyph.RenderTransform></c:Glyph>
+     </ToggleButton>
      <Grid>
-      <TextBox Name="PART_searchTextBox" Focusable="True" Width="210" MinHeight="26" Padding="26,3,6,3" FontFamily="{StaticResource UiFont}" c:Ui.Placeholder="Find">
+      <TextBox Name="PART_searchTextBox" Focusable="True" Width="210" MinHeight="26" Padding="26,3,6,3" FontFamily="{StaticResource UiFont}" c:Ui.Placeholder="Find" TabIndex="0">
        <TextBox.Text>
         <Binding Path="SearchPattern" RelativeSource="{RelativeSource TemplatedParent}" UpdateSourceTrigger="PropertyChanged">
          <Binding.ValidationRules><ExceptionValidationRule/></Binding.ValidationRules>
@@ -971,7 +977,26 @@
      </Button>
      <Button Style="{StaticResource IconButton}" Width="26" Height="26" c:Ui.Icon="Close" Command="search:SearchCommands.CloseSearchPanel" Focusable="False" ToolTip="Close (Esc)"/>
     </StackPanel>
+    <!-- Replace: under the find box and as wide, so the two texts read as a pair. -->
+    <StackPanel x:Name="ReplaceRow" Orientation="Horizontal" Margin="23,4,0,0" Visibility="Collapsed">
+     <Grid>
+      <TextBox Width="210" MinHeight="26" Padding="26,3,6,3" FontFamily="{StaticResource UiFont}" c:Ui.Placeholder="Replace with" TabIndex="1" ed:EditorReplace.IsReplaceBox="True"
+               Text="{Binding Path=(ed:EditorReplace.Text), RelativeSource={RelativeSource TemplatedParent}, UpdateSourceTrigger=PropertyChanged}"
+               ToolTip="Enter replaces the selected match and moves to the next. With .* on, $1 stands for the first group."/>
+      <c:Glyph Kind="Swap" Width="13" Height="13" HorizontalAlignment="Left" Margin="8,0,0,0" Foreground="{DynamicResource SubtleBrush}" IsHitTestVisible="False"/>
+     </Grid>
+     <Button Margin="4,0,0,0" MinHeight="26" Padding="9,0" Content="Replace" Command="ed:EditorReplace.ReplaceNext" TabIndex="2" ToolTip="Replace the selected match and select the next (Enter)"/>
+     <Button Margin="4,0,0,0" MinHeight="26" Padding="9,0" Content="All" Command="ed:EditorReplace.ReplaceAll" TabIndex="3" ToolTip="Replace every match in this file (Ctrl+Alt+Enter)"/>
+    </StackPanel>
+    </StackPanel>
    </Border>
+   <ControlTemplate.Triggers>
+    <Trigger Property="ed:EditorReplace.IsAvailable" Value="True"><Setter TargetName="ReplaceToggle" Property="Visibility" Value="Visible"/></Trigger>
+    <Trigger Property="ed:EditorReplace.IsVisible" Value="True">
+     <Setter TargetName="ReplaceRow" Property="Visibility" Value="Visible"/>
+     <Setter TargetName="ReplaceChevron" Property="RenderTransform"><Setter.Value><RotateTransform Angle="0"/></Setter.Value></Setter>
+    </Trigger>
+   </ControlTemplate.Triggers>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
 

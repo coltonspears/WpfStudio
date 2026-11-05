@@ -364,6 +364,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetSignatureHelpAsync(request, cancellationToken);
     public Task<QuickInfoResult?> GetQuickInfoAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetQuickInfoAsync(request, cancellationToken);
     public Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetDefinitionAsync(request, cancellationToken);
+    public Task<DefinitionResult> FindDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.FindDefinitionAsync(request, cancellationToken);
     public Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.FindReferencesAsync(request, cancellationToken);
     public Task<IReadOnlyList<SourceLocation>> FindImplementationsAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.FindImplementationsAsync(request, cancellationToken);
     public Task<IReadOnlyList<SymbolSearchResult>> SearchSymbolsAsync(SymbolSearchRequest request, CancellationToken cancellationToken = default) => Proxy.SearchSymbolsAsync(request, cancellationToken);

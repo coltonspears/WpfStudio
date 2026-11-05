@@ -51,7 +51,7 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
                 {
                     IncludeSubdirectories = true,
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
-                    InternalBufferSize = 16384
+                    InternalBufferSize = 65536 // The most the system allows: a build's burst under bin and obj is what overflows it.
                 };
                 watcher.Changed += Changed; watcher.Created += MembershipChanged; watcher.Deleted += MembershipChanged;
                 watcher.Renamed += Renamed; watcher.Error += Error;
@@ -141,7 +141,44 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
             .Any(part => part.Equals("obj", StringComparison.OrdinalIgnoreCase) || part.Equals("bin", StringComparison.OrdinalIgnoreCase)
                 || part.Equals(".git", StringComparison.OrdinalIgnoreCase) || part.Equals("artifacts", StringComparison.OrdinalIgnoreCase));
     }
-    private void Error(object sender, ErrorEventArgs args) => Guarded(() => Notify(null, true));
+    // Notifications were lost, usually because a build wrote thousands of files under bin and obj at once. What was lost
+    // is unknown, but whether the project still has the files it had is cheap to look up, and only a change to that
+    // needs the projects loaded again. Changed text is found by the reconciliation every notification without a path asks for.
+    private void Error(object sender, ErrorEventArgs args) => Guarded(() => Notify(null, MembershipChanged()));
+
+    private const int MembershipScanEntries = 60_000;
+    private readonly DateTime _startedUtc = DateTime.UtcNow;
+    private DateTime _shapeCheckedUtc = DateTime.UtcNow;
+
+    /// <summary>
+    /// True when a known file is gone, a source file was created since watching began, or a project file was written since
+    /// the last look. A source file that was already there and belongs to no project is not news. Unsure counts as changed.
+    /// </summary>
+    internal bool MembershipChanged()
+    {
+        var since = _shapeCheckedUtc;
+        _shapeCheckedUtc = DateTime.UtcNow;
+        try
+        {
+            if (_paths.Any(path => !File.Exists(path))) return true;
+            int entries = 0;
+            var pending = new Stack<string>(_roots);
+            while (pending.TryPop(out var directory))
+            {
+                foreach (var file in Directory.EnumerateFiles(directory))
+                {
+                    if (++entries > MembershipScanEntries) return true;
+                    if (IsSource(file) ? !_paths.Contains(file) && File.GetCreationTimeUtc(file) >= _startedUtc
+                        : IsProjectShape(file) && File.GetLastWriteTimeUtc(file) >= since) return true;
+                }
+                foreach (var child in Directory.EnumerateDirectories(directory))
+                    if (Path.GetFileName(child).ToLowerInvariant() is not ("bin" or "obj" or ".git" or ".vs" or "node_modules" or "artifacts")
+                        && (File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) pending.Push(child);
+            }
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return true; }
+    }
     private void Notify(string? path, bool requiresReload = false) { if (Volatile.Read(ref _disposed) == 0) _changed(new(path, requiresReload)); }
     public void Reconcile() => Guarded(() => Notify(null, true));
     public void Dispose()

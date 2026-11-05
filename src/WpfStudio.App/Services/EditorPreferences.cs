@@ -39,6 +39,15 @@ public sealed partial class EditorPreferences(FontCatalog fonts) : ObservableObj
     [ObservableProperty] public partial bool EnsureFinalNewline { get; set; }
     [ObservableProperty] public partial bool AutoSave { get; set; }
     [ObservableProperty] public partial int AutoSaveDelaySeconds { get; set; } = 2;
+    [ObservableProperty] public partial bool AutoCloseBrackets { get; set; } = true;
+    [ObservableProperty] public partial bool SmartBackspace { get; set; } = true;
+    [ObservableProperty] public partial bool IndentPastedLines { get; set; } = true;
+    [ObservableProperty] public partial bool HighlightMatchingBrackets { get; set; } = true;
+    [ObservableProperty] public partial bool ShowIndentationGuides { get; set; } = true;
+    [ObservableProperty] public partial bool HighlightOccurrences { get; set; } = true;
+    [ObservableProperty] public partial bool ControlClickNavigation { get; set; } = true;
+    [ObservableProperty] public partial bool CompleteWhileTyping { get; set; } = true;
+    [ObservableProperty] public partial bool AutoRefreshProject { get; set; } = true;
 
     // Values typed into the settings page are kept inside ranges the editor can draw.
     partial void OnFontSizeChanged(double value) { if (!double.IsFinite(value) || value < MinimumFontSize || value > MaximumFontSize) FontSize = Math.Clamp(double.IsFinite(value) ? value : 13, MinimumFontSize, MaximumFontSize); }
@@ -63,6 +72,10 @@ public sealed partial class EditorPreferences(FontCatalog fonts) : ObservableObj
         CutCopyWholeLine = settings.CutCopyWholeLine; EnableTextDragDrop = settings.EnableTextDragDrop; HideCursorWhileTyping = settings.HideCursorWhileTyping;
         TrimTrailingWhitespace = settings.TrimTrailingWhitespace; EnsureFinalNewline = settings.EnsureFinalNewline;
         AutoSave = settings.AutoSave; AutoSaveDelaySeconds = settings.AutoSaveDelaySeconds;
+        AutoCloseBrackets = settings.AutoCloseBrackets; SmartBackspace = settings.SmartBackspace; IndentPastedLines = settings.IndentPastedLines;
+        HighlightMatchingBrackets = settings.HighlightMatchingBrackets; ShowIndentationGuides = settings.ShowIndentationGuides;
+        HighlightOccurrences = settings.HighlightOccurrences; ControlClickNavigation = settings.ControlClickNavigation;
+        CompleteWhileTyping = settings.CompleteWhileTyping; AutoRefreshProject = settings.AutoRefreshProject;
     }
 
     public EditorSettings ToSettings() => new()
@@ -71,7 +84,10 @@ public sealed partial class EditorPreferences(FontCatalog fonts) : ObservableObj
         HighlightCurrentLine = HighlightCurrentLine, WordWrap = WordWrap, ShowWhitespace = ShowWhitespace, ShowLineEndings = ShowLineEndings,
         ShowColumnRuler = ShowColumnRuler, ColumnRulerPosition = ColumnRulerPosition, ShowFolding = ShowFolding, ScrollBelowDocument = ScrollBelowDocument,
         CutCopyWholeLine = CutCopyWholeLine, EnableTextDragDrop = EnableTextDragDrop, HideCursorWhileTyping = HideCursorWhileTyping,
-        TrimTrailingWhitespace = TrimTrailingWhitespace, EnsureFinalNewline = EnsureFinalNewline, AutoSave = AutoSave, AutoSaveDelaySeconds = AutoSaveDelaySeconds
+        TrimTrailingWhitespace = TrimTrailingWhitespace, EnsureFinalNewline = EnsureFinalNewline, AutoSave = AutoSave, AutoSaveDelaySeconds = AutoSaveDelaySeconds,
+        AutoCloseBrackets = AutoCloseBrackets, SmartBackspace = SmartBackspace, IndentPastedLines = IndentPastedLines,
+        HighlightMatchingBrackets = HighlightMatchingBrackets, ShowIndentationGuides = ShowIndentationGuides, HighlightOccurrences = HighlightOccurrences,
+        ControlClickNavigation = ControlClickNavigation, CompleteWhileTyping = CompleteWhileTyping, AutoRefreshProject = AutoRefreshProject
     };
 
     [RelayCommand] private void Reset() => Load(new EditorSettings());

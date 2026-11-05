@@ -20,8 +20,12 @@ public sealed partial class XamlLanguageService
                 before.Count('\n') + 1, declaration.ValueStart - before.LastIndexOf('\n'), declaration.Owner.Name)];
         }
         var selected = SelectedStep(elements, position, resolver);
-        if (selected?.Step.Symbol is not { } symbol) return [];
-        return symbol.Locations.Where(location => location.IsInSource && location.SourceTree is not null)
+        if (selected?.Step.Symbol is not { } bound) return [];
+        // A binding to a property the Toolkit generates goes to the field or method its author wrote.
+        var symbol = ToolkitMembers.Origin(bound);
+        var declared = symbol.Locations.Where(location => location.IsInSource && location.SourceTree is not null).ToArray();
+        if (declared.Any(ToolkitMembers.IsAuthored)) declared = declared.Where(ToolkitMembers.IsAuthored).ToArray();
+        return declared
             .Select(location =>
             {
                 var line = location.GetLineSpan();

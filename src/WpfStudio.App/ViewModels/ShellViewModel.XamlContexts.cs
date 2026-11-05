@@ -6,7 +6,8 @@ public sealed partial class ShellViewModel
 {
     private void ConfigureXamlContext(EditorViewModel editor)
     {
-        editor.SetXamlContextUnavailable(XamlAnalysis.ProjectReloadRequired ? "Project files changed. Reload the workspace to refresh XAML types."
+        editor.SetXamlContextUnavailable(XamlAnalysis.ProjectReloadRequired
+            ? RefreshesProjectModel ? "Project files changed. Refreshing the project model…" : "Project files changed. Reload the workspace to refresh XAML types."
             : XamlAnalysis.ProjectTypesPending ? "Checking changed project source files…" : null);
         editor.SetXamlProjects(Workspace?.Projects.Where(project => project.Files.Any(file => !file.IsGenerated
             && file.Path.Equals(editor.State.Path, StringComparison.OrdinalIgnoreCase))) ?? []);

@@ -40,14 +40,29 @@ public sealed record WorkspaceDiagnostic(string Id, string Message, string Sever
 public sealed record WorkspaceDiagnosticEvent(string Path, long Version, IReadOnlyList<WorkspaceDiagnostic> Diagnostics);
 /// <summary><paramref name="Origin"/> says where the entry comes from: its namespace, or the type a member belongs to.</summary>
 public sealed record CompletionEntry(string Id, string DisplayText, string InsertText, string? Description, IReadOnlyList<string> Tags, bool Recommended = false, string? Origin = null);
-public sealed record CompletionResult(long Version, int Start, int Length, IReadOnlyList<CompletionEntry> Items);
+/// <summary><paramref name="Incomplete"/> means more entries matched than were sent, so the list must be asked for again as more is typed.</summary>
+public sealed record CompletionResult(long Version, int Start, int Length, IReadOnlyList<CompletionEntry> Items, bool Incomplete = false);
 public sealed record CompletionEditRequest(string Path, long Version, string ItemId);
 public sealed record TextEdit(int Start, int Length, string NewText);
 /// <summary>Edits to one file. <paramref name="Create"/> marks a new file whose edits insert its whole text.</summary>
 public sealed record DocumentEdits(string Path, long Version, IReadOnlyList<TextEdit> Edits, string? ExpectedTextHash = null, bool Create = false);
-public sealed record SignatureParameter(string Name, string Type, string? Documentation);
-public sealed record SignatureEntry(string Label, string? Documentation, IReadOnlyList<SignatureParameter> Parameters);
-public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures);
+/// <summary><paramref name="Display"/> is the parameter as its signature writes it, with modifiers and a default value.</summary>
+public sealed record SignatureParameter(string Name, string Type, string? Documentation, string? Display = null);
+/// <summary><paramref name="Prefix"/> is the signature up to its parameter list, such as <c>void Console.WriteLine</c>.</summary>
+public sealed record SignatureEntry(string Label, string? Documentation, IReadOnlyList<SignatureParameter> Parameters, string? Prefix = null);
+/// <summary>
+/// The overloads of the call the position is in. <paramref name="ActiveParameter"/> is the argument being typed,
+/// <paramref name="ActiveSignature"/> the overload that argument list fits best, and <paramref name="Start"/> the offset
+/// just inside the call's opening bracket, or -1 when the position is in no call. An argument written with its
+/// parameter's name, as in <c>M(second: 1, first: 2)</c>, goes to that parameter wherever it stands in the call:
+/// <paramref name="ActiveName"/> is then that name, and null for an argument given by position.
+/// </summary>
+public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures, int ActiveSignature = 0, int Start = -1, string? ActiveName = null);
+/// <summary>
+/// Where a symbol is declared. With no locations, <paramref name="Status"/> says why; with some, it may say they are a best
+/// guess. <paramref name="Resolved"/> is false when the name at the position did not resolve to a symbol at all.
+/// </summary>
+public sealed record DefinitionResult(IReadOnlyList<SourceLocation> Locations, string? Status = null, bool Resolved = true);
 public sealed record SymbolReferenceRequest(string Path, int Position, long Version, string? Text = null,
     string? ProjectPath = null, IReadOnlyList<XamlDocumentOverlay>? XamlOverlays = null);
 public sealed record SymbolReferenceResult(IReadOnlyList<SourceLocation> Locations, IReadOnlyList<string> Warnings, bool SymbolFound = true);
@@ -108,6 +123,8 @@ public interface IWorkspaceRpc
     Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<QuickInfoResult?> GetQuickInfoAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
+    /// <summary>As <see cref="GetDefinitionAsync"/>, and says why when there is nowhere to go.</summary>
+    Task<DefinitionResult> FindDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     /// <summary>Implementations of an interface or abstract member, overrides of a virtual member, or types derived from the type at the position.</summary>
     Task<IReadOnlyList<SourceLocation>> FindImplementationsAsync(DocumentPositionRequest request, CancellationToken cancellationToken);

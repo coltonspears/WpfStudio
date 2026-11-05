@@ -257,6 +257,147 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DefinitionSaysWhyThereIsNowhereToGoAndFallsBackToDeclarationsByName()
+    {
+        var other = Path.Combine(_directory, "Other.cs");
+        var text = "namespace Shop;\npublic class Lookup\n{\n    public string Text = string.Empty;\n    public Missing Find() => null;\n    public void Run() => Unknown.Save();\n    public void Use(OrderStore store) => store.Save();\n}\n";
+        await File.WriteAllTextAsync(other, text);
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        Assert.True((await engine.UpdateDocumentAsync(new(other, text, 1, Analyze: false))).Accepted);
+        Task<DefinitionResult> AtAsync(string marker, int into) => engine.FindDefinitionAsync(new(other, text.IndexOf(marker, StringComparison.Ordinal) + into, 1));
+
+        // Resolved, and in source.
+        var store = await AtAsync("store.Save", "store.Sa".Length);
+        Assert.True(store.Resolved);
+        Assert.Null(store.Status);
+        Assert.Equal(Source, Assert.Single(store.Locations).Path, ignoreCase: true);
+
+        // Resolved into an assembly: nowhere to go, and the reason names it.
+        var framework = await AtAsync("string.Empty", "string.Em".Length);
+        Assert.True(framework.Resolved);
+        Assert.Empty(framework.Locations);
+        Assert.Contains("has no source in this workspace", framework.Status);
+
+        // A name nothing declares.
+        var missing = await AtAsync("Missing Find", 3);
+        Assert.False(missing.Resolved);
+        Assert.Empty(missing.Locations);
+        Assert.Contains("'Missing' does not resolve", missing.Status);
+
+        // A name that does not resolve here, but that source declares: every declaration with it is offered as a guess.
+        var guessed = await AtAsync("Unknown.Save", "Unknown.Sa".Length);
+        Assert.False(guessed.Resolved);
+        Assert.Equal(2, guessed.Locations.Count);
+        Assert.All(guessed.Locations, location => Assert.Equal(Source, location.Path, ignoreCase: true));
+        Assert.Contains("Showing the declarations with that name", guessed.Status);
+
+        // Nothing under the caret to look up.
+        Assert.Contains("Place the caret on a name", (await AtAsync("{\n    public string", 0)).Status);
+    }
+
+    [Fact]
+    public async Task SignatureHelpFollowsTheArgumentAndDescribesEachParameter()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "namespace Shop;\npublic class Pricing\n{\n"
+            + "    /// <summary>Adds tax.</summary>\n    /// <param name=\"net\">The amount before tax.</param>\n    /// <param name=\"rate\">The tax rate,\n    /// as a fraction.</param>\n"
+            + "    public decimal Gross(decimal net, decimal rate = 0.2m) => net * (1 + rate);\n"
+            + "    public decimal Gross(string label, params decimal[] parts) => 0;\n"
+            + "    public decimal Total() => Gross(10m, 0.1m) + Gross(Gross(1m), 2m);\n"
+            + "    public decimal Named() => Gross(rate: 0.1m, net: 5m) + Gross(net: 1m, 0.3m);\n"
+            + "    public decimal Unfinished() => Gross(\"sum\", 1m, \n}\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        Task<SignatureHelpResult> AtAsync(string marker) => engine.GetSignatureHelpAsync(new(Source, text.IndexOf(marker, StringComparison.Ordinal) + marker.Length, 1));
+
+        // Just inside the call: the overload it binds to, its first parameter, and where its arguments begin.
+        var first = await AtAsync("=> Gross(");
+        Assert.Equal(2, first.Signatures.Count);
+        Assert.Equal(0, first.ActiveParameter);
+        Assert.Equal(text.IndexOf("=> Gross(", StringComparison.Ordinal) + "=> Gross(".Length, first.Start);
+        var bound = first.Signatures[first.ActiveSignature];
+        Assert.Equal("decimal Pricing.Gross", bound.Prefix);
+        Assert.Equal(["decimal net", "decimal rate = 0.2"], bound.Parameters.Select(parameter => parameter.Display));
+        Assert.Equal("Adds tax.", bound.Documentation);
+        Assert.Equal("The amount before tax.", bound.Parameters[0].Documentation);
+        Assert.Equal("The tax rate, as a fraction.", bound.Parameters[1].Documentation);
+
+        // After the comma it is the second argument.
+        Assert.Equal(1, (await AtAsync("Gross(10m, ")).ActiveParameter);
+
+        // In a call inside a call, the inner one; after its closing bracket, the outer one again.
+        var inner = await AtAsync("Gross(Gross(");
+        Assert.Equal(text.IndexOf("Gross(Gross(", StringComparison.Ordinal) + "Gross(Gross(".Length, inner.Start);
+        var outer = await AtAsync("Gross(Gross(1m)");
+        Assert.Equal(text.IndexOf("Gross(Gross(", StringComparison.Ordinal) + "Gross(".Length, outer.Start);
+        Assert.Equal(0, outer.ActiveParameter);
+
+        // Past the closing bracket there is no call, and the same before the opening one.
+        Assert.Empty((await AtAsync("Gross(10m, 0.1m)")).Signatures);
+        Assert.Equal(-1, (await AtAsync("Gross(10m, 0.1m)")).Start);
+        Assert.Empty((await AtAsync("public decimal Total() => Gross")).Signatures);
+
+        // An argument written with its parameter's name is that parameter's, wherever it stands: here the first is the second's.
+        var named = await AtAsync("Gross(rate: 0.");
+        Assert.Equal((0, "rate"), (named.ActiveParameter, named.ActiveName));
+        Assert.Equal(["net", "rate"], named.Signatures[named.ActiveSignature].Parameters.Select(parameter => parameter.Name));
+        var second = await AtAsync("Gross(rate: 0.1m, net: ");
+        Assert.Equal((1, "net"), (second.ActiveParameter, second.ActiveName));
+        // One given by position has no name to go by, also after a named one.
+        Assert.Null((await AtAsync("Gross(10m, ")).ActiveName);
+        var positional = await AtAsync("Gross(net: 1m, 0.");
+        Assert.Equal((1, (string?)null), (positional.ActiveParameter, positional.ActiveName));
+
+        // A call still being typed has no closing bracket yet, and the overload with room for a third argument is the one to show.
+        var unfinished = await AtAsync("Gross(\"sum\", 1m, ");
+        Assert.Equal(2, unfinished.ActiveParameter);
+        Assert.Equal(["string label", "params decimal[] parts"], unfinished.Signatures[unfinished.ActiveSignature].Parameters.Select(parameter => parameter.Display));
+    }
+
+    [Fact]
+    public async Task CompletionMatchesInitialsAndTextInsideANameNotOnlyItsStart()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "namespace Shop;\npublic class Lookup\n{\n    public int RunningTotal;\n    public int ByInitials() => RT;\n    public int ByPart() => Tot;\n    public int ByStart() => Run;\n}\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        foreach (var typed in new[] { "=> RT", "=> Tot", "=> Run" })
+        {
+            var completions = await engine.GetCompletionsAsync(new DocumentPositionRequest(Source, text.IndexOf(typed, StringComparison.Ordinal) + typed.Length, 1));
+            Assert.Contains(completions.Items, item => item.DisplayText == "RunningTotal");
+            Assert.False(completions.Incomplete);
+            // What does not match in any of those ways stays out.
+            Assert.DoesNotContain(completions.Items, item => item.DisplayText is "ByInitials" or "GetHashCode");
+        }
+    }
+
+    [Fact]
+    public void CompletionEntriesBeyondOneReplyKeepTheClosestMatchesInTheListsOrder()
+    {
+        var items = new[] { "Assert", "ToString", "StringBuilder", "String", "SortedSet", "ObservableCollection", "Strip" }.Select(name => Microsoft.CodeAnalysis.Completion.CompletionItem.Create(name)).ToArray();
+        static string[] Names((IReadOnlyList<Microsoft.CodeAnalysis.Completion.CompletionItem> Items, bool Incomplete) result) => result.Items.Select(item => item.DisplayText).ToArray();
+
+        var everything = CompletionMatching.Select(items, "", 10);
+        Assert.Equal(7, everything.Items.Count);
+        Assert.False(everything.Incomplete);
+
+        var matching = CompletionMatching.Select(items, "Str", 10);
+        Assert.Equal(["ToString", "StringBuilder", "String", "Strip"], Names(matching));
+        Assert.False(matching.Incomplete);
+        Assert.Equal(["ObservableCollection"], Names(CompletionMatching.Select(items, "oc", 10)));
+        // Initials match; two letters in the middle of a word do not, though three do.
+        Assert.Equal(["SortedSet"], Names(CompletionMatching.Select(items, "SS", 10)));
+        Assert.Equal(["Assert"], Names(CompletionMatching.Select(items, "sse", 10)));
+
+        // Too many: the ones that start with the text are kept over the one that only contains it, still in list order.
+        var cut = CompletionMatching.Select(items, "Str", 3);
+        Assert.Equal(["StringBuilder", "String", "Strip"], Names(cut));
+        Assert.True(cut.Incomplete);
+        Assert.True(CompletionMatching.Select(items, "", 3).Incomplete);
+    }
+
+    [Fact]
     public async Task EditsReportFileDiagnosticsAtOnceAndProjectWideOnesWhenTheCompilationIsDone()
     {
         await File.WriteAllTextAsync(Project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><OutputType>Exe</OutputType></PropertyGroup></Project>");
