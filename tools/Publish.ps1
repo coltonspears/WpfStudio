@@ -127,7 +127,10 @@ try {
         'CodeAssist/Models/members/2.0.0/model.onnx',
         'CodeAssist/Models/lines/3.0.0/manifest.json',
         'CodeAssist/Models/lines/3.0.0/model.onnx',
-        'CodeAssist/Models/lines/3.0.0/tokenizer.json'
+        'CodeAssist/Models/lines/3.0.0/tokenizer.json',
+        'CodeAssist/Models/lines/4.0.0/manifest.json',
+        'CodeAssist/Models/lines/4.0.0/model.onnx',
+        'CodeAssist/Models/lines/4.0.0/tokenizer.json'
     )
     foreach ($relative in $required) {
         if (-not (Test-Path -LiteralPath (Join-Path $staging $relative))) { throw "Published package is incomplete: $relative is missing." }

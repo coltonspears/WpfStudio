@@ -2,6 +2,32 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Code Assist line model 4.0.0 (2026-11-05)
+
+Line model 4.0.0 read exactly what 3.0.0 read, by dataset hash. It is a 6-layer transformer with a copy head instead of a GRU, and a learned gate scores each finished line. The aim was more whole lines and fewer lone words and accessors.
+
+All rows are the same 6,000 stops per code base, on code the model never trained on:
+
+| Code | Version | Offers | Right when it offers | Wrong per 100 | Whole lines | Not accessors or punctuation | 15+ characters | Characters saved | Offers that are whole lines | Offers that are accessors |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 8 private repositories | 4.0.0 | 10.0% | 71.7% | 2.8 | 4.4% | 2.85% | 1.10% | 3.0% | 68% | 21% |
+| | 3.0.0 | 9.1% | 83.0% | 1.6 | 1.6% | 0.33% | 0.05% | 1.7% | 7% | 23% |
+| AvalonEdit, other authors | 4.0.0's recipe | 19.7% | 71.1% | 5.7 | 8.6% | 7.70% | 2.90% | 8.3% | 70% | 6% |
+| | 3.0.0's recipe | 8.8% | 75.1% | 2.2 | 1.0% | 0.60% | 0.00% | 1.8% | 2% | 12% |
+
+- This is a trade, not a clean win: 4.0.0 is right less often and makes more wrong offers per request, in exchange for many more whole lines and more characters saved. The long-line cutoff was set to about 60% precision on purpose. On 2 public tuning repositories, the 20 long lines the gate scored 0.40 to 0.51 were exactly right 55% of the time and the 47 at 0.25 to 0.40 only 19%, so the shipped cutoff of 0.37 sits near that drop.
+- Accessors did not fall much as a share of offers on the private repositories, 21% against 23%. Whole lines now mostly are not accessors, and accessors are a much smaller share of whole lines.
+- A wrong line counts as wrong even when only its last word differs, so these numbers do not say how useful an imperfect line is.
+- Earlier records used 1,500 stops, which weigh small files more. 3.0.0 scores 74.5% right there and 83.0% here with no change to the model, so numbers from different stop counts must not be compared.
+- The private repositories had been scored in earlier rounds and were scored several times during this work, across networks and cutoffs, so they are not fresh. The gates and thresholds were fitted only on the 2 public repositories, and the cutoff was chosen from those.
+- AvalonEdit rows are from models trained without it, with gates fitted on the same 2 public repositories.
+
+Candidates, on those 2 public repositories, with next-token loss on the same tokenizer and the same 192-token windows: 3.0.0's GRU 3.23, GRU with a copy head 2.63 (10 MB), 4-layer transformer with a copy head 2.47 (8 MB quantized), 6-layer transformer with no copy head 2.43, 6-layer with a copy head 2.38 (18 MB quantized). The last was chosen because it had the most whole lines right. Keeping four candidate lines instead of one took four times the work and did not help once gated. 3.0.0's network under the new gate, without its local-copy mix, showed almost nothing, so the gain comes from the network.
+
+Through the shipped C#, 129 requests on 8 KB of context, one thread: 4.0.0 takes 114 ms median, 263 ms at the 95th percentile and 300 ms at worst; 3.0.0 takes 19, 25 and 28 ms. The C# decoder and gate match the Python reference on 129 replayed cases, with every gate input within 0.001 on each line the model finished. The real window shows and accepts `Type targetType, object parameter, CultureInfo culture)` after `public object Convert(object value, `, and `artifacts/screenshots/code-assist-whole-line.png` records it. That window is driven by scripted typing: **nobody has used 4.0.0 at a real keyboard yet.**
+
+The settings page now lists every installed version with its training date, size, scores, what it learned from and its network, read from the manifests. That list is checked in the real window with the feature off, and reading it selects nothing.
+
 ## Code Assist line model 3.0.0 (2026-11-05)
 
 Line model 3.0.0 read 8 of the owner's public repositories plus `dotnet/wpf`, AvalonEdit and MaterialDesignInXamlToolkit, about 9 times as much source as 2.0.0, and was then fine-tuned on the owner's code. It has the same network and file size as 2.0.0, with a new tokenizer. Leading tabs now read as spaces for every line model, because nearly all training code uses spaces. See [Code Assist](docs/code-assist.md).
