@@ -192,7 +192,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         {
             if (acquired.Solution is { } loaded) { SetAuthoredSolution(loaded); SemanticRevision++; }
             else CurrentSolution = null;
-            _documents.Clear(); _completions.Clear(); _codeActions.Clear(); _ownership.Owners.Clear();
+            _documents.Clear(); _completions.Clear(); OpenCompletions = null; _codeLensCounts.Clear(); _codeActions.Clear(); _ownership.Owners.Clear();
         }
         var configurations = new HashSet<string>(ProjectDiscovery.GetDeclaredConfigurations(path), StringComparer.OrdinalIgnoreCase);
         var loadedProjects = acquired.Solution?.Projects.ToArray() ?? [];
@@ -307,6 +307,8 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         // projection deliberately replaces it in the semantic solution. It is
         // never an authored replay buffer and must not mutate the input model.
         if (IsGenerated(path)) return new(false, request.Version, []);
+        var sameDeclarations = await SolutionWithSameDeclarationsAsync(path, request, cancellationToken).ConfigureAwait(false);
+        bool declarationsChanged = false;
         lock (_gate)
         {
             if (_documents.OpenVersion(path) is { } current && request.Version < current) return new DocumentUpdateResult(false, current, []);
@@ -319,9 +321,23 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             }
             else
             {
-                foreach (var id in ids) solution = solution.WithDocumentText(id, SourceText.From(request.Text), PreservationMode.PreserveIdentity);
-                SetAuthoredSolution(solution);
-                SemanticsChanged();
+                var text = SourceText.From(request.Text);
+                var projected = ReferenceEquals(solution, sameDeclarations?.Solution) && !_pages.Pending && ids.All(id => CurrentSolution?.ContainsDocument(id) == true) ? CurrentSolution : null;
+                foreach (var id in ids) solution = solution.WithDocumentText(id, text, PreservationMode.PreserveIdentity);
+                if (projected is null)
+                {
+                    SetAuthoredSolution(solution);
+                    declarationsChanged = true;
+                }
+                else
+                {
+                    // Pages are projected from declarations, so the projection holds. Building it again would cost every keystroke its whole cost.
+                    foreach (var id in ids) projected = projected.WithDocumentText(id, text, PreservationMode.PreserveIdentity);
+                    _pages.Authored = solution;
+                    CurrentSolution = projected;
+                    _projectDiagnostics.CancelRunning();
+                }
+                SemanticsChanged(projected is null ? null : sameDeclarations!.Value.ChangedNames);
                 _disk.Settled(path);
                 _documents.Set(path, request.Version, request.Text);
                 _codeActions.Clear();
@@ -336,10 +352,54 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 return new(false, _documents.Version(path), []);
             document = currentDocument;
         }
-        if (!request.Analyze) return new DocumentUpdateResult(true, request.Version, []);
+        if (!request.Analyze) return new DocumentUpdateResult(true, request.Version, [], declarationsChanged);
         var diagnostics = await GetDiagnosticsAsync(document, cancellationToken).ConfigureAwait(false);
         lock (_gate)
-            return _documents.OpenVersion(path) == request.Version && !_pages.Pending && ReferenceEquals(document.Project.Solution, CurrentSolution) ? new DocumentUpdateResult(true, request.Version, diagnostics) : new DocumentUpdateResult(false, _documents.Version(path), []);
+            return _documents.OpenVersion(path) == request.Version && !_pages.Pending && ReferenceEquals(document.Project.Solution, CurrentSolution) ? new DocumentUpdateResult(true, request.Version, diagnostics, declarationsChanged) : new DocumentUpdateResult(false, _documents.Version(path), []);
+    }
+
+    /// <summary>
+    /// The solution this text can replace a document in without changing what anything outside the file sees: it differs only
+    /// inside method bodies, in non-constant initializers, in comments or in whitespace. Null when it declares something different.
+    /// </summary>
+    private async Task<(Solution Solution, HashSet<string> ChangedNames)?> SolutionWithSameDeclarationsAsync(string path, UpdateDocumentRequest request, CancellationToken cancellationToken)
+    {
+        Solution? authored;
+        lock (_gate)
+        {
+            // Most updates repeat the version the worker already has, and those change nothing to compare.
+            if (_documents.OpenVersion(path) == request.Version) return null;
+            authored = _pages.Pending ? null : _pages.Authored;
+        }
+        if (authored is null) return null;
+        var ids = authored.GetDocumentIdsWithFilePath(path);
+        if (ids.IsEmpty) return null;
+        var source = SourceText.From(request.Text);
+        var changedNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in ids)
+        {
+            // Each target framework has its own document: an edit inside #if can be a comment to one and a declaration to another.
+            var before = authored.GetDocument(id) is { } document ? await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false) : null;
+            if (before is null) return null;
+            var after = before.WithChangedText(source);
+            if (!before.IsEquivalentTo(after, topLevel: true)) return null;
+            changedNames.UnionWith(ChangedNames(await before.GetRootAsync(cancellationToken).ConfigureAwait(false), await after.GetRootAsync(cancellationToken).ConfigureAwait(false)));
+        }
+        return (authored, changedNames);
+    }
+
+    /// <summary>The names that appear a different number of times after an edit.</summary>
+    private static IEnumerable<string> ChangedNames(SyntaxNode before, SyntaxNode after)
+    {
+        var uses = new Dictionary<string, int>(StringComparer.Ordinal);
+        void Count(SyntaxNode root, int by)
+        {
+            foreach (var token in root.DescendantTokens(descendIntoTrivia: true))
+                if (token.IsKind(SyntaxKind.IdentifierToken)) uses[token.ValueText] = uses.GetValueOrDefault(token.ValueText) + by;
+        }
+        Count(before, 1);
+        Count(after, -1);
+        return uses.Where(pair => pair.Value != 0).Select(pair => pair.Key);
     }
 
     public async Task CloseDocumentAsync(string path, CancellationToken cancellationToken)
@@ -376,7 +436,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 _batchCache.Clear();
             }
             _documents.Remove(path); _projectDiagnostics.Reported.Remove(path);
-            _completions.Clear(); _codeActions.Clear();
+            _completions.Clear(); OpenCompletions = null; _codeActions.Clear();
         }
         await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -390,6 +450,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         {
             document = GetDocument(request.Path, request.Version);
             generation = _completions.Begin(); // Keep only the active popup, bounded to 1,500 entries and one solution snapshot.
+            OpenCompletions = null;
         }
         var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
         ValidatePosition(request.Position, text.Length);
@@ -398,13 +459,22 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var list = await service.GetCompletionsAsync(document, request.Position, cancellationToken: cancellationToken).ConfigureAwait(false);
         if (list is null) return new CompletionResult(request.Version, request.Position, 0, []);
         var prefix = text.ToString(TextSpan.FromBounds(list.Span.Start, Math.Clamp(request.Position, list.Span.Start, list.Span.End)));
+        var origins = await CompletionOrigins.FindAsync(document, list.Span.Start, cancellationToken).ConfigureAwait(false);
         var items = new List<CompletionEntry>();
         lock (_gate)
         {
             if (!_completions.IsLatest(generation) || _pages.Pending || !ReferenceEquals(document.Project.Solution, CurrentSolution))
                 return new CompletionResult(request.Version, request.Position, 0, []);
+            var open = new OpenCompletionList(document, []);
             foreach (var item in list.ItemsList.Where(i => prefix.Length == 0 || i.FilterText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Take(1500))
-                items.Add(new CompletionEntry(_completions.Add(document, request.Version, item), item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix, item.DisplayText, null, item.Tags));
+            {
+                var id = _completions.Add(document, request.Version, item);
+                open.Items[id] = item;
+                // A type that still needs a using names its namespace itself.
+                string? origin = string.IsNullOrEmpty(item.InlineDescription) ? origins.Of(item.DisplayText) : item.InlineDescription;
+                items.Add(new CompletionEntry(id, item.DisplayTextPrefix + item.DisplayText + item.DisplayTextSuffix, item.DisplayText, null, item.Tags, Origin: origin));
+            }
+            OpenCompletions = open;
         }
         return new CompletionResult(request.Version, list.Span.Start, list.Span.Length, items);
     }

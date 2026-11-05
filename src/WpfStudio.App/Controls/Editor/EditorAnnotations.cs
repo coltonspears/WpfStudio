@@ -26,8 +26,11 @@ internal sealed class EditorAnnotations
     {
         public int Position = position, Start = start, End = end;
         public CodeLensEntry Entry { get; } = entry;
+        /// <summary>What the row last said about Git history, kept while blame catches up with the text.</summary>
+        public BlameHistory? History { get; set; }
     }
     private List<TrackedLens> _lenses = [];
+    private IReadOnlyList<BlameLine>? _blameShown;
     private readonly Popup _changePopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Right, PopupAnimation = PopupAnimation.Fade };
     private readonly Popup _historyPopup = new() { StaysOpen = false, AllowsTransparency = true, Placement = PlacementMode.Bottom, PopupAnimation = PopupAnimation.Fade };
 
@@ -52,14 +55,20 @@ internal sealed class EditorAnnotations
 
     public void ApplyCodeLens()
     {
-        _lenses = [];
-        if (ShowsLensRows && _owner.ViewModel is { } vm && vm.CodeLensVersion == vm.State.Version && _owner.Text == vm.State.Content)
+        if (!ShowsLensRows) _lenses = [];
+        // Counts for older text say nothing new. The rows already shown follow the edits until current ones arrive.
+        else if (_owner.ViewModel is { } vm && vm.CodeLensVersion == vm.State.Version && _owner.Text == vm.State.Content)
+        {
+            var previous = _lenses;
+            _lenses = [];
             foreach (var entry in vm.CodeLenses.Where(entry => entry.Position <= _owner.Document.TextLength).OrderBy(entry => entry.Position))
             {
                 var first = _owner.Document.GetLineByNumber(Math.Clamp(entry.StartLine > 0 ? entry.StartLine : entry.Line, 1, _owner.Document.LineCount));
                 var last = _owner.Document.GetLineByNumber(Math.Clamp(Math.Max(entry.EndLine, first.LineNumber), 1, _owner.Document.LineCount));
-                _lenses.Add(new(entry.Position, TextUtilities.GetLeadingWhitespace(_owner.Document, first).EndOffset, last.EndOffset, entry));
+                _lenses.Add(new(entry.Position, TextUtilities.GetLeadingWhitespace(_owner.Document, first).EndOffset, last.EndOffset, entry)
+                { History = previous.FirstOrDefault(lens => lens.Position == entry.Position)?.History });
             }
+        }
         _owner.TextArea.TextView.Redraw();
     }
 
@@ -83,6 +92,9 @@ internal sealed class EditorAnnotations
         _changePopup.IsOpen = false; // Its change no longer describes the file.
         _historyPopup.IsOpen = false;
         _changeMargin.Update(); // The margin appears once the file is known to be in a repository.
+        // Line changes arrive after every edit, and only the margin shows those.
+        if (ReferenceEquals(_blameShown, _owner.ViewModel?.Blame)) return;
+        _blameShown = _owner.ViewModel?.Blame;
         _owner.TextArea.TextView.Redraw(); // Lens rows show the new blame.
     }
 
@@ -104,12 +116,14 @@ internal sealed class EditorAnnotations
                 block.MouseLeftButtonDown += (_, e) => { e.Handled = true; vm.RequestCodeLens(entry, lens.Position); };
                 row.Children.Add(block);
             }
-        if (vm.ShowInlineBlame && vm.BlameVersion == vm.State.Version && _owner.Text == vm.State.Content)
+        if (vm.ShowInlineBlame)
         {
             var lens = lenses[0];
             var first = _owner.Document.GetLineByOffset(Math.Min(lens.Start, _owner.Document.TextLength)).LineNumber;
             var last = _owner.Document.GetLineByOffset(Math.Clamp(lens.End, 0, _owner.Document.TextLength)).LineNumber;
-            if (GitBlame.Summarize(vm.Blame, first, last) is { } history && (history.Changes.Count > 0 || history.UncommittedLines > 0))
+            // Blame waits for a pause in typing. Until it catches up, the row keeps what it said.
+            if (vm.BlameVersion == vm.State.Version && _owner.Text == vm.State.Content) lens.History = GitBlame.Summarize(vm.Blame, first, last);
+            if (lens.History is { } history && (history.Changes.Count > 0 || history.UncommittedLines > 0))
             {
                 Separator();
                 var block = LensLink(history.Describe(DateTimeOffset.Now));

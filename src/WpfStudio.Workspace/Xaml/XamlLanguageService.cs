@@ -87,11 +87,11 @@ public sealed partial class XamlLanguageService
             var types = resolver.QualifiedOwnerTypes(attribute.Owner, prefix).Take(4096)
                 .Where(type => type.Name.StartsWith(typeFragment, StringComparison.OrdinalIgnoreCase))
                 .Select(type => new CompletionEntry(spelling + type.Name, spelling + type.Name, spelling + type.Name,
-                    type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), ["Class"]));
+                    type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), ["Class"], Origin: type.ContainingNamespace?.ToDisplayString()));
             var ordinary = colon < 0 && qualified.Owner is null
                 ? CompletionProperties(source.Type).Where(property => property.Name.StartsWith(fragment, StringComparison.OrdinalIgnoreCase))
                     .Select(property => new CompletionEntry(property.Name, property.Name, property.Name,
-                        property.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), ["Property"])) : [];
+                        property.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), ["Property"], Origin: property.ContainingType.Name)) : [];
             return new(version, span.Start, span.Length, types.Concat(ordinary).OrderBy(item => item.DisplayText, StringComparer.Ordinal).Take(250).ToArray());
         }
         if (!IsIdentifier(fragment, allowEmpty: true) || !IsIdentifier(segment, allowEmpty: true)) return Empty();
@@ -101,13 +101,13 @@ public sealed partial class XamlLanguageService
                 .Where(member => member.Name.StartsWith(fragment, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(member => member.Name, StringComparer.Ordinal).Take(250)
                 .Select(member => new CompletionEntry(member.Name, member.Name, member.Name,
-                    $"{member.ValueType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {ownerName}.{member.Name}", ["Property"])).ToArray();
+                    $"{member.ValueType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {ownerName}.{member.Name}", ["Property"], Origin: ownerName)).ToArray();
             return new(version, span.Start, span.Length, qualifiedItems);
         }
         var items = CompletionProperties(source.Type).Where(p => p.Name.StartsWith(fragment, StringComparison.OrdinalIgnoreCase))
             .OrderBy(p => p.Name, StringComparer.Ordinal).Take(250)
             .Select(p => new CompletionEntry(p.Name, p.Name, p.Name,
-                $"{p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {p.ContainingType.Name}.{p.Name}", ["Property"]))
+                $"{p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {p.ContainingType.Name}.{p.Name}", ["Property"], Origin: p.ContainingType.Name))
             .ToArray();
         return new CompletionResult(version, span.Start, span.Length, items);
     }

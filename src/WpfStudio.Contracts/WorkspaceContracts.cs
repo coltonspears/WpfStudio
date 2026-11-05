@@ -15,7 +15,8 @@ public sealed record ProjectDependency(string Kind, string Name, string? Version
 public sealed record WorkspaceFile(string Path, string Name, string Kind, bool IsGenerated = false, string? DocumentId = null, string? LogicalPath = null);
 public sealed record WorkspaceIssue(string Message, string Severity = "Warning");
 public sealed record UpdateDocumentRequest(string Path, string Text, long Version, bool Analyze = true);
-public sealed record DocumentUpdateResult(bool Accepted, long Version, IReadOnlyList<WorkspaceDiagnostic> Diagnostics);
+/// <summary><paramref name="DeclarationsChanged"/> is false when the edit only touched method bodies, comments and the like, which nothing outside the file depends on.</summary>
+public sealed record DocumentUpdateResult(bool Accepted, long Version, IReadOnlyList<WorkspaceDiagnostic> Diagnostics, bool DeclarationsChanged = true);
 // XAML remains a source buffer, not a C# Roslyn document. These requests keep the
 // language engine independent of its editor and transport.
 public sealed record XamlDocumentRequest(string Path, string Text, long Version, string? ProjectPath = null,
@@ -37,7 +38,8 @@ public sealed record DocumentRequest(string Path, long Version);
 public sealed record WorkspaceDiagnostic(string Id, string Message, string Severity, string? Path, int Line, int Column, int Start, int Length,
     string? ProjectPath = null, string? ProjectName = null);
 public sealed record WorkspaceDiagnosticEvent(string Path, long Version, IReadOnlyList<WorkspaceDiagnostic> Diagnostics);
-public sealed record CompletionEntry(string Id, string DisplayText, string InsertText, string? Description, IReadOnlyList<string> Tags, bool Recommended = false);
+/// <summary><paramref name="Origin"/> says where the entry comes from: its namespace, or the type a member belongs to.</summary>
+public sealed record CompletionEntry(string Id, string DisplayText, string InsertText, string? Description, IReadOnlyList<string> Tags, bool Recommended = false, string? Origin = null);
 public sealed record CompletionResult(long Version, int Start, int Length, IReadOnlyList<CompletionEntry> Items);
 public sealed record CompletionEditRequest(string Path, long Version, string ItemId);
 public sealed record TextEdit(int Start, int Length, string NewText);
@@ -73,7 +75,8 @@ public sealed record InlayHint(int Position, string Text, string Kind);
 /// </summary>
 /// <summary><paramref name="StartLine"/> and <paramref name="EndLine"/> span the whole declaration, attributes included.</summary>
 public sealed record CodeLensEntry(int Line, int Position, string Name, int References, int XamlReferences, string? XamlName = null, int StartLine = 0, int EndLine = 0);
-public sealed record CodeLensResult(long Version, IReadOnlyList<CodeLensEntry> Entries, bool Complete, string? Status = null);
+/// <summary><paramref name="Counted"/> is how many declarations were searched for this answer; the rest kept counts no edit could have changed.</summary>
+public sealed record CodeLensResult(long Version, IReadOnlyList<CodeLensEntry> Entries, bool Complete, string? Status = null, int Counted = 0);
 public sealed record EditorDecorationsResult(long Version, IReadOnlyList<SemanticSpan> Spans, IReadOnlyList<InlayHint> Hints);
 public sealed record WorkspaceEditResult(IReadOnlyList<DocumentEdits> Documents, IReadOnlyList<string> Warnings,
     XamlNameProjectionPlan? NameProjection = null);
@@ -103,6 +106,7 @@ public interface IWorkspaceRpc
     Task CloseDocumentAsync(string path, CancellationToken cancellationToken);
     Task<CompletionResult> GetCompletionsAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<TextEdit?> GetCompletionEditAsync(CompletionEditRequest request, CancellationToken cancellationToken);
+    Task<QuickInfoResult?> GetCompletionDetailsAsync(CompletionEditRequest request, CancellationToken cancellationToken);
     Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<QuickInfoResult?> GetQuickInfoAsync(DocumentPositionRequest request, CancellationToken cancellationToken);
     Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken);

@@ -1,8 +1,9 @@
+using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media;
 using ICSharpCode.AvalonEdit.CodeCompletion;
 using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
+using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Text;
@@ -12,13 +13,19 @@ namespace WpfStudio.App.Controls.Editor;
 /// <summary>The completion popup and signature help, and accepting an entry whose edit arrives asynchronously.</summary>
 internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, EditorTyping typing)
 {
+    // Rests on an entry before asking the worker about it, so walking the list does not ask about every row on the way.
+    private static readonly TimeSpan DetailsDelay = TimeSpan.FromMilliseconds(60);
+    private const double WindowHeight = 312;
     private readonly CompletionInputQueue<(EditorViewModel ViewModel, TextDocument Document)> _input = new(TimeSpan.FromSeconds(5));
     private CompletionWindow? _window;
     private CancellationTokenSource? _request;
+    private CancellationTokenSource? _details;
     private ICompletionData? _unconfirmed;
+    private int _openedAt;
 
     public bool IsWindowOpen => _window != null;
     public bool IsPending => _input.IsPending;
+    private EditorSurface Surface => owner;
 
     public void OnTextEntered(object? sender, TextCompositionEventArgs e)
     {
@@ -48,9 +55,10 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
 
     public void CloseWindow() => _window?.Close();
 
-    // A recommendation is selected before anything is typed, so Tab or Enter can take it. Punctuation cannot: "x.)" should still type ")".
+    // The popup opens with an entry selected, so its details show and Tab or Enter can take it. Punctuation cannot until
+    // more has been typed: "x.)" should still type ")".
     private bool IsUnconfirmed(CompletionWindow window) =>
-        _unconfirmed is not null && ReferenceEquals(window.CompletionList.SelectedItem, _unconfirmed) && owner.CaretOffset == window.StartOffset;
+        _unconfirmed is not null && ReferenceEquals(window.CompletionList.SelectedItem, _unconfirmed) && owner.CaretOffset == _openedAt;
 
     // Takes the model now: the dependency property cannot be read from the thread a fault may arrive on.
     private void Observe(Task request) => request.Forget(owner.ViewModel is { } vm ? vm.ReportFault : null);
@@ -70,19 +78,61 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
                 || vm.IsXaml && contextRevision != vm.XamlContextRevision) return;
             _window?.Close();
             var end = vm.State.Extension == ".xaml" ? Math.Clamp(result.Start + result.Length, caret, owner.Document.TextLength) : caret;
-            var window = new CompletionWindow(owner.TextArea) { StartOffset = result.Start, EndOffset = end, CloseWhenCaretAtBeginning = true };
+            var window = new CompletionWindow(owner.TextArea) { StartOffset = result.Start, EndOffset = end, CloseWhenCaretAtBeginning = true, MaxHeight = WindowHeight };
             foreach (var item in result.Items.Take(250)) window.CompletionList.CompletionData.Add(new StudioCompletion(this, item, result.Version, contextRevision));
             // C# snippets join the list outside member access, as in Visual Studio; Tab or Enter expands them.
             if (vm.IsCSharp && (result.Start == 0 || owner.Document.GetCharAt(result.Start - 1) != '.'))
                 foreach (var snippet in SnippetCatalog.For(".cs")) window.CompletionList.CompletionData.Add(new SnippetCompletion(owner, snippet));
-            window.Closed += (_, _) => { if (_window == window) _window = null; };
+            var list = window.CompletionList;
+            if (owner.TryFindResource("CodeCompletionList") is Style rows) list.Style = rows;
+            window.Width = CompletionRow.WidthFor(list.CompletionData.OfType<CompletionRow>().ToArray());
+            window.SourceInitialized += (_, _) => { if (owner.TryFindResource(Palette.ResourceKey) is Palette palette) WindowChromeService.ApplyFrame(window, palette); };
+            void FollowTyping(object? sender, EventArgs args) => CompletionLabel.SetQuery(window, TypedInto(window));
+            owner.TextArea.Caret.PositionChanged += FollowTyping;
+            window.Closed += (_, _) =>
+            {
+                owner.TextArea.Caret.PositionChanged -= FollowTyping;
+                if (_window == window) { _window = null; CancelDetails(); }
+            };
             _window = window; window.Show();
-            _unconfirmed = window.CompletionList.CompletionData.OfType<StudioCompletion>().FirstOrDefault(data => data.IsRecommended);
-            if (_unconfirmed is not null) window.CompletionList.SelectedItem = _unconfirmed;
+            string typed = TypedInto(window);
+            CompletionLabel.SetQuery(window, typed);
+            var recommended = list.CompletionData.OfType<StudioCompletion>().FirstOrDefault(data => data.IsRecommended);
+            if (recommended is null && typed.Length > 0) list.SelectItem(typed);
+            list.SelectedItem = recommended ?? list.SelectedItem ?? list.CompletionData.FirstOrDefault();
+            _unconfirmed = list.SelectedItem;
+            _openedAt = caret;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
     }
+
+    private string TypedInto(CompletionWindow window)
+    {
+        int caret = owner.CaretOffset;
+        return caret > window.StartOffset && caret <= owner.Document.TextLength ? owner.Document.GetText(window.StartOffset, caret - window.StartOffset) : "";
+    }
+
+    private void CancelDetails() { _details?.Cancel(); _details?.Dispose(); _details = null; }
+
+    private async Task DescribeAsync(CompletionDetailsCard card, CompletionEntry entry, long version)
+    {
+        CancelDetails();
+        if (owner.ViewModel is not { IsCSharp: true } vm) return;
+        _details = new();
+        var token = _details.Token;
+        try
+        {
+            await Task.Delay(DetailsDelay, token);
+            var info = await vm.CompletionDetailsAsync(entry, version, token);
+            if (token.IsCancellationRequested || info is null) return;
+            card.Show(info);
+            card.IsDescribed = true;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { if (!token.IsCancellationRequested && vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
+    }
+
     private async Task ShowSignatureAsync()
     {
         if (owner.ViewModel is not { } vm) return;
@@ -168,24 +218,29 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
         pending.Target.ViewModel.ReportCaret(owner.TextArea.Caret.Line, owner.TextArea.Caret.Column, owner.CaretOffset);
     }));
 
-    private sealed class StudioCompletion(EditorCompletion owner, CompletionEntry entry, long version, long contextRevision) : ICompletionData
+    private sealed class StudioCompletion(EditorCompletion owner, CompletionEntry entry, long version, long contextRevision)
+        : CompletionRow(owner.Surface, entry.DisplayText, entry.Origin, entry.Tags)
     {
-        public ImageSource? Image => null;
+        private CompletionDetailsCard? _details;
         public bool IsRecommended => entry.Recommended;
-        public string Text => entry.DisplayText;
-        public object Content => entry.Recommended ? "\u2605 " + entry.DisplayText : entry.DisplayText;
-        public object Description => entry.Description ?? string.Join(", ", entry.Tags);
-        public double Priority => entry.Recommended ? 1 : 0;
-        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => owner.Observe(owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs));
+        public override Visibility StarVisibility => entry.Recommended ? Visibility.Visible : Visibility.Collapsed;
+        public override object Content => entry.Recommended ? "\u2605 " + entry.DisplayText : entry.DisplayText;
+        public override object Description
+        {
+            get
+            {
+                _details ??= new CompletionDetailsCard(new HoverCard(owner.Surface), entry, version);
+                if (!_details.IsDescribed) owner.Observe(owner.DescribeAsync(_details, entry, version));
+                return _details;
+            }
+        }
+        public override double Priority => entry.Recommended ? 1 : 0;
+        public override void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs) => owner.Observe(owner.AcceptCompletionAsync(entry, version, contextRevision, completionSegment, insertionRequestEventArgs));
     }
-    private sealed class SnippetCompletion(EditorSurface owner, CodeSnippet snippet) : ICompletionData
+    private sealed class SnippetCompletion(EditorSurface owner, CodeSnippet snippet) : CompletionRow(owner, snippet.Shortcut, "Snippet", [], "snippet")
     {
-        public ImageSource? Image => null;
-        public string Text => snippet.Shortcut;
-        public object Content => snippet.Shortcut;
-        public object Description => "Snippet: " + snippet.Title + " (Tab)";
-        public double Priority => 0;
-        public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
+        public override object Description => "Snippet: " + snippet.Title + " (Tab)";
+        public override void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)
         {
             if (insertionRequestEventArgs is TextCompositionEventArgs typed) typed.Handled = true;
             owner.InsertSnippet(snippet, completionSegment.Offset, completionSegment.Length);

@@ -32,6 +32,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
     private IKnownSourceWatcher? _sourceWatcher;
     private WorkspaceSnapshot? _diagnosticWorkspace;
     private IReadOnlyList<XamlFileAnalysisResult> _projectXamlFiles = [];
+    // Something happened that the current results do not reflect, as opposed to a periodic check of the disk.
+    private bool _scanDue = true;
     private readonly HashSet<DocumentState> _trackedDocuments = [];
     private readonly HashSet<string> _invalidIndexPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _dirtyModelPaths = new(StringComparer.OrdinalIgnoreCase);
@@ -62,6 +64,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
             Status = "Project XAML analysis unavailable: " + exception.Message;
         }));
         _workspace.SemanticStateChanged += WorkerSemanticStateChanged;
+        _workspace.CSharpBodyChanged += WorkerCSharpBodyChanged;
     }
 
     [ObservableProperty] public partial string Status { get; set; } = NoWorkspaceStatus;
@@ -166,9 +169,22 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
 
     private void TrackedDocumentChanged(object? sender, EventArgs args)
     {
-        if (sender is DocumentState { Extension: ".xaml" }) _host.OpenXamlDocumentsChanged();
-        if (sender is DocumentState { Extension: ".cs" or ".xaml" }) Request();
+        if (sender is DocumentState { Extension: ".xaml" })
+        {
+            _host.OpenXamlDocumentsChanged();
+            Request();
+        }
+        else if (sender is DocumentState { Extension: ".cs" })
+        {
+            // Project XAML depends on a C# file's declarations, and the worker reports a change to those once it has the
+            // text. Other typing leaves the results standing, except that a scan under way is comparing against old text.
+            Interlocked.Increment(ref _indexRevision);
+            if (IsRunning && _scanDue) _ = _scheduler.Schedule();
+        }
     }
+
+    // XAML cannot see a method body, but a symbol operation under review can: the edit may add a use of what it is renaming.
+    private void WorkerCSharpBodyChanged(object? sender, string path) => _host.SemanticStateChanged();
 
     private void WorkerSemanticStateChanged(object? sender, EventArgs args)
     {
@@ -184,7 +200,11 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
     /// <summary>The WPF index no longer describes this file, so its index diagnostics stop applying until the index is rebuilt.</summary>
     public void MarkIndexStale(string path) => _invalidIndexPaths.Add(path);
     /// <summary>Queues a scan after the debounce without discarding the current results first.</summary>
-    public void Schedule() => _ = _scheduler.Schedule();
+    public void Schedule()
+    {
+        _scanDue = true;
+        _ = _scheduler.Schedule();
+    }
 
     // ------------------------------------------------------------------ Scanning
 
@@ -195,6 +215,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
         Interlocked.Increment(ref _indexRevision);
         Interlocked.Increment(ref _sourceEpoch);
         _retries = 0;
+        _scanDue = true;
         _projectXamlFiles = [];
         _host.DiagnosticsChanged();
         Status = ProjectReloadRequired ? "Project files changed. Reload the workspace to check XAML against the current project items."
@@ -230,7 +251,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
                 && document.State.Version == document.Version && document.State.Content == document.Text);
         if (!Current()) return;
         IsRunning = true;
-        Status = "Analyzing project XAML…";
+        if (_scanDue) Status = "Analyzing project XAML…";
         try
         {
             RefreshDiskDocumentsResult disk;
@@ -266,6 +287,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
             // own unavailable models. One locked project must not block healthy
             // editors elsewhere in the workspace indefinitely.
             if (ProjectTypesPending && disk.PendingFiles == 0) { ProjectTypesPending = false; _host.XamlContextsChanged(); }
+            // The periodic check only looks for what the watcher missed. If it found nothing, the results still stand.
+            if (!_scanDue && !disk.Changed && disk.PendingFiles == 0) return;
             var overlays = documents.Where(document => document.State.Extension == ".xaml")
                 .Select(document => new XamlDocumentOverlay(document.State.Path, document.Text, document.Version)).ToArray();
             var result = await _workspace.AnalyzeXamlProjectAsync(new(generation, overlays), token);
@@ -277,6 +300,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
                 return;
             }
             _projectXamlFiles = result.Files;
+            _scanDue = false;
             foreach (var file in result.Files)
             foreach (var diagnostic in file.Diagnostics)
             {
@@ -372,6 +396,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
         if (_disposed) return;
         _disposed = true;
         _workspace.SemanticStateChanged -= WorkerSemanticStateChanged;
+        _workspace.CSharpBodyChanged -= WorkerCSharpBodyChanged;
         _sourceWatcher?.Dispose(); _scheduler.Dispose();
         foreach (var document in _trackedDocuments) document.ContentChanged -= TrackedDocumentChanged;
         _trackedDocuments.Clear();

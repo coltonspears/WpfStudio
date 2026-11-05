@@ -52,6 +52,28 @@ public sealed class Glyph : FrameworkElement
 
     private static readonly Dictionary<string, Shape> Shapes = new(StringComparer.OrdinalIgnoreCase)
     {
+        // What a completion entry is. Stroked to match the rest of the set and coloured by the caller, like the editor colours that kind.
+        ["SymbolClass"] = new(Parse("M5.5,2 H10.5 V6 H5.5 Z M1.75,10.5 H6.25 V14 H1.75 Z M9.75,10.5 H14.25 V14 H9.75 Z M8,6 V8.25 M4,10.5 V8.25 H12 V10.5"), null),
+        ["SymbolStruct"] = new(Parse("M2.5,2.5 H7 V7 H2.5 Z M9,2.5 H13.5 V7 H9 Z M2.5,9 H7 V13.5 H2.5 Z M9,9 H13.5 V13.5 H9 Z"), null),
+        ["SymbolInterface"] = new(Parse("M1.5,8 H6.5 M6.5,8 A3.75,3.75 0 1 0 14,8 A3.75,3.75 0 1 0 6.5,8 Z"), null),
+        ["SymbolEnum"] = new(Parse("M2.5,2.5 H9 V8 H2.5 Z M4.5,5.25 H7 M11.5,5 H13.5 V13.5 H6 V10.5 M8.5,11 H11"), null),
+        ["SymbolEnumMember"] = new(Parse("M2.5,4.5 H13.5 V11.5 H2.5 Z M5.5,8 H10.5"), null),
+        ["SymbolDelegate"] = new(Parse("M2.25,3.5 H9 V12.5 H2.25 Z M9,8 H14 M11.75,5.75 L14,8 L11.75,10.25"), null),
+        ["SymbolMethod"] = new(Parse("M8,1.75 L13.75,5 V11 L8,14.25 L2.25,11 V5 Z M2.25,5 L8,8.25 L13.75,5 M8,8.25 V14.25"), null),
+        ["SymbolExtensionMethod"] = new(Parse("M6.5,4.25 L11,6.75 V11.75 L6.5,14.25 L2,11.75 V6.75 Z M2,6.75 L6.5,9.25 L11,6.75 M6.5,9.25 V14.25 M12.5,1.5 V5.5 M10.5,3.5 H14.5"), null),
+        ["SymbolOperator"] = new(Parse("M4.75,2.5 V7 M2.5,4.75 H7 M9.25,4.75 H13.75 M2.75,13.25 L6.75,9.25 M6.75,13.25 L2.75,9.25 M9.25,9.75 H13.75 M9.25,12.75 H13.75"), null),
+        ["SymbolProperty"] = new(Parse("M13.5,4.75 A3.6,3.6 0 0 1 9,9.25 L4.5,13.75 A1.45,1.45 0 0 1 2.25,11.5 L6.75,7 A3.6,3.6 0 0 1 11.25,2.5 L9.25,4.5 L9.75,6.25 L11.5,6.75 Z"), null),
+        ["SymbolField"] = new(Parse("M8,2.25 L13.75,8 L8,13.75 L2.25,8 Z M5.75,8 H10.25"), null),
+        ["SymbolConstant"] = new(Parse("M2.75,3.25 H13.25 V12.75 H2.75 Z M5.5,6.75 H10.5 M5.5,9.25 H10.5"), null),
+        ["SymbolEvent"] = new(Parse("M9.25,1.75 L3.75,9 H7.75 L6.75,14.25 L12.25,7 H8.25 Z"), null),
+        ["SymbolLocal"] = new(Parse("M5,2.75 H2.75 V13.25 H5 M11,2.75 H13.25 V13.25 H11 M6,6 L10,10 M10,6 L6,10"), null),
+        ["SymbolParameter"] = new(Parse("M5.25,2.25 C2.75,5 2.75,11 5.25,13.75 M10.75,2.25 C13.25,5 13.25,11 10.75,13.75 M6.25,6.25 L9.75,9.75 M9.75,6.25 L6.25,9.75"), null),
+        ["SymbolTypeParameter"] = new(Parse("M4.75,3.75 L1.5,8 L4.75,12.25 M11.25,3.75 L14.5,8 L11.25,12.25 M5.75,5 H10.25 M8,5 V11.25"), null),
+        ["SymbolNamespace"] = new(Parse("M6.25,2.25 C4.5,2.25 4.5,3.5 4.5,5 V6.25 C4.5,7.25 3.75,8 2.5,8 C3.75,8 4.5,8.75 4.5,9.75 V11 C4.5,12.5 4.5,13.75 6.25,13.75 M9.75,2.25 C11.5,2.25 11.5,3.5 11.5,5 V6.25 C11.5,7.25 12.25,8 13.5,8 C12.25,8 11.5,8.75 11.5,9.75 V11 C11.5,12.5 11.5,13.75 9.75,13.75"), null),
+        ["SymbolKeyword"] = new(Parse("M2,10.75 A3.25,3.25 0 1 0 8.5,10.75 A3.25,3.25 0 1 0 2,10.75 Z M7.6,8.4 L13.75,2.25 M11,5 L13,7 M9,7 L10.5,8.5"), null),
+        ["SymbolLabel"] = new(Parse("M2.25,3.25 H9.25 L13.75,8 L9.25,12.75 H2.25 Z"), null),
+        ["SymbolSnippet"] = new(Parse("M2.75,5 V2.75 H5 M7,2.75 H9 M11,2.75 H13.25 V5 M13.25,7 V9 M13.25,11 V13.25 H11 M9,13.25 H7 M5,13.25 H2.75 V11 M2.75,9 V7"), null),
+        ["SymbolOther"] = new(null, Parse("M6,8 A2,2 0 1 0 10,8 A2,2 0 1 0 6,8 Z")),
         ["Play"] = new(null, Parse("M5,3.6 C5,3 5.6,2.7 6.1,3 L12.3,7.2 C12.9,7.6 12.9,8.4 12.3,8.8 L6.1,13 C5.6,13.3 5,13 5,12.4 Z")),
         ["PlayOutline"] = new(Parse("M5.25,3.75 L12.25,8 L5.25,12.25 Z"), null),
         ["Stop"] = new(null, Parse("M5,4 H11 C11.6,4 12,4.4 12,5 V11 C12,11.6 11.6,12 11,12 H5 C4.4,12 4,11.6 4,11 V5 C4,4.4 4.4,4 5,4 Z")),

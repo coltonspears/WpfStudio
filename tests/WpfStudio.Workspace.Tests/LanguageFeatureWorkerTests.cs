@@ -83,6 +83,146 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CompletionEntriesSayWhereTheyComeFromAndDescribeThemselves()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "using System;\nnamespace Shop;\npublic class Lookup\n{\n    /// <summary>The running total.</summary>\n    public int Total;\n"
+            + "    public int Read(string name) => To;\n    public int Size(string name) => name.Le;\n    [Obs]\n    public void Old() { }\n}\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+
+        // Origins give way to a compilation that is not ready, so wait for the first one.
+        async Task<CompletionEntry> EntryAsync(string marker, string name, bool expectOrigin = true)
+        {
+            int position = text.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (true)
+            {
+                var entry = Assert.Single((await engine.GetCompletionsAsync(new DocumentPositionRequest(Source, position, 1))).Items, item => item.DisplayText == name);
+                if (!expectOrigin || entry.Origin is not null || DateTime.UtcNow > deadline) return entry;
+                await Task.Delay(100);
+            }
+        }
+
+        Assert.Equal("System", (await EntryAsync("[Obs", "Obsolete")).Origin);
+        Assert.Equal("String", (await EntryAsync("name.Le", "Length")).Origin);
+        Assert.Null((await EntryAsync("Size(string name) => ", "name", expectOrigin: false)).Origin);
+        var total = await EntryAsync("=> To", "Total");
+        Assert.Equal("Lookup", total.Origin);
+
+        var details = await engine.GetCompletionDetailsAsync(new CompletionEditRequest(Source, 1, total.Id));
+        Assert.NotNull(details);
+        Assert.Contains("Field", details.Tags);
+        Assert.Equal(["Description", "DocumentationComments"], details.Sections.Select(section => section.Kind));
+        Assert.Contains("Total", string.Concat(details.Sections[0].Runs.Select(run => run.Text)), StringComparison.Ordinal);
+        Assert.Contains("The running total.", string.Concat(details.Sections[1].Runs.Select(run => run.Text)), StringComparison.Ordinal);
+
+        // Typing filters the open popup, and its entries can still be described.
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text.Replace("=> To;", "=> Tot;", StringComparison.Ordinal), 2, Analyze: false))).Accepted);
+        Assert.NotNull(await engine.GetCompletionDetailsAsync(new CompletionEditRequest(Source, 2, total.Id)));
+        // A newer list replaces it.
+        await engine.GetCompletionsAsync(new DocumentPositionRequest(Source, text.IndexOf("[Obs", StringComparison.Ordinal) + "[Obs".Length + 1, 2));
+        Assert.Null(await engine.GetCompletionDetailsAsync(new CompletionEditRequest(Source, 2, total.Id)));
+    }
+
+    [Fact]
+    public async Task AnEditThatLeavesDeclarationsAloneInvalidatesNothingOutsideItsFile()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "namespace Shop;\npublic class Lookup\n{\n    public const int Limit = 1;\n    public int Total = 1;\n    public int Size()\n    {\n        return 1;\n    }\n}\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        int semantic = 0, models = 0, bodies = 0;
+        engine.SemanticStateChanged += (_, _) => Interlocked.Increment(ref semantic);
+        engine.CSharpModelChanged += (_, _) => Interlocked.Increment(ref models);
+        engine.CSharpBodyChanged += (_, _) => Interlocked.Increment(ref bodies);
+        long version = 1;
+        async Task<bool> EditAsync(string from, string to)
+        {
+            text = text.Replace(from, to, StringComparison.Ordinal);
+            var update = await engine.UpdateDocumentAsync(new(Source, text, ++version, Analyze: false));
+            Assert.True(update.Accepted);
+            return update.DeclarationsChanged;
+        }
+
+        Assert.False(await EditAsync("return 1;", "return 2;"));
+        Assert.False(await EditAsync("    public int Size()", "    // Sized.\n    public int Size()"));
+        Assert.False(await EditAsync("Total = 1", "Total = 2"));
+        Assert.Equal((0, 0, 3), (Volatile.Read(ref semantic), Volatile.Read(ref models), Volatile.Read(ref bodies)));
+
+        Assert.True(await EditAsync("Limit = 1", "Limit = 2")); // A constant's value is part of what other files see.
+        Assert.True(await EditAsync("public int Size()", "public long Size()"));
+        Assert.True(await EditAsync("namespace Shop;", "using System;\nnamespace Shop;"));
+        Assert.Equal((3, 3, 3), (Volatile.Read(ref semantic), Volatile.Read(ref models), Volatile.Read(ref bodies)));
+
+        // The file itself still sees every edit.
+        Assert.True(await EditAsync("return 2;", "return \"text\";") is false);
+        Assert.Contains((await engine.UpdateDocumentAsync(new(Source, text, version))).Diagnostics, diagnostic => diagnostic.Severity == "Error");
+    }
+
+    [Fact]
+    public async Task ReferenceCountsAreOnlySearchedForAgainWhenAnEditTouchesTheirNames()
+    {
+        string other = Path.Combine(_directory, "Other.cs");
+        var otherText = "namespace Shop;\npublic class Other\n{\n    public int Use(Lookup lookup)\n    {\n        return 1;\n    }\n}\n";
+        await File.WriteAllTextAsync(other, otherText);
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "namespace Shop;\npublic class MarkAttribute : System.Attribute { }\npublic class Lookup\n{\n    public Lookup() { }\n    public int Read() => 1;\n    public int Size()\n    {\n        return 1;\n    }\n}\n";
+        long version = 0;
+        async Task<CodeLensResult> LensAfterAsync(string from, string to)
+        {
+            text = text.Replace(from, to, StringComparison.Ordinal);
+            Assert.True((await engine.UpdateDocumentAsync(new(Source, text, ++version, Analyze: false))).Accepted);
+            return await engine.GetCodeLensAsync(new(Source, version));
+        }
+        static CodeLensEntry Read(CodeLensResult lens) => Assert.Single(lens.Entries, entry => entry.Name == "Read");
+
+        var first = await LensAfterAsync("namespace Shop;", "namespace Shop;");
+        Assert.Equal(5, first.Counted); // MarkAttribute, Lookup, its constructor, Read and Size.
+        Assert.Equal(0, Read(first).References);
+
+        // A comment moves the declarations and cannot change a count.
+        var commented = await LensAfterAsync("    public int Read()", "    // Reads.\n    public int Read()");
+        Assert.Equal(0, commented.Counted);
+        Assert.Equal(5, commented.Entries.Count);
+        Assert.Equal(text.IndexOf("Read()", StringComparison.Ordinal), Read(commented).Position);
+        Assert.Equal(first.Entries.First(entry => entry.Name == "Size").Line + 1, commented.Entries.First(entry => entry.Name == "Size").Line);
+
+        // Only the declaration whose name the edit used is searched for again.
+        var used = await LensAfterAsync("return 1;", "return Read();");
+        Assert.Equal(1, used.Counted);
+        Assert.Equal(1, Read(used).References);
+
+        // A new name nothing here declares, as most typing is.
+        var local = await LensAfterAsync("return Read();", "var unrelated = 2;\n        return Read();");
+        Assert.Equal(0, local.Counted);
+        Assert.Equal(1, Read(local).References);
+
+        // An attribute is used without its suffix.
+        var attribute = await LensAfterAsync("var unrelated = 2;", "var unrelated = 2;\n        [Mark] void Local() { }");
+        Assert.Equal(1, attribute.Counted);
+        Assert.Equal(1, Assert.Single(attribute.Entries, entry => entry.Name == "MarkAttribute").References);
+
+        // A constructor is used through its type's name. new() names nothing, and the counts leave it out as an implicit use.
+        var named = await LensAfterAsync("[Mark] void Local() { }", "[Mark] void Local() { }\n        _ = new Lookup();");
+        Assert.Equal(2, named.Counted);
+        Assert.Equal(1, Assert.Single(named.Entries, entry => entry.Name == ".ctor").References);
+        var unnamed = await LensAfterAsync("_ = new Lookup();", "_ = new Lookup();\n        Lookup target = new();");
+        Assert.Equal(1, Assert.Single(unnamed.Entries, entry => entry.Name == ".ctor").References);
+
+        // The same holds for an edit in another file, which also shows up in this file's counts.
+        Assert.True((await engine.UpdateDocumentAsync(new(other, otherText, 1, Analyze: false))).Accepted);
+        Assert.True((await engine.UpdateDocumentAsync(new(other, otherText.Replace("return 1;", "return lookup.Read();", StringComparison.Ordinal), 2, Analyze: false))).Accepted);
+        var elsewhere = await engine.GetCodeLensAsync(new(Source, version));
+        Assert.Equal(1, elsewhere.Counted);
+        Assert.Equal(2, Read(elsewhere).References);
+
+        // Changing a declaration can change anything, so everything is counted again.
+        Assert.Equal(5, (await LensAfterAsync("public int Size()", "public long Size()")).Counted);
+    }
+
+    [Fact]
     public async Task DefinitionMappedByLineDirectiveFallsBackWhenItsFileCannotBeRead()
     {
         var mapped = Path.Combine(_directory, "Mapped.xaml");

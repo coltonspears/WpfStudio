@@ -8,6 +8,15 @@ public static class ReleaseNoteCatalog
 {
     public static IReadOnlyList<ReleaseNote> All { get; } =
     [
+        new("Unreleased", "Quieter typing",
+        [
+            "Reference counts and Git history above declarations no longer flicker on every character.",
+            "Editing a method body or a comment no longer re-analyzes other open files or the project's XAML, and only searches again for declarations whose names the edit used. On large solutions this is most of the work a keystroke caused.",
+        ]),
+        new("Unreleased", "A more useful completion list",
+        [
+            "The C# completion list shows a glyph for each entry's kind and its namespace or containing type, never cuts a name off, and describes the selected entry beside the list with its signature and documentation.",
+        ]),
         new("Unreleased", "Faster solution opening",
         [
             "A solution whose project files changed opens from its saved project model in seconds. MSBuild corrects it in the background, and Output says when it is out of date.",

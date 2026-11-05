@@ -112,7 +112,15 @@ internal sealed class HoverCard(TextEditor editor)
     /// <summary>"public method", "local", "class"… from Roslyn's glyph tags, coloured like that kind of symbol.</summary>
     private static (string Text, string Brush)? KindLabel(IReadOnlyList<string> tags)
     {
-        (string Name, string Brush)? kind = tags.Select(tag => tag switch
+        if (Kind(tags) is not { } found) return null;
+        var access = tags.FirstOrDefault(tag => tag is "Public" or "Protected" or "Private" or "Internal")?.ToLowerInvariant();
+        return (access is null || found.Name is "local" or "parameter" or "range variable" or "type parameter" or "namespace" or "keyword" or "label"
+            ? found.Name : access + " " + found.Name, found.Brush);
+    }
+
+    /// <summary>What kind of symbol Roslyn's glyph tags describe, and the brush the editor colours that kind with.</summary>
+    internal static (string Name, string Brush)? Kind(IReadOnlyList<string> tags) =>
+        tags.Select(tag => tag switch
         {
             "Class" => ("class", "SyntaxType"), "Structure" => ("struct", "SyntaxType"), "Record" => ("record", "SyntaxType"),
             "RecordStruct" => ("record struct", "SyntaxType"), "Delegate" => ("delegate", "SyntaxType"), "Module" => ("module", "SyntaxType"),
@@ -122,14 +130,9 @@ internal sealed class HoverCard(TextEditor editor)
             "Constant" => ("constant", "SyntaxMember"), "Local" => ("local", "SyntaxParameter"), "Parameter" => ("parameter", "SyntaxParameter"),
             "RangeVariable" => ("range variable", "SyntaxParameter"), "TypeParameter" => ("type parameter", "SyntaxTypeParameter"),
             "Namespace" => ("namespace", "TextBrush"), "Keyword" => ("keyword", "SyntaxKeyword"), "Operator" => ("operator", "SyntaxMethod"),
-            "Label" => ("label", "TextBrush"),
+            "Label" => ("label", "TextBrush"), "Snippet" => ("snippet", "MutedBrush"),
             _ => ((string, string)?)null
         }).FirstOrDefault(found => found is not null);
-        if (kind is not { } found) return null;
-        var access = tags.FirstOrDefault(tag => tag is "Public" or "Protected" or "Private" or "Internal")?.ToLowerInvariant();
-        return (access is null || found.Name is "local" or "parameter" or "range variable" or "type parameter" or "namespace" or "keyword" or "label"
-            ? found.Name : access + " " + found.Name, found.Brush);
-    }
 
     private FrameworkElement DiagnosticRow(WorkspaceDiagnostic diagnostic)
     {
