@@ -90,8 +90,16 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
     public Task CheckAsync(bool fromAppOperation = false)
     {
         // A check already running reads the files again before it finishes; callers wait for that pass.
-        if (_check is { IsCompleted: false } running) { _recheckFiles = true; _recheckFromApp |= fromAppOperation; return running; }
+        if (_check is { IsCompleted: false } running) { _recheckFiles = true; _recheckFromApp |= fromAppOperation; return AfterAsync(running); }
         return _check = CheckCoreAsync(fromAppOperation);
+    }
+
+    // The running check may already have taken its last look when the request was noted, with only its reporting left to
+    // do. A request it did not pick up gets a pass of its own, so no caller returns without the files having been read since it asked.
+    private async Task AfterAsync(Task running)
+    {
+        await running;
+        if (_recheckFiles && !_disposed) await CheckAsync(_recheckFromApp);
     }
     private async Task CheckCoreAsync(bool fromAppOperation)
     {

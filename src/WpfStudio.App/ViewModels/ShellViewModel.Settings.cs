@@ -48,6 +48,8 @@ public sealed partial class ShellViewModel
         yield return Key("Go to definition with the mouse", "Ctrl+Click");
         yield return Key("Expand a snippet", "Tab");
         yield return Key("Find in file", "Ctrl+F");
+        yield return Key("Replace in file", "Ctrl+H");
+        yield return Key("Show the signature of the call at the caret", "Ctrl+Shift+Space");
         yield return Key("Duplicate the line or selection", "Ctrl+D");
         yield return Key("Delete the line", "Ctrl+Shift+K");
         yield return Key("Move lines up", "Alt+Up");

@@ -93,6 +93,10 @@ public class WorkspaceIntegrationTests
         Assert.Equal(view, definitions[0].Path);
         var references = await client.FindReferencesAsync(new DocumentPositionRequest(view, source.IndexOf("Echo(string", StringComparison.Ordinal) + 1, 1));
         Assert.NotEmpty(references);
+        // Each reference carries the line of code it is on, for a list that shows more than where.
+        Assert.All(references, reference => Assert.Contains("Echo(", reference.LineText));
+        Assert.Contains(references, reference => reference.Path.EndsWith("Other.cs", StringComparison.Ordinal) && reference.LineText!.Contains("window.Echo(\"other\", 2)", StringComparison.Ordinal));
+        Assert.Contains("Echo(string value, int count)", Assert.Single(definitions).LineText);
         var signatures = await client.GetSignatureHelpAsync(new DocumentPositionRequest(view, invocation + "Echo(\"x\", ".Length, 1));
         Assert.Contains(signatures.Signatures, s => s.Parameters.Count == 2);
         Assert.Equal(1, signatures.ActiveParameter);

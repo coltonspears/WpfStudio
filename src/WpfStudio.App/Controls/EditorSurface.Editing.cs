@@ -62,10 +62,18 @@ public sealed partial class EditorSurface
             case (Key.Up, ModifierKeys.Alt): MoveLines(up: true); return true;
             case (Key.Down, ModifierKeys.Alt): MoveLines(up: false); return true;
             case (Key.OemQuestion or Key.Divide, ModifierKeys.Control): return ToggleComment();
+            case (Key.H, ModifierKeys.Control): ShowReplace(); return true;
             case (Key.Enter, ModifierKeys.Control) when !_completion.IsWindowOpen: OpenLine(above: false); return true;
             case (Key.Enter, ModifierKeys.Control | ModifierKeys.Shift) when !_completion.IsWindowOpen: OpenLine(above: true); return true;
             default: return false;
         }
+    }
+
+    /// <summary>Ctrl+H: opens the find panel as Ctrl+F does, with the selected text as what to find, and its replace row.</summary>
+    internal void ShowReplace()
+    {
+        System.Windows.Input.ApplicationCommands.Find.Execute(null, TextArea);
+        EditorReplace.SetIsVisible(_search, true);
     }
 
     /// <summary>The lines the caret or selection touches. A selection that ends at the start of a line does not include that line.</summary>

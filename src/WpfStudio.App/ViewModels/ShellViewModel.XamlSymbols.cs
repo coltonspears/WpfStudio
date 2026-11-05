@@ -5,7 +5,6 @@ using WpfStudio.Workspace;
 
 using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.XamlAnalysis;
-using WpfStudio.App.Features.Workbench;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -113,14 +112,10 @@ public sealed partial class ShellViewModel
 
     internal void PublishSymbolReferences(SymbolReferenceResult result)
     {
-        SearchResults.Clear();
-        foreach (var location in result.Locations)
-        {
-            var item = new NavigationResult(location.Path, location.Line, location.Column, location.DisplayText ?? "Reference",
-                location.Start, location.ExpectedTextHash, location.ProjectPath, location.ProjectName);
-            SearchResults.Add(item);
-        }
-        ToolRequested?.Invoke(Workbenches.Search);
+        var name = result.Locations.FirstOrDefault()?.DisplayText;
+        ShowResults(Count(result.Locations.Count, "reference", "references") + (name is { Length: > 0 } ? " to " + name : ""),
+            result.Locations.Select(location => ResultFor(location, "Reference")));
+        if (result.Warnings.Count > 0) SearchResultsTitle += " · partial coverage, see Output";
         Status = $"{result.Locations.Count} symbol reference(s)" + SymbolWarnings(result.Warnings);
     }
 
@@ -135,15 +130,22 @@ public sealed partial class ShellViewModel
     private void FindResourceReferences(IReadOnlyList<string>? warnings = null)
     {
         var declaration = ResourceAtCaret();
-        SearchResults.Clear();
         if (declaration is null)
         {
+            ShowResults("", [], reveal: false);
             Status = "Place the caret on a resolved binding member, named element, event handler or resource key" + SymbolWarnings(warnings ?? []);
             return;
         }
-        foreach (var usage in WpfExplorer.Index!.Usages.Where(usage => usage.ResolvedPath == declaration.Path && usage.ResolvedDeclarationStart == declaration.ValueStart))
-            SearchResults.Add(new(usage.Path, usage.Line, 1, (usage.IsDynamic ? "DynamicResource " : "StaticResource ") + usage.Key));
-        ToolRequested?.Invoke(Workbenches.Search);
+        var index = WpfExplorer.Index!;
+        ShowResults(Count(index.Usages.Count(usage => usage.ResolvedPath == declaration.Path && usage.ResolvedDeclarationStart == declaration.ValueStart), "reference", "references") + " to resource " + declaration.Key,
+            index.Usages.Where(usage => usage.ResolvedPath == declaration.Path && usage.ResolvedDeclarationStart == declaration.ValueStart).Select(usage =>
+            {
+                var row = new NavigationResult(usage.Path, usage.Line, 1, (usage.IsDynamic ? "DynamicResource " : "StaticResource ") + usage.Key);
+                // The index holds the text it was built from, which is where the usage's offsets point.
+                if (!index.Texts.TryGetValue(usage.Path, out var text) || usage.Start < 0 || usage.Start + usage.Length > text.Length) return row;
+                int lineStart = usage.Start == 0 ? 0 : text.LastIndexOf('\n', usage.Start - 1) + 1, lineEnd = text.IndexOf('\n', usage.Start);
+                return row.WithLine(text[lineStart..(lineEnd < 0 ? text.Length : lineEnd)].TrimEnd('\r'), usage.Start - lineStart, usage.Length);
+            }));
         Status = $"{SearchResults.Count} resolved resource reference(s); runtime and code resource references are not indexed" + SymbolWarnings(warnings ?? []);
     }
 
@@ -175,8 +177,11 @@ public sealed partial class ShellViewModel
             if (!current()) throw new InvalidOperationException("The document or its types changed. Request rename again.");
             if (!symbol.SymbolFound) { await RenameResourceAtCaretAsync(symbol.Warnings); return; }
         }
-        var name = await _dialogs.PromptAsync("Rename symbol", "New symbol name:");
+        // The name starts as what it is now: a rename usually changes part of a name, not all of it.
+        var currentName = IdentifierAt(state.Content, state.CaretOffset) ?? "";
+        var name = await _dialogs.PromptAsync("Rename symbol", "New symbol name:", currentName);
         if (string.IsNullOrWhiteSpace(name)) return;
+        if (name == currentName) { Status = "The name is unchanged"; return; }
         if (!current()) throw new InvalidOperationException("The document or its types changed. Request rename again.");
         var result = await _workspace.RenameAsync(new(state.Path, state.CaretOffset, state.Version, name,
             state.Content, editor.XamlProjectPath, overlays), _lifetime.Token);

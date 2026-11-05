@@ -88,6 +88,69 @@ public sealed partial class ShellSmokeTests
         Assert.Contains("symbol reference", shell.Status);
         Assert.NotEmpty(shell.SearchResults);
 
+        // --- The references are listed as the lines of code they are on, grouped under their files, with the name marked.
+        Assert.All(shell.SearchResults, result => Assert.True(result.MatchStart >= 0 && result.Text.Substring(result.MatchStart, result.MatchLength).Contains("Count", StringComparison.Ordinal),
+            $"A reference row shows its line with the name marked, not '{result.Text}'."));
+        Assert.Contains("references to", shell.SearchResultsTitle);
+        await UntilAsync(() => Descendants<Views.Shell.SearchPane>(window).Any(pane => pane.IsVisible && pane.ActualHeight > 0), "the Search pane with the references");
+        var searchPane = Descendants<Views.Shell.SearchPane>(window).First(pane => pane.IsVisible);
+        await Idle();
+        // Rows scrolled out of view are not drawn, so some, not all.
+        Assert.NotEmpty(Descendants<MatchTextBlock>(searchPane));
+        Screenshot(searchPane, Path.Combine(root, "artifacts/screenshots/search-references.png"));
+
+        // --- Find in workspace with its switches: whole words only, whatever their case.
+        shell.SearchQuery = "count";
+        shell.SearchWholeWord = true;
+        await shell.SearchCommand.ExecuteAsync(null);
+        Assert.Contains(shell.SearchResults, result => result.FileName == "CounterViewModel.cs" && result.Text.StartsWith("Count++;", StringComparison.Ordinal));
+        Assert.All(shell.SearchResults, result => Assert.Equal("count", result.Text.Substring(result.MatchStart, result.MatchLength), ignoreCase: true));
+        Assert.DoesNotContain(shell.SearchResults, result => result.Text == "namespace CounterApp;");
+        Assert.StartsWith(shell.SearchResults.Count + " matches for “count” in ", shell.SearchResultsTitle);
+        await Idle();
+        Screenshot(searchPane, Path.Combine(root, "artifacts/screenshots/search-text.png"));
+        shell.SearchWholeWord = false;
+
+        // --- Signature help: a card for the call the caret is in, following it from argument to argument and closing outside the call.
+        Keyboard.Focus(editor.TextArea);
+        var content = document.State.Content;
+        int call = content.IndexOf("Task.Delay(", StringComparison.Ordinal) + "Task.Delay(".Length;
+        string CardText() => string.Join("\n", Descendants<TextBlock>(editor.SignatureHelp.Card).Select(block => string.Concat(block.Inlines.OfType<System.Windows.Documents.Run>().Select(run => run.Text)) is { Length: > 0 } runs ? runs : block.Text));
+        string ActiveParameter() => string.Concat(Descendants<TextBlock>(editor.SignatureHelp.Card).SelectMany(block => block.Inlines.OfType<System.Windows.Documents.Run>()).Where(run => run.FontWeight == FontWeights.SemiBold).Select(run => run.Text));
+        editor.CaretOffset = call + "200, ".Length;
+        editor.SignatureHelp.Trigger();
+        await UntilAsync(() => editor.SignatureHelp.IsOpen, "signature help for Task.Delay; focus within the editor: " + editor.IsKeyboardFocusWithin);
+        await Idle();
+        Assert.Contains("Task.Delay(", CardText());
+        Assert.Contains("overloads", CardText());
+        Assert.Equal("CancellationToken cancellationToken", ActiveParameter());
+        Screenshot(editor.SignatureHelp.Card, Path.Combine(root, "artifacts/screenshots/signature-help.png"));
+        editor.CaretOffset = call + 1;
+        await UntilAsync(() => ActiveParameter().EndsWith(" millisecondsDelay", StringComparison.Ordinal) || ActiveParameter().EndsWith(" delay", StringComparison.Ordinal), "the card to follow the caret to the first argument, showing " + ActiveParameter());
+        var before = CardText();
+        Assert.True(editor.SignatureHelp.Cycle(1), "Down shows the next overload.");
+        Assert.NotEqual(before, CardText());
+        editor.CaretOffset = content.IndexOf("Count++", StringComparison.Ordinal);
+        await UntilAsync(() => !editor.SignatureHelp.IsOpen, "signature help to close outside the call");
+
+        // --- Replace in the file: Ctrl+H opens the find panel with its replace row.
+        editor.ShowReplace();
+        await Idle();
+        var find = editor.FindPanel;
+        Assert.False(find.IsClosed);
+        Assert.True(Controls.Editor.EditorReplace.GetIsVisible(find));
+        find.SearchPattern = "Count";
+        Controls.Editor.EditorReplace.SetText(find, "Total");
+        await Idle();
+        var replaceBox = Descendants<TextBox>(find).Single(box => Controls.Editor.EditorReplace.GetIsReplaceBox(box));
+        Assert.True(replaceBox.IsVisible);
+        Assert.Equal("Total", replaceBox.Text);
+        Screenshot(find, Path.Combine(root, "artifacts/screenshots/find-replace.png"));
+        Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/editor-search-window.png"));
+        find.Close();
+        Controls.Editor.EditorReplace.SetIsVisible(find, false);
+        Keyboard.Focus(editor.TextArea);
+
         // --- A file added to the project: the count still answers, saying what it may not cover, and the project model refreshes itself.
         var copy = Path.Combine(Path.GetTempPath(), "WpfStudio-editor-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(copy);

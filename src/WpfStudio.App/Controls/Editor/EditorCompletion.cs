@@ -11,7 +11,7 @@ using WpfStudio.Core.Text;
 namespace WpfStudio.App.Controls.Editor;
 
 /// <summary>The completion popup and signature help, and accepting an entry whose edit arrives asynchronously.</summary>
-internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, EditorTyping typing)
+internal sealed class EditorCompletion(EditorSurface owner, EditorTyping typing, EditorSignatureHelp signature)
 {
     // Rests on an entry before asking the worker about it, so walking the list does not ask about every row on the way.
     private static readonly TimeSpan DetailsDelay = TimeSpan.FromMilliseconds(60);
@@ -33,8 +33,8 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
     private void Typed(string text)
     {
         if (_input.IsReplaying || _input.IsPending) return;
-        if (text is "(" or ",") Observe(ShowSignatureAsync());
-        else if (text == ")") hover.CloseSignature();
+        // Once open, signature help follows the caret by itself, including out of the call.
+        if (text is "(" or ",") signature.Trigger();
         if (_window != null || text.Length != 1 || owner.ViewModel is not { } vm) return;
         // A dot always lists members. XAML also lists after < and {; names list as they are typed unless that is turned off.
         bool opens = text[0] == '.' || vm.IsXaml && text[0] is '<' or '{'
@@ -181,20 +181,6 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
         catch (Exception ex) { if (!token.IsCancellationRequested && vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
     }
 
-    private async Task ShowSignatureAsync()
-    {
-        if (owner.ViewModel is not { } vm) return;
-        long version = vm.State.Version;
-        int caret = owner.CaretOffset;
-        try
-        {
-            var text = await vm.SignatureAsync(caret);
-            if (vm != owner.ViewModel || vm.State.Version != version || caret != owner.CaretOffset || !owner.IsKeyboardFocusWithin) return;
-            if (!string.IsNullOrEmpty(text)) hover.ShowSignature(text);
-        }
-        catch (Exception ex) { if (vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }
-    }
-
     private Task AcceptCompletionAsync(CompletionEntry entry, long version, long contextRevision, ISegment segment, EventArgs insertionRequest)
     {
         if (owner.ViewModel is not { } vm) return Task.CompletedTask;
@@ -242,8 +228,11 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorHover hover, E
         catch (Exception exception) { vm.LanguageStatus = exception.Message; }
         finally
         {
-            if (_input.IsCurrent(pending)) Replay(pending);
+            bool replayed = _input.IsCurrent(pending);
+            if (replayed) Replay(pending);
             pending.Cancellation.Dispose();
+            // A name accepted by typing its opening bracket starts a call, as typing the bracket after the name would have.
+            if (replayed && punctuation is "(" && ReferenceEquals(owner.ViewModel, vm)) signature.Trigger();
         }
     }
     public void CancelPending()

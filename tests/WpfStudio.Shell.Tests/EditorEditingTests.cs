@@ -1,8 +1,10 @@
 using System.Windows.Documents;
 using System.Windows.Threading;
 using WpfStudio.App.Controls;
+using WpfStudio.App.Controls.Editor;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
+using WpfStudio.Contracts;
 using WpfStudio.Core.Documents;
 using WpfStudio.Core.Text;
 using WpfStudio.Workspace;
@@ -191,6 +193,90 @@ public sealed class EditorEditingTests
         Assert.True(editor.TryExpandSnippet());
         Assert.Equal("class C\n{\n\tif (true)\n\t{\n\t\t\n\t}\n}", Text(editor));
     });
+
+    [Fact]
+    public Task ReplaceStepsThroughMatchesShowingEachBeforeItChanges() => WithEditorAsync("Replace.cs", "|int count = Count + count;\nreturn count;", (editor, model, _) =>
+    {
+        var panel = editor.FindPanel;
+        Assert.True(EditorReplace.GetIsAvailable(panel));
+        panel.SearchPattern = "count";
+        panel.MatchCase = true;
+        EditorReplace.SetText(panel, "total");
+
+        // The first press only selects what would be replaced.
+        var shown = EditorReplace.Next(panel, editor.TextArea);
+        Assert.Equal(0, shown.Replaced);
+        Assert.Equal("count", editor.SelectedText);
+        Assert.Equal(4, editor.SelectionStart);
+        Assert.Equal("int count = Count + count;\nreturn count;", Text(editor));
+
+        // The next replaces it and moves on, leaving the differently cased name alone.
+        Assert.Equal(1, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("int total = Count + count;\nreturn count;", Text(editor));
+        Assert.Equal("int total = Count + ".Length, editor.SelectionStart);
+        Assert.Equal("int total = Count + count;\nreturn count;", model.State.Content.Replace("\r\n", "\n"));
+
+        // A selection that is not a match is not replaced: the caret was moved elsewhere in between.
+        editor.Select(0, 3);
+        Assert.Equal(0, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("int total = Count + count;\nreturn count;", Text(editor));
+
+        Assert.Equal(1, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        var last = EditorReplace.Next(panel, editor.TextArea);
+        Assert.Equal((1, "Replaced the last occurrence"), (last.Replaced, last.Status));
+        Assert.Equal("int total = Count + total;\nreturn total;", Text(editor));
+        Assert.Equal(0, EditorReplace.Next(panel, editor.TextArea).Replaced);
+    });
+
+    [Fact]
+    public Task ReplaceAllIsOneUndoAndFollowsTheFindPanelsSwitches() => WithEditorAsync("ReplaceAll.cs", "|var cost = Cost(costs, $cost);\nvar discount = cost;", (editor, _, _) =>
+    {
+        var panel = editor.FindPanel;
+        var original = Text(editor);
+        panel.SearchPattern = "cost";
+        panel.WholeWords = true;
+        // Plain text goes in as typed: a dollar sign is not a group reference.
+        EditorReplace.SetText(panel, "$1");
+        var all = EditorReplace.All(panel, editor.TextArea);
+        Assert.Equal((4, "Replaced 4 occurrences"), (all.Replaced, all.Status));
+        Assert.Equal("var $1 = $1(costs, $$1);\nvar discount = $1;", Text(editor));
+        editor.Undo();
+        Assert.Equal(original, Text(editor));
+
+        // A regular expression's replacement can use what it captured.
+        panel.WholeWords = false;
+        panel.UseRegex = true;
+        panel.MatchCase = true;
+        panel.SearchPattern = @"var (\w+)";
+        EditorReplace.SetText(panel, "decimal $1Total");
+        Assert.Equal(2, EditorReplace.All(panel, editor.TextArea).Replaced);
+        Assert.Equal("decimal costTotal = Cost(costs, $cost);\ndecimal discountTotal = cost;", Text(editor));
+
+        // A pattern that cannot be read is said so, and nothing changes. The panel keeps such a pattern as typed: its
+        // text box's binding swallows the complaint that a bare assignment like this one gets to see.
+        Assert.Throws<ICSharpCode.AvalonEdit.Search.SearchPatternException>(() => panel.SearchPattern = "(");
+        Assert.Equal("(", panel.SearchPattern);
+        var invalid = EditorReplace.All(panel, editor.TextArea);
+        Assert.Equal(0, invalid.Replaced);
+        Assert.StartsWith("The search pattern is not valid", invalid.Status);
+        Assert.Equal("decimal costTotal = Cost(costs, $cost);\ndecimal discountTotal = cost;", Text(editor));
+        panel.UseRegex = false;
+        panel.SearchPattern = "";
+        Assert.Equal("Type what to find first", EditorReplace.Next(panel, editor.TextArea).Status);
+    });
+
+    [Fact]
+    public void SignatureHelpPicksTheParameterAnArgumentGoesTo()
+    {
+        var plain = new SignatureEntry("M(int a, string b)", null, [new("a", "int", null, "int a"), new("b", "string", null, "string b")]);
+        var open = new SignatureEntry("M(string format, params object[] values)", null, [new("format", "string", null, "string format"), new("values", "object[]", null, "params object[] values")]);
+        Assert.Equal(0, EditorSignatureHelp.ActiveParameter(plain, 0));
+        Assert.Equal(1, EditorSignatureHelp.ActiveParameter(plain, 1));
+        // One argument too many has no parameter; with a params array every further argument is one of its elements.
+        Assert.Equal(-1, EditorSignatureHelp.ActiveParameter(plain, 2));
+        Assert.Equal(1, EditorSignatureHelp.ActiveParameter(open, 4));
+        Assert.Equal(-1, EditorSignatureHelp.ActiveParameter(new SignatureEntry("M()", null, []), 0));
+    }
 
     private static Task OnDispatcherAsync(Func<Task> action)
     {

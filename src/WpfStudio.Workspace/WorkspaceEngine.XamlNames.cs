@@ -92,7 +92,7 @@ public sealed partial class WorkspaceEngine
                 if (locations.Count >= SymbolScanOccurrences) break;
                 var line = text.Lines.GetLinePosition(occurrence.Start);
                 locations.Add(new(file.Path, occurrence.Start, occurrence.Length, line.Line + 1, line.Character + 1,
-                    declaration.Name, hash, file.Project.FilePath, file.Project.Name));
+                    declaration.Name, hash, file.Project.FilePath, file.Project.Name, LineOf(text, line.Line)));
             }
             snapshot.Warnings.InsertRange(0, file.Names.Warnings);
         }
@@ -114,7 +114,7 @@ public sealed partial class WorkspaceEngine
                 var span = reference.Location.SourceSpan;
                 var line = content.Text.Lines.GetLinePosition(span.Start);
                 locations.Add(new(path, span.Start, span.Length, line.Line + 1, line.Character + 1, field.Name,
-                    content.Hash, reference.Document.Project.FilePath, reference.Document.Project.Name));
+                    content.Hash, reference.Document.Project.FilePath, reference.Document.Project.Name, LineOf(content.Text, line.Line)));
             }
         }
         snapshot.Warnings.Insert(0, "Name references include verified authored declarations, ElementName values and proven generated-field C# uses. Runtime registration, FindName/reflection strings and unsupported name consumers are not inferred.");

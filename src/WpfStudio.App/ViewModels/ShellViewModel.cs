@@ -692,27 +692,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             }
         }
     });
-    [RelayCommand(IncludeCancelCommand = true)] private async Task SearchAsync(CancellationToken token)
-    {
-        await GuardAsync(async () =>
-        {
-            var query = SearchQuery; if (string.IsNullOrWhiteSpace(query)) return;
-            SearchResults.Clear(); ToolRequested?.Invoke(Workbenches.Search);
-            var results = await Task.Run(async () =>
-            {
-                var found = new List<NavigationResult>();
-                foreach (var path in _allFiles.Where(p => Path.GetExtension(p).ToLowerInvariant() is ".cs" or ".xaml" or ".json" or ".xml" or ".sql" or ".csproj" or ".props" or ".targets" or ".md"))
-                {
-                    token.ThrowIfCancellationRequested();
-                    string text; try { text = _store.Find(path)?.Content ?? await File.ReadAllTextAsync(path, token); } catch (IOException) { continue; }
-                    var lines = text.Split('\n'); var offset = 0;
-                    for (var i = 0; i < lines.Length; i++) { var at = lines[i].IndexOf(query, StringComparison.OrdinalIgnoreCase); if (at >= 0) found.Add(new(path, i + 1, at + 1, lines[i].Trim(), offset + at)); offset += lines[i].Length + 1; if (found.Count >= 2000) return found; }
-                }
-                return found;
-            }, token);
-            foreach (var result in results) SearchResults.Add(result); Status = $"{results.Count} search result(s)" + (results.Count >= 2000 ? " · limit reached" : "");
-        });
-    }
     [RelayCommand] private Task NavigateSearchAsync(NavigationResult? result) => result == null ? Task.CompletedTask : GuardAsync(() => NavigateSymbolResultAsync(result));
     [RelayCommand] private Task NavigateDiagnosticAsync(WorkspaceDiagnostic? diagnostic) => diagnostic?.Path == null ? Task.CompletedTask : GuardAsync(async () =>
     {
