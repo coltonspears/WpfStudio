@@ -3,29 +3,68 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:c="clr-namespace:WpfStudio.App.Controls"
              xmlns:b="clr-namespace:WpfStudio.App.Behaviors">
+  <UserControl.Resources>
+    <!-- Results are listed under the file they are in. -->
+    <CollectionViewSource x:Key="ResultsByFile" Source="{Binding SearchResults}">
+      <CollectionViewSource.GroupDescriptions>
+        <PropertyGroupDescription PropertyName="Path" />
+      </CollectionViewSource.GroupDescriptions>
+    </CollectionViewSource>
+  </UserControl.Resources>
   <DockPanel Background="{DynamicResource SurfaceBrush}">
     <DockPanel DockPanel.Dock="Top" Margin="10,4,8,6">
       <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Cancel" Command="{Binding SearchCancelCommand}" />
       <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" c:Ui.Icon="Search" Content="Search" Command="{Binding SearchCommand}" />
+      <!-- The same three switches, with the same marks, as Find in the editor. -->
+      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" Margin="0,0,6,0" IsChecked="{Binding SearchUseRegex}" ToolTip="Use a regular expression" AutomationProperties.Name="Use a regular expression">
+        <TextBlock Text=".*" FontSize="12" FontWeight="SemiBold" FontFamily="{StaticResource CodeFont}" />
+      </ToggleButton>
+      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" IsChecked="{Binding SearchWholeWord}" ToolTip="Match whole words only" AutomationProperties.Name="Match whole words only">
+        <TextBlock Text="ab" FontSize="11.5" FontWeight="SemiBold" TextDecorations="Underline" />
+      </ToggleButton>
+      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" Margin="4,0,0,0" IsChecked="{Binding SearchMatchCase}" ToolTip="Match case" AutomationProperties.Name="Match case">
+        <TextBlock Text="Aa" FontSize="11.5" FontWeight="SemiBold" />
+      </ToggleButton>
       <TextBox x:Name="SearchBox" b:Interaction.FocusWhenTrue="{Binding IsSearchFocusRequested}" Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Find text in workspace files" ToolTip="Find text across source files (Enter)">
         <TextBox.InputBindings>
           <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
         </TextBox.InputBindings>
       </TextBox>
     </DockPanel>
-    <ListBox ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult}" b:Interaction.ActivateCommand="{Binding NavigateSearchCommand}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+    <!-- What the list below is: a search's matches, a symbol's references, a type's implementations. -->
+    <TextBlock DockPanel.Dock="Top" Text="{Binding SearchResultsTitle}" Margin="12,0,10,6" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"
+               ToolTip="{Binding SearchResultsTitle}" Visibility="{Binding SearchResultsTitle, Converter={StaticResource Presence}}" />
+    <ListBox ItemsSource="{Binding Source={StaticResource ResultsByFile}}" SelectedItem="{Binding SelectedSearchResult}" b:Interaction.ActivateCommand="{Binding NavigateSearchCommand}"
+             HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.IsVirtualizingWhenGrouping="True" VirtualizingPanel.ScrollUnit="Pixel" AutomationProperties.Name="Search results">
+      <ListBox.GroupStyle>
+        <GroupStyle>
+          <GroupStyle.HeaderTemplate>
+            <DataTemplate>
+              <DockPanel Margin="6,7,10,3" ToolTip="{Binding Name}">
+                <Border DockPanel.Dock="Right" Style="{StaticResource Badge}" Background="{DynamicResource RaisedBrush}" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding ItemCount}" FontSize="10.5" Foreground="{DynamicResource MutedBrush}" />
+                </Border>
+                <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Name, Converter={StaticResource FileIconKind}}" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" />
+                <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                  <Run Text="{Binding Items[0].FileName, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" /><Run Text="   " /><Run Text="{Binding Items[0].Folder, Mode=OneWay}" Foreground="{DynamicResource SubtleBrush}" FontSize="11.5" />
+                </TextBlock>
+              </DockPanel>
+            </DataTemplate>
+          </GroupStyle.HeaderTemplate>
+        </GroupStyle>
+      </ListBox.GroupStyle>
       <ListBox.ItemTemplate>
         <DataTemplate>
-          <Grid>
+          <Grid Margin="12,0,0,0">
             <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="220" />
+              <ColumnDefinition Width="46" />
               <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <DockPanel Margin="0,0,12,0">
-              <c:StudioIcon DockPanel.Dock="Left" Kind="{Binding Path, Converter={StaticResource FileIconKind}}" Width="14" Height="14" Margin="0,0,6,0" />
-              <TextBlock Text="{Binding Location}" ToolTip="{Binding Location}" Foreground="{DynamicResource AccentBrush}" TextTrimming="CharacterEllipsis" />
-            </DockPanel>
-            <TextBlock Grid.Column="1" Text="{Binding Text}" ToolTip="{Binding Text}" TextTrimming="CharacterEllipsis" FontFamily="{StaticResource CodeFont}" />
+            <TextBlock Text="{Binding Line}" HorizontalAlignment="Right" Margin="0,0,12,0" VerticalAlignment="Center" FontFamily="{StaticResource CodeFont}" FontSize="11.5" Foreground="{DynamicResource SubtleBrush}" />
+            <c:MatchTextBlock Grid.Column="1" Line="{Binding Text}" MatchStart="{Binding MatchStart}" MatchLength="{Binding MatchLength}" ToolTip="{Binding Text}" TextTrimming="CharacterEllipsis" FontFamily="{StaticResource CodeFont}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="2" Text="{Binding ProjectName}" Margin="12,0,2,0" VerticalAlignment="Center" FontSize="11" Foreground="{DynamicResource SubtleBrush}" />
           </Grid>
         </DataTemplate>
       </ListBox.ItemTemplate>

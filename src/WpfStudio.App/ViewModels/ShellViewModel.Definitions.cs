@@ -1,7 +1,6 @@
 using System.IO;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.Input;
-using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.ViewModels;
@@ -92,11 +91,8 @@ public sealed partial class ShellViewModel
         var first = locations[0];
         await NavigateAsync(first.Path, first.Line, first.Column);
         if (locations.Count == 1) { if (note is not null) Status = note; return; }
-        SearchResults.Clear();
-        foreach (var location in locations)
-            SearchResults.Add(new NavigationResult(location.Path, location.Line, location.Column, location.DisplayText ?? "Declaration"));
         // A guess needs showing; the parts of one declaration only need mentioning.
-        if (note is not null) ToolRequested?.Invoke(Workbenches.Search);
+        ShowResults(Count(locations.Count, "declaration", "declarations"), locations.Select(location => ResultFor(location, "Declaration") with { Start = 0, ExpectedTextHash = null }), reveal: note is not null);
         Status = note ?? $"Declared in {locations.Count} places; the others are listed in Search.";
     }
 
@@ -126,7 +122,8 @@ public sealed partial class ShellViewModel
                     int start = match.Index + match.Length - name.Length;
                     int lineStart = start == 0 ? 0 : text.LastIndexOf('\n', start - 1) + 1;
                     int lineEnd = text.IndexOf('\n', start); if (lineEnd < 0) lineEnd = text.Length;
-                    results.Add(new NavigationResult(path, text.AsSpan(0, start).Count('\n') + 1, start - lineStart + 1, text[lineStart..lineEnd].Trim()));
+                    var line = text[lineStart..lineEnd].TrimEnd('\r');
+                    results.Add(new NavigationResult(path, text.AsSpan(0, start).Count('\n') + 1, start - lineStart + 1, line).WithLine(line, start - lineStart, name.Length));
                     if (results.Count >= 20) return results;
                 }
             }
@@ -135,12 +132,7 @@ public sealed partial class ShellViewModel
         if (!ReferenceEquals(document, ActiveDocument)) return;
         if (found.Count == 0) { Status = reason; return; }
         await NavigateAsync(found[0].Path, found[0].Line, found[0].Column);
-        if (found.Count > 1)
-        {
-            SearchResults.Clear();
-            foreach (var result in found) SearchResults.Add(result);
-            ToolRequested?.Invoke(Workbenches.Search);
-        }
+        if (found.Count > 1) ShowResults($"{found.Count} types named {name}", found);
         Status = found.Count == 1 ? $"Found {name} by its name; the language service could not resolve it."
             : $"{found.Count} types are named {name}; the language service could not say which one this is.";
     }

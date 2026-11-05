@@ -46,11 +46,21 @@ public sealed record CompletionEditRequest(string Path, long Version, string Ite
 public sealed record TextEdit(int Start, int Length, string NewText);
 /// <summary>Edits to one file. <paramref name="Create"/> marks a new file whose edits insert its whole text.</summary>
 public sealed record DocumentEdits(string Path, long Version, IReadOnlyList<TextEdit> Edits, string? ExpectedTextHash = null, bool Create = false);
-public sealed record SignatureParameter(string Name, string Type, string? Documentation);
-public sealed record SignatureEntry(string Label, string? Documentation, IReadOnlyList<SignatureParameter> Parameters);
-public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures);
+/// <summary><paramref name="Display"/> is the parameter as its signature writes it, with modifiers and a default value.</summary>
+public sealed record SignatureParameter(string Name, string Type, string? Documentation, string? Display = null);
+/// <summary><paramref name="Prefix"/> is the signature up to its parameter list, such as <c>void Console.WriteLine</c>.</summary>
+public sealed record SignatureEntry(string Label, string? Documentation, IReadOnlyList<SignatureParameter> Parameters, string? Prefix = null);
+/// <summary>
+/// The overloads of the call the position is in. <paramref name="ActiveParameter"/> is the argument being typed,
+/// <paramref name="ActiveSignature"/> the overload that argument list fits best, and <paramref name="Start"/> the offset
+/// just inside the call's opening bracket, or -1 when the position is in no call. An argument written with its
+/// parameter's name, as in <c>M(second: 1, first: 2)</c>, goes to that parameter wherever it stands in the call:
+/// <paramref name="ActiveName"/> is then that name, and null for an argument given by position.
+/// </summary>
+public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures, int ActiveSignature = 0, int Start = -1, string? ActiveName = null);
+/// <summary><paramref name="LineText"/> is the source line the location is on, so a list of locations can show the code and not only where it is.</summary>
 public sealed record SourceLocation(string Path, int Start, int Length, int Line, int Column, string? DisplayText = null,
-    string? ExpectedTextHash = null, string? ProjectPath = null, string? ProjectName = null);
+    string? ExpectedTextHash = null, string? ProjectPath = null, string? ProjectName = null, string? LineText = null);
 /// <summary>
 /// Where a symbol is declared. With no locations, <paramref name="Status"/> says why; with some, it may say they are a best
 /// guess. <paramref name="Resolved"/> is false when the name at the position did not resolve to a symbol at all.

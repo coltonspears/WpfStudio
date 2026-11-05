@@ -501,7 +501,9 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         if (root is null || root.FullSpan.IsEmpty) return new SignatureHelpResult(request.Version, 0, []);
         ValidatePosition(request.Position, root.FullSpan.Length);
         var node = root.FindToken(Math.Max(0, request.Position - 1)).Parent;
-        var argumentList = node?.AncestorsAndSelf().OfType<BaseArgumentListSyntax>().FirstOrDefault(a => a.SpanStart <= request.Position && request.Position <= a.Span.End);
+        // Inside the brackets: after the opening one, and before the closing one unless that is still to be typed.
+        var argumentList = node?.AncestorsAndSelf().OfType<BaseArgumentListSyntax>().FirstOrDefault(a => a.SpanStart < request.Position
+            && (request.Position < a.Span.End || a.GetLastToken(includeZeroWidth: true).IsMissing && request.Position <= a.Span.End));
         if (argumentList?.Parent is not { } expression) return new SignatureHelpResult(request.Version, 0, []);
         var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
         if (model is null) return new SignatureHelpResult(request.Version, 0, []);
@@ -511,11 +513,42 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         symbols.AddRange(symbolInfo.CandidateSymbols);
         if (expression is InvocationExpressionSyntax invocation) symbols.AddRange(model.GetMemberGroup(invocation.Expression, cancellationToken));
         if (expression is ObjectCreationExpressionSyntax creation && model.GetTypeInfo(creation, cancellationToken).Type is INamedTypeSymbol type) symbols.AddRange(type.InstanceConstructors);
-        var signatures = symbols.OfType<IMethodSymbol>().Distinct<IMethodSymbol>(SymbolEqualityComparer.Default).Select(method => new SignatureEntry(
-            method.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), PlainDocumentation(method.GetDocumentationCommentXml(cancellationToken: cancellationToken)),
-            method.Parameters.Select(p => new SignatureParameter(p.Name, p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), null)).ToArray())).ToArray();
+        var methods = symbols.OfType<IMethodSymbol>().Distinct<IMethodSymbol>(SymbolEqualityComparer.Default).ToArray();
+        var signatures = methods.Select(method =>
+        {
+            var documentation = method.GetDocumentationCommentXml(cancellationToken: cancellationToken);
+            return new SignatureEntry(
+                method.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), PlainDocumentation(documentation),
+                method.Parameters.Select(p => new SignatureParameter(p.Name, p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+                    ParameterDocumentation(documentation, p.Name), p.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat))).ToArray(),
+                method.ToDisplayString(SignaturePrefixFormat));
+        }).ToArray();
         var active = argumentList.Arguments.GetSeparators().Count(s => s.SpanStart < request.Position);
-        return new SignatureHelpResult(request.Version, active, signatures);
+        // An argument that names its parameter goes to that one, wherever it stands among the others.
+        var named = active < argumentList.Arguments.Count ? argumentList.Arguments[active].NameColon?.Name.Identifier.ValueText : null;
+        // The overload the call binds to comes first. While the call is incomplete, the first that takes this many arguments,
+        // and has the parameter being named, is the likeliest.
+        int typed = argumentList.Arguments.Count;
+        int fitting = symbolInfo.Symbol is not null ? 0 : Array.FindIndex(methods, method => Takes(method, Math.Max(typed, active + 1))
+            && (named is null || method.Parameters.Any(parameter => parameter.Name == named)));
+        return new SignatureHelpResult(request.Version, active, signatures, Math.Max(0, fitting), argumentList.GetFirstToken().Span.End, named);
+    }
+
+    private static readonly SymbolDisplayFormat SignaturePrefixFormat = SymbolDisplayFormat.MinimallyQualifiedFormat
+        .WithMemberOptions(SymbolDisplayMemberOptions.IncludeType | SymbolDisplayMemberOptions.IncludeRef | SymbolDisplayMemberOptions.IncludeContainingType);
+
+    private static bool Takes(IMethodSymbol method, int arguments) =>
+        method.Parameters.Length >= arguments || method.Parameters.LastOrDefault() is { IsParams: true };
+
+    private static string? ParameterDocumentation(string? xml, string parameter)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return null;
+        try
+        {
+            var text = System.Xml.Linq.XElement.Parse(xml).Elements("param").FirstOrDefault(element => (string?)element.Attribute("name") == parameter)?.Value;
+            return string.IsNullOrWhiteSpace(text) ? null : string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        }
+        catch (System.Xml.XmlException) { return null; }
     }
 
     public async Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken)
@@ -596,6 +629,8 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var path = line.Path;
         var start = location.SourceSpan.Start;
         var available = File.Exists(path);
+        // The text the location is reported in, for the line of code a list of locations shows.
+        SourceText? shown = null;
         if (available && !string.Equals(path, location.SourceTree?.FilePath, StringComparison.OrdinalIgnoreCase))
         {
             // #line maps generated WPF fields back to XAML. Their C# offsets are not XAML offsets.
@@ -604,6 +639,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 var text = SourceText.From(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false));
                 var sourceLine = text.Lines[Math.Clamp(line.StartLinePosition.Line, 0, text.Lines.Count - 1)];
                 start = Math.Min(sourceLine.End, sourceLine.Start + line.StartLinePosition.Character);
+                shown = text;
             }
             // Locked, unreadable or just deleted: the C# declaration below is still somewhere to go.
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { available = false; }
@@ -613,8 +649,11 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             var text = await tree.GetTextAsync(cancellationToken).ConfigureAwait(false);
             path = await CacheGeneratedAsync(tree.FilePath, text, cancellationToken).ConfigureAwait(false);
             line = location.GetLineSpan();
+            shown = text;
         }
-        return new SourceLocation(path, start, location.SourceSpan.Length, line.StartLinePosition.Line + 1, line.StartLinePosition.Character + 1, display);
+        if (shown is null && location.SourceTree is { } own) shown = await own.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        return new SourceLocation(path, start, location.SourceSpan.Length, line.StartLinePosition.Line + 1, line.StartLinePosition.Character + 1, display,
+            LineText: shown is null ? null : LineOf(shown, line.StartLinePosition.Line));
     }
     private static string TextHash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     private static async Task<string> CacheGeneratedAsync(string originalPath, SourceText text, CancellationToken cancellationToken)

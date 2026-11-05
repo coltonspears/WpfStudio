@@ -210,7 +210,8 @@ public sealed class GitFeatureTests
     [Fact]
     public void ConflictsParseWithAndWithoutBaseAndResolve()
     {
-        const string text = """
+        // The literal's line endings are whatever this file was checked out with, so they are set here.
+        var text = """
             using System;
             <<<<<<< HEAD
             var a = 1;
@@ -226,7 +227,7 @@ public sealed class GitFeatureTests
             Right();
             >>>>>>> Stashed changes
             end
-            """;
+            """.ReplaceLineEndings("\n");
         var blocks = MergeConflicts.Parse(text);
         Assert.Equal(2, blocks.Count);
         Assert.Equal(("HEAD", "var a = 1;\n", "feature/login", "var a = 2;\n", "var a = 0;\n"),
@@ -236,6 +237,15 @@ public sealed class GitFeatureTests
         Assert.Equal("using System;\nvar a = 2;\nmiddle\nLeft();\nRight();\nend", resolved);
         Assert.Throws<InvalidOperationException>(() => MergeConflicts.Apply(text, blocks, [ConflictChoice.Base, ConflictChoice.Base]));
         Assert.Throws<InvalidOperationException>(() => MergeConflicts.Apply(text, blocks, [ConflictChoice.Current, ConflictChoice.Unresolved]));
+
+        // A file with Windows line endings keeps them, in each side and in what is left after resolving.
+        var windows = text.ReplaceLineEndings("\r\n");
+        var windowsBlocks = MergeConflicts.Parse(windows);
+        Assert.Equal(2, windowsBlocks.Count);
+        Assert.Equal(("HEAD", "var a = 1;\r\n", "feature/login", "var a = 2;\r\n", "var a = 0;\r\n"),
+            (windowsBlocks[0].CurrentLabel, windowsBlocks[0].Current, windowsBlocks[0].IncomingLabel, windowsBlocks[0].Incoming, windowsBlocks[0].Base));
+        Assert.Equal("using System;\r\nvar a = 2;\r\nmiddle\r\nLeft();\r\nRight();\r\nend",
+            MergeConflicts.Apply(windows, windowsBlocks, [ConflictChoice.Incoming, ConflictChoice.CurrentThenIncoming]));
     }
 
     [Fact]

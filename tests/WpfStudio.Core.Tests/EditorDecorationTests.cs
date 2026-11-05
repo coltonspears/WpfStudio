@@ -35,7 +35,8 @@ public sealed class EditorDecorationTests
     [Fact]
     public void CSharpFoldsBlocksRegionsUsingsAndComments()
     {
-        const string text = """"
+        // The literal's line endings are whatever this file was checked out with, so they are set here.
+        var text = """"
             using System;
             using System.Linq;
 
@@ -59,7 +60,7 @@ public sealed class EditorDecorationTests
                 }
             }
             #endregion
-            """";
+            """".ReplaceLineEndings("\n");
         var regions = CSharpFolding.Find(text);
         string Folded(FoldRegion region) => text[region.Start..region.End];
         Assert.Contains(regions, r => r.Title == "using …" && Folded(r) == "using System;\nusing System.Linq;");
@@ -73,6 +74,12 @@ public sealed class EditorDecorationTests
         Assert.Equal("public class Customer", text[..regions.First(r => r.Title == "{ … }").Start].Split('\n')[^1].TrimStart());
         Assert.EndsWith("}", blocks[1]);
         Assert.Equal(regions.OrderBy(r => r.Start), regions);
+
+        // Windows line endings fold the same regions, and none begins or ends inside a line break.
+        var windows = text.ReplaceLineEndings("\r\n");
+        var windowsRegions = CSharpFolding.Find(windows);
+        Assert.Equal(regions.Select(r => r.Title), windowsRegions.Select(r => r.Title));
+        Assert.Equal(regions.Select(Folded), windowsRegions.Select(r => windows[r.Start..r.End].ReplaceLineEndings("\n")));
     }
 
     [Fact]

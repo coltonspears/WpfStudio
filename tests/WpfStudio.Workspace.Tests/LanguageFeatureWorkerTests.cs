@@ -297,6 +297,65 @@ public sealed class LanguageFeatureWorkerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SignatureHelpFollowsTheArgumentAndDescribesEachParameter()
+    {
+        await using var engine = new WorkspaceClient();
+        await engine.LoadAsync(new LoadWorkspaceRequest(Project));
+        var text = "namespace Shop;\npublic class Pricing\n{\n"
+            + "    /// <summary>Adds tax.</summary>\n    /// <param name=\"net\">The amount before tax.</param>\n    /// <param name=\"rate\">The tax rate,\n    /// as a fraction.</param>\n"
+            + "    public decimal Gross(decimal net, decimal rate = 0.2m) => net * (1 + rate);\n"
+            + "    public decimal Gross(string label, params decimal[] parts) => 0;\n"
+            + "    public decimal Total() => Gross(10m, 0.1m) + Gross(Gross(1m), 2m);\n"
+            + "    public decimal Named() => Gross(rate: 0.1m, net: 5m) + Gross(net: 1m, 0.3m);\n"
+            + "    public decimal Unfinished() => Gross(\"sum\", 1m, \n}\n";
+        Assert.True((await engine.UpdateDocumentAsync(new(Source, text, 1, Analyze: false))).Accepted);
+        Task<SignatureHelpResult> AtAsync(string marker) => engine.GetSignatureHelpAsync(new(Source, text.IndexOf(marker, StringComparison.Ordinal) + marker.Length, 1));
+
+        // Just inside the call: the overload it binds to, its first parameter, and where its arguments begin.
+        var first = await AtAsync("=> Gross(");
+        Assert.Equal(2, first.Signatures.Count);
+        Assert.Equal(0, first.ActiveParameter);
+        Assert.Equal(text.IndexOf("=> Gross(", StringComparison.Ordinal) + "=> Gross(".Length, first.Start);
+        var bound = first.Signatures[first.ActiveSignature];
+        Assert.Equal("decimal Pricing.Gross", bound.Prefix);
+        Assert.Equal(["decimal net", "decimal rate = 0.2"], bound.Parameters.Select(parameter => parameter.Display));
+        Assert.Equal("Adds tax.", bound.Documentation);
+        Assert.Equal("The amount before tax.", bound.Parameters[0].Documentation);
+        Assert.Equal("The tax rate, as a fraction.", bound.Parameters[1].Documentation);
+
+        // After the comma it is the second argument.
+        Assert.Equal(1, (await AtAsync("Gross(10m, ")).ActiveParameter);
+
+        // In a call inside a call, the inner one; after its closing bracket, the outer one again.
+        var inner = await AtAsync("Gross(Gross(");
+        Assert.Equal(text.IndexOf("Gross(Gross(", StringComparison.Ordinal) + "Gross(Gross(".Length, inner.Start);
+        var outer = await AtAsync("Gross(Gross(1m)");
+        Assert.Equal(text.IndexOf("Gross(Gross(", StringComparison.Ordinal) + "Gross(".Length, outer.Start);
+        Assert.Equal(0, outer.ActiveParameter);
+
+        // Past the closing bracket there is no call, and the same before the opening one.
+        Assert.Empty((await AtAsync("Gross(10m, 0.1m)")).Signatures);
+        Assert.Equal(-1, (await AtAsync("Gross(10m, 0.1m)")).Start);
+        Assert.Empty((await AtAsync("public decimal Total() => Gross")).Signatures);
+
+        // An argument written with its parameter's name is that parameter's, wherever it stands: here the first is the second's.
+        var named = await AtAsync("Gross(rate: 0.");
+        Assert.Equal((0, "rate"), (named.ActiveParameter, named.ActiveName));
+        Assert.Equal(["net", "rate"], named.Signatures[named.ActiveSignature].Parameters.Select(parameter => parameter.Name));
+        var second = await AtAsync("Gross(rate: 0.1m, net: ");
+        Assert.Equal((1, "net"), (second.ActiveParameter, second.ActiveName));
+        // One given by position has no name to go by, also after a named one.
+        Assert.Null((await AtAsync("Gross(10m, ")).ActiveName);
+        var positional = await AtAsync("Gross(net: 1m, 0.");
+        Assert.Equal((1, (string?)null), (positional.ActiveParameter, positional.ActiveName));
+
+        // A call still being typed has no closing bracket yet, and the overload with room for a third argument is the one to show.
+        var unfinished = await AtAsync("Gross(\"sum\", 1m, ");
+        Assert.Equal(2, unfinished.ActiveParameter);
+        Assert.Equal(["string label", "params decimal[] parts"], unfinished.Signatures[unfinished.ActiveSignature].Parameters.Select(parameter => parameter.Display));
+    }
+
+    [Fact]
     public async Task CompletionMatchesInitialsAndTextInsideANameNotOnlyItsStart()
     {
         await using var engine = new WorkspaceClient();

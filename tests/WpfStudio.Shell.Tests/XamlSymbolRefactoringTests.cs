@@ -248,11 +248,16 @@ public sealed class XamlSymbolRefactoringTests
         var editor = test.Shell.ActiveDocument!;
         editor.XamlProject = editor.XamlProjects[0];
         int at = Markup.IndexOf("Name}", StringComparison.Ordinal);
-        test.Shell.PublishSymbolReferences(new([new(view, at, 4, 1, at + 1, "Name", Hash(Markup), second, "Second")], ["Unknown DataContext omitted"]));
+        test.Shell.PublishSymbolReferences(new([new(view, at, 4, 1, at + 1, "Name", Hash(Markup), second, "Second", LineText: Markup)], ["Unknown DataContext omitted"]));
         var result = Assert.Single(test.Shell.SearchResults);
         Assert.Equal(second, result.ProjectPath);
         Assert.Contains("Second", result.Location);
         Assert.Contains("Unknown DataContext", test.Shell.Status);
+        // The row is the line of code the reference is on, with the name marked in it, and the list says what it holds.
+        Assert.Contains("Text=\"{Binding Name}\" />", result.Text);
+        Assert.Equal("Name", result.Text.Substring(result.MatchStart, result.MatchLength));
+        Assert.StartsWith("1 reference to Name in 1 file", test.Shell.SearchResultsTitle);
+        Assert.Contains("partial coverage", test.Shell.SearchResultsTitle);
 
         await test.Shell.NavigateSearchCommand.ExecuteAsync(result);
         Assert.Equal(second, editor.XamlProjectPath);
@@ -328,9 +333,17 @@ public sealed class XamlSymbolRefactoringTests
         Assert.Contains(test.Shell.SearchResults, result => result.Path == view);
         Assert.Contains(test.Shell.SearchResults, result => result.Path == closed);
         Assert.All(test.Shell.SearchResults, result => Assert.NotNull(result.ExpectedTextHash));
+        // Every row shows its line of code with the name marked, whether the worker read it from C# or from XAML.
+        Assert.All(test.Shell.SearchResults, result => Assert.Equal("Name", result.Text.Substring(result.MatchStart, result.MatchLength)));
+        Assert.Contains(test.Shell.SearchResults, result => result.Path == code && result.Text.Contains("c.Name", StringComparison.Ordinal));
+        Assert.Matches(@"^\d+ references to .*Name in 3 files", test.Shell.SearchResultsTitle);
 
         test.Shell.ActiveDocument = codeEditor;
         codeEditor.State.CaretOffset = Code.IndexOf("Name", StringComparison.Ordinal) + 1;
+        // The prompt opens holding the current name, and accepting it as it is renames nothing.
+        await test.Shell.RenameSymbolCommand.ExecuteAsync(null);
+        Assert.Equal("The name is unchanged", test.Shell.Status);
+        Assert.False(test.Shell.IsPreviewOpen);
         test.Dialogs.Prompts.Enqueue("FullName");
         Task operation = test.Shell.RenameSymbolCommand.ExecuteAsync(null);
         await PreviewReadyAsync(test, operation);
