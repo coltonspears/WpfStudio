@@ -83,8 +83,14 @@ internal sealed class EditorSignatureHelp
         {
             // Typing moves the caret with every key; one question once it rests is enough.
             if (follow) await Task.Delay(FollowDelay, token);
-            var result = await vm.SignatureHelpAsync(_owner.CaretOffset, token);
+            int offset = _owner.CaretOffset;
+            long version = vm.State.Version;
+            var result = await vm.SignatureHelpAsync(offset, token);
             if (token.IsCancellationRequested || !ReferenceEquals(vm, _owner.ViewModel)) return;
+            // The caret or the text moved on while the worker answered, as when an argument is typed straight after its
+            // bracket. The answer is for a place the caret has left: neither shown nor taken as "no call here", but asked
+            // again once the caret rests. A closed card has nothing else watching the caret for it.
+            if (_owner.CaretOffset != offset || vm.State.Version != version) { Request(follow: true); return; }
             if (result is null || !_owner.IsKeyboardFocusWithin) { Close(); return; }
             Show(result);
         }
@@ -96,11 +102,11 @@ internal sealed class EditorSignatureHelp
         bool sameCall = IsOpen && _shown is { } previous && previous.Start == result.Start && previous.Signatures.Count == result.Signatures.Count;
         if (!sameCall || !_picked) { _selected = Math.Clamp(result.ActiveSignature, 0, result.Signatures.Count - 1); _picked = false; }
         // An overload that has no parameter for the argument being typed gives way to the next one that has.
-        if (!Takes(result.Signatures[_selected], result.ActiveParameter))
+        if (!Takes(result.Signatures[_selected], result))
             for (int step = 1; step < result.Signatures.Count; step++)
             {
                 int candidate = (_selected + step) % result.Signatures.Count;
-                if (Takes(result.Signatures[candidate], result.ActiveParameter)) { _selected = candidate; break; }
+                if (Takes(result.Signatures[candidate], result)) { _selected = candidate; break; }
             }
         _shown = result;
         Render(result);
@@ -108,20 +114,33 @@ internal sealed class EditorSignatureHelp
         _popup.IsOpen = true;
     }
 
-    private static bool Takes(SignatureEntry signature, int argument) =>
-        argument < signature.Parameters.Count || signature.Parameters.Count > 0 && IsParams(signature.Parameters[^1]) || argument == 0;
+    // An overload with no parameters still shows for a call's first, not yet typed, argument.
+    private static bool Takes(SignatureEntry signature, SignatureHelpResult result) =>
+        ActiveParameter(signature, result.ActiveParameter, result.ActiveName) >= 0 || result is { ActiveParameter: 0, ActiveName: null };
 
     private static bool IsParams(SignatureParameter parameter) => parameter.Display?.StartsWith("params ", StringComparison.Ordinal) == true;
 
-    /// <summary>The parameter the argument at <paramref name="argument"/> goes to: its own, or a trailing params array.</summary>
-    internal static int ActiveParameter(SignatureEntry signature, int argument) =>
-        argument < signature.Parameters.Count ? argument
-        : signature.Parameters.Count > 0 && IsParams(signature.Parameters[^1]) ? signature.Parameters.Count - 1 : -1;
+    /// <summary>
+    /// The parameter an argument goes to, or -1 when the overload has none for it. An argument written with a name goes to
+    /// the parameter of that name, wherever it stands in the call; one given by position goes to the parameter at its
+    /// position, or to a trailing params array.
+    /// </summary>
+    internal static int ActiveParameter(SignatureEntry signature, int argument, string? name = null)
+    {
+        if (name is not null)
+        {
+            for (int index = 0; index < signature.Parameters.Count; index++)
+                if (signature.Parameters[index].Name == name) return index;
+            return -1;
+        }
+        return argument < signature.Parameters.Count ? argument
+            : signature.Parameters.Count > 0 && IsParams(signature.Parameters[^1]) ? signature.Parameters.Count - 1 : -1;
+    }
 
     private void Render(SignatureHelpResult result)
     {
         var signature = result.Signatures[_selected];
-        int active = ActiveParameter(signature, result.ActiveParameter);
+        int active = ActiveParameter(signature, result.ActiveParameter, result.ActiveName);
         var text = new TextBlock { FontFamily = _owner.FontFamily, FontSize = _owner.FontSize, TextWrapping = TextWrapping.Wrap };
         text.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         var prefix = signature.Prefix ?? (signature.Label.IndexOf('(') is > 0 and var paren ? signature.Label[..paren] : signature.Label);

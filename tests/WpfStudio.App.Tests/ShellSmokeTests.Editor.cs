@@ -132,6 +132,21 @@ public sealed partial class ShellSmokeTests
         Assert.NotEqual(before, CardText());
         editor.CaretOffset = content.IndexOf("Count++", StringComparison.Ordinal);
         await UntilAsync(() => !editor.SignatureHelp.IsOpen, "signature help to close outside the call");
+        // Asked for inside the call, with the caret gone from it before the worker answers: no card for a place the caret has left.
+        int outside = content.IndexOf("Count++", StringComparison.Ordinal);
+        editor.CaretOffset = call + 1;
+        await Idle();
+        editor.SignatureHelp.Trigger();
+        editor.CaretOffset = outside;
+        await Task.Delay(1500);
+        await Idle();
+        Assert.False(editor.SignatureHelp.IsOpen, "An answer for where the caret was must not open a card where it is now.");
+        // And the other way round, as when an argument is typed straight after its bracket: the card comes for where the caret rests.
+        editor.SignatureHelp.Trigger();
+        editor.CaretOffset = call + 1;
+        await UntilAsync(() => editor.SignatureHelp.IsOpen, "signature help for the call the caret moved into while the worker answered");
+        editor.CaretOffset = outside;
+        await UntilAsync(() => !editor.SignatureHelp.IsOpen, "signature help to close outside the call again");
 
         // --- Replace in the file: Ctrl+H opens the find panel with its replace row.
         editor.ShowReplace();

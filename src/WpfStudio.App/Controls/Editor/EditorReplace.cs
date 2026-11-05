@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Editing;
 using ICSharpCode.AvalonEdit.Search;
 
@@ -70,25 +71,60 @@ public static class EditorReplace
         if (Strategy(panel, out var problem) is not { } strategy) return new(0, problem);
         var document = area.Document;
         int replaced = 0;
-        var selection = area.Selection.SurroundingSegment;
-        if (selection is { Length: > 0 } && strategy.FindAll(document, selection.Offset, selection.Length).FirstOrDefault() is { } current
-            && current.Offset == selection.Offset && current.Length == selection.Length)
+        bool replacedEmpty = false;
+        var current = Current(panel, area, strategy);
+        panel.ClearValue(ShownProperty);
+        if (current is not null)
         {
             var replacement = Replacement(panel, current);
             document.Replace(current.Offset, current.Length, replacement);
             area.ClearSelection();
             area.Caret.Offset = current.Offset + replacement.Length;
             replaced = 1;
+            replacedEmpty = current.Length == 0;
         }
         // From the caret on, then from the top: the panel's own Find next skips a match that starts at the caret.
-        var next = strategy.FindNext(document, Math.Min(area.Caret.Offset, document.TextLength), document.TextLength)
-            ?? strategy.FindNext(document, 0, document.TextLength);
+        int from = Math.Min(area.Caret.Offset, document.TextLength);
+        var next = After(strategy, document, from, replacedEmpty) ?? strategy.FindNext(document, 0, document.TextLength);
+        // Coming round from the top to the place just replaced is the end, not another match.
+        if (replacedEmpty && next is { Length: 0 } && next.Offset == from) next = null;
         if (next is null) return new(replaced, replaced == 1 ? "Replaced the last occurrence" : "Nothing to replace: no match for the search text");
         area.Caret.Offset = next.Offset + next.Length;
-        area.Selection = Selection.Create(area, next.Offset, next.Offset + next.Length);
+        if (next.Length > 0) area.Selection = Selection.Create(area, next.Offset, next.Offset + next.Length);
+        else
+        {
+            area.ClearSelection();
+            panel.SetValue(ShownProperty, new Shown(next.Offset, document.Version));
+        }
         area.Caret.BringCaretToView();
         area.Caret.Show(); // The keyboard focus is in the panel.
-        return new(replaced, replaced == 1 ? "Replaced 1 occurrence" : "");
+        return new(replaced, replaced == 1 ? "Replaced 1 occurrence" : next.Length == 0 ? "The next match is at the caret and has no length; Replace inserts there" : "");
+    }
+
+    // A match of no length, as ^ or a lookahead finds, cannot be shown by selecting it: the caret is put there, and where
+    // that was is kept so that the next press replaces it. The caret or the text moving on forgets it.
+    private sealed record Shown(int Offset, ITextSourceVersion Version);
+    private static readonly DependencyProperty ShownProperty = DependencyProperty.RegisterAttached("Shown", typeof(Shown), typeof(EditorReplace));
+
+    // The match a press replaces: the one that is selected, or one of no length last shown at the caret.
+    private static ISearchResult? Current(SearchPanel panel, TextArea area, ISearchStrategy strategy)
+    {
+        var document = area.Document;
+        if (area.Selection.SurroundingSegment is { Length: > 0 } selection)
+            return strategy.FindAll(document, selection.Offset, selection.Length).FirstOrDefault(match => match.Offset == selection.Offset && match.Length == selection.Length);
+        if (panel.GetValue(ShownProperty) is not Shown shown || shown.Offset != area.Caret.Offset
+            || !shown.Version.BelongsToSameDocumentAs(document.Version) || shown.Version.CompareAge(document.Version) != 0) return null;
+        return strategy.FindAll(document, shown.Offset, 0).FirstOrDefault(match => match.Length == 0);
+    }
+
+    // The first match from an offset on. After a match of no length was replaced, the place it was at is not matched empty
+    // again, as a regular expression moves on after an empty match: otherwise a lookahead would be replaced there for ever.
+    private static ISearchResult? After(ISearchStrategy strategy, TextDocument document, int from, bool afterEmpty)
+    {
+        var next = strategy.FindNext(document, from, document.TextLength - from);
+        if (afterEmpty && next is { Length: 0 } && next.Offset == from)
+            next = from < document.TextLength ? strategy.FindNext(document, from + 1, document.TextLength - from - 1) : null;
+        return next;
     }
 
     /// <summary>Replaces every match in the document as one undoable change.</summary>

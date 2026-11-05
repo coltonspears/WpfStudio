@@ -524,10 +524,14 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 method.ToDisplayString(SignaturePrefixFormat));
         }).ToArray();
         var active = argumentList.Arguments.GetSeparators().Count(s => s.SpanStart < request.Position);
-        // The overload the call binds to comes first. While the call is incomplete, the first that takes this many arguments is the likeliest.
+        // An argument that names its parameter goes to that one, wherever it stands among the others.
+        var named = active < argumentList.Arguments.Count ? argumentList.Arguments[active].NameColon?.Name.Identifier.ValueText : null;
+        // The overload the call binds to comes first. While the call is incomplete, the first that takes this many arguments,
+        // and has the parameter being named, is the likeliest.
         int typed = argumentList.Arguments.Count;
-        int fitting = symbolInfo.Symbol is not null ? 0 : Array.FindIndex(methods, method => Takes(method, Math.Max(typed, active + 1)));
-        return new SignatureHelpResult(request.Version, active, signatures, Math.Max(0, fitting), argumentList.GetFirstToken().Span.End);
+        int fitting = symbolInfo.Symbol is not null ? 0 : Array.FindIndex(methods, method => Takes(method, Math.Max(typed, active + 1))
+            && (named is null || method.Parameters.Any(parameter => parameter.Name == named)));
+        return new SignatureHelpResult(request.Version, active, signatures, Math.Max(0, fitting), argumentList.GetFirstToken().Span.End, named);
     }
 
     private static readonly SymbolDisplayFormat SignaturePrefixFormat = SymbolDisplayFormat.MinimallyQualifiedFormat

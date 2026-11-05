@@ -276,7 +276,80 @@ public sealed class EditorEditingTests
         Assert.Equal(-1, EditorSignatureHelp.ActiveParameter(plain, 2));
         Assert.Equal(1, EditorSignatureHelp.ActiveParameter(open, 4));
         Assert.Equal(-1, EditorSignatureHelp.ActiveParameter(new SignatureEntry("M()", null, []), 0));
+
+        // An argument written with a name goes to the parameter of that name, not to the one at its place in the call:
+        // in M(b: "x", a: 1) the first argument is the second parameter.
+        Assert.Equal(1, EditorSignatureHelp.ActiveParameter(plain, 0, "b"));
+        Assert.Equal(0, EditorSignatureHelp.ActiveParameter(plain, 1, "a"));
+        Assert.Equal(1, EditorSignatureHelp.ActiveParameter(open, 0, "values"));
+        // An overload without a parameter of that name has none for it, whatever its position.
+        Assert.Equal(-1, EditorSignatureHelp.ActiveParameter(plain, 0, "format"));
     }
+
+    [Fact]
+    public Task ReplaceStepsThroughMatchesThatHaveNoLength() => WithEditorAsync("Empty.cs", "one\n|two\n\nthree", (editor, _, _) =>
+    {
+        var panel = editor.FindPanel;
+        panel.UseRegex = true;
+        panel.SearchPattern = "^";
+        EditorReplace.SetText(panel, "// ");
+
+        // There is nothing to select, so the caret is put where the text would go, and the first press changes nothing.
+        var shown = EditorReplace.Next(panel, editor.TextArea);
+        Assert.Equal(0, shown.Replaced);
+        Assert.Contains("no length", shown.Status);
+        Assert.Equal("one\n|two\n\nthree", Marked(editor));
+
+        // Each further press inserts there and moves to the next line's start, an empty line's included.
+        Assert.Equal(1, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("one\n// two\n|\nthree", Marked(editor));
+        Assert.Equal(1, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("one\n// two\n// \n|three", Marked(editor));
+
+        // A caret moved elsewhere is not where a match was shown: the press shows the next one instead of inserting.
+        editor.CaretOffset = 1;
+        Assert.Equal(0, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("one\n|// two\n// \nthree", Marked(editor));
+        // Nor is one that the text has changed around since, though the caret is still there.
+        editor.Document.Insert(editor.Document.TextLength, "!");
+        Assert.Equal(0, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("one\n|// two\n// \nthree!", Marked(editor));
+
+        // Replace all inserts at every line as one undo step.
+        var before = Text(editor);
+        var all = EditorReplace.All(panel, editor.TextArea);
+        Assert.Equal(4, all.Replaced);
+        Assert.Equal("// one\n// // two\n// // \n// three!", Text(editor));
+        editor.Undo();
+        Assert.Equal(before, Text(editor));
+    });
+
+    [Fact]
+    public Task ReplacingBeforeALookaheadMovesOnInsteadOfInsertingThereAgain() => WithEditorAsync("Ahead.cs", "|count = count + 1;", (editor, _, _) =>
+    {
+        var panel = editor.FindPanel;
+        panel.UseRegex = true;
+        panel.MatchCase = true;
+        panel.SearchPattern = "(?=count)";
+        EditorReplace.SetText(panel, "_");
+        Assert.Equal(0, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        // After the insertion the lookahead still matches where the caret now is; the next one is the one after it.
+        Assert.Equal(1, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("_count = |count + 1;", Marked(editor));
+        // Past the last one the search comes round from the top, where a pattern that still matches what it produced is found again.
+        Assert.Equal(1, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("_|count = _count + 1;", Marked(editor));
+
+        // With one place only, coming round to it is the end: it is not replaced over and over.
+        editor.Document.Text = "count";
+        editor.CaretOffset = 0;
+        Assert.Equal(0, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        var only = EditorReplace.Next(panel, editor.TextArea);
+        Assert.Equal((1, "Replaced the last occurrence"), (only.Replaced, only.Status));
+        Assert.Equal("_|count", Marked(editor));
+        Assert.Equal(0, EditorReplace.Next(panel, editor.TextArea).Replaced);
+        Assert.Equal("_|count", Marked(editor));
+    });
 
     private static Task OnDispatcherAsync(Func<Task> action)
     {

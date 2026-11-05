@@ -53,9 +53,11 @@ public sealed record SignatureEntry(string Label, string? Documentation, IReadOn
 /// <summary>
 /// The overloads of the call the position is in. <paramref name="ActiveParameter"/> is the argument being typed,
 /// <paramref name="ActiveSignature"/> the overload that argument list fits best, and <paramref name="Start"/> the offset
-/// just inside the call's opening bracket, or -1 when the position is in no call.
+/// just inside the call's opening bracket, or -1 when the position is in no call. An argument written with its
+/// parameter's name, as in <c>M(second: 1, first: 2)</c>, goes to that parameter wherever it stands in the call:
+/// <paramref name="ActiveName"/> is then that name, and null for an argument given by position.
 /// </summary>
-public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures, int ActiveSignature = 0, int Start = -1);
+public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures, int ActiveSignature = 0, int Start = -1, string? ActiveName = null);
 /// <summary><paramref name="LineText"/> is the source line the location is on, so a list of locations can show the code and not only where it is.</summary>
 public sealed record SourceLocation(string Path, int Start, int Length, int Line, int Column, string? DisplayText = null,
     string? ExpectedTextHash = null, string? ProjectPath = null, string? ProjectName = null, string? LineText = null);
