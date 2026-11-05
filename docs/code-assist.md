@@ -105,6 +105,8 @@ Inference runs **in the IDE process**, on the thread pool, one request at a time
 
 Before a line model reads code, carriage returns become bare newlines and leading tabs become four spaces, because that is nearly all it trained on. A space just before the caret is taken off, because a token owns the space before it, so the model predicts that space and the suggestion drops it again.
 
+The Experimental page is a template, built the first time it is shown, so with the feature off even the manifests stay unread at startup. A manifest with incomplete provenance is listed under the catalog's problems and not offered.
+
 Version 4.0.0 decodes one candidate line. Keeping four cost four times the work and gained nothing once gated. The gate is logistic regression, stored in the manifest, with separate weights for long lines and short ones, because one gate across all lengths learns that only short lines are safe. Accessors and bare punctuation count as short however long they run. A line the model cannot finish within 48 tokens is not shown at all, since that usually means it is repeating itself.
 
 It is slower than the GRUs and larger: through the shipped C# on one thread, with 8 KB of context, the median request takes 114 ms and the slowest about 300 ms, against 19 ms and 28 ms for 3.0.0. The file is 18 MB against 10 MB. Requests run off the UI thread, after a pause, and typing cancels them between tokens.

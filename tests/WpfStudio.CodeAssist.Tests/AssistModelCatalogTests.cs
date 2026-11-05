@@ -75,6 +75,46 @@ public sealed class AssistModelCatalogTests : IDisposable
         Assert.Equal("18.2 MB", facts["Size"]);
     }
 
+    [Theory]
+    [InlineData("trainedAs")]
+    [InlineData("createdUtc")]
+    [InlineData("corpus")]
+    [InlineData("datasetSha256")]
+    public void ABadVersionIsListedAsAProblemAndDoesNotHideTheOthers(string missing)
+    {
+        WriteManifest("lines", "1.0.0", "1.0.0");
+        string path = Path.Combine(WriteManifest("lines", "2.0.0", "2.0.0"), "manifest.json");
+        var fields = new Dictionary<string, string> { ["trainedAs"] = "x", ["createdUtc"] = "2026-11-05T00:00:00Z", ["corpus"] = "y", ["datasetSha256"] = "z" };
+        fields.Remove(missing);
+        string provenance = string.Join(", ", fields.Select(field => $"\"{field.Key}\": \"{field.Value}\""));
+        File.WriteAllText(path, File.ReadAllText(path).Replace("\"files\":", $"\"provenance\": {{ {provenance} }},\n\"files\":", StringComparison.Ordinal));
+        var catalog = new AssistModelCatalog(_directory);
+        Assert.Contains(catalog.Problems, problem => problem.Contains("provenance is incomplete", StringComparison.Ordinal));
+        Assert.Equal(["1.0.0"], catalog.Versions(AssistModelKind.Lines).Select(model => model.Manifest.Version));
+    }
+
+    [Fact]
+    public void AManifestWithNullListsIsAProblemRatherThanACrash()
+    {
+        string folder = WriteManifest("lines", "1.0.0", "1.0.0");
+        string path = Path.Combine(folder, "manifest.json");
+        string text = File.ReadAllText(path);
+        File.WriteAllText(path, text[..text.IndexOf("\"files\":", StringComparison.Ordinal)] + "\"files\": null, " + text[text.IndexOf("\"members\":", StringComparison.Ordinal)..]);
+        var catalog = new AssistModelCatalog(_directory);
+        Assert.Empty(catalog.Versions(AssistModelKind.Lines));
+        Assert.Contains(catalog.Problems, problem => problem.Contains("no model.onnx", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReadingIsLeftUntilSomethingAsks()
+    {
+        WriteManifest("lines", "1.0.0", "1.0.0");
+        var catalog = new AssistModelCatalog(_directory);
+        Assert.False(catalog.IsRead);
+        _ = catalog.Versions(AssistModelKind.Lines);
+        Assert.True(catalog.IsRead);
+    }
+
     [Fact]
     public void AManifestWithLittleInItStillDescribesItself()
     {

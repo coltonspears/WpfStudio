@@ -94,7 +94,7 @@ public sealed record AssistModel(AssistModelManifest Manifest, string Directory,
             new("Size", InstalledSize),
             new("Identity", provenance is null ? Name : $"{Name}, trained as {provenance.TrainedAs}, dataset {provenance.DatasetSha256[..Math.Min(12, provenance.DatasetSha256.Length)]}"),
         };
-        return [.. facts.Where(fact => fact.Value.Length > 0)];
+        return [.. facts.Where(fact => !string.IsNullOrEmpty(fact.Value))];
     }
 
     private string Network() => Manifest switch
@@ -144,6 +144,9 @@ public sealed class AssistModelCatalog(string directory)
 
     public IReadOnlyList<string> Problems => _installed.Value.Problems;
 
+    /// <summary>Whether the versions have been read. With the feature off, nothing should have needed them.</summary>
+    public bool IsRead => _installed.IsValueCreated;
+
     /// <summary>The installed versions of a kind of model, newest first.</summary>
     public IReadOnlyList<AssistModel> Versions(AssistModelKind kind) => [.. _installed.Value.Models.Where(model => model.Kind == kind).OrderByDescending(model => model.Version)];
 
@@ -178,7 +181,10 @@ public sealed class AssistModelCatalog(string directory)
         if (!Version.TryParse(manifest.Version, out var version) || version.Build < 0 || version.Revision >= 0) throw new InvalidDataException($"The version {manifest.Version} is not major.minor.patch.");
         // The folder is the version a settings file refers to, so it has to agree with what the manifest says it holds.
         if (Path.GetFileName(folder) != manifest.Version || Path.GetFileName(Path.GetDirectoryName(folder)) != kind) throw new InvalidDataException($"{manifest.Id} {manifest.Version} must live in {kind}/{manifest.Version}.");
-        if (manifest.Files.Count == 0 || !manifest.Files.ContainsKey("model.onnx")) throw new InvalidDataException("The manifest lists no model.onnx.");
+        if (manifest.Files is not { Count: > 0 } || !manifest.Files.ContainsKey("model.onnx")) throw new InvalidDataException("The manifest lists no model.onnx.");
+        // The settings page describes every version from these, so a gap here is a problem to report, not a crash when the page is built.
+        if (manifest.Provenance is { } provenance && (string.IsNullOrWhiteSpace(provenance.TrainedAs) || string.IsNullOrWhiteSpace(provenance.Corpus) || string.IsNullOrWhiteSpace(provenance.DatasetSha256) || provenance.CreatedUtc == default))
+            throw new InvalidDataException("The manifest's provenance is incomplete.");
         if (manifest.Kind == AssistModelKind.Members ? manifest.Members is null : manifest.Lines is null) throw new InvalidDataException($"The manifest has no {kind} settings.");
         return new AssistModel(manifest, folder, version);
     }

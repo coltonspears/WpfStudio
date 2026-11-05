@@ -233,6 +233,25 @@ public sealed class CodeAssistEngineTests : IDisposable
     }
 
     [Fact]
+    public void TheGateSearchesWhatItWasFittedOn()
+    {
+        // Measured before tabs expand. This fits in 5,000 characters as written, and would not once its tabs became spaces.
+        string tabbed = "first\r\n" + string.Concat(Enumerable.Repeat("\t\t\t\tx;\n", 700));
+        string window = TransformerLineGenerator.SearchWindow(tabbed);
+        Assert.StartsWith("first\n", window, StringComparison.Ordinal);
+        Assert.Contains('\t', window);
+        Assert.Equal(5000, TransformerLineGenerator.SearchWindow(string.Concat(Enumerable.Repeat("x;\n", 2000))).Length);
+
+        // As Python reads them: an accented letter continues a name, and a combining mark ends it.
+        Assert.Equal(["x\u00E91"], TransformerLineGenerator.Names("x\u00E91"));
+        Assert.Equal(["xe", "y"], TransformerLineGenerator.Names("xe\u0301y"));
+        Assert.Equal(["_name1", "x"], TransformerLineGenerator.Names("_name1 + x;"));
+
+        // An emoji is one character, as it was when the gate was fitted.
+        Assert.Equal(2, TransformerLineGenerator.VisibleLength(" \U0001F600 x\t"));
+    }
+
+    [Fact]
     public void AGateThatDoesNotFitThisBuildIsRefused()
     {
         var model = new AssistModelCatalog(AssistModelCatalog.DefaultDirectory).Resolve(AssistModelKind.Lines, "4.0.0")!;
