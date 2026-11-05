@@ -49,6 +49,9 @@ LINE_CONTEXTS = [
     "foreach (var item in items)\n{\n    Console.WriteLine(item.Name);\n    Console.",
     "// Clear out the array\nnames.",
     "private readonly List<string> _items = new();\n\npublic void Add(string value)\n{\n    _items",
+    "public sealed class Person\n{\n\tpublic string Name { get; set; }\n\tpublic string Email { get; ",
+    "class Demo\n{\n\tvoid Run(CancellationToken cancellationToken = default)\n\t{\n\t\ttry\n\t\t{\n\t\t}\n\t\tcatch ",
+    "class Demo\n{\n\tvoid Run()\n\t{\n\t\t",
 ]
 
 
@@ -103,10 +106,11 @@ def gated_lines(folder, shipped):
 
 
 v2 = sandbox / ".sandbox-cache" / "experiments" / "code-assist-lines-2.0.0"
+v3 = sandbox / ".sandbox-cache" / "experiments" / "code-assist-lines-3.0.0"
 golden = {
     "members": {version: member_cases(int(version[0]), models / "members" / version) for version in ("1.0.0", "2.0.0")},
-    "tokens": {"1.0.0": tokens(models / "lines" / "1.0.0"), "2.0.0": tokens(models / "lines" / "2.0.0")},
-    "lines": {"1.0.0": lines_v1(), "2.0.0": gated_lines(v2, models / "lines" / "2.0.0")},
+    "tokens": {version: tokens(models / "lines" / version) for version in ("1.0.0", "2.0.0", "3.0.0")},
+    "lines": {"1.0.0": lines_v1(), "2.0.0": gated_lines(v2, models / "lines" / "2.0.0"), "3.0.0": gated_lines(v3, models / "lines" / "3.0.0")},
 }
 
 out = Path(__file__).with_name("golden.json")

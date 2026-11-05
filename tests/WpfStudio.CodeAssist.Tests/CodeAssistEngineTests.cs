@@ -184,18 +184,31 @@ public sealed class CodeAssistEngineTests : IDisposable
         Assert.NotNull(line);
         Assert.StartsWith("set;", line, StringComparison.Ordinal);
         Assert.DoesNotContain('\n', line);
-        Assert.Contains("code-assist-lines 2.0.0 is loaded", engine.Status, StringComparison.Ordinal);
+        Assert.Contains("code-assist-lines 3.0.0 is loaded", engine.Status, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("1.0.0")]
     [InlineData("2.0.0")]
+    [InlineData("3.0.0")]
     public async Task WindowsLineEndingsGiveTheSameSuggestion(string version)
     {
         using var engine = NewEngine();
         await engine.ConfigureAsync(new CodeAssistOptions(true, LineSuggestions: true, LineModelVersion: version));
         string windows = PropertyContext.Replace("\n", "\r\n", StringComparison.Ordinal);
         Assert.Equal(await engine.SuggestLineAsync(PropertyContext, PropertyContext.Length), await engine.SuggestLineAsync(windows, windows.Length));
+    }
+
+    [Theory]
+    [InlineData("1.0.0")]
+    [InlineData("2.0.0")]
+    [InlineData("3.0.0")]
+    public async Task TabIndentationGivesTheSameSuggestionAsSpaces(string version)
+    {
+        using var engine = NewEngine();
+        await engine.ConfigureAsync(new CodeAssistOptions(true, LineSuggestions: true, LineModelVersion: version));
+        const string tabs = "public sealed class Person\n{\n\tpublic string Name { get; set; }\n\tpublic string Email { get; ";
+        Assert.Equal(await engine.SuggestLineAsync(PropertyContext, PropertyContext.Length), await engine.SuggestLineAsync(tabs, tabs.Length));
     }
 
     [Fact]

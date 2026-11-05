@@ -1,0 +1,32 @@
+{
+  "formatVersion": 1,
+  "id": "code-assist-lines",
+  "kind": "lines",
+  "version": "3.0.0",
+  "language": "csharp",
+  "summary": "Continues the current line as far as it is confident. Stays quiet the rest of the time. Read widely, then fine-tuned on the owner's code.",
+  "limitations": "On code it never trained on, it offers something about 1 time in 9, and about 3 in 4 of those are right. Read what it suggests before you keep it.",
+  "provenance": {
+    "trainedAs": "lines-pre",
+    "createdUtc": "2026-11-03T16:05:11.659594+00:00",
+    "corpus": "6,306 C# files: 8 of the owner's public repositories, plus three MIT-licensed ones, dotnet/wpf at 69805e9, icsharpcode/AvalonEdit at ed0bd14 and MaterialDesignInXAML/MaterialDesignInXamlToolkit at 0877280. No private code. No Microsoft model weights or predictions.",
+    "datasetSha256": "0eb8e2b2fff528e6ffcae5fe1fb10b988444e3ad53b4eb4a8b51795af69175c9"
+  },
+  "evaluation": "1,500 places where ghost text can appear, from 679 files in 8 private repositories it never trained on: offered 11.0%, right when offered 74.5%, 2.8 wrong per 100 requests, 1.9% of characters saved. Version 2.0.0 on the same cases: offered 12.1%, right 69.2%, 3.7 wrong per 100, 2.0% saved. On AvalonEdit, by other authors, the same recipe trained without it: right 69.5%, 2.0% saved; version 2.0.0: right 51.0%, 1.0% saved.",
+  "files": {
+    "model.onnx": "75345c5af586fc97bcf9d0198937dda50bfed9286a5be7e8bac4fde851a5a5b2",
+    "tokenizer.json": "064cbaeadd8e721f64233c5892066743a411f887358ccf044874209e0af21340"
+  },
+  "lines": {
+    "featureVersion": 1,
+    "vocabSize": 4096,
+    "hiddenSize": 384,
+    "contextTokens": 256,
+    "padId": 0,
+    "bosId": 1,
+    "eosId": 2,
+    "contextCacheWeight": 0.3,
+    "layers": 2,
+    "tokenConfidence": 0.7
+  }
+}
