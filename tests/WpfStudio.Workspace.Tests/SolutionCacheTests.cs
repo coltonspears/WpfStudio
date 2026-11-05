@@ -2,6 +2,7 @@ using WpfStudio.Contracts;
 
 namespace WpfStudio.Workspace.Tests;
 
+[Collection(WorkspaceCacheIsolationTests.Collection)]
 public sealed class SolutionCacheTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("WpfStudio-SolutionCache-").FullName;
