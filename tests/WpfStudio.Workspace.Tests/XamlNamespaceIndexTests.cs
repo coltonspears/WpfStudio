@@ -24,7 +24,7 @@ public sealed class XamlNamespaceIndexTests : IDisposable
     [Fact]
     public void ReadsDeclarationsAndSkipsDesignTimeAndReferenceAssemblies()
     {
-        var controls = XamlNamespaceIndex.ReadLibrary(Emit("Vendor.Controls", """
+        var controls = XamlNamespaceLibraryReader.Read(Emit("Vendor.Controls", """
             [assembly: System.Windows.Markup.XmlnsDefinition("http://vendor/wpf", "Vendor")]
             [assembly: System.Windows.Markup.XmlnsCompatibleWith("http://vendor/2019", "http://vendor/wpf")]
             namespace Vendor { public class Gauge { } }
@@ -36,15 +36,15 @@ public sealed class XamlNamespaceIndexTests : IDisposable
 
         // Visual Studio design-time parts often repeat the runtime namespace but cannot load outside the designer.
         var designer = Emit("Microsoft.VisualStudio.DesignTools.Extensibility", "namespace Designer { public class Metadata { } }");
-        Assert.Null(XamlNamespaceIndex.ReadLibrary(Emit("Vendor.Controls.Design", """
+        Assert.Null(XamlNamespaceLibraryReader.Read(Emit("Vendor.Controls.Design", """
             [assembly: System.Windows.Markup.XmlnsDefinition("http://vendor/wpf", "Vendor.Design")]
             namespace Vendor.Design { public class Registration : Designer.Metadata { } }
             """, _markup, designer)));
-        Assert.Null(XamlNamespaceIndex.ReadLibrary(Emit("Vendor.Reference", """
+        Assert.Null(XamlNamespaceLibraryReader.Read(Emit("Vendor.Reference", """
             [assembly: System.Windows.Markup.XmlnsDefinition("http://vendor/wpf", "Vendor")]
             [assembly: System.Runtime.CompilerServices.ReferenceAssembly]
             """, _markup)));
-        Assert.Null(XamlNamespaceIndex.ReadLibrary(designer));
+        Assert.Null(XamlNamespaceLibraryReader.Read(designer));
     }
 
     [Fact]

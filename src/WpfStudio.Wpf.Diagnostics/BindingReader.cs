@@ -134,7 +134,7 @@ public static partial class BindingReader
     private static bool IsMissingClrProperty(BindingExpression expression, object? source, string? path)
     {
         if (source is null or DependencyObject or ICustomTypeDescriptor or ICustomTypeProvider or IDynamicMetaObjectProvider or IEnumerable or IListSource ||
-            !string.IsNullOrEmpty(expression.ParentBinding.XPath) || string.IsNullOrEmpty(path) || path.Length > 2048 ||
+            !string.IsNullOrEmpty(expression.ParentBinding.XPath) || path is not { Length: > 0 and <= 2048 } ||
             !(path[0] is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or '_') ||
             path.Any(c => !(c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_')))
             return false;

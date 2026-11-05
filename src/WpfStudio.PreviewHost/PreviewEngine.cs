@@ -41,9 +41,7 @@ public sealed class PreviewEngine : IPreviewRpc, IDisposable
         string? sessionId = null, int parentProcessId = 0)
     {
         _dispatcher = dispatcher;
-        _native = new PreviewNativeSurface(_scene, dispatcher, new PreviewHostSession(sessionId ?? Guid.NewGuid().ToString("N"), Environment.ProcessId,
-            parentProcessId, PreviewNativeNavigation.ProtocolVersion, Guid.TryParseExact(sessionId, "N", out _) && parentProcessId > 0 &&
-                OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063)));
+        _native = new PreviewNativeSurface(_scene, dispatcher, PreviewHostSessions.Create(sessionId, parentProcessId));
         _tree = new PreviewVisualTree(_scene, _log);
         _layout = new PreviewLayoutEditing(_scene, _tree, _native);
         _inspector = new PreviewInspector(_scene, _tree, _layout, _log);
@@ -64,6 +62,9 @@ public sealed class PreviewEngine : IPreviewRpc, IDisposable
             _status = null;
             _build = null;
             _scenario = null;
+#if NETFRAMEWORK
+            _log.Add(new($"Preview is running on {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}, {(Environment.Is64BitProcess ? 64 : 32)}-bit, chosen from this project's build.", "Information"));
+#endif
             try
             {
                 if (!double.IsFinite(request.Width) || !double.IsFinite(request.Height) || request.Width < 32 || request.Height < 32 || request.Width > 4096 || request.Height > 4096)

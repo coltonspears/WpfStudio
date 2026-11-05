@@ -1,15 +1,10 @@
-using System.Reflection.Metadata;
-using System.Reflection.PortableExecutable;
 using System.Text.RegularExpressions;
 using System.Xml;
 
 namespace WpfStudio.PreviewDependencies;
 
-/// <summary>The XAML namespaces an assembly declares through XmlnsDefinition and XmlnsCompatibleWith, read from metadata.</summary>
-internal sealed record XamlNamespaceLibrary(string Path, string Name, IReadOnlyList<string> Namespaces, IReadOnlyList<KeyValuePair<string, string>> Compatible);
-
 /// <summary>Namespaces a document declares (loaded when a library defines them) and those its markup uses (reported when none does).</summary>
-internal sealed record XamlNamespaceUse(IReadOnlySet<string> Declared, IReadOnlySet<string> Used);
+internal sealed record XamlNamespaceUse(IReadOnlyCollection<string> Declared, IReadOnlyCollection<string> Used);
 
 internal sealed record XamlNamespaceSelection(IReadOnlyList<XamlNamespaceLibrary> Libraries, IReadOnlyList<string> Unresolved);
 
@@ -59,53 +54,14 @@ internal static partial class XamlNamespaceIndex
         return new(declared.Where(Library).ToHashSet(StringComparer.Ordinal), used.Where(Library).ToHashSet(StringComparer.Ordinal));
     }
 
-    [GeneratedRegex(@"(?<![\w.:-])([A-Za-z_][\w.-]*):(?=[A-Za-z_])")]
+    private const string PrefixInValuePattern = @"(?<![\w.:-])([A-Za-z_][\w.-]*):(?=[A-Za-z_])";
+#if NETFRAMEWORK
+    private static readonly Regex PrefixInValueRegex = new(PrefixInValuePattern, RegexOptions.CultureInvariant);
+    private static Regex PrefixInValue() => PrefixInValueRegex;
+#else
+    [GeneratedRegex(PrefixInValuePattern)]
     private static partial Regex PrefixInValue();
-
-    /// <summary>
-    /// Reads an assembly's XAML namespace declarations without loading it. Returns null for files that are not
-    /// assemblies, reference assemblies, Visual Studio design-time assemblies, and assemblies that declare no namespace.
-    /// </summary>
-    public static XamlNamespaceLibrary? ReadLibrary(string path)
-    {
-        try
-        {
-            using var stream = System.IO.File.OpenRead(path);
-            using var pe = new PEReader(stream);
-            if (!pe.HasMetadata) return null;
-            var metadata = pe.GetMetadataReader();
-            if (!metadata.IsAssembly) return null;
-            // Design-time parts reference the Visual Studio designer, which is never present at run time.
-            foreach (var handle in metadata.AssemblyReferences)
-            {
-                string reference = metadata.GetString(metadata.GetAssemblyReference(handle).Name);
-                if (reference.StartsWith("Microsoft.VisualStudio.DesignTools.", StringComparison.Ordinal)
-                    || reference.StartsWith("Microsoft.Windows.Design.", StringComparison.Ordinal)) return null;
-            }
-            var namespaces = new List<string>();
-            var compatible = new List<KeyValuePair<string, string>>();
-            foreach (var handle in metadata.GetAssemblyDefinition().GetCustomAttributes())
-            {
-                var attribute = metadata.GetCustomAttribute(handle);
-                if (attribute.Constructor.Kind != HandleKind.MemberReference) continue;
-                var constructor = metadata.GetMemberReference((MemberReferenceHandle)attribute.Constructor);
-                if (constructor.Parent.Kind != HandleKind.TypeReference) continue;
-                var type = metadata.GetTypeReference((TypeReferenceHandle)constructor.Parent);
-                string typeNamespace = metadata.GetString(type.Namespace), typeName = metadata.GetString(type.Name);
-                if (typeNamespace == "System.Runtime.CompilerServices" && typeName == "ReferenceAssemblyAttribute") return null;
-                if (typeNamespace != "System.Windows.Markup") continue;
-                var value = metadata.GetBlobReader(attribute.Value);
-                if (value.ReadUInt16() != 1) continue;
-                if (typeName == "XmlnsDefinitionAttribute" && value.ReadSerializedString() is { Length: > 0 } uri) namespaces.Add(uri);
-                else if (typeName == "XmlnsCompatibleWithAttribute" && value.ReadSerializedString() is { Length: > 0 } old
-                    && value.ReadSerializedString() is { Length: > 0 } current) compatible.Add(new(old, current));
-            }
-            if (namespaces.Count == 0 && compatible.Count == 0) return null;
-            string name = metadata.GetString(metadata.GetAssemblyDefinition().Name);
-            return new(path, name, namespaces.Distinct(StringComparer.Ordinal).ToArray(), compatible);
-        }
-        catch (Exception exception) when (exception is BadImageFormatException or System.IO.IOException or UnauthorizedAccessException) { return null; }
-    }
+#endif
 
     /// <summary>
     /// The libraries to load for a document, one per assembly name in the given order, and the used namespaces that

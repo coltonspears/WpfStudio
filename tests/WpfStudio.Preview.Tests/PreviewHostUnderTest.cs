@@ -15,10 +15,11 @@ internal static class PreviewHostUnderTest
                 throw new InvalidOperationException("WPFSTUDIO_PREVIEW_HOST_UNDER_TEST must name an absolute preview-host executable path.");
             string path = Path.GetFullPath(candidate);
             string directory = Path.GetDirectoryName(path)!;
-            foreach (string required in new[] { path, Path.Combine(directory, "WpfStudio.PreviewHost.dll"),
-                Path.Combine(directory, "WpfStudio.PreviewHost.runtimeconfig.json"), Path.Combine(directory, "WpfStudio.PreviewHost.deps.json"),
-                Path.Combine(directory, "WpfStudio.Wpf.PropertyEditing.dll"), Path.Combine(directory, "WpfStudio.Wpf.Diagnostics.dll"),
-                Path.Combine(directory, "WpfStudio.Inspection.Protocol.dll") })
+            // A .NET Framework host starts from its configuration file instead of a runtime manifest.
+            string[] runtimeFiles = File.Exists(path + ".config") ? [path + ".config"]
+                : [Path.Combine(directory, "WpfStudio.PreviewHost.runtimeconfig.json"), Path.Combine(directory, "WpfStudio.PreviewHost.deps.json")];
+            foreach (string required in new[] { path, Path.Combine(directory, "WpfStudio.PreviewHost.dll"), Path.Combine(directory, "WpfStudio.Wpf.PropertyEditing.dll"),
+                Path.Combine(directory, "WpfStudio.Wpf.Diagnostics.dll"), Path.Combine(directory, "WpfStudio.Inspection.Protocol.dll") }.Concat(runtimeFiles))
                 if (!File.Exists(required)) throw new FileNotFoundException("The explicitly selected preview host is incomplete; no fallback is allowed.", required);
             return path;
         }

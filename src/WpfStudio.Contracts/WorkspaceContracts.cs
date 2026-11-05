@@ -48,8 +48,6 @@ public sealed record DocumentEdits(string Path, long Version, IReadOnlyList<Text
 public sealed record SignatureParameter(string Name, string Type, string? Documentation);
 public sealed record SignatureEntry(string Label, string? Documentation, IReadOnlyList<SignatureParameter> Parameters);
 public sealed record SignatureHelpResult(long Version, int ActiveParameter, IReadOnlyList<SignatureEntry> Signatures);
-public sealed record SourceLocation(string Path, int Start, int Length, int Line, int Column, string? DisplayText = null,
-    string? ExpectedTextHash = null, string? ProjectPath = null, string? ProjectName = null);
 public sealed record SymbolReferenceRequest(string Path, int Position, long Version, string? Text = null,
     string? ProjectPath = null, IReadOnlyList<XamlDocumentOverlay>? XamlOverlays = null);
 public sealed record SymbolReferenceResult(IReadOnlyList<SourceLocation> Locations, IReadOnlyList<string> Warnings, bool SymbolFound = true);

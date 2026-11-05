@@ -1,3 +1,4 @@
+#if !NETFRAMEWORK
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Data;
@@ -131,3 +132,4 @@ public sealed class BindingEvidenceCollector : IDisposable
         }
     }
 }
+#endif

@@ -13,7 +13,7 @@ public static class PreviewReferenceResolver
 {
     public const int MaximumProjects = 32;
 
-    public static async Task<PreviewReferenceSet> ResolveAsync(string projectPath, string configuration, string? framework, CancellationToken cancellationToken)
+    public static async Task<PreviewReferenceSet> ResolveAsync(string projectPath, string configuration, string? framework, CancellationToken cancellationToken, string? msbuildPath = null)
     {
         var assemblies = new Dictionary<string, PreviewReference>(StringComparer.OrdinalIgnoreCase);
         var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -25,7 +25,7 @@ public static class PreviewReferenceResolver
             if (!visited.Add(next.Project)) continue;
             if (visited.Count > MaximumProjects) { warnings.Add($"Only the first {MaximumProjects} projects' references were resolved."); break; }
             string json;
-            try { json = await QueryAsync(next.Project, configuration, next.Framework, cancellationToken).ConfigureAwait(false); }
+            try { json = await QueryAsync(next.Project, configuration, next.Framework, msbuildPath, cancellationToken).ConfigureAwait(false); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 warnings.Add($"References of {Path.GetFileName(next.Project)} could not be resolved: {exception.Message}");
@@ -41,18 +41,22 @@ public static class PreviewReferenceResolver
         return new([.. assemblies.Values.OrderBy(reference => reference.RelativePath, StringComparer.OrdinalIgnoreCase)], [.. directories.Order(StringComparer.OrdinalIgnoreCase)], warnings);
     }
 
-    private static async Task<string> QueryAsync(string projectPath, string configuration, string? framework, CancellationToken cancellationToken)
+    private static async Task<string> QueryAsync(string projectPath, string configuration, string? framework, string? msbuildPath, CancellationToken cancellationToken)
     {
         // BuildingProject=true makes ResolveAssemblyReferences search for dependencies, as a real build does;
         // BuildProjectReferences=false keeps it from compiling anything.
         var arguments = new List<string>
         {
-            "msbuild", projectPath, "-nologo", "-t:ResolveAssemblyReferences", $"-p:Configuration={configuration}",
+            projectPath, "-nologo", "-t:ResolveAssemblyReferences", $"-p:Configuration={configuration}",
             "-p:BuildingProject=true", "-p:BuildProjectReferences=false",
             "-getItem:ReferencePath,ReferenceDependencyPaths,ReferenceSatellitePaths,ProjectReference"
         };
         if (!string.IsNullOrWhiteSpace(framework)) arguments.Add($"-p:TargetFramework={framework}");
-        var result = await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(Path.GetDirectoryName(projectPath)!, [.. arguments]), cancellationToken).ConfigureAwait(false);
+        var directory = Path.GetDirectoryName(projectPath)!;
+        var result = msbuildPath is null ? (ExitCode: -1, Output: "", Error: "")
+            : await ProcessRunner.CaptureAsync(ProcessRunner.Create(msbuildPath, directory, arguments), cancellationToken).ConfigureAwait(false);
+        // MSBuild before Visual Studio 2022 17.8 has no -getItem switch; the .NET SDK evaluates most legacy projects too.
+        if (result.ExitCode != 0) result = await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(directory, ["msbuild", .. arguments]), cancellationToken).ConfigureAwait(false);
         var start = result.Output.IndexOf('{');
         if (result.ExitCode != 0 || start < 0)
             throw new InvalidOperationException(FirstLine(result.Error) ?? FirstLine(result.Output) ?? $"MSBuild exited with code {result.ExitCode}. Restore the project.");

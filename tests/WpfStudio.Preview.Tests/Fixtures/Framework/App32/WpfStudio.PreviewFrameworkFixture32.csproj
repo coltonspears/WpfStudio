@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The same application with Prefer32Bit, the default of a legacy WPF application: it runs in a 32-bit process, so its preview must too. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>true</Prefer32Bit>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <NuGetAudit>false</NuGetAudit>
+    <RootNamespace>WpfStudio.PreviewFrameworkFixture</RootNamespace>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <ProjectReference Include="../Controls/WpfStudio.PreviewFrameworkControls.csproj" />
+    <ApplicationDefinition Include="../App/App.xaml" Link="App.xaml" />
+    <Page Include="../App/FixtureView.xaml" Link="FixtureView.xaml" />
+    <Compile Include="../App/App.xaml.cs" Link="App.xaml.cs" />
+    <Compile Include="../App/FixtureView.xaml.cs" Link="FixtureView.xaml.cs" />
+  </ItemGroup>
+</Project>

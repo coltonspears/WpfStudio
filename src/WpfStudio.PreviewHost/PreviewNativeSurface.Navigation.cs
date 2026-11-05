@@ -21,10 +21,10 @@ internal sealed partial class PreviewNativeSurface
             ValidateBridge(attachment);
             RequireAttachedBridge(attachment);
             hwnd = RequireOwnedSurface(attachment.Surface);
-            if (NativeNavigationMessage == 0 || _nativeCallSequence >= (nint.MaxValue.ToInt64() - 2) / 4)
+            if (NativeNavigationMessage == 0 || _nativeCallSequence >= ((IntPtr.Size == 8 ? long.MaxValue : int.MaxValue) - 2) / 4)
                 return Fail("The native keyboard navigation sequence is unavailable.");
             encoded = ++_nativeCallSequence * 4 + (direction == FocusNavigationDirection.Previous ? 2 : 1);
-            if (!PreviewNativeMethods.SetProp(hwnd, property, new nint(encoded)))
+            if (!PreviewNativeMethods.SetProp(hwnd, property, (nint)encoded))
                 return Fail("The native keyboard navigation grant could not be created.");
             granted = true;
             _nativeHandoff = handoff = new object();
@@ -35,7 +35,7 @@ internal sealed partial class PreviewNativeSurface
             // ignore the nominal timeout, so the independent client watchdog also
             // bounds NavigationPendingSinceTick even during a nested message pump.
             nint completed = PreviewNativeMethods.SendMessageTimeout(_bridgeHandle, NativeNavigationMessage,
-                unchecked((nuint)hwnd), new nint(encoded), 0x0002 | 0x0020, 1500, out nuint result);
+                unchecked((nuint)hwnd), (nint)encoded, 0x0002 | 0x0020, 1500, out nuint result);
             if (!CurrentSurface(attachment.Surface) || !ReferenceEquals(_attachment, attachment) || !ReferenceEquals(_nativeHandoff, handoff))
                 return true; // The old traversal has no authority over a replacement view.
             if (completed == 0)
@@ -54,7 +54,7 @@ internal sealed partial class PreviewNativeSurface
             // properties automatically; a recycled handle is never cleanup authority.
             if (granted && CurrentSurface(attachment.Surface) && scene.Surface!.Handle == hwnd &&
                 PreviewNativeMethods.OwnedWindow(hwnd, session.ProcessId) &&
-                PreviewNativeMethods.GetProp(hwnd, property) == new nint(encoded))
+                PreviewNativeMethods.GetProp(hwnd, property) == (nint)encoded)
                 PreviewNativeMethods.RemoveProp(hwnd, property);
             if (handoff is not null && ReferenceEquals(_nativeHandoff, handoff))
             {

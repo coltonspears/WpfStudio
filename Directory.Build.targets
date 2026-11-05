@@ -1,0 +1,8 @@
+<Project>
+  <!-- The .NET Framework preview host and the libraries it shares with the rest of the product. Everything here is compile-time only: a project previewed on .NET Framework brings its own copies of the usual polyfill packages, so nothing that runs beside its code may depend on them. -->
+  <ItemGroup Condition="'$(IsProductCode)' == 'true' And '$(TargetFramework)' == 'net48'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="PolySharp" Version="1.15.0" PrivateAssets="all" />
+    <Compile Include="$(MSBuildThisFileDirectory)src\Shared\NetFrameworkCompatibility.cs" Link="Shared\NetFrameworkCompatibility.cs" />
+  </ItemGroup>
+</Project>

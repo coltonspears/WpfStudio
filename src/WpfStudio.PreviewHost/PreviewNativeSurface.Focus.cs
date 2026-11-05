@@ -103,7 +103,7 @@ internal sealed partial class PreviewNativeSurface
     private void PublishNativeFocus(PreviewBounds? bounds, string? status)
     {
         if (_attachment is not { } attachment || _bridgeHandle == 0 || !CurrentSurface(attachment.Surface)) return;
-        long nativeFocus = PreviewNativeMethods.GetFocus().ToInt64();
+        long nativeFocus = (long)PreviewNativeMethods.GetFocus();
         uint dpi = PreviewNativeMethods.GetDpiForWindow(scene.Surface!.Handle);
         var sample = new PreviewSurfaceFocus(attachment.BridgeToken, attachment.Sequence, 0,
             _focusEpoch, _focusChangedAtTick, nativeFocus, dpi, bounds, status);

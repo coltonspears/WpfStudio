@@ -462,9 +462,9 @@ internal sealed class RawNativePreviewHost : IAsyncDisposable
     { Process = process; _pipe = pipe; _rpc = rpc; Rpc = preview; SessionId = sessionId; _stderr = stderr; _stdout = stdout;
         _shadowDirectory = shadowDirectory; _shadowToken = shadowToken; }
 
-    public static async Task<RawNativePreviewHost> StartAsync()
+    public static async Task<RawNativePreviewHost> StartAsync(string? hostPath = null)
     {
-        var host = await LaunchAsync(Environment.ProcessId);
+        var host = await LaunchAsync(Environment.ProcessId, hostPath);
         try
         {
             var session = await host.Rpc.GetSessionAsync(default).WaitAsync(TimeSpan.FromSeconds(10));
@@ -474,14 +474,14 @@ internal sealed class RawNativePreviewHost : IAsyncDisposable
         catch { await host.DisposeAsync(); throw; }
     }
 
-    public static async Task<RawNativePreviewHost> LaunchAsync(int parentPid)
+    public static async Task<RawNativePreviewHost> LaunchAsync(int parentPid, string? hostPath = null)
     {
         string pipeName = "WpfStudio.NativeHost.Tests." + Guid.NewGuid().ToString("N");
         string session = Guid.NewGuid().ToString("N");
         string shadowDirectory = Directory.CreateTempSubdirectory("WpfStudio.Preview.").FullName;
         string shadowToken = Guid.NewGuid().ToString("N");
         File.WriteAllText(Path.Combine(shadowDirectory, "owner.token"), shadowToken);
-        var start = new ProcessStartInfo(PreviewHostUnderTest.ExecutablePath)
+        var start = new ProcessStartInfo(hostPath ?? PreviewHostUnderTest.ExecutablePath)
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true, WindowStyle = ProcessWindowStyle.Hidden };
         foreach (string argument in new[] { "--pipe", pipeName, "--session", session, "--parent-process", parentPid.ToString(),
             "--shadow-directory", shadowDirectory, "--shadow-token", shadowToken }) start.ArgumentList.Add(argument);

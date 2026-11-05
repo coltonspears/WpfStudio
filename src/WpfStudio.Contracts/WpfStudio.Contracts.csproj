@@ -1,10 +1,16 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net10.0;net48</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <!-- The .NET Framework preview host speaks only the preview protocol. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Compile Remove="**/*.cs" />
+    <Compile Include="Preview*.cs;SourceLocation.cs;TaskObservation.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../WpfStudio.Inspection.Protocol/WpfStudio.Inspection.Protocol.csproj" />

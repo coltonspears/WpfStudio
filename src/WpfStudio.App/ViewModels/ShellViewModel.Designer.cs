@@ -5,6 +5,7 @@ using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Documents;
 using WpfStudio.App.Features.Workbench;
 using WpfStudio.Contracts;
+using WpfStudio.Workspace;
 using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.App.ViewModels;
@@ -91,7 +92,7 @@ public sealed partial class ShellViewModel
             Status = "Select the XAML project's context before opening its preview scenarios.";
             return;
         }
-        var assembly = project?.OutputPath;
+        var assembly = project is null ? null : ProjectDiscovery.FindBuiltAssembly(project, Configuration);
         if (assembly != null && Directory.Exists(assembly)) assembly = Path.Combine(assembly, (project!.AssemblyName ?? project.Name) + ".dll");
         // Keep the evaluated output path even before the first build. Refresh can
         // then discover the new assembly without requiring the designer to reopen.

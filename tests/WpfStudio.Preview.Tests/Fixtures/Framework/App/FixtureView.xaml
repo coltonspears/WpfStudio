@@ -1,0 +1,9 @@
+<UserControl x:Class="WpfStudio.PreviewFrameworkFixture.FixtureView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:WpfStudio.PreviewFrameworkControls;assembly=WpfStudio.PreviewFrameworkControls">
+    <StackPanel>
+        <TextBlock x:Name="Greeting" Text="Compiled on .NET Framework" Foreground="{StaticResource FixtureBrush}" />
+        <controls:ProbeControl x:Name="Probe" />
+    </StackPanel>
+</UserControl>
