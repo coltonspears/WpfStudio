@@ -59,11 +59,12 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                     ? reason : "MSBuild could not load the workspace.");
             // MSBuild reports a project it cannot open and loads it with no documents, as with a half-merged project file.
             // The solution still lists it and the current model still answers for it, so swapping would only lose those answers.
+            // Without a failure the project has simply stopped compiling anything, and that is a change to take.
+            var failures = acquired.Issues.Where(issue => issue.Severity == "Error").Select(issue => issue.Message).ToArray();
             Solution? current;
             lock (_gate) current = _pages.Authored ?? CurrentSolution;
-            if (current is not null && acquired.Paths.FirstOrDefault(path => HasDocuments(current, path) && !HasDocuments(solution, path)) is { } lost)
-                throw new InvalidOperationException(string.Join(" ", acquired.Issues.Where(issue => issue.Severity == "Error").Select(issue => issue.Message)) is { Length: > 0 } reason
-                    ? reason : $"MSBuild could not load {lost}.");
+            if (failures.Length > 0 && current is not null && acquired.Paths.Any(path => HasDocuments(current, path) && !HasDocuments(solution, path)))
+                throw new InvalidOperationException(string.Join(" ", failures));
             // Generators would otherwise run while publishing, when the client waits.
             foreach (var project in solution.Projects)
                 await project.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false);

@@ -105,6 +105,38 @@ public sealed class SolutionCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task AProjectThatStoppedCompilingAnythingDoesNotHoldBackTheRefresh()
+    {
+        var solution = Path.Combine(_root, "Shop.slnx");
+        var emptied = Path.Combine(_root, "Emptied", "Emptied.csproj");
+        var other = Path.Combine(_root, "Other", "Other.csproj");
+        foreach (var project in new[] { emptied, other })
+        {
+            var name = Path.GetFileNameWithoutExtension(project);
+            Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+            await File.WriteAllTextAsync(Path.Combine(_root, name, name + "Type.cs"), $"namespace {name}; public sealed class {name}Type {{ }}");
+            Assert.Equal(0, (await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(_root, "restore", project), CancellationToken.None)).ExitCode);
+        }
+        await File.WriteAllTextAsync(solution, "<Solution><Project Path=\"Emptied/Emptied.csproj\" /><Project Path=\"Other/Other.csproj\" /></Solution>");
+        await using (var first = new WorkspaceClient())
+        {
+            await first.LoadAsync(new LoadWorkspaceRequest(solution));
+            await WaitForSavedModelAsync(solution);
+        }
+
+        // Its source stays on disk, but the project no longer includes that or anything generated.
+        await File.WriteAllTextAsync(emptied, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><GenerateAssemblyInfo>false</GenerateAssemblyInfo><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute></PropertyGroup></Project>");
+        await File.WriteAllTextAsync(Path.Combine(_root, "Other", "AddedType.cs"), "namespace Other; public sealed class AddedType { }");
+        await using var client = new WorkspaceClient();
+        Assert.True((await client.LoadAsync(new LoadWorkspaceRequest(solution, UseCache: true))).Cached);
+        await client.RefreshAsync(new LoadWorkspaceRequest(solution));
+
+        Assert.Contains(await client.SearchSymbolsAsync(new("AddedType")), symbol => symbol.Name == "AddedType");
+        Assert.DoesNotContain(await client.SearchSymbolsAsync(new("EmptiedType")), symbol => symbol.Name == "EmptiedType");
+    }
+
+    [Fact]
     public async Task ASolutionThatLostAndGainedProjectsStillStartsFromItsSavedModel()
     {
         var solution = Path.Combine(_root, "Shop.slnx");
