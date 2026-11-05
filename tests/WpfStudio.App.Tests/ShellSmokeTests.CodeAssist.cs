@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Automation;
 using System.Windows.Input;
 using AvalonDock;
 using AvalonDock.Layout;
@@ -10,6 +11,7 @@ using ICSharpCode.AvalonEdit.CodeCompletion;
 using WpfStudio.App.Controls;
 using WpfStudio.App.ViewModels;
 using WpfStudio.App.Views;
+using WpfStudio.Core;
 
 namespace WpfStudio.App.Tests;
 
@@ -39,6 +41,22 @@ public sealed partial class ShellSmokeTests
         Assert.False(lines.IsEnabled);
         Assert.False(memberVersion.IsEnabled);
         Screenshot((FrameworkElement)window.Content, Path.Combine(shots, "code-assist-settings-off.png"));
+
+        // Anyone deciding whether to turn a model on can read about every version first, and reading selects nothing.
+        var about = Descendants<Expander>(settings).Single(expander => AutomationProperties.GetName(expander) == "About the line suggestion model versions");
+        Assert.True(about.IsEnabled);
+        about.IsExpanded = true;
+        await Idle();
+        var versions = Descendants<Expander>(about).ToList();
+        Assert.Equal(shell.CodeAssist.LineModelVersions.Count, versions.Count);
+        versions[0].IsExpanded = true;
+        await Idle();
+        Assert.Contains(Descendants<TextBlock>(versions[0]), text => text.IsVisible && text.Text == "How it scored");
+        Screenshot((FrameworkElement)window.Content, Path.Combine(shots, "code-assist-settings-versions.png"));
+        Assert.Equal(CodeAssistSettings.LatestVersion, shell.CodeAssist.LineModelVersion);
+        Assert.False(engine.SuggestsLines);
+        about.IsExpanded = false;
+        await Idle();
 
         enabled.IsChecked = true;
         await Idle();
@@ -107,7 +125,7 @@ public sealed partial class ShellSmokeTests
             // A suggestion waits for a pause, shows without changing the text, and Tab takes it.
             Assert.Null(await document.SuggestLineAsync(editor.CaretOffset));
             shell.CodeAssist.LineSuggestions = true;
-            await UntilAsync(() => shell.CodeAssist.Status.Contains("code-assist-lines 3.0.0 is loaded", StringComparison.Ordinal), "the line model");
+            await UntilAsync(() => shell.CodeAssist.Status.Contains("code-assist-lines 4.0.0 is loaded", StringComparison.Ordinal), "the line model");
             const string property = "public string Title { get; ";
             int member = document.State.Content.IndexOf("[RelayCommand]", StringComparison.Ordinal);
             editor.Document.Insert(member, "public string Name { get; set; }\n    \n    ");
@@ -120,6 +138,18 @@ public sealed partial class ShellSmokeTests
             Assert.False(editor.LineSuggestion.IsVisible);
             Assert.Contains(property + "set; }", document.State.Content, StringComparison.Ordinal);
             Assert.Equal(document.State.Content.IndexOf(property, StringComparison.Ordinal) + property.Length + "set; }".Length, editor.CaretOffset);
+
+            // A long whole line, which is what the newest model is for, and Tab takes all of it at once.
+            const string signature = "public object Convert(object value, ";
+            const string rest = "Type targetType, object parameter, CultureInfo culture)";
+            editor.Document.Insert(editor.CaretOffset, "\n    ");
+            editor.TextArea.PerformTextInput(signature);
+            await UntilAsync(() => editor.LineSuggestion.IsVisible, "the whole line");
+            await Idle();
+            Screenshot((FrameworkElement)window.Content, Path.Combine(shots, "code-assist-whole-line.png"));
+            Press(editor, Key.Tab);
+            Assert.Contains(signature + rest, document.State.Content, StringComparison.Ordinal);
+            Assert.Equal(document.State.Content.IndexOf(signature, StringComparison.Ordinal) + signature.Length + rest.Length, editor.CaretOffset);
 
             // Escape dismisses a suggestion without touching the text.
             string accepted = document.State.Content;

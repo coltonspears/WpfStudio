@@ -20,6 +20,8 @@ from sandbox.compact import CompactRunner  # noqa: E402
 from sandbox.evaluate_lines import Generator, editor_stops, offered_text  # noqa: E402
 from sandbox.features import FEATURE_SPECS, make_features  # noqa: E402
 from sandbox.line_corpus import line_cases, load_sources  # noqa: E402
+from sandbox.line_nets import OnnxGenerator  # noqa: E402
+from sandbox.line_search import suggest  # noqa: E402
 
 CONTEXTS = [
     ("", ["Add", "Clear"]),
@@ -105,12 +107,22 @@ def gated_lines(folder, shipped):
     return result
 
 
+def transformer_lines(folder, shipped):
+    assert hashlib.sha256((folder / "model.int8.onnx").read_bytes()).digest() == hashlib.sha256((shipped / "model.onnx").read_bytes()).digest()
+    generator = OnnxGenerator(folder, "model.int8.onnx")
+    gate = json.loads((shipped / "manifest.json").read_text(encoding="utf-8"))["lines"]["gate"]
+    rows = load_sources(sandbox / ".sandbox-cache" / "corpus" / "multi-lines.jsonl")
+    replay = [case["code"][-1600:] for case in line_cases(rows, "validation", 30)] + [case["code"][-1600:] for case in editor_stops(rows, "validation", 90)]
+    return [{"code": code, **suggest(generator, code, gate)} for code in LINE_CONTEXTS + replay]
+
+
 v2 = sandbox / ".sandbox-cache" / "experiments" / "code-assist-lines-2.0.0"
 v3 = sandbox / ".sandbox-cache" / "experiments" / "code-assist-lines-3.0.0"
 golden = {
     "members": {version: member_cases(int(version[0]), models / "members" / version) for version in ("1.0.0", "2.0.0")},
-    "tokens": {version: tokens(models / "lines" / version) for version in ("1.0.0", "2.0.0", "3.0.0")},
-    "lines": {"1.0.0": lines_v1(), "2.0.0": gated_lines(v2, models / "lines" / "2.0.0"), "3.0.0": gated_lines(v3, models / "lines" / "3.0.0")},
+    "tokens": {version: tokens(models / "lines" / version) for version in ("1.0.0", "2.0.0", "3.0.0", "4.0.0")},
+    "lines": {"1.0.0": lines_v1(), "2.0.0": gated_lines(v2, models / "lines" / "2.0.0"), "3.0.0": gated_lines(v3, models / "lines" / "3.0.0"),
+              "4.0.0": transformer_lines(sandbox / ".sandbox-cache" / "experiments" / "lines-t384c", models / "lines" / "4.0.0")},
 }
 
 out = Path(__file__).with_name("golden.json")

@@ -47,6 +47,34 @@
       <Setter Property="Margin" Value="0,1" />
       <Setter Property="Cursor" Value="Hand" />
     </Style>
+    <BooleanToVisibilityConverter x:Key="SettingsBoolVisibility" />
+    <DataTemplate x:Key="ModelFact">
+      <Grid Margin="0,5,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="92" />
+          <ColumnDefinition />
+        </Grid.ColumnDefinitions>
+        <TextBlock Text="{Binding Label}" Style="{StaticResource Caption}" FontSize="11.5" />
+        <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" FontSize="11.5" />
+      </Grid>
+    </DataTemplate>
+    <!-- One installed version: a line to compare it by, and everything else one click away. -->
+    <DataTemplate x:Key="ModelVersion">
+      <Expander Margin="0,2">
+        <Expander.Header>
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="{Binding Version}" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding Headline}" Style="{StaticResource Caption}" FontSize="11.5" Margin="10,1,0,0" />
+            <TextBlock Text="Selected" FontSize="11.5" Margin="10,1,0,0" Foreground="{DynamicResource AccentBrush}" Visibility="{Binding IsSelected, Converter={StaticResource SettingsBoolVisibility}}" />
+          </StackPanel>
+        </Expander.Header>
+        <StackPanel Margin="4,2,4,6">
+          <TextBlock Text="{Binding Summary}" Style="{StaticResource RowNote}" />
+          <TextBlock Text="{Binding Limitations}" Style="{StaticResource RowNote}" />
+          <ItemsControl ItemsSource="{Binding Facts}" ItemTemplate="{StaticResource ModelFact}" Margin="0,3,0,0" />
+        </StackPanel>
+      </Expander>
+    </DataTemplate>
     <DataTemplate x:Key="NavEntry">
       <StackPanel Orientation="Horizontal">
         <c:Glyph Kind="{Binding (c:Ui.Icon), RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Width="16" Height="16" Margin="0,0,10,0" Foreground="{DynamicResource MutedBrush}" />
@@ -417,16 +445,20 @@
                 </StackPanel>
               </CheckBox>
               <Border Style="{StaticResource Divider}" />
+              <DockPanel Margin="0,9" IsEnabled="{Binding CodeAssist.Enabled}">
+                <ComboBox DockPanel.Dock="Right" VerticalAlignment="Center" Width="130" Margin="12,0,0,0" ItemsSource="{Binding CodeAssist.MemberModels}" SelectedValuePath="Version" SelectedValue="{Binding CodeAssist.MemberModelVersion}" DisplayMemberPath="Label" AutomationProperties.Name="Member ranking model version" />
+                <StackPanel>
+                  <TextBlock Text="Member ranking model" Style="{StaticResource RowName}" />
+                  <TextBlock Text="{Binding CodeAssist.SelectedMemberModel.Summary}" Style="{StaticResource RowNote}" />
+                  <TextBlock Text="{Binding CodeAssist.SelectedMemberModel.Limitations}" Style="{StaticResource RowNote}" />
+                </StackPanel>
+              </DockPanel>
+              <!-- Outside the switches: anyone deciding whether to turn a model on should be able to read about it first. -->
+              <Expander Header="About these versions" Margin="0,0,0,8" AutomationProperties.Name="About the member ranking model versions">
+                <ItemsControl ItemsSource="{Binding CodeAssist.MemberModelVersions}" ItemTemplate="{StaticResource ModelVersion}" Margin="4,4,0,0" />
+              </Expander>
+              <Border Style="{StaticResource Divider}" />
               <StackPanel IsEnabled="{Binding CodeAssist.Enabled}">
-                <DockPanel Margin="0,9">
-                  <ComboBox DockPanel.Dock="Right" VerticalAlignment="Center" Width="130" Margin="12,0,0,0" ItemsSource="{Binding CodeAssist.MemberModels}" SelectedValuePath="Version" SelectedValue="{Binding CodeAssist.MemberModelVersion}" DisplayMemberPath="Label" AutomationProperties.Name="Member ranking model version" />
-                  <StackPanel>
-                    <TextBlock Text="Member ranking model" Style="{StaticResource RowName}" />
-                    <TextBlock Text="{Binding CodeAssist.SelectedMemberModel.Summary}" Style="{StaticResource RowNote}" />
-                    <TextBlock Text="{Binding CodeAssist.SelectedMemberModel.Limitations}" Style="{StaticResource RowNote}" />
-                  </StackPanel>
-                </DockPanel>
-                <Border Style="{StaticResource Divider}" />
                 <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding CodeAssist.LineSuggestions}">
                   <StackPanel>
                     <TextBlock Text="Line suggestions" Style="{StaticResource RowName}" />
@@ -443,6 +475,9 @@
                   </StackPanel>
                 </DockPanel>
               </StackPanel>
+              <Expander Header="About these versions" Margin="0,0,0,8" AutomationProperties.Name="About the line suggestion model versions">
+                <ItemsControl ItemsSource="{Binding CodeAssist.LineModelVersions}" ItemTemplate="{StaticResource ModelVersion}" Margin="4,4,0,0" />
+              </Expander>
             </StackPanel>
           </Border>
           <TextBlock Text="{Binding CodeAssist.Status}" Style="{StaticResource Caption}" TextWrapping="Wrap" AutomationProperties.Name="Code Assist status" />

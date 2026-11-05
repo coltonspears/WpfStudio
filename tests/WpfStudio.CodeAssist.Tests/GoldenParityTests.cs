@@ -10,6 +10,7 @@ namespace WpfStudio.CodeAssist.Tests;
 public sealed class GoldenParityTests
 {
     private const float FeatureTolerance = 2e-6f;
+    private const double GateFeatureTolerance = 1e-3;
     private static readonly JsonElement Golden = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Golden", "golden.json"))).RootElement;
     private static readonly AssistModelCatalog Catalog = new(AssistModelCatalog.DefaultDirectory);
 
@@ -61,6 +62,7 @@ public sealed class GoldenParityTests
     [InlineData("1.0.0")]
     [InlineData("2.0.0")]
     [InlineData("3.0.0")]
+    [InlineData("4.0.0")]
     public void TokensMatchTheTokenizerLibrary(string version)
     {
         var tokenizer = ByteLevelBpeTokenizer.Load(Model(AssistModelKind.Lines, version).PathOf("tokenizer.json"));
@@ -87,6 +89,34 @@ public sealed class GoldenParityTests
             Assert.Equal(wanted, actual.Text);
             Assert.Equal(expected.GetProperty("finished").GetBoolean(), actual.Finished);
         }
+    }
+
+    [Fact]
+    public void TransformerLinesAndTheirGateMatchTraining()
+    {
+        using var generator = TransformerLineGenerator.Load(Model(AssistModelKind.Lines, "4.0.0"));
+        int whole = 0, parts = 0;
+        foreach (var expected in Golden.GetProperty("lines").GetProperty("4.0.0").EnumerateArray())
+        {
+            string code = expected.GetProperty("code").GetString()!;
+            var actual = generator.Generate(code, CodeAssistEngine.MaxLineTokens);
+            Assert.Equal(expected.GetProperty("text").GetString(), actual.Text);
+            if (actual.Text.Length > 0)
+            {
+                Assert.Equal(expected.GetProperty("finished").GetBoolean(), actual.Finished);
+                if (actual.Finished) whole++; else parts++;
+            }
+            // A line the gate declined still has to be scored the same way, or the gate would decide differently elsewhere.
+            if (expected.GetProperty("features").ValueKind == JsonValueKind.Null) continue;
+            var wanted = expected.GetProperty("features").EnumerateArray().Select(value => value.GetDouble()).ToArray();
+            var features = generator.Features(code, CodeAssistEngine.MaxLineTokens);
+            Assert.Equal(wanted.Length, features.Length);
+            for (int i = 0; i < wanted.Length; i++)
+                Assert.True(Math.Abs(wanted[i] - features[i]) <= GateFeatureTolerance, $"{TransformerLineGenerator.GateFeatures[i]}: {wanted[i]} and {features[i]}, for: {code[^Math.Min(60, code.Length)..]}");
+        }
+        // The replayed code has to exercise both ways of showing something, or this compares very little.
+        Assert.InRange(whole, 3, int.MaxValue);
+        Assert.InRange(parts, 3, int.MaxValue);
     }
 
     private static void AssertSparse(JsonElement expected, ReadOnlySpan<float> actual, string label)
