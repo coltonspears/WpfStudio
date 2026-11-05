@@ -30,6 +30,40 @@ The tests found two faults an ordinary port would have shipped. The engine bound
 
 Not exercised: clicking through a Framework preview by hand in the running application (native interaction is covered by process tests only), and data-bound DevExpress grids through a scenario factory.
 
+## Code Assist line model 3.0.0 (2026-11-05)
+
+Line model 3.0.0 read 8 of the owner's public repositories plus `dotnet/wpf`, AvalonEdit and MaterialDesignInXamlToolkit, about 9 times as much source as 2.0.0, and was then fine-tuned on the owner's code. It has the same network and file size as 2.0.0, with a new tokenizer. Leading tabs now read as spaces for every line model, because nearly all training code uses spaces. See [Code Assist](docs/code-assist.md).
+
+All rows use a 0.7 confidence gate, on code neither version trained on:
+
+| Code | Version | Offers | Right when it offers | Wrong per 100 | Whole lines | Characters saved |
+| --- | --- | --- | --- | --- | --- | --- |
+| 8 private repositories, 1,500 stops | 3.0.0 | 11.0% | 74.5% | 2.8 | 1.4% | 1.9% |
+| | 2.0.0 | 12.1% | 69.2% | 3.7 | 1.6% | 2.0% |
+| 2 public repositories, 600 stops | 3.0.0 | 12.2% | 75.3% | 3.0 | 1.2% | 2.4% |
+| | 2.0.0 | 15.7% | 74.5% | 4.0 | 1.5% | 3.2% |
+| AvalonEdit, other authors, 600 stops | 3.0.0's recipe | 9.8% | 69.5% | 3.0 | 1.7% | 2.0% |
+| | 2.0.0 | 8.5% | 51.0% | 4.2 | 1.2% | 1.0% |
+
+- The AvalonEdit row is the reason to prefer 3.0.0, and it is the weakest evidence: one repository and 50 to 60 offers. That model was trained without AvalonEdit, so it is the same recipe as the shipped file rather than the shipped file itself.
+- On the owner's code the two versions are about even. The accuracy gains are small enough to be noise, and 3.0.0 offers less often and saves fewer characters on the 2 public repositories.
+- The candidate was fixed before its one run on the private repositories, but those repositories had been scored in earlier rounds, so they are not completely fresh.
+- The 2 public rows were measured without the tab handling, and the private row with it. Only 2 of the 1,500 private contexts contained tab indentation.
+
+Other candidates were tried and not chosen: more data with no fine-tuning, a larger network, and weighting the owner's code equally each epoch. Tuning how much the model copies from the file only moved along the same trade-off curve.
+
+Through the shipped C#, on 26 stops in freshly written code: 3.0.0 offered 7 and 6 were right, at 17 ms median and 20 ms at worst; 2.0.0 offered 6 and 5 were right. The same file indented with tabs gave the same counts. `GoldenParityTests` compares C# with Python on 69 line contexts for each gated version, including tab-indented ones. A real-window run showed `set; }` for `public string Title { get; `, and `dotnet publish -r win-x64` carries all three line model folders. `tools/Publish.ps1` itself was not run; it parses, and its required files and license copies were updated.
+
+| Suite | Result |
+| --- | --- |
+| CodeAssist | 42 passed |
+| App | 1 passed, including the Code Assist scenario, and that scenario alone passed 3 of 3 |
+| Shell | 863 of 866 in the full run: the known `AutomaticReloadAppliesOnlyToFilesWithoutUnsavedEdits`, plus `DeletedSourceDirectoryAndOverflowRequireReload` and `ClosedDictionaryDiskChangesReanalyzeConsumerEvenWithUnchangedTimestampAndLength`. Neither of the last two recurred in 6 runs alone or in 2 more full runs of the suite, which failed only the known test and, once, the known intermittent `WatchedModelChangeRestoresHealthyEditor` |
+| Core, Runtime, Inspection | Only the 14 failures already known on this machine |
+| Workspace, Database, NativeView, Preview, Profiling | All passed |
+
+Not checked: use by a person at a keyboard, and whether the two newly seen Shell timeouts also occur on an untouched `main`.
+
 ## Code Assist, experimental and off by default (2026-11-03)
 
 **Settings > Experimental** adds Code Assist, which ranks C# member completions with small local ONNX models, and separately offers line suggestions. See [Code Assist](docs/code-assist.md).

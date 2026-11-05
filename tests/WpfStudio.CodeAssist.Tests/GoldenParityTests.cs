@@ -60,6 +60,7 @@ public sealed class GoldenParityTests
     [Theory]
     [InlineData("1.0.0")]
     [InlineData("2.0.0")]
+    [InlineData("3.0.0")]
     public void TokensMatchTheTokenizerLibrary(string version)
     {
         var tokenizer = ByteLevelBpeTokenizer.Load(Model(AssistModelKind.Lines, version).PathOf("tokenizer.json"));
@@ -74,6 +75,7 @@ public sealed class GoldenParityTests
     [Theory]
     [InlineData("1.0.0")]
     [InlineData("2.0.0")]
+    [InlineData("3.0.0")]
     public void LineGenerationMatchesTraining(string version)
     {
         using var generator = LineGenerator.Load(Model(AssistModelKind.Lines, version));

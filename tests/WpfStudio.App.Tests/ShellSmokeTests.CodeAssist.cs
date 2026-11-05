@@ -107,7 +107,7 @@ public sealed partial class ShellSmokeTests
             // A suggestion waits for a pause, shows without changing the text, and Tab takes it.
             Assert.Null(await document.SuggestLineAsync(editor.CaretOffset));
             shell.CodeAssist.LineSuggestions = true;
-            await UntilAsync(() => shell.CodeAssist.Status.Contains("code-assist-lines 2.0.0 is loaded", StringComparison.Ordinal), "the line model");
+            await UntilAsync(() => shell.CodeAssist.Status.Contains("code-assist-lines 3.0.0 is loaded", StringComparison.Ordinal), "the line model");
             const string property = "public string Title { get; ";
             int member = document.State.Content.IndexOf("[RelayCommand]", StringComparison.Ordinal);
             editor.Document.Insert(member, "public string Name { get; set; }\n    \n    ");
