@@ -60,6 +60,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         {
             _workspace.NameProjectionChanged += SemanticStateChanged;
             _workspace.CSharpModelChanged += CSharpModelChanged;
+            _workspace.CSharpBodyChanged += CSharpBodyChanged;
             _workspace.ProjectDiagnosticsChanged += ProjectDiagnosticsChanged;
         }
         ContentChanged(this, EventArgs.Empty);
@@ -156,7 +157,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _codeLens;
     // Set by an analysis that may change the counts and cleared by the first to finish, so one cancelled by a diagnostics-only analysis still counts.
     private bool _codeLensDue;
-    private void ScheduleCodeLens(long version)
+    // Another file's method bodies changed since these counts, and they can use this file's symbols.
+    private bool _countsBehind;
+    private const int CodeLensRetries = 2;
+    private void ScheduleCodeLens(long version, int attempt = 0)
     {
         _codeLens?.Cancel(); _codeLens?.Dispose(); _codeLens = null;
         if (!IsCSharp || IsReadOnly || !(ShowCodeLens || ShowInlineBlame) || _disposed || !_workspace.IsConnected) return;
@@ -166,7 +170,14 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         {
             // Counting scans every XAML file, so wait for a pause in typing.
             await Task.Delay(CodeLensVersion < 0 ? 300 : 1500, token);
-            var result = await _workspace.GetCodeLensAsync(new(State.Path, version), token);
+            CodeLensResult result;
+            try { result = await _workspace.GetCodeLensAsync(new(State.Path, version), token); }
+            // The worker turns requests away while it synchronizes buffers and XAML fields, and nothing else will ask again until the next edit.
+            catch (Exception) when (!token.IsCancellationRequested && attempt < CodeLensRetries)
+            {
+                _dispatcher.Post(() => { if (!token.IsCancellationRequested && !_disposed && version == State.Version) ScheduleCodeLens(version, attempt + 1); });
+                return;
+            }
             await _dispatcher.InvokeAsync(() =>
             {
                 if (token.IsCancellationRequested || _disposed || version != State.Version || result.Version != version) return;
@@ -218,6 +229,20 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     {
         if (!StringComparer.OrdinalIgnoreCase.Equals(System.IO.Path.GetFullPath(State.Path), path))
             SemanticStateChanged(sender, EventArgs.Empty);
+    }
+    // Another file's method bodies cannot affect this file's diagnostics, but they can use its symbols. Nothing shows
+    // the counts until this tab does, so they wait for that rather than being counted again on every keystroke there.
+    private void CSharpBodyChanged(object? sender, string path)
+    {
+        if (!StringComparer.OrdinalIgnoreCase.Equals(System.IO.Path.GetFullPath(State.Path), path)) _countsBehind = true;
+    }
+    /// <summary>Catches up on reference counts other files may have changed while this tab was in the background.</summary>
+    public void RefreshCountsIfBehind()
+    {
+        // Counts for older text are on their way already, and will see those edits.
+        if (!_countsBehind || CodeLensVersion != State.Version) return;
+        _countsBehind = false;
+        ScheduleCodeLens(State.Version);
     }
     private void SemanticStateChanged(object? sender, EventArgs e)
     {
@@ -359,6 +384,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     {
         if (State.Extension != ".cs") return null;
         return await _workspace.GetCompletionEditAsync(new(State.Path, version, entry.Id), token);
+    }
+    public async Task<QuickInfoResult?> CompletionDetailsAsync(CompletionEntry entry, long version, CancellationToken token = default)
+    {
+        if (State.Extension != ".cs" || !_workspace.IsConnected) return null;
+        return await _workspace.GetCompletionDetailsAsync(new(State.Path, version, entry.Id), token);
     }
     public async Task<string?> SignatureAsync(int offset, CancellationToken token = default)
     {
@@ -522,6 +552,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _workspace.SemanticStateChanged -= SemanticStateChanged;
         _workspace.NameProjectionChanged -= SemanticStateChanged;
         _workspace.CSharpModelChanged -= CSharpModelChanged;
+        _workspace.CSharpBodyChanged -= CSharpBodyChanged;
         _workspace.ProjectDiagnosticsChanged -= ProjectDiagnosticsChanged;
         if (_resources is not null) _resources.Changed -= SemanticStateChanged;
         ClearQuickFixes();

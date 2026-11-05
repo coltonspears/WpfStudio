@@ -196,12 +196,19 @@ public sealed partial class WorkspaceEngine
         return new(edits.Values.ToArray(), BoundedWarnings(snapshot.Warnings));
     }
 
-    private async Task<SymbolSnapshot> CaptureSymbolSnapshotAsync(SymbolReferenceRequest request, CancellationToken token)
+    private Task<SymbolSnapshot> CaptureSymbolSnapshotAsync(SymbolReferenceRequest request, CancellationToken token) =>
+        CaptureSymbolSnapshotAsync(request, acceptRecentVerification: false, token);
+
+    private async Task<SymbolSnapshot> CaptureSymbolSnapshotAsync(SymbolReferenceRequest request, bool acceptRecentVerification, CancellationToken token)
     {
+        bool verified;
+        lock (_gate) verified = acceptRecentVerification && _disk.Pending.Count == 0 && _disk.Unavailable.Count == 0 && _disk.LastVerified != 0
+            && System.Diagnostics.Stopwatch.GetElapsedTime(_disk.LastVerified) < DiskVerificationHolds;
         // Public refresh calls are reported by WorkspaceClient after their response.
         // This implicit refresh must notify independently, even if a later part of it or the rest
         // of the symbol operation fails or is cancelled. Both refresh locks are released.
-        var refresh = await this.RefreshAllDiskDocumentsAsync(() => SemanticStateChanged?.Invoke(this, EventArgs.Empty), token).ConfigureAwait(false);
+        var refresh = verified ? new RefreshDiskDocumentsResult(true, false, 0)
+            : await this.RefreshAllDiskDocumentsAsync(() => SemanticStateChanged?.Invoke(this, EventArgs.Empty), token).ConfigureAwait(false);
         Solution solution;
         long revision;
         Dictionary<string, long> versions;

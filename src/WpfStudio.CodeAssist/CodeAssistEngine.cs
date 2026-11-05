@@ -130,7 +130,7 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog) : IDisposable
         var recommended = new List<CompletionEntry>(top.Count);
         foreach (string name in top)
             if (completions.Items.FirstOrDefault(item => IsMember(item) && MemberName(item) == name) is { } entry)
-                recommended.Add(entry with { Recommended = true, Description = $"{note}\n{entry.Description ?? string.Join(", ", entry.Tags)}" });
+                recommended.Add(entry with { Recommended = true, Description = string.IsNullOrEmpty(entry.Description) ? note : $"{note}\n{entry.Description}" });
         var ids = recommended.Select(entry => entry.Id).ToHashSet(StringComparer.Ordinal);
         return completions with { Items = [.. recommended, .. completions.Items.Where(item => !ids.Contains(item.Id))] };
     }

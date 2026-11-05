@@ -40,6 +40,8 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public event EventHandler? NameProjectionChanged;
     /// <summary>An accepted C# model change affects other editors. The canonical changed path lets its own editor retain the analysis that synchronized it.</summary>
     public event EventHandler<string>? CSharpModelChanged;
+    /// <summary>A C# file changed only where nothing outside it can depend on, although reference counts elsewhere may differ.</summary>
+    public event EventHandler<string>? CSharpBodyChanged;
     /// <summary>A whole-project compilation contradicted an analysis reply. Nothing semantic changed, so same-version observations stay valid; subscribers must marshal to their UI dispatcher.</summary>
     public event EventHandler? ProjectDiagnosticsChanged;
     public int? WorkerProcessId => _worker is { HasExited: false } worker ? worker.ProcessId : null;
@@ -165,10 +167,8 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         bool changed = RememberBuffer(request);
         bool semanticChange = changed && !IsXaml(request.Path);
-        // Only C# synchronization invalidates dependent XAML here. XAML editors
-        // already share resource invalidation; firing their own event would
-        // cancel the synchronization at the start of every analysis.
-        if (semanticChange) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+        // With no acknowledged text there is no telling what the worker compared this edit with.
+        bool uncertain = !HasAcceptedDocument(request.Path);
         var proxy = Proxy;
         cancellationToken.ThrowIfCancellationRequested();
         DocumentUpdateResult result;
@@ -181,16 +181,22 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             // work completes. A failed reply therefore invalidates our last
             // acknowledged identity, even if the next edit restores that text.
             ForgetAcceptedDocument(request.Path);
+            if (semanticChange) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
             throw;
         }
-        if (semanticChange) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
+        bool declarationsChanged = result.DeclarationsChanged || uncertain;
+        // Only C# synchronization invalidates dependent XAML here, and only a change to what
+        // it declares can matter to XAML. XAML editors already share resource invalidation;
+        // firing their own event would cancel the synchronization at the start of every analysis.
+        if (semanticChange && declarationsChanged) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
         // Replay buffers remember the latest requested text even if a worker
         // fails. Notification identity must instead follow accepted text, so a
         // successful retry after cancellation still refreshes unchanged C#.
         if (result.Accepted && result.Version == request.Version && RememberAcceptedDocument(request))
         {
             if (IsXaml(request.Path)) NotifyNameProjectionChanged();
-            else if (IsCSharp(request.Path)) CSharpModelChanged?.Invoke(this, Path.GetFullPath(request.Path));
+            else if (IsCSharp(request.Path))
+                (declarationsChanged ? CSharpModelChanged : CSharpBodyChanged)?.Invoke(this, Path.GetFullPath(request.Path));
         }
         if (result.Accepted && request.Analyze) DiagnosticsReceived?.Invoke(this, new WorkspaceDiagnosticEvent(request.Path, result.Version, result.Diagnostics));
         return result;
@@ -218,6 +224,11 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             _acceptedDocumentTexts[path] = request.Text;
             return changed;
         }
+    }
+
+    private bool HasAcceptedDocument(string path)
+    {
+        lock (_bufferGate) return _acceptedDocumentTexts.ContainsKey(Path.GetFullPath(path));
     }
 
     private void ForgetAcceptedDocument(string path)
@@ -349,6 +360,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public Task<XamlHoverInfo?> GetXamlHoverAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlHoverAsync(request, cancellationToken);
     public Task<IReadOnlyList<XamlCodeAction>> GetXamlCodeActionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlCodeActionsAsync(request, cancellationToken);
     public Task<TextEdit?> GetCompletionEditAsync(CompletionEditRequest request, CancellationToken cancellationToken = default) => Proxy.GetCompletionEditAsync(request, cancellationToken);
+    public Task<QuickInfoResult?> GetCompletionDetailsAsync(CompletionEditRequest request, CancellationToken cancellationToken = default) => Proxy.GetCompletionDetailsAsync(request, cancellationToken);
     public Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetSignatureHelpAsync(request, cancellationToken);
     public Task<QuickInfoResult?> GetQuickInfoAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetQuickInfoAsync(request, cancellationToken);
     public Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetDefinitionAsync(request, cancellationToken);

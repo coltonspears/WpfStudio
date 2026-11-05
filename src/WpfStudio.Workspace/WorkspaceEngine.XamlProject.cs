@@ -143,6 +143,7 @@ public sealed partial class WorkspaceEngine
                 }
                 // A verification interrupted by a targeted refresh is not that refresh's work, and a later verification continues it.
                 int remaining = requested is null ? pending.Count + verifying.Count : pending.Count;
+                if (requested is null && remaining == 0) _disk.LastVerified = System.Diagnostics.Stopwatch.GetTimestamp();
                 bool incomplete = remaining > 0 || _disk.Unavailable.Count > 0;
                 result = new(true, changed, reads.Count, incomplete, remaining > 0
                     ? $"Model refresh is incomplete; {remaining} known files remain in this sweep. A subsequent refresh continues it."

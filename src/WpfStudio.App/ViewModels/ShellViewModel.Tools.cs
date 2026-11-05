@@ -26,6 +26,7 @@ public sealed partial class ShellViewModel
     partial void OnIsSettingsOpenChanged(bool value) => UpdateDesignerOverlay();
     partial void OnActiveDocumentChanged(EditorViewModel? value)
     {
+        value?.RefreshCountsIfBehind();
         if (value != null) { ActiveWorkbench = null; _assistantContextDocument = value; }
         NotifyActiveDocumentChanged();
         UpdateAssistantContext();

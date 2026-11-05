@@ -24,6 +24,7 @@ public sealed partial class WorkspaceEngine
     private readonly ProjectDiagnosticsState _projectDiagnostics;
     private readonly LatestRequestEntries<CompletionItem> _completions;
     private readonly LatestRequestEntries<CodeAction> _codeActions;
+    private readonly CodeLensCounts _codeLensCounts;
 
     public WorkspaceEngine()
     {
@@ -36,21 +37,30 @@ public sealed partial class WorkspaceEngine
         _projectDiagnostics = new(_gate);
         _completions = new(_gate);
         _codeActions = new(_gate);
+        _codeLensCounts = new(_gate);
     }
 
     // What requests answer from, and the generation every snapshot of it is checked against.
     private Solution? CurrentSolution { get { AssertGateHeld(); return field; } set { AssertGateHeld(); field = value; } }
     private long SemanticRevision { get { AssertGateHeld(); return field; } set { AssertGateHeld(); field = value; } }
+    // Typing filters the open popup without asking for a new list, so what describes its entries has to outlive the edits that clear _completions.
+    private OpenCompletionList? OpenCompletions { get { AssertGateHeld(); return field; } set { AssertGateHeld(); field = value; } }
 
     private void AssertGateHeld() => Debug.Assert(Monitor.IsEntered(_gate));
 
-    // A change in any file can change the semantic context of a completion.
-    private void SemanticsChanged()
+    // A change in any file can change the semantic context of a completion. Reference counts need less:
+    // an edit that left declarations alone can only change the counts of the names it added or removed.
+    private void SemanticsChanged(IReadOnlyCollection<string>? changedNames = null)
     {
         SemanticRevision++;
         _completions.Clear();
         _batchCache.Clear();
+        if (changedNames is null) _codeLensCounts.Clear();
+        else _codeLensCounts.NamesChanged(changedNames);
     }
+
+    private sealed record OpenCompletionList(Document Document, Dictionary<string, CompletionItem> Items);
+    private readonly record struct CountedReferences(int References, int XamlReferences, string? XamlName);
 
     private abstract class GatedState(object gate)
     {
@@ -149,6 +159,8 @@ public sealed partial class WorkspaceEngine
         /// <summary>Files a verification has not reached yet. Nothing says these changed, so they withhold nothing.</summary>
         public HashSet<string> Verifying { get { Held(); return field; } } = new(StringComparer.OrdinalIgnoreCase);
         public string? Cursor { get { Held(); return field; } set { Held(); field = value; } }
+        /// <summary>When a verification last reached every known file.</summary>
+        public long LastVerified { get { Held(); return field; } set { Held(); field = value; } }
 
         public void Settled(string path) { Unavailable.Remove(path); Pending.Remove(path); Verifying.Remove(path); }
 
@@ -159,6 +171,7 @@ public sealed partial class WorkspaceEngine
             Pending.Clear();
             Verifying.Clear();
             Cursor = null;
+            LastVerified = 0;
         }
     }
 
@@ -216,6 +229,30 @@ public sealed partial class WorkspaceEngine
             CancelRunning();
             Passes.Clear();
             Reported.Clear();
+        }
+    }
+
+    /// <summary>The reference counts last worked out for each file's declarations, and the names edits have touched since.</summary>
+    private sealed class CodeLensCounts(object gate) : GatedState(gate)
+    {
+        internal sealed class File
+        {
+            public Dictionary<string, CountedReferences> Counts { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> ChangedNames { get; } = new(StringComparer.Ordinal);
+            public long Edits { get; set; }
+            public bool Complete { get; set; }
+            public string? Status { get; set; }
+        }
+
+        private readonly Dictionary<string, File> _files = new(StringComparer.OrdinalIgnoreCase);
+
+        public File For(string path) { Held(); return _files.TryGetValue(path, out var file) ? file : _files[path] = new(); }
+        public bool IsCurrent(string path, File file) { Held(); return _files.TryGetValue(path, out var current) && ReferenceEquals(current, file); }
+        public void Clear() { Held(); _files.Clear(); }
+        public void NamesChanged(IReadOnlyCollection<string> names)
+        {
+            Held();
+            foreach (var file in _files.Values) { file.ChangedNames.UnionWith(names); file.Edits++; }
         }
     }
 
