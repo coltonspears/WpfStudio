@@ -27,10 +27,12 @@ public sealed class SolutionCacheTests : IDisposable
             Assert.False(full.Cached);
             await WaitForSavedModelAsync(project);
         }
+        Assert.Null(await SolutionCache.ReadAsync(new LoadWorkspaceRequest(project), "0.0.0", CancellationToken.None));
 
         await using var client = new WorkspaceClient();
         var cached = await client.LoadAsync(new LoadWorkspaceRequest(project, UseCache: true));
         Assert.True(cached.Cached);
+        Assert.DoesNotContain(cached.Issues, issue => issue.Message.Contains("out of date", StringComparison.Ordinal));
         Assert.Contains(Assert.Single(cached.Projects).Files, file => file.Path == source);
         var text = await File.ReadAllTextAsync(source) + "public sealed class Unsaved : IStore { public void Save() { } }\n";
         await client.UpdateDocumentAsync(new(source, text, 1, Analyze: false));
@@ -44,7 +46,7 @@ public sealed class SolutionCacheTests : IDisposable
     }
 
     [Fact]
-    public async Task AChangedProjectFileIgnoresTheSavedModel()
+    public async Task AnOutOfDateSavedModelStillStartsAndTheRefreshCorrectsIt()
     {
         var project = Path.Combine(_root, "Lib", "Lib.csproj");
         Directory.CreateDirectory(Path.GetDirectoryName(project)!);
@@ -58,8 +60,120 @@ public sealed class SolutionCacheTests : IDisposable
         }
 
         await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Changed</RootNamespace></PropertyGroup></Project>");
+        var added = Path.Combine(_root, "Lib", "Added.cs");
+        await File.WriteAllTextAsync(added, "namespace Lib; public sealed class Added { }");
         await using var client = new WorkspaceClient();
-        Assert.False((await client.LoadAsync(new LoadWorkspaceRequest(project, UseCache: true))).Cached);
+        var stale = await client.LoadAsync(new LoadWorkspaceRequest(project, UseCache: true));
+        Assert.True(stale.Cached);
+        Assert.Contains(stale.Issues, issue => issue.Message.Contains("out of date", StringComparison.Ordinal));
+        Assert.DoesNotContain(Assert.Single(stale.Projects).Files, file => file.Path == added);
+        Assert.Contains(await client.SearchSymbolsAsync(new("Value")), symbol => symbol.Name == "Value");
+
+        var refreshed = await client.RefreshAsync(new LoadWorkspaceRequest(project));
+        Assert.False(refreshed.Cached);
+        Assert.Contains(Assert.Single(refreshed.Projects).Files, file => file.Path == added);
+        Assert.Contains(await client.SearchSymbolsAsync(new("Added")), symbol => symbol.Name == "Added");
+    }
+
+    [Fact]
+    public async Task AProjectMSBuildCannotOpenDoesNotTakeItsAnswersAwayFromTheSavedModel()
+    {
+        var solution = Path.Combine(_root, "Shop.slnx");
+        var broken = Path.Combine(_root, "Broken", "Broken.csproj");
+        var healthy = Path.Combine(_root, "Healthy", "Healthy.csproj");
+        foreach (var project in new[] { broken, healthy })
+        {
+            var name = Path.GetFileNameWithoutExtension(project);
+            Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+            await File.WriteAllTextAsync(Path.Combine(_root, name, name + "Type.cs"), $"namespace {name}; public sealed class {name}Type {{ }}");
+            Assert.Equal(0, (await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(_root, "restore", project), CancellationToken.None)).ExitCode);
+        }
+        await File.WriteAllTextAsync(solution, "<Solution><Project Path=\"Broken/Broken.csproj\" /><Project Path=\"Healthy/Healthy.csproj\" /></Solution>");
+        await using (var first = new WorkspaceClient())
+        {
+            await first.LoadAsync(new LoadWorkspaceRequest(solution));
+            await WaitForSavedModelAsync(solution);
+        }
+
+        await File.WriteAllTextAsync(broken, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>");
+        await using var client = new WorkspaceClient();
+        Assert.True((await client.LoadAsync(new LoadWorkspaceRequest(solution, UseCache: true))).Cached);
+        await Assert.ThrowsAnyAsync<Exception>(() => client.RefreshAsync(new LoadWorkspaceRequest(solution)));
+
+        Assert.Contains(await client.SearchSymbolsAsync(new("BrokenType")), symbol => symbol.Name == "BrokenType");
+        Assert.Contains(await client.SearchSymbolsAsync(new("HealthyType")), symbol => symbol.Name == "HealthyType");
+    }
+
+    [Fact]
+    public async Task AProjectThatStoppedCompilingAnythingDoesNotHoldBackTheRefresh()
+    {
+        var solution = Path.Combine(_root, "Shop.slnx");
+        var emptied = Path.Combine(_root, "Emptied", "Emptied.csproj");
+        var other = Path.Combine(_root, "Other", "Other.csproj");
+        foreach (var project in new[] { emptied, other })
+        {
+            var name = Path.GetFileNameWithoutExtension(project);
+            Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+            await File.WriteAllTextAsync(Path.Combine(_root, name, name + "Type.cs"), $"namespace {name}; public sealed class {name}Type {{ }}");
+            Assert.Equal(0, (await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(_root, "restore", project), CancellationToken.None)).ExitCode);
+        }
+        await File.WriteAllTextAsync(solution, "<Solution><Project Path=\"Emptied/Emptied.csproj\" /><Project Path=\"Other/Other.csproj\" /></Solution>");
+        await using (var first = new WorkspaceClient())
+        {
+            await first.LoadAsync(new LoadWorkspaceRequest(solution));
+            await WaitForSavedModelAsync(solution);
+        }
+
+        // Its source stays on disk, but the project no longer includes that or anything generated.
+        await File.WriteAllTextAsync(emptied, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><GenerateAssemblyInfo>false</GenerateAssemblyInfo><GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute></PropertyGroup></Project>");
+        await File.WriteAllTextAsync(Path.Combine(_root, "Other", "AddedType.cs"), "namespace Other; public sealed class AddedType { }");
+        await using var client = new WorkspaceClient();
+        Assert.True((await client.LoadAsync(new LoadWorkspaceRequest(solution, UseCache: true))).Cached);
+        await client.RefreshAsync(new LoadWorkspaceRequest(solution));
+
+        Assert.Contains(await client.SearchSymbolsAsync(new("AddedType")), symbol => symbol.Name == "AddedType");
+        Assert.DoesNotContain(await client.SearchSymbolsAsync(new("EmptiedType")), symbol => symbol.Name == "EmptiedType");
+    }
+
+    [Fact]
+    public async Task ASolutionThatLostAndGainedProjectsStillStartsFromItsSavedModel()
+    {
+        var solution = Path.Combine(_root, "Shop.slnx");
+        string Project(string name, string body = "") => $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>{body}</Project>";
+        async Task<string> WriteProjectAsync(string name, string body = "")
+        {
+            var path = Path.Combine(_root, name, name + ".csproj");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, Project(name, body));
+            await File.WriteAllTextAsync(Path.Combine(_root, name, name + "Type.cs"), $"namespace {name}; public sealed class {name}Type {{ }}");
+            return path;
+        }
+        var kept = await WriteProjectAsync("Kept", "<ItemGroup><ProjectReference Include=\"..\\Gone\\Gone.csproj\" /></ItemGroup>");
+        var gone = await WriteProjectAsync("Gone");
+        await File.WriteAllTextAsync(solution, "<Solution><Project Path=\"Kept/Kept.csproj\" /><Project Path=\"Gone/Gone.csproj\" /></Solution>");
+        Assert.Equal(0, (await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(_root, "restore", kept), CancellationToken.None)).ExitCode);
+        await using (var first = new WorkspaceClient())
+        {
+            await first.LoadAsync(new LoadWorkspaceRequest(solution));
+            await WaitForSavedModelAsync(solution);
+        }
+
+        Directory.Delete(Path.GetDirectoryName(gone)!, true);
+        await WriteProjectAsync("Kept");
+        var added = await WriteProjectAsync("Added");
+        await File.WriteAllTextAsync(solution, "<Solution><Project Path=\"Kept/Kept.csproj\" /><Project Path=\"Added/Added.csproj\" /></Solution>");
+        Assert.Equal(0, (await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(_root, "restore", added), CancellationToken.None)).ExitCode);
+        await using var client = new WorkspaceClient();
+        var stale = await client.LoadAsync(new LoadWorkspaceRequest(solution, UseCache: true));
+        Assert.True(stale.Cached);
+        Assert.Equal(["Added", "Kept"], stale.Projects.Select(project => project.Name).Order());
+        Assert.Contains(await client.SearchSymbolsAsync(new("KeptType")), symbol => symbol.Name == "KeptType");
+
+        var refreshed = await client.RefreshAsync(new LoadWorkspaceRequest(solution));
+        Assert.Equal(["Added", "Kept"], refreshed.Projects.Select(project => project.Name).Order());
+        Assert.Contains(await client.SearchSymbolsAsync(new("AddedType")), symbol => symbol.Name == "AddedType");
     }
 
     [Fact]

@@ -8,6 +8,10 @@ public static class ReleaseNoteCatalog
 {
     public static IReadOnlyList<ReleaseNote> All { get; } =
     [
+        new("Unreleased", "Faster solution opening",
+        [
+            "A solution whose project files changed opens from its saved project model in seconds. MSBuild corrects it in the background, and Output says when it is out of date.",
+        ]),
         new("Unreleased", "Workbench essentials",
         [
             "File > Close solution closes every tab and unloads the solution, returning to the start page.",
