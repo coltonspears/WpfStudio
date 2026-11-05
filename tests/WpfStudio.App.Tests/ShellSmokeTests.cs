@@ -113,6 +113,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             }
             if (Environment.GetEnvironmentVariable("WPFSTUDIO_TEST_CODEASSIST_ONLY") == "1")
             {
+                // Started and laid out with the feature off, and nothing has needed the models yet.
+                Assert.False(shell.CodeAssist.Engine.Catalog.IsRead);
                 await VerifyCodeAssistAsync(root, window, manager, shell);
                 Assert.Empty(bindingErrors.Messages);
                 return;

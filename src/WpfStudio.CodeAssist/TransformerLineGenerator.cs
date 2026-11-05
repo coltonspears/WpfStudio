@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -31,7 +32,8 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
     [GeneratedRegex(@"^\{?\s*(get|set|init)\b|\b(get|set|init)\s*(;|=>)", RegexOptions.None, 1000)]
     private static partial Regex Accessor();
 
-    [GeneratedRegex(@"[A-Za-z_]\w*", RegexOptions.None, 1000)]
+    // Not \w, which in .NET also takes combining marks. Python's does not, and the gate was fitted on Python's names.
+    [GeneratedRegex(@"[A-Za-z_][\p{L}\p{N}_]*", RegexOptions.None, 1000)]
     private static partial Regex Name();
 
     private readonly InferenceSession _session;
@@ -86,7 +88,7 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
         if (typed.Length > 0 && !whole.StartsWith(' ')) return Nothing;
         whole = whole[typed.Length..];
         if (VisibleLength(whole) < 2) return Nothing;
-        if (Trusted(whole, line, text)) return new LineCompletion(whole, true);
+        if (Trusted(whole, line, code)) return new LineCompletion(whole, true);
         string part = SurePart(line, typed);
         return VisibleLength(part) >= _gate.PartialCharacters || (VisibleLength(part) >= 2 && ClosesWhatIsOpen(text[(text.LastIndexOf('\n') + 1)..], part)) ? new LineCompletion(part, false) : Nothing;
     }
@@ -97,8 +99,20 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
         string text = LineText.Normalize(code);
         string typed = text.EndsWith(' ') ? " " : "";
         var line = Decode(text[..^typed.Length], maxTokens, CancellationToken.None) ?? throw new InvalidOperationException("The model did not finish this line.");
-        return Features(line.Text[typed.Length..], line, text);
+        return Features(line.Text[typed.Length..], line, code);
     }
+
+    /// <summary>The text searched for names and copies. Tabs stay as they are, because the gate was fitted on a window measured before they expand.</summary>
+    internal static string SearchWindow(string code)
+    {
+        string text = code.Replace("\r\n", "\n", StringComparison.Ordinal);
+        return text.Length > GateContextChars ? text[^GateContextChars..] : text;
+    }
+
+    internal static List<string> Names(string text) => [.. Name().Matches(text).Select(match => match.Value)];
+
+    /// <summary>Visible characters, not UTF-16 units, so an emoji counts once as it did when the gate was fitted.</summary>
+    internal static int VisibleLength(string text) => text.EnumerateRunes().Count(rune => !Rune.IsWhiteSpace(rune));
 
     // The likeliest line, or null when the network did not reach its end in time, which usually means it is repeating itself.
     private DecodedLine? Decode(string code, int maxTokens, CancellationToken token)
@@ -165,10 +179,10 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
 
     private double[] Features(string whole, DecodedLine line, string code)
     {
-        string searched = code.Length > GateContextChars ? code[^GateContextChars..] : code;
-        string tail = code[(code.LastIndexOf('\n') + 1)..];
-        var names = Name().Matches(whole).Select(match => match.Value).ToList();
-        var known = Name().Matches(searched).Select(match => match.Value).ToHashSet(StringComparer.Ordinal);
+        string searched = SearchWindow(code);
+        string tail = searched[(searched.LastIndexOf('\n') + 1)..];
+        var names = Names(whole);
+        var known = Names(searched).ToHashSet(StringComparer.Ordinal);
         int inFile = names.Count(known.Contains);
         double logProbability = line.Confidence.Sum(Math.Log);
         string stripped = whole.Trim();
@@ -232,8 +246,6 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
     }
 
     private static bool IsWordCharacter(char character) => char.IsLetterOrDigit(character) || character == '_';
-
-    private static int VisibleLength(string text) => text.Count(character => !char.IsWhiteSpace(character));
 
     public void Dispose() => _session.Dispose();
 

@@ -430,60 +430,68 @@
         </StackPanel>
       </ScrollViewer>
 
-      <!-- ================================================== Keyboard shortcuts -->
-      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Experimental}">
-        <StackPanel Margin="28,22,28,24">
-          <TextBlock Text="Experimental" Style="{StaticResource PageTitle}" />
-          <TextBlock Text="Features still being evaluated. They stay off until you turn them on, and they may change or be removed." Style="{StaticResource PageIntro}" />
-          <TextBlock Text="CODE ASSIST" Style="{StaticResource GroupLabel}" />
-          <Border Style="{StaticResource Group}">
-            <StackPanel>
-              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding CodeAssist.Enabled}">
-                <StackPanel>
-                  <TextBlock Text="Code Assist" Style="{StaticResource RowName}" />
-                  <TextBlock Text="After a dot in C#, a small local model moves the members you are likely to want to the top of the completion list and marks them with a star. Tab or Enter takes the first. It runs on this computer; no code leaves it." Style="{StaticResource RowNote}" />
-                </StackPanel>
-              </CheckBox>
-              <Border Style="{StaticResource Divider}" />
-              <DockPanel Margin="0,9" IsEnabled="{Binding CodeAssist.Enabled}">
-                <ComboBox DockPanel.Dock="Right" VerticalAlignment="Center" Width="130" Margin="12,0,0,0" ItemsSource="{Binding CodeAssist.MemberModels}" SelectedValuePath="Version" SelectedValue="{Binding CodeAssist.MemberModelVersion}" DisplayMemberPath="Label" AutomationProperties.Name="Member ranking model version" />
-                <StackPanel>
-                  <TextBlock Text="Member ranking model" Style="{StaticResource RowName}" />
-                  <TextBlock Text="{Binding CodeAssist.SelectedMemberModel.Summary}" Style="{StaticResource RowNote}" />
-                  <TextBlock Text="{Binding CodeAssist.SelectedMemberModel.Limitations}" Style="{StaticResource RowNote}" />
-                </StackPanel>
-              </DockPanel>
-              <!-- Outside the switches: anyone deciding whether to turn a model on should be able to read about it first. -->
-              <Expander Header="About these versions" Margin="0,0,0,8" AutomationProperties.Name="About the member ranking model versions">
-                <ItemsControl ItemsSource="{Binding CodeAssist.MemberModelVersions}" ItemTemplate="{StaticResource ModelVersion}" Margin="4,4,0,0" />
-              </Expander>
-              <Border Style="{StaticResource Divider}" />
-              <StackPanel IsEnabled="{Binding CodeAssist.Enabled}">
-                <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding CodeAssist.LineSuggestions}">
+      <!-- ================================================== Experimental -->
+      <!-- A template, because a collapsed control is never measured: nothing here is built, and no model catalog is read, until the page is first shown. The fallback keeps it collapsed on the first layout pass, before the binding attaches. -->
+      <ContentControl Content="{Binding}" Focusable="False" IsTabStop="False" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Experimental, FallbackValue=Collapsed}">
+        <ContentControl.ContentTemplate>
+          <DataTemplate>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel Margin="28,22,28,24">
+                <TextBlock Text="Experimental" Style="{StaticResource PageTitle}" />
+                <TextBlock Text="Features still being evaluated. They stay off until you turn them on, and they may change or be removed." Style="{StaticResource PageIntro}" />
+                <TextBlock Text="CODE ASSIST" Style="{StaticResource GroupLabel}" />
+                <Border Style="{StaticResource Group}">
                   <StackPanel>
-                    <TextBlock Text="Line suggestions" Style="{StaticResource RowName}" />
-                    <TextBlock Text="After a pause at the end of a C# line, shows a grey continuation when the model is confident, and nothing when it is not. Tab inserts it; typing or Esc dismisses it." Style="{StaticResource RowNote}" />
+                    <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding CodeAssist.Enabled}">
+                      <StackPanel>
+                        <TextBlock Text="Code Assist" Style="{StaticResource RowName}" />
+                        <TextBlock Text="After a dot in C#, a small local model moves the members you are likely to want to the top of the completion list and marks them with a star. Tab or Enter takes the first. It runs on this computer; no code leaves it." Style="{StaticResource RowNote}" />
+                      </StackPanel>
+                    </CheckBox>
+                    <Border Style="{StaticResource Divider}" />
+                    <DockPanel Margin="0,9" IsEnabled="{Binding CodeAssist.Enabled}">
+                      <ComboBox DockPanel.Dock="Right" VerticalAlignment="Center" Width="130" Margin="12,0,0,0" ItemsSource="{Binding CodeAssist.MemberModels}" SelectedValuePath="Version" SelectedValue="{Binding CodeAssist.MemberModelVersion}" DisplayMemberPath="Label" AutomationProperties.Name="Member ranking model version" />
+                      <StackPanel>
+                        <TextBlock Text="Member ranking model" Style="{StaticResource RowName}" />
+                        <TextBlock Text="{Binding CodeAssist.SelectedMemberModel.Summary}" Style="{StaticResource RowNote}" />
+                        <TextBlock Text="{Binding CodeAssist.SelectedMemberModel.Limitations}" Style="{StaticResource RowNote}" />
+                      </StackPanel>
+                    </DockPanel>
+                    <!-- Outside the switches: anyone deciding whether to turn a model on should be able to read about it first. -->
+                    <Expander Header="About these versions" Margin="0,0,0,8" AutomationProperties.Name="About the member ranking model versions">
+                      <ItemsControl ItemsSource="{Binding CodeAssist.MemberModelVersions}" ItemTemplate="{StaticResource ModelVersion}" Margin="4,4,0,0" />
+                    </Expander>
+                    <Border Style="{StaticResource Divider}" />
+                    <StackPanel IsEnabled="{Binding CodeAssist.Enabled}">
+                      <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding CodeAssist.LineSuggestions}">
+                        <StackPanel>
+                          <TextBlock Text="Line suggestions" Style="{StaticResource RowName}" />
+                          <TextBlock Text="After a pause at the end of a C# line, shows a grey continuation when the model is confident, and nothing when it is not. Tab inserts it; typing or Esc dismisses it." Style="{StaticResource RowNote}" />
+                        </StackPanel>
+                      </CheckBox>
+                      <Border Style="{StaticResource Divider}" />
+                      <DockPanel Margin="0,9" IsEnabled="{Binding CodeAssist.LineSuggestions}">
+                        <ComboBox DockPanel.Dock="Right" VerticalAlignment="Center" Width="130" Margin="12,0,0,0" ItemsSource="{Binding CodeAssist.LineModels}" SelectedValuePath="Version" SelectedValue="{Binding CodeAssist.LineModelVersion}" DisplayMemberPath="Label" AutomationProperties.Name="Line suggestion model version" />
+                        <StackPanel>
+                          <TextBlock Text="Line suggestion model" Style="{StaticResource RowName}" />
+                          <TextBlock Text="{Binding CodeAssist.SelectedLineModel.Summary}" Style="{StaticResource RowNote}" />
+                          <TextBlock Text="{Binding CodeAssist.SelectedLineModel.Limitations}" Style="{StaticResource RowNote}" />
+                        </StackPanel>
+                      </DockPanel>
+                    </StackPanel>
+                    <Expander Header="About these versions" Margin="0,0,0,8" AutomationProperties.Name="About the line suggestion model versions">
+                      <ItemsControl ItemsSource="{Binding CodeAssist.LineModelVersions}" ItemTemplate="{StaticResource ModelVersion}" Margin="4,4,0,0" />
+                    </Expander>
                   </StackPanel>
-                </CheckBox>
-                <Border Style="{StaticResource Divider}" />
-                <DockPanel Margin="0,9" IsEnabled="{Binding CodeAssist.LineSuggestions}">
-                  <ComboBox DockPanel.Dock="Right" VerticalAlignment="Center" Width="130" Margin="12,0,0,0" ItemsSource="{Binding CodeAssist.LineModels}" SelectedValuePath="Version" SelectedValue="{Binding CodeAssist.LineModelVersion}" DisplayMemberPath="Label" AutomationProperties.Name="Line suggestion model version" />
-                  <StackPanel>
-                    <TextBlock Text="Line suggestion model" Style="{StaticResource RowName}" />
-                    <TextBlock Text="{Binding CodeAssist.SelectedLineModel.Summary}" Style="{StaticResource RowNote}" />
-                    <TextBlock Text="{Binding CodeAssist.SelectedLineModel.Limitations}" Style="{StaticResource RowNote}" />
-                  </StackPanel>
-                </DockPanel>
+                </Border>
+                <TextBlock Text="{Binding CodeAssist.Status}" Style="{StaticResource Caption}" TextWrapping="Wrap" AutomationProperties.Name="Code Assist status" />
               </StackPanel>
-              <Expander Header="About these versions" Margin="0,0,0,8" AutomationProperties.Name="About the line suggestion model versions">
-                <ItemsControl ItemsSource="{Binding CodeAssist.LineModelVersions}" ItemTemplate="{StaticResource ModelVersion}" Margin="4,4,0,0" />
-              </Expander>
-            </StackPanel>
-          </Border>
-          <TextBlock Text="{Binding CodeAssist.Status}" Style="{StaticResource Caption}" TextWrapping="Wrap" AutomationProperties.Name="Code Assist status" />
-        </StackPanel>
-      </ScrollViewer>
+            </ScrollViewer>
+          </DataTemplate>
+        </ContentControl.ContentTemplate>
+      </ContentControl>
 
+      <!-- ================================================== Keyboard shortcuts -->
       <DockPanel Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Shortcuts}" Margin="28,22,28,0">
         <StackPanel DockPanel.Dock="Top">
           <TextBlock Text="Keyboard shortcuts" Style="{StaticResource PageTitle}" />
