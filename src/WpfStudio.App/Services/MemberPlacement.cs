@@ -28,6 +28,17 @@ internal static partial class MemberPlacement
             return new(lineEnd, 0, newLine + LeadingWhitespace(text, LineStart(text, opened[^1])) + unit, IsCrowded(text, lineEnd) ? newLine : "");
         int type = TypeBrace(text, braces);
         string memberIndent = type >= 0 ? LeadingWhitespace(text, LineStart(text, braces[type])) + unit : LeadingWhitespace(text, lineStart);
+        // The line that closes the type: the member goes last in its body, above the brace. After the line would be outside the type.
+        if (type >= 0 && opened.Count <= type && text.AsSpan(lineStart, lineEnd - lineStart).TrimStart().StartsWith("}"))
+        {
+            int previousEnd = lineStart;
+            if (previousEnd > 0 && text[previousEnd - 1] == '\n') previousEnd--;
+            if (previousEnd > 0 && text[previousEnd - 1] == '\r') previousEnd--;
+            var previous = text.AsSpan(LineStart(text, previousEnd), previousEnd - LineStart(text, previousEnd)).TrimEnd();
+            // Set off from the member above by a blank line, unless there is none or one is already there.
+            bool separated = lineStart == 0 || previous.IsEmpty || previous.EndsWith("{");
+            return new(lineStart, 0, (separated ? "" : newLine) + memberIndent, newLine);
+        }
         if (IsBlank(text, lineStart, lineEnd))
         {
             // Directly inside the type the blank line is where the member belongs. Deeper, it is a blank line in some method's body.

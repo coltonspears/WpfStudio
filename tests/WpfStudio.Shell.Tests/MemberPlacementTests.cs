@@ -36,6 +36,22 @@ public sealed class MemberPlacementTests
     }
 
     [Fact]
+    public void TheTypesClosingBraceTakesTheMemberAboveItNotAfterTheType()
+    {
+        string At(string text, int caret) => MemberPlacement.Apply(text, MemberPlacement.Find(text, caret, "    ", "\n"), "MEMBER", "\n");
+        // With the caret before the brace and after it: either way the member is the type's last.
+        Assert.EndsWith("public string Name { get; set; } = \"\";\n\n    MEMBER\n}\n", At(Model, Model.LastIndexOf('}')));
+        Assert.EndsWith("public string Name { get; set; } = \"\";\n\n    MEMBER\n}\n", At(Model, Model.LastIndexOf('}') + 1));
+        // Nothing above it to be set off from.
+        Assert.Equal("class C\n{\n    MEMBER\n}", At("class C\n{\n}", "class C\n{\n}".Length));
+        Assert.Equal("class C\n{\n    int a;\n\n    MEMBER\n}", At("class C\n{\n    int a;\n\n}", "class C\n{\n    int a;\n\n}".Length));
+        // An indented type, and a nested one: the member lands in the type whose brace it is.
+        const string nested = "namespace N\n{\n    class Outer\n    {\n        class Inner\n        {\n            int a;\n        }\n    }\n}";
+        Assert.Contains("            int a;\n\n            MEMBER\n        }\n    }", At(nested, nested.IndexOf("        }\n    }", StringComparison.Ordinal) + 8));
+        Assert.Contains("        }\n\n        MEMBER\n    }\n}", At(nested, nested.IndexOf("    }\n}", StringComparison.Ordinal) + 4));
+    }
+
+    [Fact]
     public void AGenericConstraintDoesNotMakeAMethodLookLikeAType()
     {
         const string text = "class C\n{\n    void M<T>() where T : class\n    {\n        Run();\n    }\n}";

@@ -123,6 +123,29 @@ public sealed class EditorEditingTests
     });
 
     [Fact]
+    public Task ASelectionWithItsLineBreakMovesBelowALastLineThatHasNone() => WithEditorAsync("Last.cs", "a\nb\nc", (editor, _, _) =>
+    {
+        // The break selected with "b" stays between the lines, so at the end of the document the selection is the line alone.
+        editor.Select(2, 2);
+        editor.MoveLines(up: false);
+        Assert.Equal("a\nc\nb", Text(editor));
+        Assert.Equal("b", editor.SelectedText);
+        Assert.Equal(editor.Document.TextLength, editor.CaretOffset);
+        editor.MoveLines(up: false); // Already last.
+        editor.MoveLines(up: true);
+        Assert.Equal("a\nb\nc", Text(editor));
+        Assert.Equal("b", editor.SelectedText);
+
+        // The same with the caret at the selection's start.
+        editor.TextArea.Selection = ICSharpCode.AvalonEdit.Editing.Selection.Create(editor.TextArea, 4, 2);
+        editor.CaretOffset = 2;
+        editor.MoveLines(up: false);
+        Assert.Equal("a\nc\nb", Text(editor));
+        Assert.Equal("b", editor.SelectedText);
+        Assert.Equal(4, editor.CaretOffset);
+    });
+
+    [Fact]
     public Task CommentingTogglesLinesInCSharp() => WithEditorAsync("Comment.cs", "class C\n{\n    void M()\n    {\n        |Run();\n\n        if (a)\n            Stop();\n    }\n}", (editor, _, _) =>
     {
         Assert.True(editor.ToggleComment());

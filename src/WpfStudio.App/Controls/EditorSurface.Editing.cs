@@ -118,13 +118,15 @@ public sealed partial class EditorSurface
         int shift = up ? -(other.Length + between.Length) : other.Length + between.Length;
         using (Document.RunUpdate())
             Document.Replace(start, end - start, up ? block + between + other : other + between + block);
+        // A selection that took its last line's break with it has no break to cover once that line is the document's last.
+        int Moved(int offset) => Math.Clamp(offset + shift, 0, Document.TextLength);
         if (selectionLength > 0)
         {
             int anchor = caretAtStart ? selectionStart + selectionLength : selectionStart;
-            TextArea.Selection = Selection.Create(TextArea, anchor + shift, (caretAtStart ? selectionStart : selectionStart + selectionLength) + shift);
+            TextArea.Selection = Selection.Create(TextArea, Moved(anchor), Moved(caretAtStart ? selectionStart : selectionStart + selectionLength));
         }
         else TextArea.ClearSelection();
-        CaretOffset = caret + shift;
+        CaretOffset = Moved(caret);
         TextArea.Caret.BringCaretToView();
     }
 
