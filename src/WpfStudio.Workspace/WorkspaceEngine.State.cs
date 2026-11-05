@@ -144,16 +144,20 @@ public sealed partial class WorkspaceEngine
         public SemaphoreSlim RefreshGate { get; } = new(1, 1);
         public Dictionary<string, DocumentId[]> Documents { get { Held(); return field; } } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, string> Unavailable { get { Held(); return field; } } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Files something says changed. Their projects' XAML contexts are withheld until these are read.</summary>
         public HashSet<string> Pending { get { Held(); return field; } } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Files a verification has not reached yet. Nothing says these changed, so they withhold nothing.</summary>
+        public HashSet<string> Verifying { get { Held(); return field; } } = new(StringComparer.OrdinalIgnoreCase);
         public string? Cursor { get { Held(); return field; } set { Held(); field = value; } }
 
-        public void Settled(string path) { Unavailable.Remove(path); Pending.Remove(path); }
+        public void Settled(string path) { Unavailable.Remove(path); Pending.Remove(path); Verifying.Remove(path); }
 
         public void Reset()
         {
             Documents.Clear();
             Unavailable.Clear();
             Pending.Clear();
+            Verifying.Clear();
             Cursor = null;
         }
     }

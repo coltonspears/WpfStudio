@@ -37,7 +37,10 @@ public sealed partial class WorkspaceEngine
     /// <summary>
     /// Reconciles known closed C# documents without registering replay buffers. Missing files
     /// retain their document identity with empty text so recreation can recover without reload.
-    /// A bounded full scan continues its pending sweep on the next call.
+    /// Paths name files something says changed, and their XAML contexts are withheld until they are read. With no paths
+    /// this verifies every known file. Nothing says those changed, so until it finds a difference a verification
+    /// withholds nothing and reports no change. Either continues on the next call when its budget runs out;
+    /// <see cref="WorkspaceRpcExtensions.RefreshAllDiskDocumentsAsync(IWorkspaceRpc, CancellationToken)"/> runs a verification to its end.
     /// </summary>
     public async Task<RefreshDiskDocumentsResult> RefreshDiskDocumentsAsync(RefreshDiskDocumentsRequest request,
         CancellationToken cancellationToken)
@@ -52,6 +55,7 @@ public sealed partial class WorkspaceEngine
             Solution solution;
             long revision;
             HashSet<string> pending;
+            HashSet<string> verifying;
             Dictionary<string, DocumentId[]> documents;
             string[] selected;
             lock (_gate)
@@ -61,14 +65,16 @@ public sealed partial class WorkspaceEngine
                 revision = SemanticRevision;
                 documents = new(_disk.Documents, StringComparer.OrdinalIgnoreCase);
                 pending = new(_disk.Pending.Where(path => !_documents.IsOpen(path)), StringComparer.OrdinalIgnoreCase);
+                verifying = new(_disk.Verifying.Where(path => !_documents.IsOpen(path)), StringComparer.OrdinalIgnoreCase);
                 if (requested is not null)
                     pending.UnionWith(requested.Where(path => documents.ContainsKey(path) && !_documents.IsOpen(path)));
-                else if (pending.Count == 0)
-                    pending.UnionWith(documents.Keys.Where(path => !_documents.IsOpen(path)));
+                else if (pending.Count == 0 && verifying.Count == 0)
+                    verifying.UnionWith(documents.Keys.Where(path => !_documents.IsOpen(path)));
                 // Rotate even targeted requests, so a repeated over-budget request cannot
                 // permanently starve later paths in a large project.
                 var priority = requested?.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                selected = pending.OrderBy(path => priority?.Contains(path) == true ? 0 : 1)
+                selected = (requested is null ? pending.Union(verifying, StringComparer.OrdinalIgnoreCase) : pending)
+                    .OrderBy(path => priority?.Contains(path) == true ? 0 : pending.Contains(path) ? 1 : 2)
                     .ThenBy(path => _disk.Cursor is null || StringComparer.OrdinalIgnoreCase.Compare(path, _disk.Cursor) > 0 ? 0 : 1)
                     .ThenBy(path => path, StringComparer.OrdinalIgnoreCase).Take(maximum).ToArray();
             }
@@ -86,21 +92,24 @@ public sealed partial class WorkspaceEngine
                 var read = await ReadBoundedTextAsync(path, available, cancellationToken).ConfigureAwait(false);
                 reads.Add(path, read);
                 pending.Remove(path);
+                verifying.Remove(path);
                 if (read.State == "TooLarge") total += available;
                 if (read.Text is { } text)
                 {
                     total += text.Length;
                     var replacement = SourceText.From(text);
+                    // Roslyn drops text it can reload, so text not in memory now says nothing about the disk. Replacing
+                    // those documents regardless discards every compilation that used them.
                     foreach (var id in documents[path])
                         if (updated.GetDocument(id) is { } document
-                            && (!document.TryGetText(out var currentText) || !currentText.ContentEquals(replacement)))
+                            && !(await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ContentEquals(replacement))
                             updated = updated.WithDocumentText(id, replacement, PreservationMode.PreserveIdentity);
                 }
                 else if (read.State == "Missing")
                 {
                     foreach (var id in documents[path])
                         if (updated.GetDocument(id) is { } document
-                            && (!document.TryGetText(out var currentText) || currentText.Length != 0))
+                            && (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).Length != 0)
                             updated = updated.WithDocumentText(id, SourceText.From(""), PreservationMode.PreserveIdentity);
                 }
             }
@@ -124,17 +133,21 @@ public sealed partial class WorkspaceEngine
                 }
                 _disk.Pending.Clear();
                 _disk.Pending.UnionWith(pending);
+                _disk.Verifying.Clear();
+                _disk.Verifying.UnionWith(verifying);
                 if (reads.Count > 0) _disk.Cursor = reads.Keys.Last();
                 if (changed)
                 {
                     SetAuthoredSolution(updated);
                     SemanticsChanged();
                 }
-                bool incomplete = pending.Count > 0 || _disk.Unavailable.Count > 0;
-                result = new(true, changed, reads.Count, incomplete, pending.Count > 0
-                    ? $"Model refresh is incomplete; {pending.Count} known files remain in this sweep. A subsequent refresh continues it."
+                // A verification interrupted by a targeted refresh is not that refresh's work, and a later verification continues it.
+                int remaining = requested is null ? pending.Count + verifying.Count : pending.Count;
+                bool incomplete = remaining > 0 || _disk.Unavailable.Count > 0;
+                result = new(true, changed, reads.Count, incomplete, remaining > 0
+                    ? $"Model refresh is incomplete; {remaining} known files remain in this sweep. A subsequent refresh continues it."
                     : _disk.Unavailable.Count > 0 ? $"{_disk.Unavailable.Count} model source files are missing, unreadable, or exceed the read budget; affected XAML contexts are unavailable." : null,
-                    PendingFiles: pending.Count);
+                    PendingFiles: remaining);
             }
             bool pagesChanged = await RefreshPageProjectionSourcesAsync(request.Paths, cancellationToken).ConfigureAwait(false);
             await EnsurePageProjectionAsync(cancellationToken).ConfigureAwait(false);
