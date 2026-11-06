@@ -465,6 +465,66 @@ public sealed class GitIntegrationTests
     }
 
     [Fact]
+    public async Task TrackingAndRemoteFollowTheUpstreamOnlyOnceTheBranchHasACommit()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        await fixture.RunAsync("remote", "add", "origin", "https://github.com/example/origin.git");
+        await fixture.RunAsync("remote", "add", "fork", "https://gitlab.com/example/fork.git");
+        await fixture.RunAsync("update-ref", "refs/remotes/fork/main", "HEAD");
+
+        // An unborn branch's upstream already resolves, but there is nothing to count against it yet.
+        await fixture.RunAsync("switch", "--quiet", "--orphan", "fresh");
+        await fixture.RunAsync("config", "branch.fresh.remote", "fork");
+        await fixture.RunAsync("config", "branch.fresh.merge", "refs/heads/main");
+        var unborn = await fixture.Service.LoadAsync(fixture.Root);
+        Assert.Equal<(string, string?, string)>(("fresh", null, "No commits yet"), (unborn.Branch, unborn.Upstream, unborn.Tracking));
+        Assert.Empty(unborn.History);
+        Assert.Equal("https://github.com/example/origin", unborn.Remote?.WebUrl);
+
+        await fixture.RunAsync("switch", "--quiet", "main");
+        await fixture.RunAsync("config", "branch.main.remote", "fork");
+        await fixture.RunAsync("config", "branch.main.merge", "refs/heads/main");
+        await fixture.RunAsync("commit", "--allow-empty", "--quiet", "-m", "Ahead");
+        var tracked = await fixture.Service.LoadAsync(fixture.Root);
+        Assert.Equal(("fork/main", "fork/main · 1 ahead · 0 behind"), (tracked.Upstream, tracked.Tracking));
+        Assert.Equal("https://gitlab.com/example/fork", tracked.Remote?.WebUrl);
+        Assert.Equal(new[] { "Ahead", "Initial commit" }, tracked.History.Select(x => x.Subject));
+    }
+
+    [Fact]
+    public async Task RefreshNamesEachOperationInProgress()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.InitialCommitAsync();
+        await fixture.RunAsync("switch", "--quiet", "-c", "feature");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "feature\n");
+        await fixture.RunAsync("commit", "--quiet", "-am", "Feature");
+        await fixture.RunAsync("switch", "--quiet", "main");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "main\n");
+        await fixture.RunAsync("commit", "--quiet", "-am", "Main");
+        await File.WriteAllTextAsync(fixture.File("file.cs"), "later\n");
+        await fixture.RunAsync("commit", "--quiet", "-am", "Later");
+        Assert.Equal(GitOperation.None, (await fixture.Service.LoadAsync(fixture.Root)).Operation);
+
+        // Each stops on a conflict in file.cs, and aborting it leaves main clean for the next.
+        (string[] Start, GitOperation Expected)[] operations =
+        [
+            (["merge", "feature"], GitOperation.Merge),
+            (["rebase", "feature"], GitOperation.Rebase),
+            (["cherry-pick", "feature"], GitOperation.CherryPick),
+            (["revert", "--no-edit", "HEAD~1"], GitOperation.Revert)
+        ];
+        foreach (var (start, expected) in operations)
+        {
+            await fixture.ConflictAsync(start);
+            Assert.Equal(expected, (await fixture.Service.LoadAsync(fixture.Root)).Operation);
+            await fixture.Service.AbortOperationAsync(fixture.Root);
+            Assert.Equal(GitOperation.None, (await fixture.Service.LoadAsync(fixture.Root)).Operation);
+        }
+    }
+
+    [Fact]
     public async Task MissingRepoAndCancellationHaveHelpfulBoundedOutcomes()
     {
         var service = new GitService();
@@ -729,14 +789,27 @@ public sealed class GitIntegrationTests
 
         public async Task<string> RunAsync(params string[] arguments)
         {
+            var (exitCode, output, error) = await StartAsync(arguments);
+            Assert.True(exitCode == 0, error);
+            return output;
+        }
+
+        /// <summary>Runs a command that stops on a conflict, which Git reports with a failing exit code.</summary>
+        public async Task ConflictAsync(params string[] arguments)
+        {
+            var (exitCode, output, error) = await StartAsync(arguments);
+            Assert.True(exitCode != 0, $"Expected a conflict.\n{output}\n{error}");
+        }
+
+        private async Task<(int ExitCode, string Output, string Error)> StartAsync(string[] arguments)
+        {
             var start = new ProcessStartInfo("git") { WorkingDirectory = Root, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var argument in arguments) start.ArgumentList.Add(argument);
             using var process = Process.Start(start)!;
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
-            Assert.True(process.ExitCode == 0, await error);
-            return await output;
+            return (process.ExitCode, await output, await error);
         }
 
         public void Dispose()
