@@ -15,6 +15,13 @@ public sealed class GitService
     private const string BinaryMessage = "Binary file — there is no text to compare.";
     private const string TooLargeMessage = "This file is larger than 2 MiB. Open it in the editor or use the terminal to compare it.";
 
+    /// <summary>The files Git leaves while an operation is in progress, checked in this order.</summary>
+    private static readonly (string Marker, GitOperation Operation)[] OperationMarkers =
+    [
+        ("rebase-merge", GitOperation.Rebase), ("rebase-apply", GitOperation.Rebase), ("MERGE_HEAD", GitOperation.Merge),
+        ("CHERRY_PICK_HEAD", GitOperation.CherryPick), ("REVERT_HEAD", GitOperation.Revert)
+    ];
+
     /// <param name="historyLimit">How many recent commits to include; the pane asks for more as the reader pages.</param>
     public async Task<GitSnapshot> LoadAsync(string? workspacePath, CancellationToken cancellationToken = default, int historyLimit = 50)
     {
@@ -31,40 +38,61 @@ public sealed class GitService
             throw new InvalidOperationException(GitDiagnosticSanitizer.Redact(discovery.Error.Trim()));
         }
         var root = System.IO.Path.GetFullPath(discovery.Output.TrimEnd('\r', '\n'));
-        var status = await RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cancellationToken);
-        var branchResult = await RunAsync(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], cancellationToken, allowFailure: true);
+        // A refresh follows every pane action, so its commands start together, and only the commit counts and the remote's
+        // URL wait for the upstream. status is the only one that writes (the index's stat cache, when the lock is free), and
+        // no other command here reads the index. log and the upstream lookup don't wait for the HEAD check: without a commit
+        // they fail, and their results are dropped. Task.WhenAll reports the first failure in the order listed, which is the
+        // order they used to run in, and leaves no process unobserved.
+        var statusTask = RunAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], cancellationToken);
+        var branchTask = RunAsync(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], cancellationToken, allowFailure: true);
+        var branchListTask = RunAsync(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"], cancellationToken);
+        var hasHeadTask = HasHeadAsync(root, cancellationToken);
+        var logTask = RunAsync(root, ["log", $"-{Math.Max(1, historyLimit)}", "--no-show-signature", HistoryFormat], cancellationToken, allowFailure: true, readOnly: true);
+        var upstreamTask = RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true);
+        var remoteNamesTask = GetRemoteNamesAsync(root, cancellationToken);
+        var operationTask = GetOperationAsync(root, cancellationToken);
+        await Task.WhenAll(statusTask, branchTask, branchListTask, hasHeadTask, logTask, upstreamTask, remoteNamesTask, operationTask);
+
+        var branchResult = await branchTask;
         var branch = branchResult.ExitCode == 0 ? branchResult.Output.Trim() : "Detached HEAD";
-        var branchList = await RunAsync(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"], cancellationToken);
-        var branches = branchList.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var hasHead = await HasHeadAsync(root, cancellationToken);
+        var branches = (await branchListTask).Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var hasHead = await hasHeadTask;
         GitCommit[] history = [];
         string? upstream = null;
         var tracking = hasHead ? "No upstream configured" : "No commits yet";
+        Task<GitResult>? countsTask = null;
         if (hasHead)
         {
-            var log = await RunAsync(root, ["log", $"-{Math.Max(1, historyLimit)}", "--no-show-signature", HistoryFormat], cancellationToken, readOnly: true);
-            history = [.. GitOutput.ParseHistory(log.Output)];
-            var upstreamResult = await RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true);
+            history = [.. GitOutput.ParseHistory((await logTask).EnsureSuccess().Output)];
+            var upstreamResult = await upstreamTask;
             if (upstreamResult.ExitCode == 0)
             {
                 upstream = upstreamResult.Output.Trim();
-                var counts = await RunAsync(root, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], cancellationToken);
-                var parts = counts.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                tracking = $"{upstream} · {parts[0]} ahead · {parts[1]} behind";
+                countsTask = RunAsync(root, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], cancellationToken);
             }
         }
-        var changes = GitOutput.ParseStatus(status.Output);
-        var remote = await GetRemoteAsync(root, upstream, cancellationToken);
-        var operation = await GetOperationAsync(root, cancellationToken);
+        var remoteTask = ResolveRemoteAsync(root, await remoteNamesTask, upstream, cancellationToken);
+        await Task.WhenAll(countsTask ?? Task.CompletedTask, remoteTask);
+        if (countsTask is not null)
+        {
+            var parts = (await countsTask).Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            tracking = $"{upstream} · {parts[0]} ahead · {parts[1]} behind";
+        }
+        var changes = GitOutput.ParseStatus((await statusTask).Output);
         return new(root, branch, upstream, tracking, changes, branches, history,
-            changes.Count == 0 ? "Working tree clean" : $"{changes.Count} changed file{(changes.Count == 1 ? "" : "s")}", remote, operation);
+            changes.Count == 0 ? "Working tree clean" : $"{changes.Count} changed file{(changes.Count == 1 ? "" : "s")}", await remoteTask, await operationTask);
     }
 
     /// <summary>The web location of the upstream's remote, else origin, else the only remote.</summary>
-    public async Task<GitRemote?> GetRemoteAsync(string root, string? upstream, CancellationToken cancellationToken = default)
-    {
-        var names = (await RunAsync(root, ["remote"], cancellationToken, allowFailure: true, readOnly: true)).Output
+    public async Task<GitRemote?> GetRemoteAsync(string root, string? upstream, CancellationToken cancellationToken = default) =>
+        await ResolveRemoteAsync(root, await GetRemoteNamesAsync(root, cancellationToken), upstream, cancellationToken);
+
+    private static async Task<string[]> GetRemoteNamesAsync(string root, CancellationToken cancellationToken) =>
+        (await RunAsync(root, ["remote"], cancellationToken, allowFailure: true, readOnly: true)).Output
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static async Task<GitRemote?> ResolveRemoteAsync(string root, string[] names, string? upstream, CancellationToken cancellationToken)
+    {
         var preferred = upstream?.Split('/', 2)[0];
         var name = names.FirstOrDefault(n => n == preferred) ?? names.FirstOrDefault(n => n == "origin") ?? (names.Length == 1 ? names[0] : null);
         if (name is null) return null;
@@ -74,17 +102,15 @@ public sealed class GitService
 
     public async Task<GitOperation> GetOperationAsync(string root, CancellationToken cancellationToken = default)
     {
-        async Task<bool> Exists(string name)
+        // One rev-parse resolves every marker, printing a line for each in the order asked.
+        var result = await RunAsync(root, ["rev-parse", .. OperationMarkers.SelectMany(x => new[] { "--git-path", x.Marker })], cancellationToken, allowFailure: true, readOnly: true);
+        if (result.ExitCode != 0) return GitOperation.None;
+        var paths = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var (path, (_, operation)) in paths.Zip(OperationMarkers))
         {
-            var path = await RunAsync(root, ["rev-parse", "--git-path", name], cancellationToken, allowFailure: true, readOnly: true);
-            if (path.ExitCode != 0) return false;
-            var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, path.Output.Trim()));
-            return File.Exists(full) || Directory.Exists(full);
+            var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, path));
+            if (File.Exists(full) || Directory.Exists(full)) return operation;
         }
-        if (await Exists("rebase-merge") || await Exists("rebase-apply")) return GitOperation.Rebase;
-        if (await Exists("MERGE_HEAD")) return GitOperation.Merge;
-        if (await Exists("CHERRY_PICK_HEAD")) return GitOperation.CherryPick;
-        if (await Exists("REVERT_HEAD")) return GitOperation.Revert;
         return GitOperation.None;
     }
 
@@ -443,9 +469,7 @@ public sealed class GitService
         var error = await errorTask;
         if (output.Truncated || error.Truncated) throw new GitOutputLimitException();
         var result = new GitResult(process.ExitCode, output.Text, error.Text);
-        if (result.ExitCode != 0 && !allowFailure)
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Display) ? $"Git exited with code {result.ExitCode}." : result.Display);
-        return result;
+        return allowFailure ? result : result.EnsureSuccess();
     }
 
     private static async Task<(string Text, bool Truncated)> ReadBoundedAsync(StreamReader reader)
@@ -468,5 +492,9 @@ public sealed class GitService
     private sealed record GitResult(int ExitCode, string Output, string Error)
     {
         public string Display => GitDiagnosticSanitizer.Redact((Output + (Output.Length > 0 && Error.Length > 0 ? "\n" : "") + Error).Trim());
+
+        /// <summary>What a command that may not fail throws when it does.</summary>
+        public GitResult EnsureSuccess() =>
+            ExitCode == 0 ? this : throw new InvalidOperationException(string.IsNullOrWhiteSpace(Display) ? $"Git exited with code {ExitCode}." : Display);
     }
 }
