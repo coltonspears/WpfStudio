@@ -1,0 +1,40 @@
+<UserControl x:Class="WpfStudio.App.Views.Shell.RuntimeBanner"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls">
+  <Border Margin="6,0,6,6" Padding="14,10,12,10" CornerRadius="6" BorderThickness="1"
+          Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource WarningBrush}" AutomationProperties.Name="Missing .NET runtimes">
+    <DockPanel>
+      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="24" Height="24" VerticalAlignment="Top"
+              Command="{Binding Runtimes.DismissCommand}" ToolTip="Hide until the workspace is opened again" AutomationProperties.Name="Hide missing runtimes" />
+      <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Check again" VerticalAlignment="Top" Margin="0,0,6,0"
+              Command="{Binding Runtimes.CheckAgainCommand}" ToolTip="Ask dotnet again what is installed, as after installing from a download page" />
+      <c:Glyph Kind="Warning" Width="18" Height="18" Margin="0,1,10,0" VerticalAlignment="Top" Foreground="{DynamicResource WarningBrush}" />
+      <StackPanel>
+        <TextBlock Text="{Binding Runtimes.Summary}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+        <ItemsControl ItemsSource="{Binding Runtimes.Missing}" Focusable="False" Margin="0,4,0,0">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <DockPanel Margin="0,4,0,0">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                  <Button Style="{StaticResource AccentButton}" Content="Install…" Margin="0,0,6,0"
+                          Command="{Binding DataContext.Runtimes.InstallCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                          Visibility="{Binding CanInstall, Converter={StaticResource BooleanToVisibility}}" IsEnabled="{Binding IsInstalling, Converter={StaticResource Not}}"
+                          ToolTip="Download Microsoft's installer for this machine, check its SHA-512 hash, and run it" />
+                  <Button Style="{StaticResource QuietButton}" Content="Download page"
+                          Command="{Binding DataContext.Runtimes.OpenDownloadPageCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                          ToolTip="{Binding DownloadPage}" />
+                </StackPanel>
+                <StackPanel>
+                  <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Title}" />
+                  <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="11.5" />
+                  <TextBlock Text="{Binding Status}" Foreground="{DynamicResource AccentBrush}" TextWrapping="Wrap" FontSize="11.5" Visibility="{Binding HasStatus, Converter={StaticResource BooleanToVisibility}}" />
+                </StackPanel>
+              </DockPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </DockPanel>
+  </Border>
+</UserControl>

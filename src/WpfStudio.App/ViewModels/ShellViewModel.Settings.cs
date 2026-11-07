@@ -12,7 +12,7 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class ShellViewModel
 {
     public const string AppearancePage = "Appearance", EditorPage = "Editor", IntelligencePage = "Intelligence",
-        FilesPage = "Files", AssistantPage = "Assistant", ExperimentalPage = "Experimental", ShortcutsPage = "Shortcuts";
+        FilesPage = "Files", DebuggingPage = "Debugging", AssistantPage = "Assistant", ExperimentalPage = "Experimental", ShortcutsPage = "Shortcuts";
     private CancellationTokenSource? _settingsSave;
 
     public EditorPreferences Editor { get; }
@@ -65,7 +65,18 @@ public sealed partial class ShellViewModel
     {
         Editor.PropertyChanged += EditorPreferenceChanged;
         CodeAssist.PropertyChanged += (_, args) => { if (args.PropertyName != nameof(CodeAssistPreferences.Status)) ScheduleSettingsSave(); };
+        Debugger.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(Debugger.JustMyCode) or nameof(Debugger.StepFiltering) or nameof(Debugger.StopAtEntry)) ScheduleSettingsSave();
+        };
     }
+    private void LoadDebuggingSettings(WpfStudio.Core.DebuggingSettings settings)
+    {
+        Debugger.JustMyCode = settings.JustMyCode;
+        Debugger.StepFiltering = settings.StepFiltering;
+        Debugger.StopAtEntry = settings.StopAtEntry;
+    }
+    private WpfStudio.Core.DebuggingSettings DebuggingSettings() => new() { JustMyCode = Debugger.JustMyCode, StepFiltering = Debugger.StepFiltering, StopAtEntry = Debugger.StopAtEntry };
     private void EditorPreferenceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
         ScheduleSettingsSave();

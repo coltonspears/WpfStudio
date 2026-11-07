@@ -31,6 +31,7 @@ public sealed class DapMessagesTests
         Assert.Equal(new DapEvaluation("", "", 0), DapMessages.Evaluation(body));
         Assert.Equal(new DapExceptionInfo("", "", null), DapMessages.ExceptionInfo(body));
         Assert.Null(DapMessages.ChangedBreakpoint(body));
+        Assert.Null(DapMessages.Module(body));
         var stopped = DapMessages.Stopped(body);
         Assert.Null(stopped.Reason);
         Assert.Equal(0, stopped.ThreadId);
@@ -44,6 +45,20 @@ public sealed class DapMessagesTests
     [InlineData("""{"threads":null}""")]
     [InlineData("""{"threads":[1,"x",null,true,[]]}""")]
     public void AListOfTheWrongKindOrEntriesThatAreNotObjectsReadAsEmpty(string text) => Assert.Empty(DapMessages.Threads(Json(text)));
+
+    [Fact]
+    public void ModuleEventsReadStringAndNumberIdsAndSkipModulesWithoutOne()
+    {
+        var loaded = DapMessages.Module(Json("""{"reason":"new","module":{"id":"a1","name":"App.dll","path":"C:\\src\\App.dll","symbolStatus":"Symbols loaded."}}"""));
+        Assert.Equal(new DapModuleEvent("new", new DebugModule("a1", "App.dll", @"C:\src\App.dll", "Symbols loaded.")), loaded);
+        Assert.True(loaded!.Module.HasSymbols);
+        Assert.Equal("Symbols loaded", loaded.Module.Symbols);
+        Assert.False(DapMessages.Module(Json("""{"reason":"new","module":{"id":"b","symbolStatus":"Symbols not found."}}"""))!.Module.HasSymbols);
+        Assert.Equal(new DapModuleEvent("removed", new DebugModule("7", "", "", "")), DapMessages.Module(Json("""{"reason":"removed","module":{"id":7}}""")));
+        Assert.Null(DapMessages.Module(Json("""{"reason":"new","module":{"name":"x"}}""")));
+        Assert.Null(DapMessages.Module(Json("""{"reason":"new","module":{"id":null}}""")));
+        Assert.Null(DapMessages.Module(Json("""{"reason":"new","module":[1]}""")));
+    }
 
     [Fact]
     public void ThreadsReadCompletely() =>

@@ -11,6 +11,14 @@ public sealed record DapExceptionInfo(string ExceptionId, string Description, st
 /// <param name="SourcePath">Null when the adapter sent no source at all, and empty when it sent one without a path.</param>
 public sealed record DapBreakpoint(int? Id, bool Verified, string? Message, int Line, string? SourcePath);
 public sealed record DapStopped(string? Reason, int ThreadId, IReadOnlySet<int> HitBreakpointIds);
+/// <summary>A loaded assembly. <paramref name="SymbolStatus"/> is the adapter's own wording, such as "Symbols loaded."; empty when it sent none.</summary>
+public sealed record DebugModule(string Id, string Name, string Path, string SymbolStatus)
+{
+    public bool HasSymbols => SymbolStatus.StartsWith("Symbols loaded", StringComparison.OrdinalIgnoreCase);
+    public string Symbols => SymbolStatus.Length == 0 ? "" : SymbolStatus.TrimEnd('.');
+}
+/// <param name="Reason"><c>new</c>, <c>changed</c> or <c>removed</c>.</param>
+public sealed record DapModuleEvent(string Reason, DebugModule Module);
 
 /// <summary>
 /// Reads adapter JSON. A response may omit its body and most fields, and an answer that cannot be read is not worth ending a session over,
@@ -34,6 +42,11 @@ public static class DapMessages
 
     public static DapStopped Stopped(JsonElement body) => new(OptionalText(body, "reason"), Int(body, "threadId"),
         Member(body, "hitBreakpointIds") is { ValueKind: JsonValueKind.Array } ids ? ids.EnumerateArray().Select(AsInt).OfType<int>().ToHashSet() : new HashSet<int>());
+
+    /// <summary>The body of a <c>module</c> event, or null when it names no module. netcoredbg sends string ids; the protocol also allows numbers.</summary>
+    public static DapModuleEvent? Module(JsonElement body) =>
+        Member(body, "module") is { ValueKind: JsonValueKind.Object } module && Member(module, "id") is { ValueKind: JsonValueKind.String or JsonValueKind.Number } id
+            ? new(Text(body, "reason"), new DebugModule(id.ToString(), Text(module, "name"), Text(module, "path"), Text(module, "symbolStatus"))) : null;
 
     private static DapBreakpoint Breakpoint(JsonElement item) => new(Member(item, "id") is { } id ? AsInt(id) : null, Member(item, "verified")?.ValueKind == JsonValueKind.True, OptionalText(item, "message"), Int(item, "line"), SourcePath(item));
     private static string? SourcePath(JsonElement item) => Member(item, "source") is { } source ? Text(source, "path") : null;

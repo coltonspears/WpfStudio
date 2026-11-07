@@ -71,6 +71,19 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     [ObservableProperty] public partial int AttachProcessId { get; set; }
     [ObservableProperty] public partial string WatchExpression { get; set; } = "";
     [ObservableProperty] public partial bool BreakOnThrown { get; set; }
+    /// <summary>Stop and step in the solution's own code only. Like the two below, it applies to programs this launches; an attach keeps the adapter's defaults.</summary>
+    [ObservableProperty] public partial bool JustMyCode { get; set; } = true;
+    /// <summary>Step over properties and operators instead of into them.</summary>
+    [ObservableProperty] public partial bool StepFiltering { get; set; } = true;
+    [ObservableProperty] public partial bool StopAtEntry { get; set; }
+    public DebugLaunchOptions LaunchOptions => new(JustMyCode, StepFiltering, StopAtEntry);
+    /// <summary>The assemblies the debuggee has loaded, matching <see cref="ModuleFilter"/>. They stay listed after the session ends, until the next one starts.</summary>
+    public ObservableCollection<DebugModule> Modules { get; } = [];
+    private readonly List<DebugModule> allModules = [];
+    [ObservableProperty] public partial string ModuleFilter { get; set; } = "";
+    partial void OnModuleFilterChanged(string value) { Modules.Clear(); foreach (var module in allModules.Where(MatchesModuleFilter)) Modules.Add(module); OnPropertyChanged(nameof(ModuleSummary)); }
+    public string ModuleSummary => allModules.Count == 0 ? "Modules are listed while a program is being debugged."
+        : $"{allModules.Count} module{(allModules.Count == 1 ? "" : "s")} · {allModules.Count(module => module.HasSymbols)} with symbols" + (Modules.Count < allModules.Count ? $" · {Modules.Count} shown" : "");
     [ObservableProperty] public partial DebugThread? SelectedThread { get; set; }
     [ObservableProperty] public partial DebugFrame? SelectedFrame { get; set; }
     [ObservableProperty] public partial BreakpointViewModel? SelectedBreakpoint { get; set; }
@@ -98,11 +111,11 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     public async Task LaunchAsync(DebugLaunchConfiguration configuration, CancellationToken cancellationToken = default)
     {
         Error = ""; ExceptionDetails = ""; Status = "Starting debugger…";
-        store.ResetForSession();
+        store.ResetForSession(); ClearModules();
         var ends = sessionEnds;
         try
         {
-            await session.LaunchAsync(configuration, store.ToModels(), BreakOnThrown, cancellationToken);
+            await session.LaunchAsync(configuration, store.ToModels(), BreakOnThrown, LaunchOptions, cancellationToken);
             await EnterRunningAsync(ends);
         }
         catch (Exception ex) { Error = ex.Message; Status = "Debug launch failed"; IsActive = false; throw; }
@@ -120,7 +133,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     {
         if (IsAdapterMissing) { Error = "Install the debugger first: choose Install debugger above."; return; }
         Status = "Attaching…";
-        store.ResetForSession();
+        store.ResetForSession(); ClearModules();
         var ends = sessionEnds;
         await session.AttachAsync(AttachProcessId, store.ToModels(), BreakOnThrown);
         await EnterRunningAsync(ends);
@@ -214,7 +227,40 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         {
             if (applyingBreakpoints > 0) changesWhileApplying.Add(changed); else ApplyChange(changed);
         }
+        else if (message.Name == "module" && DapMessages.Module(message.Body) is { } module) ApplyModule(module);
     });
+
+    /// <summary>A new module is added, a changed one replaces the row with its id, and a removed one goes.</summary>
+    private void ApplyModule(DapModuleEvent change)
+    {
+        var module = change.Module;
+        var known = allModules.FindIndex(existing => existing.Id == module.Id);
+        var shown = -1;
+        for (var index = 0; index < Modules.Count && shown < 0; index++) if (Modules[index].Id == module.Id) shown = index;
+        if (change.Reason == "removed")
+        {
+            if (known >= 0) allModules.RemoveAt(known);
+            if (shown >= 0) Modules.RemoveAt(shown);
+        }
+        else
+        {
+            // A change event may leave out what did not change.
+            if (known >= 0 && allModules[known] is { } previous)
+                module = module with { Name = module.Name.Length == 0 ? previous.Name : module.Name, Path = module.Path.Length == 0 ? previous.Path : module.Path, SymbolStatus = module.SymbolStatus.Length == 0 ? previous.SymbolStatus : module.SymbolStatus };
+            if (known >= 0) allModules[known] = module; else allModules.Add(module);
+            if (!MatchesModuleFilter(module)) { if (shown >= 0) Modules.RemoveAt(shown); }
+            else if (shown >= 0) Modules[shown] = module;
+            else Modules.Add(module);
+        }
+        OnPropertyChanged(nameof(ModuleSummary));
+    }
+    private bool MatchesModuleFilter(DebugModule module)
+    {
+        var filter = ModuleFilter.Trim();
+        return filter.Length == 0 || module.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) || module.Path.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || module.SymbolStatus.Contains(filter, StringComparison.OrdinalIgnoreCase);
+    }
+    private void ClearModules() { allModules.Clear(); Modules.Clear(); OnPropertyChanged(nameof(ModuleSummary)); }
 
     private void EnterStopped(DapStopped stopped)
     {

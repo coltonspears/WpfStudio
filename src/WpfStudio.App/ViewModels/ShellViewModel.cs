@@ -63,6 +63,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.AttachSourceHost(this);
         TaskList = new(this, tools.Tasks, messenger); FileGroups = new(this, tools.FileGroups, messenger); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher, tools.WatchOpenDocuments);
         Palette = new(this); ChangeReview = new(this, dispatcher); _verifiedEdits = new(this, store, _edits);
+        Tasks = new(this, Terminal, dispatcher, messenger); Runtimes = new(this, tools.Runtimes);
         XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
         Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
@@ -178,9 +179,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Explorer.NestRelatedFiles = settings.NestRelatedFiles;
         Editor.Load(settings.Editor);
         CodeAssist.Load(settings.CodeAssist);
+        LoadDebuggingSettings(settings.Debugging);
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true; AutoSave.IsEnabled = true;
+        // Personal tasks are there before any workspace opens; a workspace load reads its own tasks again.
+        await GuardAsync(Tasks.ReloadAsync);
         var requested = arguments.FirstOrDefault(a => File.Exists(a) && Path.GetExtension(a).ToLowerInvariant() is ".sln" or ".slnx" or ".csproj");
         var restoring = requested == null && settings.WorkspacePath != null && File.Exists(settings.WorkspacePath);
         // Read the previous session's files while the language worker loads; tabs still open in their saved order afterwards.
@@ -263,7 +267,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
             await SaveSettingsAsync();
         }
-        finally { _loading = false; lease.Dispose(); XamlAnalysis.Request(); if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); }
+        finally { _loading = false; lease.Dispose(); XamlAnalysis.Request(); if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); CheckRuntimes(path); }
         if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
     }
     // Any other status written meanwhile is newer than the refresh's result and stays.
@@ -319,6 +323,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await RefreshWpfAsync();
             if (_statusShowsModelRefresh) ShowWorkspaceStatus(snapshot, refreshingModel: false);
             XamlAnalysis.Request();
+            CheckRuntimes(snapshot.Path);
         }
         catch (OperationCanceledException) { }
         catch (Exception exception)
@@ -641,7 +646,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
     private void RefreshEditorDiagnostics()
     {
-        Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Distinct()) Diagnostics.Add(item);
+        Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Concat(Tasks.Diagnostics).Distinct()) Diagnostics.Add(item);
         Problems.Refresh();
         RefreshWpfIssues();
     }
@@ -896,7 +901,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) await _store.DeleteRecoveryAsync(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings(), CodeAssist = CodeAssist.ToSettings() });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings(), CodeAssist = CodeAssist.ToSettings(), Debugging = DebuggingSettings() });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }
@@ -914,7 +919,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
         Messenger.UnregisterAll(this); _workspace.WorkerExited -= WorkerExited;
-        XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Palette.Dispose();
+        XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Tasks.Dispose(); Palette.Dispose();
         _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
         Breakpoints.Dispose();
         Features.Dispose();

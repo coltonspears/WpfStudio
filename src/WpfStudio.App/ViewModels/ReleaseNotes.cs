@@ -8,6 +8,13 @@ public static class ReleaseNoteCatalog
 {
     public static IReadOnlyList<ReleaseNote> All { get; } =
     [
+        new("Unreleased", "Tasks, debugger options and runtime checks",
+        [
+            "Tasks in Visual Studio Code's tasks.json format, from .vscode/tasks.json and .wpfstudio/tasks.json in the repository and tasks.json in your profile. Run them from View > Tasks, the command palette (Task: ...) or Build > Run build task. Each run gets its own terminal tab; dependencies run together or in order, and the $msCompile problem matcher puts compiler errors in Problems.",
+            "Tasks > New task fills in a task with a form, tries it with Test run, and saves it to the repository or your profile after you review the change.",
+            "Settings > Debugging turns Just My Code, stepping over properties and operators, and stopping at entry on or off for programs F5 starts. The Debugger pane lists loaded modules and whether their symbols loaded.",
+            "Opening a solution checks that the runtimes its programs need and the SDK its global.json asks for are installed. A banner lists what is missing and installs it from Microsoft's official installer after checking its SHA-512 hash.",
+        ]),
         new("Unreleased", "Quieter typing",
         [
             "Reference counts and Git history above declarations no longer flicker on every character.",

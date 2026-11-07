@@ -7,7 +7,20 @@ using WpfStudio.Contracts;
 namespace WpfStudio.Runtime.Terminal;
 
 public sealed record TerminalShell(string Name, string Executable, string Arguments);
-public sealed record TerminalSessionViewModel(string Title, ConPtySession Session);
+
+/// <summary>One tab of the terminal pane: an interactive shell, or a task's program.</summary>
+public sealed partial class TerminalSessionViewModel(string title, ConPtySession session, string? taskLabel = null) : ObservableObject
+{
+    [ObservableProperty] public partial string Title { get; set; } = title;
+    public ConPtySession Session { get; } = session;
+    /// <summary>The task this tab runs; null for a shell.</summary>
+    public string? TaskLabel { get; } = taskLabel;
+    public bool IsTask => TaskLabel is not null;
+}
+
+/// <summary>A task program for its own terminal tab. <paramref name="Replacing"/> is a finished tab of the same task, which the new one takes the place of.</summary>
+public sealed record TerminalTaskStart(string TaskLabel, string Title, string Executable, string Arguments, string WorkingDirectory,
+    IReadOnlyDictionary<string, string>? Environment = null, Action<byte[]>? ObserveOutput = null, TerminalSessionViewModel? Replacing = null);
 
 public sealed partial class TerminalViewModel : ObservableObject, IAsyncDisposable
 {
@@ -56,6 +69,42 @@ public sealed partial class TerminalViewModel : ObservableObject, IAsyncDisposab
             if (!accepted) await session.DisposeAsync();
         }
         catch (Exception ex) { await dispatcher.InvokeAsync(() => Error = ex.Message); }
+    }
+    /// <summary>
+    /// Starts a task's program in a new tab and selects it. Output keeps flowing while the tab has never been shown, so a
+    /// task in the background is not held up by a renderer that does not exist yet. Null when the terminal was disposed.
+    /// </summary>
+    public async Task<TerminalSessionViewModel?> StartTaskAsync(TerminalTaskStart start)
+    {
+        if (Volatile.Read(ref disposed) != 0) return null;
+        var options = new ConPtyOptions { Environment = start.Environment, ObserveOutput = start.ObserveOutput, KeepOutputFlowing = true };
+        var session = await Task.Run(() => new ConPtySession(start.Executable, start.Arguments, start.WorkingDirectory, options));
+        session.Error += value => dispatcher.Post(() => Error = value);
+        TerminalSessionViewModel? accepted = null;
+        TerminalSessionViewModel? replaced = null;
+        await dispatcher.InvokeAsync(() =>
+        {
+            if (Volatile.Read(ref disposed) != 0) return;
+            accepted = new TerminalSessionViewModel(start.Title, session, start.TaskLabel);
+            var index = start.Replacing is { } previous ? Sessions.IndexOf(previous) : -1;
+            if (index >= 0) { replaced = start.Replacing; Sessions[index] = accepted; }
+            else Sessions.Add(accepted);
+            SelectedSession = accepted; Error = "";
+        });
+        if (accepted is null) { await session.DisposeAsync(); return null; }
+        if (replaced is not null) await replaced.Session.DisposeAsync();
+        return accepted;
+    }
+    /// <summary>Closes a tab, ending its program.</summary>
+    public async Task CloseAsync(TerminalSessionViewModel tab)
+    {
+        var removed = false;
+        await dispatcher.InvokeAsync(() =>
+        {
+            removed = Sessions.Remove(tab);
+            if (removed && (SelectedSession is null || ReferenceEquals(SelectedSession, tab))) SelectedSession = Sessions.LastOrDefault();
+        });
+        if (removed) await tab.Session.DisposeAsync();
     }
     [RelayCommand] private async Task CloseSessionAsync()
     {

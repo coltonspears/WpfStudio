@@ -94,7 +94,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var startup = clock.Elapsed;
             output.WriteLine($"Shell construction to rendered idle: {startup.TotalMilliseconds:N0} ms");
             Assert.True(startup < TimeSpan.FromSeconds(5), "Shell render exceeded 5-second regression budget");
-            Assert.Equal(11, manager.Layout.Descendents().OfType<LayoutAnchorable>().Count());
+            Assert.Equal(12, manager.Layout.Descendents().OfType<LayoutAnchorable>().Count());
             Assert.Contains(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Welcome");
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/welcome.png"));
             Application.Current.MainWindow = window;

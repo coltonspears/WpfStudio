@@ -27,9 +27,9 @@ Status for each item on the wants list, ordered roughly by how much it gives for
 | Build/Rebuild/Clean solution or project | 🟢 Existing | Build menu (solution) and Solution Explorer context menu (project) |
 | Formatting | 🟢 Existing | Code > Format document (C# and XAML) |
 | Custom design-time DataContexts | 🟢 Existing (partial) | Preview scenarios (`wpfstudio.preview.json`) |
-| Global/scoped tools and tasks (like VS Code) | 🟡 Next | — |
-| Debug symbols / extra DLLs / source files | 🟡 Next | — |
-| Runtime downloader | 🟡 Next | — |
+| Global/scoped tools and tasks (like VS Code) | ✅ Done | View > Tasks; `Core/Tasks`, `Features/Tasks` |
+| Debug symbols / extra DLLs / source files | ✅ Done (partial) | Settings > Debugging, Debugger > Modules; symbol paths need another adapter |
+| Runtime downloader | ✅ Done | Banner on workspace load; `Workspace/Runtimes`, `Features/Runtimes` |
 | Split designer view | 🟡 Next | — |
 | Template wizards (models from DB/REST/CSV, SQL from model) | 🔵 Later | — |
 | Extended testing (integration, end-to-end, UI) | 🔵 Later | — |
@@ -76,6 +76,23 @@ View > **Task List** has two halves:
 The **File Groups** tab next to Solution Explorer. Pin the open tabs as a group (pin button, or Window > Pin open tabs), add the active file, or right-click a file in Solution Explorer > **Add to file group…**. Double-click a group to open all its files. **Switch to this group** closes the other tabs first. You can rename and delete groups and remove single files. Every group appears in the command palette as *Open file group: …* and *Switch to file group: …*. Groups are personal (`<data>/file-groups/<hash>.json`).
 *Follow-ups:* an option to share a group through `.wpfstudio/file-groups.json` in the repository; drag files from Solution Explorer onto a group. A pane added after you last saved a layout docks at the bottom the first time; **Window > Reset to default layout** puts it beside Solution Explorer.
 
+### Tasks, like VS Code
+**View > Tasks** reads `.vscode/tasks.json` and `.wpfstudio/tasks.json` in the repository and `<data>/tasks.json` in the profile, merged by label (personal over shared over VS Code). The schema is VS Code's for `shell` and `process` tasks: `command`, `args` (strings or `{ value }`), `options.cwd`/`env`/`shell` at file and task level, `windows` overrides, `group` with `isDefault`, `dependsOn` (labels or `{ label }`) with `dependsOrder`, `isBackground`, `hide`, `detail`, and `problemMatcher`, of which `$msCompile` is understood. Comments and trailing commas are allowed. A task of an extension's type (`npm`, `dotnet`) is reported with its line instead of failing the file. Variables are VS Code's plus `${projectDir}` and `${configuration}`.
+- **Running:** each run gets a terminal tab, replaced by the next run once finished. Shell tasks use PowerShell (`-NoLogo -Command`), as VS Code does; `cmd.exe` gets `/d /s /c`. A dependency that is already running is shared, a background task counts as done once started, and a loop is reported. Stop ends the program but keeps its output.
+- **Task sessions keep their output flowing without a renderer** (`ConPtyOptions.KeepOutputFlowing`): before, a tab that had never been shown stopped its program once its first screens filled the 64-chunk channel.
+- **Problems:** the `$msCompile` matcher reads `file(line,col): error CODE: message` lines from the pseudoconsole's output after stripping escape sequences, and sets `MSBUILDTERMINALLOGGER=off` for the task unless it sets it itself, because the live logger's redraws leave no whole lines.
+- **Form editor:** New task, with Test run, saves through the change review by inserting into the file's text, so comments and unknown properties stay.
+*Follow-ups:* background problem matchers (`beginsPattern`/`endsPattern`) so a watcher counts as ready only once it reports so; `input` variables (`${input:…}`); editing an existing task in the form; running a task when its file is opened from the Tasks pane's error list.
+
+### Debugger options and modules
+netcoredbg 3.2.0-1092 reads `justMyCode`, `enableStepFiltering` and `stopAtEntry` from `launch` (its `attach` reads none), so those three are settings (Settings > Debugging and the Debugger pane), saved in `settings.json`. The Debugger pane's **Modules** tab lists the adapter's `module` events with symbol status and a filter.
+*Not possible with this adapter:* symbol search paths, source file maps and "Load symbols from…": it has no `modules` request and no launch option for them, and reads PDBs from beside each assembly. Source Link downloads remain open.
+
+### Runtime check and installer
+On every workspace load (and after a project-model refresh) the shell asks the `dotnet` on PATH for `--version` in the workspace folder (which applies `global.json` and its roll-forward exactly as a build does), `--list-runtimes` and `--list-sdks`, and compares with what the executables and test projects target: the base runtime for every `netX.Y` target, the Desktop runtime with a `Microsoft.WindowsDesktop.App` framework reference (or XAML files when the model has no references), the ASP.NET Core runtime with `Microsoft.AspNetCore.App`. A program rolls forward within its major version only. A missing Desktop runtime absorbs a missing base runtime of the same version, because its installer brings it. Legacy .NET Framework projects are checked for their reference assemblies. The answers are kept until an install or **Check again**.
+**Install…** reads `releases-index.json` and the channel's `releases.json` from `builds.dotnet.microsoft.com`, takes the newest release with an installer for the machine's architecture on a Microsoft host, asks, downloads it into `<data>/downloads`, checks its SHA-512, and runs it with `/install /passive /norestart` through the shell so it can elevate. An SDK request takes the exact version or the newest of its feature band.
+*Follow-ups:* run the check before a build or F5 rather than only on load; offer the developer pack's installer once its download link can be found in a machine-readable list.
+
 ## Existing
 
 ### Build/Rebuild/Clean solution or project
@@ -94,6 +111,8 @@ Preview scenarios already let a project define several named DataContexts (`wpfs
 - Or, simpler: a `dataContextJson` scenario that deserializes JSON into the view's DataContext type. This suits read-only layouts.
 
 ## Next (recommended order)
+
+The split designer view is the one item left from this list; the next three sections are the original designs of what is now done, kept for reference.
 
 ### 1. Global/scoped tools and tasks, like VS Code
 This has the highest value of what remains: you would use it every day.

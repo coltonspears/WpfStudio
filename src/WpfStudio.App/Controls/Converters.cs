@@ -46,6 +46,7 @@ public sealed class ContentGlyphConverter : IValueConverter
         Workbenches.Output => "Output",
         Workbenches.Problems => "Warning",
         Workbenches.TaskList => "Check",
+        Workbenches.Tasks => "Play",
         Workbenches.FileGroups => "Pin",
         Workbenches.Search => "Search",
         Workbenches.Terminal => "Terminal",

@@ -33,6 +33,19 @@ public sealed class DesktopService : IDesktopService
     }
 }
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0030", Justification = "Starts the official .NET installers through the shell, so they can ask Windows for elevation (C8).")]
+public sealed class ShellInstallerLauncher : WpfStudio.Workspace.Runtimes.IInstallerLauncher
+{
+    public async Task<int> RunAsync(string path, CancellationToken cancellationToken)
+    {
+        // Passive shows the installer's progress without asking anything; the elevation prompt is the installer's own.
+        using var process = Process.Start(new ProcessStartInfo(path, "/install /passive /norestart") { UseShellExecute = true })
+            ?? throw new InvalidOperationException("The installer did not start.");
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        return process.ExitCode;
+    }
+}
+
 [System.Diagnostics.CodeAnalysis.SuppressMessage("ApiDesign", "RS0030", Justification = "This class owns the clipboard and its contention handling (C8).")]
 public sealed class ClipboardService : IClipboardService
 {

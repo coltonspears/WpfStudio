@@ -18,4 +18,16 @@ public sealed record StudioSettings
     public bool NestRelatedFiles { get; init; } = true;
     public EditorSettings Editor { get; init; } = new();
     public CodeAssistSettings CodeAssist { get; init; } = new();
+    public DebuggingSettings Debugging { get; init; } = new();
+}
+
+/// <summary>How the debugger treats programs WpfStudio launches. The defaults are the adapter's own.</summary>
+public sealed record DebuggingSettings
+{
+    /// <summary>Step through and stop in the solution's own code only, not in framework or package code.</summary>
+    public bool JustMyCode { get; init; } = true;
+    /// <summary>Step over properties and operators instead of into them.</summary>
+    public bool StepFiltering { get; init; } = true;
+    /// <summary>Pause on the program's first line.</summary>
+    public bool StopAtEntry { get; init; }
 }
