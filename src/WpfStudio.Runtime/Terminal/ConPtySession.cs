@@ -29,7 +29,7 @@ public sealed record ConPtyOptions
 public sealed class ConPtySession : IAsyncDisposable
 {
     private readonly Channel<byte[]> output;
-    private readonly Action<byte[]>? observeOutput;
+    private Action<byte[]>? observeOutput;
     private readonly TaskCompletionSource<int> exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Channel<byte[]> input = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
     private readonly CancellationTokenSource lifetime = new();
@@ -143,7 +143,9 @@ public sealed class ConPtySession : IAsyncDisposable
             {
                 if (Volatile.Read(ref disposed) != 0) continue; // Drain the final ConPTY frame during teardown.
                 var chunk = buffer.AsSpan(0, count).ToArray();
-                observeOutput?.Invoke(chunk);
+                // An observer that fails stops observing; the terminal itself keeps reading.
+                try { observeOutput?.Invoke(chunk); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { observeOutput = null; Error?.Invoke("Reading the output stopped: " + ex.Message); }
 #pragma warning disable VSTHRD002 // This thread exists to block, and waits on nothing that needs it; a full channel is what pauses reading.
                 try { output.Writer.WriteAsync(chunk, lifetime.Token).AsTask().GetAwaiter().GetResult(); }
 #pragma warning restore VSTHRD002

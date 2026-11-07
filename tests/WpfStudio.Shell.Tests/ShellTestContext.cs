@@ -28,6 +28,8 @@ internal sealed class ShellTestContext : IAsyncDisposable
         services.Configure<StudioPaths>(paths => paths.DataDirectory = Path.Combine(Root, "state"));
         services.AddSingleton<IFileDialogService>(Dialogs); services.AddSingleton<IUserDialogService>(Dialogs);
         services.AddSingleton<IDesktopService>(Desktop); services.AddSingleton<IClipboardService>(Desktop); services.AddSingleton<IThemeService>(Theme);
+        // Every workspace load checks the machine's .NET; RuntimeCheckViewModelTests cover that, and here it would only add three dotnet processes per load.
+        services.AddSingleton<WpfStudio.Workspace.Runtimes.IDotNetInventorySource>(new NothingInstalled());
         if (previewClient != null) services.AddSingleton(previewClient);
         configure?.Invoke(services);
         _services = services.BuildServiceProvider();
@@ -103,6 +105,14 @@ internal sealed class InlineDispatcher : IUiDispatcher
 {
     public void Post(Action action) => action();
     public Task InvokeAsync(Action action, CancellationToken cancellationToken = default) { cancellationToken.ThrowIfCancellationRequested(); action(); return Task.CompletedTask; }
+}
+
+/// <summary>A machine that reports nothing, which the runtime check reads as "cannot tell" and so lists nothing.</summary>
+internal sealed class NothingInstalled : WpfStudio.Workspace.Runtimes.IDotNetInventorySource
+{
+    public Task<WpfStudio.Workspace.Runtimes.DotNetInventory> ReadAsync(string directory, CancellationToken cancellationToken) => Task.FromResult(new WpfStudio.Workspace.Runtimes.DotNetInventory([], []));
+    public Task<WpfStudio.Workspace.Runtimes.SdkRequirement?> FindMissingSdkAsync(string directory, CancellationToken cancellationToken) => Task.FromResult<WpfStudio.Workspace.Runtimes.SdkRequirement?>(null);
+    public bool DirectoryExists(string path) => true;
 }
 
 internal sealed class FakeDialogs : IFileDialogService, IUserDialogService
