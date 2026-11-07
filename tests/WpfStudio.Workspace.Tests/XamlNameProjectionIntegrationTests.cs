@@ -526,11 +526,9 @@ public sealed class XamlNameProjectionIntegrationTests
                 string code = Path.Combine(directory, "View.xaml.cs"); codePaths.Add(code);
                 await File.WriteAllTextAsync(project, $"<Project Sdk='Microsoft.NET.Sdk'><PropertyGroup><TargetFramework>{framework}</TargetFramework><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><Page Include='../View.xaml' Link='View.xaml'/></ItemGroup></Project>");
                 await File.WriteAllTextAsync(code, Code);
-                foreach (var operation in new[] { BuildOperation.Restore, BuildOperation.Build })
-                {
-                    var result = await new BuildService().RunAsync(new(project, operation, "Release"));
-                    Assert.True(result.ExitCode == 0, string.Join("\n", result.Diagnostics.Select(item => item.Message)));
-                }
+                // A build restores first, so a separate restore would only start another process.
+                var result = await new BuildService().RunAsync(new(project, BuildOperation.Build, "Release"));
+                Assert.True(result.ExitCode == 0, string.Join("\n", result.Diagnostics.Select(item => item.Message)));
             }
             string workspace = projects[0];
             if (linked)

@@ -79,9 +79,31 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
 
     public LineCompletion Generate(string code, int maxTokens, CancellationToken token = default)
     {
+        var (text, typed) = Prepare(code);
+        return Shown(Decode(text[..^typed.Length], maxTokens, token), text, typed, code);
+    }
+
+    /// <summary>
+    /// What <see cref="Generate"/> returns, and the gate's inputs in <see cref="GateFeatures"/> order from the same pass of the network,
+    /// or null inputs when it did not finish the line. Internal so the tests can compare both with training without decoding twice.
+    /// </summary>
+    internal (LineCompletion Completion, double[]? Features) GenerateWithFeatures(string code, int maxTokens)
+    {
+        var (text, typed) = Prepare(code);
+        var line = Decode(text[..^typed.Length], maxTokens, CancellationToken.None);
+        var features = line is null || line.Text.Length < typed.Length ? null : Features(line.Text[typed.Length..], line, code);
+        return (Shown(line, text, typed, code), features);
+    }
+
+    // The normalized code, and a space typed at its end, which is held back from the network so that its line has to start with one.
+    private static (string Text, string Typed) Prepare(string code)
+    {
         string text = LineText.Normalize(code);
-        string typed = text.EndsWith(' ') ? " " : "";
-        var line = Decode(text[..^typed.Length], maxTokens, token);
+        return (text, text.EndsWith(' ') ? " " : "");
+    }
+
+    private LineCompletion Shown(DecodedLine? line, string text, string typed, string code)
+    {
         if (line is null) return Nothing;
         string whole = line.Text;
         // A model expecting no space where one was typed is continuing some other line.
@@ -91,15 +113,6 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
         if (Trusted(whole, line, code)) return new LineCompletion(whole, true);
         string part = SurePart(line, typed);
         return VisibleLength(part) >= _gate.PartialCharacters || (VisibleLength(part) >= 2 && ClosesWhatIsOpen(text[(text.LastIndexOf('\n') + 1)..], part)) ? new LineCompletion(part, false) : Nothing;
-    }
-
-    /// <summary>The gate's inputs for this line, in <see cref="GateFeatures"/> order. Internal so the tests can compare them with training.</summary>
-    internal double[] Features(string code, int maxTokens)
-    {
-        string text = LineText.Normalize(code);
-        string typed = text.EndsWith(' ') ? " " : "";
-        var line = Decode(text[..^typed.Length], maxTokens, CancellationToken.None) ?? throw new InvalidOperationException("The model did not finish this line.");
-        return Features(line.Text[typed.Length..], line, code);
     }
 
     /// <summary>The text searched for names and copies. Tabs stay as they are, because the gate was fitted on a window measured before they expand.</summary>
