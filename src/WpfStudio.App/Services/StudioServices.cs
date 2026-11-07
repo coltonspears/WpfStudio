@@ -117,6 +117,14 @@ public static class StudioServices
         // Factories, not instances: a watcher holds the paths of one workspace or one set of open files.
         services.AddSingleton<OpenDocumentWatcherFactory>(changed => new OpenDocumentWatcher(changed));
         services.AddSingleton<KnownSourceWatcherFactory>((paths, changed, reconcile, contextFiles, failed) => new KnownSourceFileWatcher(paths, changed, null, reconcile, contextFiles, failed));
+        // The runtime check: what is installed, Microsoft's release metadata, and the installers it lists.
+        services.AddSingleton<WpfStudio.Workspace.Runtimes.IDotNetInventorySource, WpfStudio.Workspace.Runtimes.DotNetInventorySource>();
+        services.AddSingleton<WpfStudio.Workspace.Runtimes.IInstallerLauncher, ShellInstallerLauncher>();
+        services.AddHttpClient("dotnet-releases", client => client.Timeout = TimeSpan.FromMinutes(30));
+        services.AddSingleton(sp => new WpfStudio.Workspace.Runtimes.DotNetReleases(sp.GetRequiredService<System.Net.Http.IHttpClientFactory>().CreateClient("dotnet-releases")));
+        services.AddSingleton(sp => new WpfStudio.Workspace.Runtimes.RuntimeInstaller(sp.GetRequiredService<System.Net.Http.IHttpClientFactory>().CreateClient("dotnet-releases"),
+            sp.GetRequiredService<WpfStudio.Workspace.Runtimes.IInstallerLauncher>(), System.IO.Path.Combine(DataDirectory(sp), "downloads")));
+        services.AddSingleton<WpfStudio.App.Features.Runtimes.RuntimeCheckServices>();
         services.AddSingleton<ShellToolServices>();
         services.AddSingleton<ShellPanes>();
         services.AddSingleton<ShellLanguageServices>();

@@ -64,6 +64,7 @@
 
     <DockPanel Grid.Row="2">
     <shell:ExternalChangesBanner DockPanel.Dock="Top" Visibility="{Binding ExternalChanges.HasChanges, Converter={StaticResource BooleanToVisibility}}" />
+    <shell:RuntimeBanner DockPanel.Dock="Top" Visibility="{Binding Runtimes.IsVisible, Converter={StaticResource BooleanToVisibility}}" />
     <dock:DockingManager x:Name="DockManager" Margin="6,0,6,0" DocumentsSource="{Binding Documents}" LayoutItemContainerStyleSelector="{StaticResource DocumentStyles}" b:DockingBehavior.Shell="{Binding}"
                          Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}" GridSplitterWidth="5" GridSplitterHeight="5"
                          DocumentPaneControlStyle="{DynamicResource StudioDocumentPaneStyle}" AnchorablePaneControlStyle="{DynamicResource StudioAnchorablePaneStyle}"

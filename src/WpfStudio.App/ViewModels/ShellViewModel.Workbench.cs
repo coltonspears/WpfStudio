@@ -36,6 +36,7 @@ public sealed partial class ShellViewModel
         _updatingChoices = false;
         StartupProject = null;
         Workspace = null;
+        await Runtimes.CheckAsync(null, []);
         RefreshEditorDiagnostics();
         await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync(); await TaskList.RefreshCommand.ExecuteAsync(null);
         try { await _workspace.UnloadAsync(_lifetime.Token); } catch (Exception ex) { AppendOutput("Language worker shutdown: " + ex.Message); }

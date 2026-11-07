@@ -63,7 +63,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.AttachSourceHost(this);
         TaskList = new(this, tools.Tasks, messenger); FileGroups = new(this, tools.FileGroups, messenger); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher, tools.WatchOpenDocuments);
         Palette = new(this); ChangeReview = new(this, dispatcher); _verifiedEdits = new(this, store, _edits);
-        Tasks = new(this, Terminal, dispatcher, messenger);
+        Tasks = new(this, Terminal, dispatcher, messenger); Runtimes = new(this, tools.Runtimes);
         XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
         Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
@@ -267,7 +267,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
             await SaveSettingsAsync();
         }
-        finally { _loading = false; lease.Dispose(); XamlAnalysis.Request(); if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); }
+        finally { _loading = false; lease.Dispose(); XamlAnalysis.Request(); if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); CheckRuntimes(path); }
         if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
     }
     // Any other status written meanwhile is newer than the refresh's result and stays.
@@ -323,6 +323,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             await RefreshWpfAsync();
             if (_statusShowsModelRefresh) ShowWorkspaceStatus(snapshot, refreshingModel: false);
             XamlAnalysis.Request();
+            CheckRuntimes(snapshot.Path);
         }
         catch (OperationCanceledException) { }
         catch (Exception exception)
