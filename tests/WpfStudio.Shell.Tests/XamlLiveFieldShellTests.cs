@@ -362,11 +362,9 @@ public sealed class XamlLiveFieldShellTests
                 if (customControl) await test.CreateFileAsync("CustomInput.cs", CustomInput);
                 await test.CreateFileAsync("View.xaml.cs", Code);
                 string observer = await test.CreateFileAsync("Observer.cs", Observer);
-                foreach (var operation in new[] { BuildOperation.Restore, BuildOperation.Build })
-                {
-                    var result = await new BuildService().RunAsync(new(project, operation, "Release"));
-                    Assert.True(result.ExitCode == 0, string.Join("\n", result.Diagnostics.Select(diagnostic => diagnostic.Message)));
-                }
+                // A build restores first, so a separate restore would only start another process.
+                var result = await new BuildService().RunAsync(new(project, BuildOperation.Build, "Release"));
+                Assert.True(result.ExitCode == 0, string.Join("\n", result.Diagnostics.Select(diagnostic => diagnostic.Message)));
                 test.Shell.Workspace = await test.Workspace.LoadAsync(new(project, "Release"));
                 var generated = Directory.EnumerateFiles(Path.Combine(test.Root, "obj"), "*.g.cs", SearchOption.AllDirectories)
                     .ToDictionary(path => path, File.ReadAllBytes);

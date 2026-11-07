@@ -75,11 +75,9 @@ public sealed class XamlNameProjectionShellTests
         string view = await test.CreateFileAsync("View.xaml", Markup);
         string code = await test.CreateFileAsync("View.xaml.cs", Code);
         string observerPath = await test.CreateFileAsync("Observer.cs", Observer);
-        foreach (var operation in new[] { BuildOperation.Restore, BuildOperation.Build })
-        {
-            var built = await new BuildService().RunAsync(new(project, operation, "Release"));
-            Assert.True(built.ExitCode == 0, string.Join("\n", built.Diagnostics.Select(item => item.Message)));
-        }
+        // A build restores first, so a separate restore would only start another process.
+        var built = await new BuildService().RunAsync(new(project, BuildOperation.Build, "Release"));
+        Assert.True(built.ExitCode == 0, string.Join("\n", built.Diagnostics.Select(item => item.Message)));
         test.Shell.Workspace = await test.Workspace.LoadAsync(new(project, "Release"));
         // MSBuildWorkspace may normalize generated resource URIs during its
         // initial design-time build. The editing invariant starts after load.
