@@ -13,6 +13,7 @@ public static class Workbenches
     public const string Output = "Output";
     public const string Problems = "Problems";
     public const string TaskList = "TaskList";
+    public const string Tasks = "Tasks";
     public const string Search = "Search";
     public const string Terminal = "Terminal";
     public const string Debugger = "Debugger";
@@ -25,7 +26,7 @@ public static class Workbenches
     public const string Welcome = "Welcome";
 
     public static IReadOnlyList<string> All { get; } =
-        [Explorer, FileGroups, WpfTools, Assistant, Output, Problems, TaskList, Search, Terminal, Debugger, Database, Designer, LiveInspection, Packages, Git, Profiler, Welcome];
+        [Explorer, FileGroups, WpfTools, Assistant, Output, Problems, TaskList, Tasks, Search, Terminal, Debugger, Database, Designer, LiveInspection, Packages, Git, Profiler, Welcome];
 
     /// <summary>Workbenches that open as closable document tabs rather than tool panes.</summary>
     public static bool IsDocument(string? id) => id is Packages or Git or Profiler;

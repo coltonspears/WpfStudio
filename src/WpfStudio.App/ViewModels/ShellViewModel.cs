@@ -63,6 +63,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Designer.AttachSourceHost(this);
         TaskList = new(this, tools.Tasks, messenger); FileGroups = new(this, tools.FileGroups, messenger); Problems = new(this, Diagnostics); ExternalChanges = new(this, store, dispatcher, tools.WatchOpenDocuments);
         Palette = new(this); ChangeReview = new(this, dispatcher); _verifiedEdits = new(this, store, _edits);
+        Tasks = new(this, Terminal, dispatcher, messenger);
         XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
         Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
@@ -182,6 +183,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true; AutoSave.IsEnabled = true;
+        // Personal tasks are there before any workspace opens; a workspace load reads its own tasks again.
+        await GuardAsync(Tasks.ReloadAsync);
         var requested = arguments.FirstOrDefault(a => File.Exists(a) && Path.GetExtension(a).ToLowerInvariant() is ".sln" or ".slnx" or ".csproj");
         var restoring = requested == null && settings.WorkspacePath != null && File.Exists(settings.WorkspacePath);
         // Read the previous session's files while the language worker loads; tabs still open in their saved order afterwards.
@@ -642,7 +645,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
     private void RefreshEditorDiagnostics()
     {
-        Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Distinct()) Diagnostics.Add(item);
+        Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Concat(Tasks.Diagnostics).Distinct()) Diagnostics.Add(item);
         Problems.Refresh();
         RefreshWpfIssues();
     }
@@ -915,7 +918,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
         Messenger.UnregisterAll(this); _workspace.WorkerExited -= WorkerExited;
-        XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Palette.Dispose();
+        XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Tasks.Dispose(); Palette.Dispose();
         _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
         Breakpoints.Dispose();
         Features.Dispose();

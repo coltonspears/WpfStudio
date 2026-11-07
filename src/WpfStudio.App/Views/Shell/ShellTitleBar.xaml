@@ -144,6 +144,7 @@
           <MenuItem Header="Output" c:Ui.Icon="Output" Command="{Binding ShowToolCommand}" CommandParameter="Output" />
           <MenuItem Header="Problems" c:Ui.Icon="Warning" Command="{Binding ShowToolCommand}" CommandParameter="Problems" />
           <MenuItem Header="Task List" c:Ui.Icon="Check" Command="{Binding ShowToolCommand}" CommandParameter="TaskList" />
+          <MenuItem Header="Tasks" c:Ui.Icon="Play" Command="{Binding ShowToolCommand}" CommandParameter="Tasks" />
           <MenuItem Header="Search results" Command="{Binding ShowToolCommand}" CommandParameter="Search" />
           <MenuItem Header="Terminal" c:Ui.Icon="Terminal" Command="{Binding ShowToolCommand}" CommandParameter="Terminal" InputGestureText="Ctrl+`" />
           <MenuItem Header="Debugger" c:Ui.Icon="Bug" Command="{Binding ShowToolCommand}" CommandParameter="Debugger" />
@@ -208,6 +209,9 @@
           <Separator />
           <MenuItem Header="Run tests" c:Ui.Icon="Flask" Command="{Binding TestCommand}" />
           <Separator />
+          <MenuItem Header="Run build task" Command="{Binding Tasks.RunBuildTaskCommand}" ToolTip="The default task of the build group in tasks.json" />
+          <MenuItem Header="Run test task" Command="{Binding Tasks.RunTestTaskCommand}" ToolTip="The default task of the test group in tasks.json" />
+          <Separator />
           <MenuItem Header="Cancel running operation" c:Ui.Icon="Stop" Command="{Binding CancelOperationCommand}" />
         </MenuItem>
         <MenuItem Header="_Debug">
@@ -236,6 +240,10 @@
           <MenuItem Header="NuGet packages…" c:Ui.Icon="Package" Command="{Binding OpenPackagesCommand}" />
           <MenuItem Header="Git changes…" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" />
           <MenuItem Header="Memory profiler…" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="Profiler" />
+          <Separator />
+          <MenuItem Header="Run task…" c:Ui.Icon="Play" Command="{Binding RunTaskPaletteCommand}" />
+          <MenuItem Header="New task…" Command="{Binding Tasks.NewTaskCommand}" />
+          <MenuItem Header="Tasks" Command="{Binding ShowToolCommand}" CommandParameter="Tasks" />
           <Separator />
           <MenuItem Header="Reload workspace" c:Ui.Icon="Refresh" Command="{Binding ReloadWorkspaceCommand}" />
           <MenuItem Header="Restart language service" c:Ui.Icon="Restart" Command="{Binding RestartWorkspaceCommand}" />

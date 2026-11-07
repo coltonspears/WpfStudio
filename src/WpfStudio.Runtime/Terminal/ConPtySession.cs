@@ -8,10 +8,29 @@ using Microsoft.Win32.SafeHandles;
 
 namespace WpfStudio.Runtime.Terminal;
 
+/// <summary>How a pseudoconsole session starts, beyond its program and folder.</summary>
+public sealed record ConPtyOptions
+{
+    public short Columns { get; init; } = 120;
+    public short Rows { get; init; } = 30;
+    /// <summary>Variables set over the IDE's own environment for the program; null inherits it unchanged.</summary>
+    public IReadOnlyDictionary<string, string>? Environment { get; init; }
+    /// <summary>Sees every chunk of output on the reader thread before the renderer does. It must not keep the thread long or change the bytes.</summary>
+    public Action<byte[]>? ObserveOutput { get; init; }
+    /// <summary>
+    /// The program never waits for a renderer: with none attached, output collects up to a limit and the oldest is then
+    /// dropped. Suits a task that runs while its tab has never been shown, which would otherwise stop when its first
+    /// few screens of output fill the channel.
+    /// </summary>
+    public bool KeepOutputFlowing { get; init; }
+}
+
 /// <summary>A real Windows pseudoconsole. Dedicated readers/writers avoid synchronous pipe deadlocks.</summary>
 public sealed class ConPtySession : IAsyncDisposable
 {
-    private readonly Channel<byte[]> output = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
+    private readonly Channel<byte[]> output;
+    private readonly Action<byte[]>? observeOutput;
+    private readonly TaskCompletionSource<int> exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Channel<byte[]> input = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true });
     private readonly CancellationTokenSource lifetime = new();
     private readonly FileStream inputStream;
@@ -22,13 +41,23 @@ public sealed class ConPtySession : IAsyncDisposable
     private nint pseudoConsole;
     private int disposed;
     public int ProcessId => process.Id;
+    /// <summary>The program's exit code once it has ended; -1 when it could not be read, as after the session is disposed first.</summary>
+    public Task<int> Exited => exited.Task;
     public ChannelReader<byte[]> Output => output.Reader;
     public event Action? Closed;
     public event Action<string>? Error;
 
     public ConPtySession(string executable, string arguments, string workingDirectory, short columns = 120, short rows = 30)
+        : this(executable, arguments, workingDirectory, new ConPtyOptions { Columns = columns, Rows = rows }) { }
+
+    public ConPtySession(string executable, string arguments, string workingDirectory, ConPtyOptions options)
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763)) throw new PlatformNotSupportedException("The terminal requires Windows 10 1809 or newer.");
+        output = options.KeepOutputFlowing
+            ? Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8192) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true, SingleWriter = true })
+            : Channel.CreateBounded<byte[]>(new BoundedChannelOptions(64) { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
+        observeOutput = options.ObserveOutput;
+        var (columns, rows) = (options.Columns, options.Rows);
         if (!Directory.Exists(workingDirectory)) throw new DirectoryNotFoundException(workingDirectory);
         Check(Native.CreatePipe(out var readInput, out var writeInput, 0, 0));
         SafeFileHandle? readOutput = null, writeOutput = null;
@@ -47,11 +76,17 @@ public sealed class ConPtySession : IAsyncDisposable
             // Explicit null standard handles prevent a redirected IDE/test-host console from being inherited instead of ConPTY.
             var startup = new StartupInfoEx { StartupInfo = new StartupInfo { cb = Marshal.SizeOf<StartupInfoEx>(), dwFlags = 0x00000100 }, AttributeList = attributes };
             var command = new StringBuilder('"' + executable + '"' + (string.IsNullOrWhiteSpace(arguments) ? "" : " " + arguments));
-            Check(Native.CreateProcess(executable, command, 0, 0, false, 0x00080000 | 0x00000400, 0, workingDirectory, ref startup, out var information));
+            ProcessInformation information;
+            var block = options.Environment is { } variables ? Marshal.StringToHGlobalUni(EnvironmentBlock(variables)) : 0;
+            try { Check(Native.CreateProcess(executable, command, 0, 0, false, 0x00080000 | 0x00000400, block, workingDirectory, ref startup, out information)); }
+            finally { if (block != 0) Marshal.FreeHGlobal(block); }
             // Opening Handle while the creation handle is still open retains the OS process object, so the id cannot be
             // reused by an unrelated process before Kill(entireProcessTree) looks it up on close.
             try { process = Process.GetProcessById(information.ProcessId); _ = process.Handle; }
             finally { Native.CloseHandle(information.Process); Native.CloseHandle(information.Thread); }
+            process.EnableRaisingEvents = true;
+            process.Exited += OnProcessExited;
+            if (process.HasExited) OnProcessExited(null, EventArgs.Empty);
             inputStream = new FileStream(writeInput, FileAccess.Write, 4096, false);
             outputStream = new FileStream(readOutput, FileAccess.Read, 16384, false);
             // The pipe only offers blocking reads, and this one lasts as long as the session, so it gets its own thread rather than holding a pool thread.
@@ -71,6 +106,27 @@ public sealed class ConPtySession : IAsyncDisposable
             if (attributes != 0) Marshal.FreeHGlobal(attributes);
         }
     }
+    private void OnProcessExited(object? sender, EventArgs args)
+    {
+        try { exited.TrySetResult(process.ExitCode); }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception) { exited.TrySetResult(-1); }
+    }
+    /// <summary>The IDE's environment with <paramref name="variables"/> set over it, sorted as Windows expects, in CreateProcess's block format.</summary>
+    internal static string EnvironmentBlock(IReadOnlyDictionary<string, string> variables)
+    {
+        var merged = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Collections.DictionaryEntry entry in System.Environment.GetEnvironmentVariables()) merged[(string)entry.Key] = (string?)entry.Value ?? "";
+        foreach (var (name, value) in variables) { if (name.Length > 0 && !name.Contains('=', StringComparison.Ordinal)) merged[name] = value; }
+        var block = new StringBuilder();
+        foreach (var (name, value) in merged) block.Append(name).Append('=').Append(value).Append('\0');
+        return block.Append('\0').ToString();
+    }
+    /// <summary>Ends the program and everything it started, but leaves the pseudoconsole open, so its output can still be read.</summary>
+    public void Terminate()
+    {
+        if (Volatile.Read(ref disposed) != 0) return;
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } catch (Win32Exception) { }
+    }
     public ValueTask WriteAsync(string text, CancellationToken cancellationToken = default) => input.Writer.WriteAsync(Encoding.UTF8.GetBytes(text), cancellationToken);
     public void Resize(int columns, int rows)
     {
@@ -86,8 +142,10 @@ public sealed class ConPtySession : IAsyncDisposable
             while ((count = outputStream.Read(buffer, 0, buffer.Length)) > 0)
             {
                 if (Volatile.Read(ref disposed) != 0) continue; // Drain the final ConPTY frame during teardown.
+                var chunk = buffer.AsSpan(0, count).ToArray();
+                observeOutput?.Invoke(chunk);
 #pragma warning disable VSTHRD002 // This thread exists to block, and waits on nothing that needs it; a full channel is what pauses reading.
-                try { output.Writer.WriteAsync(buffer.AsSpan(0, count).ToArray(), lifetime.Token).AsTask().GetAwaiter().GetResult(); }
+                try { output.Writer.WriteAsync(chunk, lifetime.Token).AsTask().GetAwaiter().GetResult(); }
 #pragma warning restore VSTHRD002
                 catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             }
@@ -116,6 +174,14 @@ public sealed class ConPtySession : IAsyncDisposable
         inputStream.Dispose();
         outputStream.Dispose();
         await Task.WhenAll(reader, writer).ConfigureAwait(false);
+        if (!exited.Task.IsCompleted)
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try { await process.WaitForExitAsync(deadline.Token).ConfigureAwait(false); OnProcessExited(null, EventArgs.Empty); }
+            catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException or Win32Exception) { }
+        }
+        exited.TrySetResult(-1);
+        process.Exited -= OnProcessExited;
         process.Dispose(); lifetime.Dispose();
     }
     private static void Check(bool success) { if (!success) throw new Win32Exception(Marshal.GetLastWin32Error()); }

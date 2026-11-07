@@ -103,6 +103,9 @@
             <layout:LayoutAnchorable Title="Task List" ContentId="TaskList" CanClose="False" CanHide="True">
               <shell:TaskListPane />
             </layout:LayoutAnchorable>
+            <layout:LayoutAnchorable Title="Tasks" ContentId="Tasks" CanClose="False" CanHide="True">
+              <shell:TasksPane />
+            </layout:LayoutAnchorable>
             <layout:LayoutAnchorable Title="Search" ContentId="Search" CanClose="False" CanHide="True">
               <shell:SearchPane x:Name="WorkspaceSearch" />
             </layout:LayoutAnchorable>

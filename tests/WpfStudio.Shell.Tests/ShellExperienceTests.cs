@@ -29,6 +29,31 @@ public sealed class ShellExperienceTests
     }
 
     [Fact]
+    public async Task PersonalTasksLoadWithoutAWorkspaceAndRunFromThePalette()
+    {
+        await using var test = new ShellTestContext();
+        var personal = WpfStudio.Core.Tasks.TaskCatalog.PersonalFile(test.Shell.DataFolder);
+        Directory.CreateDirectory(Path.GetDirectoryName(personal)!);
+        await File.WriteAllTextAsync(personal, """{ "tasks": [ { "label": "greet", "command": "echo hi", "detail": "Says hi", "group": "build" }, { "label": "secret", "command": "echo", "hide": true } ] }""");
+        test.Shell.CommandPaletteCommand.Execute(null);
+        Assert.DoesNotContain(test.Shell.Palette.Results, entry => entry.Label == "Run build task");
+        test.Shell.Palette.CloseCommand.Execute(null);
+        await test.Shell.InitializeAsync([]);
+
+        Assert.Equal("greet", Assert.Single(test.Shell.Tasks.Items).Label);
+        Assert.False(test.Shell.Tasks.HasWorkspace);
+        test.Shell.RunTaskPaletteCommand.Execute(null);
+        Assert.True(test.Shell.Palette.IsOpen);
+        var entry = Assert.Single(test.Shell.Palette.Results);
+        Assert.Equal(("Task: greet", "Says hi", "Tasks"), (entry.Label, entry.Detail, entry.Category));
+        test.Shell.Palette.Query = ">run build task";
+        Assert.Equal("Run build task", test.Shell.Palette.Results.First().Label);
+        Assert.DoesNotContain(test.Shell.Palette.Results, entry => entry.Label == "Run test task");
+        await test.Shell.Tasks.RunTestTaskCommand.ExecuteAsync(null);
+        Assert.StartsWith("No test task yet", test.Shell.Status);
+    }
+
+    [Fact]
     public void FuzzyScoringPrefersPrefixesWordStartsAndRuns()
     {
         Assert.Null(CommandPaletteViewModel.FuzzyScore("Build", "xyz"));

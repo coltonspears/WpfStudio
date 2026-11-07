@@ -95,6 +95,7 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Task List", ShowToolCommand, Workbenches.TaskList, icon: "Check", detail: "TODO, HACK and FIXME comments, and your own to-do items");
         yield return Command("View", "Refresh Task List", TaskList.RefreshCommand, icon: "Refresh");
         foreach (var entry in FileGroupCommands()) yield return entry;
+        foreach (var entry in TaskCommands()) yield return entry;
         yield return Command("Help", "About WpfStudio", ShowAboutCommand, icon: "Info", detail: "Version, runtime and data folder");
         yield return Command("Help", "What's new", ShowWhatsNewCommand, icon: "Bulb", detail: "Recent features and fixes");
     }
