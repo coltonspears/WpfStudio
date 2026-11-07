@@ -52,8 +52,8 @@
 
     <!-- Toolbar -->
     <DockPanel Margin="10,3,8,3">
-      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Refresh" Command="{Binding Tasks.RefreshCommand}" Width="26" Height="26" ToolTip="Read the tasks files again" />
-      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Stop" Command="{Binding Tasks.StopAllCommand}" Width="26" Height="26" ToolTip="Stop every running task" />
+      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Refresh" Command="{Binding Tasks.RefreshCommand}" Width="26" Height="26" ToolTip="Read the tasks files again" AutomationProperties.Name="Refresh tasks" />
+      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Stop" Command="{Binding Tasks.StopAllCommand}" Width="26" Height="26" ToolTip="Stop every running task" AutomationProperties.Name="Stop all tasks" />
       <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Personal tasks" Command="{Binding Tasks.EditPersonalCommand}" ToolTip="{Binding Tasks.PersonalFile}" Margin="4,0" />
       <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Shared tasks" Command="{Binding Tasks.EditSharedCommand}" IsEnabled="{Binding Tasks.HasWorkspace}" ToolTip="The repository's .wpfstudio/tasks.json" Margin="4,0" />
       <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" c:Ui.Icon="Plus" Content="New task…" Command="{Binding Tasks.NewTaskCommand}" Margin="4,0" />
@@ -81,13 +81,13 @@
       <ListBox.ItemTemplate>
         <DataTemplate>
           <DockPanel ToolTip="{Binding ToolTip}" Margin="0,2">
-            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Braces" Width="24" Height="24" ToolTip="Edit in its tasks file" Visibility="{Binding CanEdit, Converter={StaticResource BooleanToVisibility}}"
+            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Braces" Width="24" Height="24" ToolTip="Edit in its tasks file" AutomationProperties.Name="{Binding Label, StringFormat=Edit {0}}" Visibility="{Binding CanEdit, Converter={StaticResource BooleanToVisibility}}"
                     Command="{Binding DataContext.Tasks.EditTaskCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
-            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Restart" Width="24" Height="24" ToolTip="Stop and run again" Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibility}}"
+            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Restart" Width="24" Height="24" ToolTip="Stop and run again" AutomationProperties.Name="{Binding Label, StringFormat=Restart {0}}" Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibility}}"
                     Command="{Binding DataContext.Tasks.RestartCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
-            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Stop" Width="24" Height="24" ToolTip="Stop" Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibility}}"
+            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Stop" Width="24" Height="24" ToolTip="Stop" AutomationProperties.Name="{Binding Label, StringFormat=Stop {0}}" Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibility}}"
                     Command="{Binding DataContext.Tasks.StopCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
-            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Play" Width="24" Height="24" ToolTip="Run" Visibility="{Binding IsRunning, Converter={StaticResource Presence}, ConverterParameter=Invert}"
+            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Play" Width="24" Height="24" ToolTip="Run" AutomationProperties.Name="{Binding Label, StringFormat=Run {0}}" Visibility="{Binding IsRunning, Converter={StaticResource Presence}, ConverterParameter=Invert}"
                     Command="{Binding DataContext.Tasks.RunCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
             <TextBlock DockPanel.Dock="Right" Text="{Binding StateText}" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="8,0" />
             <c:Glyph DockPanel.Dock="Left" Style="{StaticResource StateGlyph}" />
@@ -114,7 +114,7 @@
     <Border Grid.Column="1" Grid.RowSpan="3" Width="360" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1,0,0,0" Visibility="{Binding Tasks.Editor.IsOpen, Converter={StaticResource BooleanToVisibility}}">
       <DockPanel DataContext="{Binding Tasks}">
         <DockPanel DockPanel.Dock="Top" Margin="12,6,8,0">
-          <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="24" Height="24" Command="{Binding CancelNewTaskCommand}" ToolTip="Close without saving" />
+          <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="24" Height="24" Command="{Binding CancelNewTaskCommand}" ToolTip="Close without saving" AutomationProperties.Name="Close the new task form" />
           <TextBlock Text="NEW TASK" Style="{StaticResource SectionLabel}" VerticalAlignment="Center" Margin="0" />
         </DockPanel>
         <StackPanel DockPanel.Dock="Bottom" Margin="12,6,12,10">

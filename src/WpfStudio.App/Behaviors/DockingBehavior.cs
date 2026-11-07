@@ -192,6 +192,9 @@ public static class DockingBehavior
             if (tool.IsAutoHidden) tool.ToggleAutoHide();
             if (id == Workbenches.Debugger && tool.Parent is LayoutAnchorablePane debugPane && debugPane.DockHeight.IsAbsolute && debugPane.DockHeight.Value < 320)
                 debugPane.DockHeight = new GridLength(320);
+            // Room for a few tasks and the New task form beside them.
+            if (id == Workbenches.Tasks && tool.Parent is LayoutAnchorablePane tasksPane && tasksPane.DockHeight.IsAbsolute && tasksPane.DockHeight.Value < 340)
+                tasksPane.DockHeight = new GridLength(340);
             if (id == Workbenches.Designer && tool.Parent is LayoutAnchorablePane designerPane && (!designerPane.DockHeight.IsAbsolute || designerPane.DockHeight.Value < 500))
                 designerPane.DockHeight = new GridLength(500);
             if (id == Workbenches.LiveInspection && tool.Parent is LayoutAnchorablePane inspectionPane && (!inspectionPane.DockHeight.IsAbsolute || inspectionPane.DockHeight.Value < 420))
