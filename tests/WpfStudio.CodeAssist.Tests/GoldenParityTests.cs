@@ -99,7 +99,8 @@ public sealed class GoldenParityTests
         foreach (var expected in Golden.GetProperty("lines").GetProperty("4.0.0").EnumerateArray())
         {
             string code = expected.GetProperty("code").GetString()!;
-            var actual = generator.Generate(code, CodeAssistEngine.MaxLineTokens);
+            // One pass of the network gives both the line and the gate's inputs; running it again for each took a third of the test's time.
+            var (actual, features) = generator.GenerateWithFeatures(code, CodeAssistEngine.MaxLineTokens);
             Assert.Equal(expected.GetProperty("text").GetString(), actual.Text);
             if (actual.Text.Length > 0)
             {
@@ -109,7 +110,7 @@ public sealed class GoldenParityTests
             // A line the gate declined still has to be scored the same way, or the gate would decide differently elsewhere.
             if (expected.GetProperty("features").ValueKind == JsonValueKind.Null) continue;
             var wanted = expected.GetProperty("features").EnumerateArray().Select(value => value.GetDouble()).ToArray();
-            var features = generator.Features(code, CodeAssistEngine.MaxLineTokens);
+            Assert.True(features is not null, "The model did not finish this line: " + code[^Math.Min(60, code.Length)..]);
             Assert.Equal(wanted.Length, features.Length);
             for (int i = 0; i < wanted.Length; i++)
                 Assert.True(Math.Abs(wanted[i] - features[i]) <= GateFeatureTolerance, $"{TransformerLineGenerator.GateFeatures[i]}: {wanted[i]} and {features[i]}, for: {code[^Math.Min(60, code.Length)..]}");
