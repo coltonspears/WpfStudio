@@ -178,6 +178,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Explorer.NestRelatedFiles = settings.NestRelatedFiles;
         Editor.Load(settings.Editor);
         CodeAssist.Load(settings.CodeAssist);
+        LoadDebuggingSettings(settings.Debugging);
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true; AutoSave.IsEnabled = true;
@@ -896,7 +897,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) await _store.DeleteRecoveryAsync(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings(), CodeAssist = CodeAssist.ToSettings() });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings(), CodeAssist = CodeAssist.ToSettings(), Debugging = DebuggingSettings() });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }

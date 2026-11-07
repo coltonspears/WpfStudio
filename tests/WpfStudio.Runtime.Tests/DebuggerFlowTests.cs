@@ -246,6 +246,32 @@ public sealed class DebuggerFlowTests
     });
 
     [Fact]
+    public Task LaunchSendsTheChosenOptions() => WithAttachedModelAsync("debug-modules", async model =>
+    {
+        await Until(() => model.Output.Contains("launch ", StringComparison.Ordinal));
+        Assert.Contains("launch justMyCode=False enableStepFiltering=True stopAtEntry=True", model.Output);
+    }, start: model =>
+    {
+        model.JustMyCode = false; model.StopAtEntry = true;
+        Assert.Equal(new DebugLaunchOptions(JustMyCode: false, StepFiltering: true, StopAtEntry: true), model.LaunchOptions);
+        return model.LaunchAsync(new DebugLaunchConfiguration(@"C:\src\App.exe", @"C:\src"));
+    });
+
+    [Fact]
+    public Task ModuleEventsAddChangeAndRemoveRows() => WithAttachedModelAsync("debug-modules", async model =>
+    {
+        await Until(() => model.ModuleSummary == "2 modules · 2 with symbols");
+        Assert.Equal(["App.dll", "Plugin.dll"], model.Modules.Select(module => module.Name));
+        // The change carried only the new symbol status; the name and path it left out are kept.
+        Assert.Equal(new DebugModule("m3", "Plugin.dll", @"C:\src\bin\Plugin.dll", "Symbols loaded."), model.Modules[1]);
+        model.ModuleFilter = "plug";
+        Assert.Equal("Plugin.dll", Assert.Single(model.Modules).Name);
+        Assert.Equal("2 modules · 2 with symbols · 1 shown", model.ModuleSummary);
+        model.ModuleFilter = "";
+        Assert.Equal(2, model.Modules.Count);
+    }, start: model => model.LaunchAsync(new DebugLaunchConfiguration(@"C:\src\App.exe", @"C:\src")));
+
+    [Fact]
     public Task TerminationEndsTheSession() => WithAttachedModelAsync("debug-terminate", async model =>
     {
         await model.PauseCommand.ExecuteAsync(null);

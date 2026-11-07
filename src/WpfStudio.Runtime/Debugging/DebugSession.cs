@@ -11,6 +11,11 @@ public sealed record DebugLaunchConfiguration(string Program, string WorkingDire
 /// <summary>A source breakpoint. Hit conditions and log messages are applied by the IDE, so they work with any adapter.</summary>
 public sealed record SourceBreakpoint(string Path, int Line, string? Condition = null, bool Enabled = true, string? HitCondition = null, string? LogMessage = null);
 public sealed record DebugEvent(string Name, JsonElement Body);
+/// <summary>
+/// How the adapter treats a program it launches. netcoredbg reads these from the launch request only: an attach always
+/// keeps its defaults, which are Just My Code and step filtering on.
+/// </summary>
+public sealed record DebugLaunchOptions(bool JustMyCode = true, bool StepFiltering = true, bool StopAtEntry = false);
 
 /// <summary>Owns one managed debug session; the adapter never runs inside the IDE process.</summary>
 public sealed class DebugSession : IAsyncDisposable
@@ -58,9 +63,10 @@ public sealed class DebugSession : IAsyncDisposable
         Capabilities = await RequestAsync("initialize", new { clientID = "wpfstudio", clientName = "WpfStudio", adapterID = "coreclr", pathFormat = "path", linesStartAt1 = true, columnsStartAt1 = true, supportsVariableType = true, supportsVariablePaging = true, supportsRunInTerminalRequest = false }, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task LaunchAsync(DebugLaunchConfiguration configuration, IEnumerable<SourceBreakpoint> breakpoints, bool breakOnThrown = false, CancellationToken cancellationToken = default)
+    public async Task LaunchAsync(DebugLaunchConfiguration configuration, IEnumerable<SourceBreakpoint> breakpoints, bool breakOnThrown = false, DebugLaunchOptions? options = null, CancellationToken cancellationToken = default)
     {
         if (IsActive) throw new InvalidOperationException("Stop the active debugging session first.");
+        options ??= new();
         ownsDebuggee = true;
         try
         {
@@ -72,7 +78,7 @@ public sealed class DebugSession : IAsyncDisposable
             environment.Remove("DOTNET_STARTUP_HOOKS");
             if (hooks is not null) environment["DOTNET_STARTUP_HOOKS"] = hooks;
             await ConnectAsync(cancellationToken, isolateStartupHooks: true).ConfigureAwait(false);
-            var launch = RequestAsync("launch", new { program = Path.GetFullPath(configuration.Program), cwd = configuration.WorkingDirectory, args = configuration.Arguments ?? [], env = environment, stopAtEntry = false, justMyCode = true, enableStepFiltering = true }, cancellationToken);
+            var launch = RequestAsync("launch", new { program = Path.GetFullPath(configuration.Program), cwd = configuration.WorkingDirectory, args = configuration.Arguments ?? [], env = environment, stopAtEntry = options.StopAtEntry, justMyCode = options.JustMyCode, enableStepFiltering = options.StepFiltering }, cancellationToken);
             await ConfigureWhileStartingAsync(launch, breakpoints, breakOnThrown, cancellationToken).ConfigureAwait(false);
         }
         catch { await TearDownAsync(); throw; }

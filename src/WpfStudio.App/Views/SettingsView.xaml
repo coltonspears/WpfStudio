@@ -101,6 +101,7 @@
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.EditorPage}" c:Ui.Icon="Text" Content="Text editor" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.IntelligencePage}" c:Ui.Icon="Bulb" Content="Code intelligence" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.FilesPage}" c:Ui.Icon="Save" Content="Files and saving" ContentTemplate="{StaticResource NavEntry}" />
+        <ListBoxItem Tag="{x:Static vm:ShellViewModel.DebuggingPage}" c:Ui.Icon="Bug" Content="Debugging" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.AssistantPage}" c:Ui.Icon="Chat" Content="ColtonGPT" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.ExperimentalPage}" c:Ui.Icon="Flask" Content="Experimental" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.ShortcutsPage}" c:Ui.Icon="Keyboard" Content="Keyboard shortcuts" ContentTemplate="{StaticResource NavEntry}" />
@@ -418,6 +419,31 @@
               </CheckBox>
             </StackPanel>
           </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================================================== Debugging -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Debugging}">
+        <StackPanel Margin="28,22,28,24">
+          <TextBlock Text="Debugging" Style="{StaticResource PageTitle}" />
+          <TextBlock Text="How the debugger treats programs that WpfStudio starts with F5. Attaching to a running process always uses the debugger's defaults: Just My Code and step filtering on." Style="{StaticResource PageIntro}" />
+          <TextBlock Text="STEPPING" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}">
+            <StackPanel>
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Debugger.JustMyCode}">
+                <StackPanel><TextBlock Text="Just My Code" Style="{StaticResource RowName}" /><TextBlock Text="Stop and step only in your solution's code. Turn it off to also step into and stop in other code that has symbols, such as a package shipped with its PDB files." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Debugger.StepFiltering}">
+                <StackPanel><TextBlock Text="Step over properties and operators" Style="{StaticResource RowName}" /><TextBlock Text="Step into goes past property getters and operator methods instead of into them." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+              <Border Style="{StaticResource Divider}" />
+              <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Debugger.StopAtEntry}">
+                <StackPanel><TextBlock Text="Stop at entry" Style="{StaticResource RowName}" /><TextBlock Text="Pause on the program's first line, before any breakpoint is reached." Style="{StaticResource RowNote}" /></StackPanel>
+              </CheckBox>
+            </StackPanel>
+          </Border>
+          <TextBlock Text="Which assemblies loaded with symbols is listed on the Modules tab of the Debugger pane while a program runs. The bundled debugger reads symbols from next to each assembly, so it has no symbol search paths to set." Style="{StaticResource RowNote}" TextWrapping="Wrap" Margin="2,10,0,0" />
         </StackPanel>
       </ScrollViewer>
 

@@ -67,6 +67,23 @@ while (ReadFrame(input) is { } request)
             Reply(sequence);
             EventWith("stopped", """{"reason":"step","threadId":7}""");
             break;
+        // Echoes the launch options, then loads, changes and unloads modules as netcoredbg reports them.
+        case ("debug-modules", "launch"):
+        {
+            var options = request.GetProperty("arguments");
+            EventWith("output", $$"""{"category":"console","output":"launch justMyCode={{options.GetProperty("justMyCode").GetBoolean()}} enableStepFiltering={{options.GetProperty("enableStepFiltering").GetBoolean()}} stopAtEntry={{options.GetProperty("stopAtEntry").GetBoolean()}}\n"}""");
+            Reply(sequence);
+            break;
+        }
+        case ("debug-modules", "configurationDone"):
+            Reply(sequence);
+            EventWith("module", """{"reason":"new","module":{"id":"m1","name":"App.dll","path":"C:\\src\\bin\\App.dll","symbolStatus":"Symbols loaded."}}""");
+            EventWith("module", """{"reason":"new","module":{"id":"m2","name":"System.Private.CoreLib.dll","path":"C:\\dotnet\\System.Private.CoreLib.dll","symbolStatus":"Skipped loading symbols."}}""");
+            EventWith("module", """{"reason":"new","module":{"id":"m3","name":"Plugin.dll","path":"C:\\src\\bin\\Plugin.dll","symbolStatus":"Symbols not found."}}""");
+            EventWith("module", """{"reason":"changed","module":{"id":"m3","symbolStatus":"Symbols loaded."}}""");
+            EventWith("module", """{"reason":"removed","module":{"id":"m2"}}""");
+            EventWith("module", """{"reason":"new","module":{"name":"NoId.dll"}}""");
+            break;
         case ("debug-exception", "configurationDone"):
             Reply(sequence);
             EventWith("stopped", """{"reason":"exception","threadId":7}""");
