@@ -370,7 +370,11 @@ public sealed class InspectionSession : IInspectionSession
                     Close("The inspector could not send its request. The application is still running.", exception);
                     throw;
                 }
-                var response = await completion.Task.WaitAsync(deadline.Token).ConfigureAwait(false);
+                InspectionMessage response;
+                try { response = await completion.Task.WaitAsync(deadline.Token).ConfigureAwait(false); }
+                // The reader settles a request before it closes the session, and closing cancels this wait at once, while the
+                // settled request's own continuation is still waiting for a pool thread. What the request settled to is the outcome.
+                catch (OperationCanceledException) when (completion.Task.IsCompleted) { response = await completion.Task.ConfigureAwait(false); }
                 if (response.Error is { } error) throw new InvalidOperationException(error.Length <= 2000 ? error : error[..2000] + "…");
                 return response.GetPayload<T>();
             }

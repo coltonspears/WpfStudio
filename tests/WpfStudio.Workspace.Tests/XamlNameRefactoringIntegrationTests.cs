@@ -276,8 +276,7 @@ public sealed class XamlNameRefactoringIntegrationTests
                 string code = Path.Combine(directory, "View.xaml.cs"); codePaths.Add(code);
                 await File.WriteAllTextAsync(project, $"<Project Sdk='Microsoft.NET.Sdk'><PropertyGroup><TargetFramework>{framework}</TargetFramework><UseWPF>true</UseWPF></PropertyGroup><ItemGroup><Page Include='../View.xaml' Link='View.xaml'/></ItemGroup></Project>");
                 await File.WriteAllTextAsync(code, Code);
-                var restore = await new BuildService().RunAsync(new(project, BuildOperation.Restore, "Release"));
-                Assert.True(restore.ExitCode == 0, string.Join("\n", restore.Diagnostics.Select(item => item.Message)));
+                // A build restores first, so a separate restore would only start another process.
                 var build = await new BuildService().RunAsync(new(project, BuildOperation.Build, "Release"));
                 Assert.True(build.ExitCode == 0, string.Join("\n", build.Diagnostics.Select(item => item.Message)));
             }

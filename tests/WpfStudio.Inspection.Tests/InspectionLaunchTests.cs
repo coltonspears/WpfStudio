@@ -4,6 +4,7 @@ using WpfStudio.Runtime.Inspection;
 
 namespace WpfStudio.Inspection.Tests;
 
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class InspectionLaunchTests
 {
     [Theory]
