@@ -521,25 +521,41 @@ How it was checked: this pass ran on Linux, where only the Core, Workspace, Code
 | Database | Each text cell allocated a 131 KB buffer; dates lost their fractions of a second and were shown month-first; the completion feed was quadratic | Built only |
 | Assistant | A stalled streaming response never timed out | Built only |
 
+### Fixed in the follow-up
+
+A second round on the same day took the findings left open above. It was checked the same way: Core (434 passing) and Workspace (711 passing) fail only the tests they fail on an untouched checkout, and everything else is built for every target but not run.
+
+| Area | What | Checked by |
+|------|------|-----------|
+| Documents | A file with no byte order mark that is not valid UTF-8 is read in the system's code page, as the compiler reads it, and saved back as the same bytes. Read as UTF-8, each letter outside ASCII became a replacement character that the next save wrote to disk. Text the code page cannot hold turns the file into marked UTF-8 | Core tests |
+| Database | SQL scripts keep the encoding and byte order mark they were read with | Built only |
+| Language worker | A C# source that is not valid UTF-8 is read in the code page instead of being reported unavailable, which withheld XAML analysis from its project and its dependents | Workspace tests |
+| XAML | A `DataGrid` or `GridView` column's binding properties and cell templates are checked against the row's item | Workspace test |
+| XAML | An attribute value that lost its closing quote ends with its tag, so accepting a completion no longer deletes the markup after it | Workspace test |
+| XAML | The event service resolves only the attribute at the asked position; a type resolver remembers what each name resolved to; type completion describes only the entries it returns; binding analysis tests for a binding before the ignored test | Workspace tests |
+| Language worker | A field is resolved to its XAML name through the one page that declares it, not by asking every page under the gate; a worker nobody connects to exits after three minutes | Workspace tests |
+| Git | History asks for full ref names, so a local branch with a slash is not drawn as a remote one; a bare carriage return ends a diff line as it does in the editor | Core tests |
+| Git | One refresh asks each repository about itself once, and a file whose HEAD has not moved keeps its committed text without asking Git | Built only |
+| Problems | An XAML editor with nothing to clear no longer announces a change on every keystroke in any XAML tab | Built only |
+| Inspection | The live tree changes only the branches whose rows changed, so a collapsed branch stays collapsed across refreshes | Built only |
+| Preview | A snapshot no longer copies each node's property set; a parse shares one XAML schema context; the restore file's package folders are remembered between renders | Built only |
+| Profiler UI | Opening a type that the filter or "My code" hides reveals it, and commands no longer act on the previously selected type when it cannot be shown; an object opened while a list or the first views load is kept; closing a capture clears the retention focus; the process sampler reads off the UI thread and stops with the process; the graph's dot grid covers the whole surface; a dragged node keeps back-references attached to the right side | Built only |
+| Shell | Quick Open scores cached file names | Built only |
+| Build | Test fixtures are left out of the analyzers on Linux and macOS (PR #44), so the solution builds as a whole there | Solution build |
+
 ### Open
 
-Found and traced, but left: each needs a design choice, a larger change, or a run on Windows that this pass could not make.
+Found and traced, but still left: each needs a design choice, a larger change, or a run on Windows that these passes could not make.
 
 | Area | Finding |
 |------|---------|
-| Documents | A file without a byte order mark that is not valid UTF-8 (Windows-1252, GBK) is decoded with replacement characters and silently rewritten as UTF-8 on save. `DocumentStore.OpenAsync` should detect invalid UTF-8 and either keep an ANSI encoding or open read-only. The SQL script editor has the same loss, and also drops a UTF-16 byte order mark (`QueryDocumentsViewModel`). The language worker treats such a C# file as unavailable, which withholds XAML analysis for its project and dependents |
-| XAML | `DataGrid` and `GridView` column bindings are checked against the inherited DataContext instead of the row item: false XAMLBIND001, wrong completion, and rename can rewrite the wrong binding (`XamlBindingSources.DetermineContext`) |
-| XAML | An unterminated attribute value swallows markup up to the next quote, and accepting a completion then deletes it (`XamlSyntax.cs`); end the value at `<` |
-| XAML | Every XAML buffer sync rebuilds the page projection of all pages of all projects; needs an incremental path for edits that change no field or base type |
-| XAML | The event service resolves the whole document on every completion, hover and F12; type resolution is not memoized (about 40 metadata probes per lookup); schema completion builds documentation for every candidate before filtering; resource lookups have no per-container index and can exhaust the 65,536 work budget |
-| Language worker | "Generated" is decided by an `/obj/` substring anywhere in the path, so a workspace under `D:\obj\` or a source folder named `Obj` loses language services; each C# sync parses the file three times; F12 on any field is quadratic in the project's pages; the generated-source folder under `%TEMP%` is never pruned; a worker whose IDE dies before connecting waits for ever |
-| Problems | With several XAML tabs open, each keystroke still rebuilds the shell's diagnostics list once per tab; coalescing the rebuild needs the Shell tests to confirm the ordering they rely on |
-| Git | Each refresh still runs seven Git processes per open file on every save and window activation; resolve the repository, HEAD and upstream once per pass. Local branches containing `/` are drawn as remote refs (`--decorate=full` fixes it). A bare `\r` is a line break for the editor but not for the diff, margin or blame |
-| Diff | Split view cannot scroll horizontally past the narrower side's content; the gutter and background allocate text, typefaces and brushes per line per frame |
-| Inspection | The live tree is cleared and rebuilt on every 2 s refresh, so collapsed nodes reopen |
-| Preview | Every snapshot probes every dependency property of every node for bindings with no budget; the dependency catalog and `project.assets.json` are re-read before every render; `XamlSchemaContext` is created per lookup |
-| Profiler UI | Opening a type the "My code" switch or the 5,000-row limit hides does nothing; the first-view load can replace the object the user just opened; clicks during a capture load are dropped; the graph surface redraws every node on each pan or hover frame, and its dot grid stops partway across a large surface; dragging a node misroutes back-edges; the process sampler runs on the UI thread and keeps polling after the process exits |
+| XAML | Every XAML buffer sync rebuilds the page projection of all pages of all projects; needs an incremental path for edits that change no field or base type. This is the largest remaining cost of typing in XAML |
+| XAML | Resource lookups have no per-container index and can exhaust the 65,536 work budget on a view with many `{StaticResource}` bindings; one analysis parses the same text four times; a diagnostic's line is counted from the start of the text each time |
+| Language worker | "Generated" is decided by an `/obj/` substring anywhere in the path, so a workspace under `D:\obj\` or a source folder named `Obj` loses language services. The fix needs each project's evaluated intermediate directory and touches seventeen call sites |
+| Language worker | Each C# sync parses the file three times, where one change range against the previous text would make all three incremental; the generated-source folder under `%TEMP%` is never pruned |
+| Problems | Each editor whose diagnostics change still rebuilds the shell's whole list; coalescing the rebuild needs the Shell tests to confirm the ordering they rely on |
+| Diff | Split view cannot scroll horizontally past the narrower side's content: the narrower editor clamps the offset and the clamp is mirrored back. A fix has to tell a scroll from a clamp, and needs the window to try it in. The gutter and background allocate text, typefaces and brushes per line per frame |
+| Preview | Every snapshot still probes every dependency property of every node for bindings, with no budget; the output folder is listed and `deps.json` parsed before every render |
+| Profiler UI | Clicks during a capture load are dropped; a type beyond the 5,000 rows listed can only be reached by sorting or filtering; the graph surface redraws every node on each pan or hover frame, and the treemap every cell on each hover |
 | Profiler engine | `Neighbors` sorts every neighbour of a hub to return 64 |
-| Shell | Quick Open rescores every workspace file on each keystroke (a binding delay would make Enter act on a stale list, so cache the names instead); the source watcher allocates per root on each event and is built on the UI thread |
-| Build | `Directory.Build.props` recognizes test fixtures by `\Fixtures\`, so on Linux the fixtures get the product's analyzers and the solution does not build as a whole |
-
+| Shell | The source watcher allocates per root on each event and is built on the UI thread |
