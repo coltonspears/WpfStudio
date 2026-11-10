@@ -44,7 +44,9 @@ public sealed partial class WorkspaceEngine
         var sources = snapshot.Files.Where(file => file.Project.Id == project.Id)
             .Select(file => new XamlGeneratedNameSource(file.Path, file.Text)).ToArray();
         XamlGeneratedNameBridgeResult? bridge = null;
-        foreach (var source in sources)
+        // Only the page that declares the field can resolve it, so only its source is asked.
+        var pagePaths = ProjectedPagePaths(project, field);
+        foreach (var source in sources.Where(source => pagePaths.Count > 0 && pagePaths.Contains(Path.GetFullPath(source.Path))))
         {
             bridge = await TryResolveProjectedNameAsync(project, compilation, source, null, field, token).ConfigureAwait(false);
             if (bridge is not null) break;
