@@ -24,6 +24,52 @@ public static class DecorationOffsets
     }
 }
 
+/// <summary>
+/// Ranges with a value each, ordered by start, that follow the document's edits in place. An editor holds one per identifier of
+/// a file and every change to the document moves them, so moving them must not allocate: a batch edit raises one change per line.
+/// </summary>
+public sealed class ShiftingRanges<T>
+{
+    private (int Start, int Length, T Value)[] _items = [];
+    public int Count { get; private set; }
+    public (int Start, int Length, T Value) this[int index] => index < Count ? _items[index] : throw new ArgumentOutOfRangeException(nameof(index));
+
+    public void Set(IEnumerable<(int Start, int Length, T Value)> ranges)
+    {
+        _items = [.. ranges.OrderBy(range => range.Start)];
+        Count = _items.Length;
+    }
+    public void Clear() { _items = []; Count = 0; }
+
+    /// <summary>Applies an edit as <see cref="DecorationOffsets.MapRange"/> does for each range: those the edit touches are dropped.</summary>
+    public void Shift(int offset, int removed, int inserted)
+    {
+        int kept = 0, delta = inserted - removed;
+        for (var index = 0; index < Count; index++)
+        {
+            ref var range = ref _items[index];
+            if (range.Start + range.Length > offset)
+            {
+                if (range.Start < offset + removed) continue;
+                range.Start += delta;
+            }
+            if (kept != index) _items[kept] = range;
+            kept++;
+        }
+        // Dropped values must not stay reachable from the unused tail.
+        if (kept < Count) Array.Clear(_items, kept, Count - kept);
+        Count = kept;
+    }
+
+    /// <summary>The index of the first range that starts at or after <paramref name="position"/>, or <see cref="Count"/>.</summary>
+    public int FirstStartingAt(int position)
+    {
+        int low = 0, high = Count;
+        while (low < high) { var middle = (low + high) / 2; if (_items[middle].Start < position) low = middle + 1; else high = middle; }
+        return low;
+    }
+}
+
 /// <summary>A collapsible region: <see cref="Start"/> and <see cref="End"/> are document offsets, <see cref="Title"/> its collapsed text.</summary>
 public readonly record struct FoldRegion(int Start, int End, string Title);
 

@@ -146,6 +146,9 @@ public static class HeapInsights
 
     private static void SparseArrays(HeapGraph graph, HeapAnalysis analysis, HeapExtras extras, List<MemoryInsight> insights)
     {
+        // The slots in use are counted from the captured references. A capture that stopped at a limit left references out,
+        // so a full array whose elements lie beyond the limit would be reported as empty.
+        if (!graph.IsComplete) return;
         var sparse = new List<(int Id, int Length, int Used, long Wasted)>();
         foreach (var (id, length) in extras.ReferenceArrayLengths)
         {

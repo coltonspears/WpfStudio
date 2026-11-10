@@ -426,8 +426,22 @@ public sealed partial class WorkspaceEngine
 
     private static string ApplySymbolEdits(string text, IEnumerable<TextEdit> edits)
     {
-        foreach (var edit in edits.OrderByDescending(edit => edit.Start)) text = text.Remove(edit.Start, edit.Length).Insert(edit.Start, edit.NewText);
-        return text;
+        var ordered = edits.OrderBy(edit => edit.Start).ToArray();
+        // One pass over the text. Replacing each edit in turn copies the whole text per edit, and a rename can carry thousands.
+        var result = new System.Text.StringBuilder(text.Length + 64);
+        int position = 0, previousStart = -1;
+        foreach (var edit in ordered)
+        {
+            // Edits that overlap or share a start keep the meaning they had when applied one by one from the end; a rename's own never do.
+            if (edit.Start < position || edit.Start == previousStart)
+            {
+                foreach (var each in ordered.OrderByDescending(each => each.Start)) text = text.Remove(each.Start, each.Length).Insert(each.Start, each.NewText);
+                return text;
+            }
+            result.Append(text, position, edit.Start - position).Append(edit.NewText);
+            position = edit.Start + edit.Length; previousStart = edit.Start;
+        }
+        return result.Append(text, position, text.Length - position).ToString();
     }
 
     private static string[] BoundedWarnings(IEnumerable<string> warnings) => warnings.Distinct().Take(64)

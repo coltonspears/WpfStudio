@@ -1,5 +1,4 @@
 using System.Xml;
-using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using WpfStudio.Contracts;
 using WorkspaceDiagnostic = WpfStudio.Contracts.WorkspaceDiagnostic;
@@ -25,7 +24,8 @@ public sealed partial class XamlLanguageService
         try
         {
             using var reader = XmlReader.Create(new StringReader(text), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
-            _ = XDocument.Load(reader);
+            // Only whether it is well formed matters here, so nothing is built from it.
+            while (reader.Read()) { }
         }
         catch (XmlException) { return []; }
 

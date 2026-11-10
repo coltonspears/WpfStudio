@@ -207,7 +207,14 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     }
     private void ApplyChange(DapBreakpoint changed) { foreach (var item in store.Matching(changed)) item.ApplyChange(changed); }
 
-    private void OnDebugEvent(DebugEvent message) => dispatcher.Post(() =>
+    private void OnDebugEvent(DebugEvent message)
+    {
+        // Every other event, above all each line of the program's output, which the output buffer already batches,
+        // would only queue an empty operation on the UI thread.
+        if (message.Name is not ("stopped" or "continued" or "terminated" or "exited" or "breakpoint" or "module")) return;
+        dispatcher.Post(() => ApplyDebugEvent(message));
+    }
+    private void ApplyDebugEvent(DebugEvent message)
     {
         if (message.Name == "stopped")
         {
@@ -228,7 +235,7 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
             if (applyingBreakpoints > 0) changesWhileApplying.Add(changed); else ApplyChange(changed);
         }
         else if (message.Name == "module" && DapMessages.Module(message.Body) is { } module) ApplyModule(module);
-    });
+    }
 
     /// <summary>A new module is added, a changed one replaces the row with its id, and a removed one goes.</summary>
     private void ApplyModule(DapModuleEvent change)
@@ -385,7 +392,9 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
     /// <summary>Empties the rows and supersedes any refresh still awaiting the adapter, whose answers would land on top of the newer rows.</summary>
     private int ResetWatchRows() { Watches.Clear(); return ++watchRefresh; }
     private void EndSession() { sessionEnds++; changesWhileApplying.Clear(); IsActive = false; IsStopped = false; Status = "Session ended"; store.MarkPending(); stopVersion++; SelectedThread = null; SelectedFrame = null; Threads.Clear(); Frames.Clear(); Locals.Clear(); }
-    private void OnError(string value) => dispatcher.Post(() => { Error = value; EndSession(); });
+    // The session is torn down as well: left active after its adapter crashed or sent an unreadable frame, it would refuse
+    // every later launch with "Stop the active debugging session first", and could leave the program frozen at a breakpoint.
+    private void OnError(string value) => dispatcher.Post(() => { Error = value; EndSession(); session.DisposeAsync().AsTask().Forget(); });
     private async Task GuardAsync(Func<Task> action) { try { Error = ""; await action(); } catch (Exception ex) { Error = ex.Message; } }
     public async ValueTask DisposeAsync() { output.Close(); session.EventReceived -= OnDebugEvent; session.Output -= output.Append; session.Error -= OnError; await session.DisposeAsync(); }
 }

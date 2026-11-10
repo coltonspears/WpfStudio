@@ -99,6 +99,15 @@ public sealed class TaskFileTests
             problem => Assert.Equal(8, problem.Line));
     }
 
+    [Fact]
+    public void AFileOptionThatCannotBeReadIsAProblemOfThatFileAndOffersNoneOfItsTasks()
+    {
+        var file = TaskFileReader.Read(Path, """{ "options": { "env": { "FOO": null } }, "tasks": [ { "label": "ok", "command": "echo ok" } ] }""", TaskSource.VisualStudioCode);
+
+        Assert.Empty(file.Tasks);
+        Assert.Contains("FOO must be text", Assert.Single(file.Problems).Message);
+    }
+
     [Theory]
     [InlineData("{ \"tasks\": [ { \"label\": \"x\" ", 1)]
     [InlineData("{\n\n  \"tasks\": [ } ]\n}", 3)]

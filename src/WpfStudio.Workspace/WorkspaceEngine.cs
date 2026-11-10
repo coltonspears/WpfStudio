@@ -421,7 +421,10 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             if (_documents.OpenVersion(path) != version || _documents.Text(path) != synchronizedText) return;
             if (_pages.Authored is { } solution)
             {
-                if (read.Text is not null || read.State == "Missing")
+                // A tab closed with the text it was saved with, which is most of them, leaves the solution as it is. Replacing the text
+                // regardless made every close recompile the project and its dependents and rebuild the page projection of all projects.
+                bool unchanged = synchronizedText is not null && string.Equals(read.Text, synchronizedText, StringComparison.Ordinal);
+                if (!unchanged && (read.Text is not null || read.State == "Missing"))
                     foreach (var id in solution.GetDocumentIdsWithFilePath(path))
                         solution = solution.WithDocumentText(id, SourceText.From(read.Text ?? ""), PreservationMode.PreserveIdentity);
                 if (_disk.Documents.ContainsKey(path))
@@ -430,7 +433,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                     else _disk.Unavailable.Remove(path);
                     _disk.Pending.Remove(path);
                 }
-                SetAuthoredSolution(solution);
+                if (!unchanged) SetAuthoredSolution(solution);
                 SemanticRevision++;
                 _batchCache.Clear();
             }
@@ -664,9 +667,21 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         var name = Path.GetFileName(originalPath);
         if (string.IsNullOrWhiteSpace(name)) name = "Generated.g.cs";
         var path = Path.Combine(directory, name);
-        // Content-addressed, so a concurrent writer of the same name produces identical bytes.
-        try { if (!File.Exists(path)) await File.WriteAllTextAsync(path, content, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false); }
+        if (File.Exists(path)) return path;
+        // Content-addressed, so a concurrent writer of the same name produces identical bytes. Written beside the target and moved into
+        // place: a write cancelled part-way would otherwise leave a truncated file that every later call finds and takes for complete.
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporary, content, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
+            File.Move(temporary, path, overwrite: false);
+        }
         catch (IOException) when (File.Exists(path)) { }
+        finally
+        {
+            try { File.Delete(temporary); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
         return path;
     }
     private static TextEdit ToEdit(TextChange change) => new(change.Span.Start, change.Span.Length, change.NewText ?? "");

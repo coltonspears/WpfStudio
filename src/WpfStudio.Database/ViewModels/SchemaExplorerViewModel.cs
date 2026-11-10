@@ -21,6 +21,9 @@ public partial class SchemaExplorerViewModel : ObservableObject
     }
     public ObservableCollection<SchemaNodeViewModel> Schema { get; } = [];
     public ObservableCollection<string> CompletionItems { get; } = [];
+    // What CompletionItems holds, for a constant-time test: searching the list for each child made expanding a node with
+    // thousands of tables or procedures quadratic, on the UI thread.
+    private readonly HashSet<string> _completionTexts = new(StringComparer.Ordinal);
     [ObservableProperty] public partial SchemaNodeViewModel? SelectedSchema { get; set; }
     [ObservableProperty] public partial bool IsConnected { get; set; }
 
@@ -28,7 +31,7 @@ public partial class SchemaExplorerViewModel : ObservableObject
     {
         // Saving the connected profile re-selects its new record; the schema tree loaded from that same connection stays.
         if (profile is not null && _schemaProfile is { } loaded && SameConnection(loaded, profile)) return;
-        Schema.Clear(); CompletionItems.Clear(); IsConnected = false; _schemaProfile = null;
+        Schema.Clear(); CompletionItems.Clear(); _completionTexts.Clear(); IsConnected = false; _schemaProfile = null;
     }
     private static bool SameConnection(ConnectionProfile left, ConnectionProfile right) =>
         string.Equals(left.Server, right.Server, StringComparison.OrdinalIgnoreCase)
@@ -48,7 +51,7 @@ public partial class SchemaExplorerViewModel : ObservableObject
             ConnectionProfile profile = _connections.CurrentProfile();
             IReadOnlyList<SchemaItem> databases = await _database.GetDatabasesAsync(profile, cancellationToken);
             _schemaProfile = profile;
-            Schema.Clear(); CompletionItems.Clear();
+            Schema.Clear(); CompletionItems.Clear(); _completionTexts.Clear();
             // Capture credentials/server for this tree, even when the edit form changes later.
             foreach (SchemaItem item in databases)
                 Schema.Add(new SchemaNodeViewModel(item, async (parent, token) =>
@@ -57,7 +60,7 @@ public partial class SchemaExplorerViewModel : ObservableObject
                     var children = await _database.GetChildrenAsync(profile, parent, loadLifetime.Token);
                     loadLifetime.Token.ThrowIfCancellationRequested();
                     foreach (SchemaItem child in children.Where(child => child.Kind is SchemaNodeKind.Table or SchemaNodeKind.View or SchemaNodeKind.Procedure or SchemaNodeKind.Column))
-                        if (!CompletionItems.Contains(child.CompletionText)) CompletionItems.Add(child.CompletionText);
+                        if (_completionTexts.Add(child.CompletionText)) CompletionItems.Add(child.CompletionText);
                     return children;
                 }));
             IsConnected = true; _report($"{databases.Count} databases available. Expand to browse.");

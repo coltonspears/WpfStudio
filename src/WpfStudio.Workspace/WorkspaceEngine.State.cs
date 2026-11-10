@@ -198,17 +198,31 @@ public sealed partial class WorkspaceEngine
     /// <summary>Bounded results of batch XAML analysis, which only ever adds them for the current revision.</summary>
     private sealed class XamlBatchCache(object gate) : GatedState(gate)
     {
+        // One scan analyzes up to 512 files, so a smaller cache could never answer a whole repeated scan.
+        private const int Capacity = 512;
         private readonly Dictionary<BatchCacheKey, BatchAnalysis> _entries = [];
+        // Oldest first. A dictionary gives a new entry the slot the removed one left and enumerates that slot first, so evicting
+        // "the first key" of a full dictionary removed the entry added just before.
+        private readonly Queue<BatchCacheKey> _order = new();
+        private int _diagnostics;
 
         public BatchAnalysis? Find(BatchCacheKey key) { Held(); return _entries.GetValueOrDefault(key); }
-        public void Clear() { Held(); _entries.Clear(); }
+        public void Clear() { Held(); _entries.Clear(); _order.Clear(); _diagnostics = 0; }
 
         public void Add(BatchCacheKey key, BatchAnalysis analysis)
         {
             Held();
-            while (_entries.Count > 0 && (_entries.Count >= 128 || _entries.Values.Sum(value => value.Diagnostics.Length) + analysis.Diagnostics.Length > 8192))
-                _entries.Remove(_entries.Keys.First());
-            _entries[key] = analysis;
+            // A replaced entry keeps its place in the order.
+            var known = _entries.Remove(key, out var replaced);
+            if (known) _diagnostics -= replaced!.Diagnostics.Length;
+            while (_order.Count > 0 && (_entries.Count >= Capacity || _diagnostics + analysis.Diagnostics.Length > 8192))
+            {
+                var oldest = _order.Dequeue();
+                if (_entries.Remove(oldest, out var evicted)) _diagnostics -= evicted.Diagnostics.Length;
+                else if (oldest == key) known = false;
+            }
+            _entries[key] = analysis; _diagnostics += analysis.Diagnostics.Length;
+            if (!known) _order.Enqueue(key);
         }
     }
 

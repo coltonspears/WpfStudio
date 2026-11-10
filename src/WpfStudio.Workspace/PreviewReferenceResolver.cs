@@ -24,14 +24,14 @@ public static class PreviewReferenceResolver
         {
             if (!visited.Add(next.Project)) continue;
             if (visited.Count > MaximumProjects) { warnings.Add($"Only the first {MaximumProjects} projects' references were resolved."); break; }
-            string json;
-            try { json = await QueryAsync(next.Project, configuration, next.Framework, msbuildPath, cancellationToken).ConfigureAwait(false); }
+            Selection result;
+            // Reading the answer is inside too: output that is not the expected JSON is this project's warning, not the failure of every project's references.
+            try { result = Select(await QueryAsync(next.Project, configuration, next.Framework, msbuildPath, cancellationToken).ConfigureAwait(false)); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 warnings.Add($"References of {Path.GetFileName(next.Project)} could not be resolved: {exception.Message}");
                 continue;
             }
-            var result = Select(json);
             // The previewed project's own copy-local choices come first; referenced projects add what is still missing.
             foreach (var reference in result.Assemblies) assemblies.TryAdd(reference.RelativePath, reference);
             directories.UnionWith(result.SearchDirectories);
@@ -57,7 +57,8 @@ public static class PreviewReferenceResolver
             : await ProcessRunner.CaptureAsync(ProcessRunner.Create(msbuildPath, directory, arguments), cancellationToken).ConfigureAwait(false);
         // MSBuild before Visual Studio 2022 17.8 has no -getItem switch; the .NET SDK evaluates most legacy projects too.
         if (result.ExitCode != 0) result = await ProcessRunner.CaptureAsync(ProcessRunner.DotNet(directory, ["msbuild", .. arguments]), cancellationToken).ConfigureAwait(false);
-        var start = result.Output.IndexOf('{');
+        // The first line that opens with a brace: a notice or warning printed before the JSON can contain one.
+        var start = ProjectDiscovery.JsonOutputStart(result.Output);
         if (result.ExitCode != 0 || start < 0)
             throw new InvalidOperationException(FirstLine(result.Error) ?? FirstLine(result.Output) ?? $"MSBuild exited with code {result.ExitCode}. Restore the project.");
         return result.Output[start..];

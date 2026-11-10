@@ -27,6 +27,8 @@ internal sealed class EditorGuides : IBackgroundRenderer
         _owner = owner;
         owner.TextArea.TextView.BackgroundRenderers.Add(this);
         owner.TextArea.Caret.PositionChanged += (_, _) => UpdateBrackets();
+        // An edit that leaves the caret where it is, such as Delete or a replacement elsewhere, still moves the brackets after it.
+        owner.TextChanged += (_, _) => UpdateBrackets();
         owner.TextArea.SelectionChanged += (_, _) => UpdateWord();
     }
 

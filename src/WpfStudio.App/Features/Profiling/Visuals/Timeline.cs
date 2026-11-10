@@ -146,7 +146,8 @@ public sealed class MemoryTimeline : FrameworkElement
             var ring = marker.IsBaseline ? warning : accent;
             dc.DrawEllipse(ChartPalette.Frozen(fill), ChartPalette.Pen(ring, 2), new Point(x, y), 4.5, 4.5);
             var label = ChartPalette.Text(this, marker.Label, 10.5, marker.IsCurrent ? text : muted, 80, bold: marker.IsCurrent || marker.IsBaseline);
-            var lx = Math.Clamp(x - label.Width / 2, plot.Left - 4, plot.Right - label.Width + 4);
+            // A label wider than a very narrow plot starts at the plot's left; Math.Clamp throws when its bounds cross.
+            var lx = Math.Clamp(x - label.Width / 2, plot.Left - 4, Math.Max(plot.Left - 4, plot.Right - label.Width + 4));
             if (lx > labelRight + 4 || marker.IsCurrent || marker.IsBaseline || !timeMode)
             {
                 if (timeMode && lx <= labelRight + 4) lx = labelRight + 4;
@@ -156,7 +157,7 @@ public sealed class MemoryTimeline : FrameworkElement
             if (!timeMode)
             {
                 var index = ChartPalette.Text(this, marker.Time.LocalDateTime.ToString("t", CultureInfo.CurrentCulture), 10, subtle, 80);
-                dc.DrawText(index, new Point(Math.Clamp(x - index.Width / 2, plot.Left - 4, plot.Right - index.Width + 4), plot.Bottom + 4));
+                dc.DrawText(index, new Point(Math.Clamp(x - index.Width / 2, plot.Left - 4, Math.Max(plot.Left - 4, plot.Right - index.Width + 4)), plot.Bottom + 4));
             }
             _markerHits.Add((new Point(x, y), marker));
         }

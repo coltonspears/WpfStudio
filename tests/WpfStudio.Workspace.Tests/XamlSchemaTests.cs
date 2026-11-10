@@ -209,6 +209,29 @@ public sealed class XamlSchemaTests
         Assert.Empty(new XamlSchemaService().Analyze("View.xaml", text, 1, compilation));
     }
 
+    [Fact]
+    public void TypesAFacadeAssemblyForwardsResolveInItsClrNamespace()
+    {
+        // On .NET, mscorlib declares System only by forwarding its types to the core library.
+        var text = "<Window " + Namespaces + " xmlns:sys=\"clr-namespace:System;assembly=mscorlib\">\n<ComboBox><sys:String>One</sys:String><sys:Double>2</sys:Double></ComboBox>\n</Window>";
+
+        Assert.Empty(Analyze(text));
+        Assert.Equal("XAMLSCHEMA001", Assert.Single(Analyze(text.Replace("<sys:Double>2</sys:Double>", "<sys:Duoble />"))).Id);
+    }
+
+    [Fact]
+    public void ATruncatedCompletionListSaysSoAndNarrowsAsTheNameIsTyped()
+    {
+        var (_, all) = Complete(Window("<Grid><$$ /></Grid>"));
+        Assert.Equal(250, all.Items.Count);
+        Assert.True(all.Incomplete);
+        Assert.DoesNotContain(all.Items, item => item.InsertText == "TextBlock");
+
+        var (_, narrowed) = Complete(Window("<Grid><TextBl$$ /></Grid>"));
+        Assert.False(narrowed.Incomplete);
+        Assert.Contains(narrowed.Items, item => item.InsertText == "TextBlock");
+    }
+
     private static string Window(string body) => $"<Window {Namespaces}>\n{body}\n</Window>";
     [Fact]
     public void GetterOnlyAttachedCollectionsAreValidPropertyElements()

@@ -90,6 +90,51 @@ public sealed class EditorDecorationTests
     }
 }
 
+public sealed class ShiftingRangesTests
+{
+    [Fact]
+    public void AnEditMovesEachRangeAsMappingItAloneWouldAndDropsTheOnesItTouches()
+    {
+        var random = new Random(7);
+        for (var round = 0; round < 200; round++)
+        {
+            var expected = new List<(int Start, int Length, string Value)>();
+            for (int index = 0, position = 0; index < 40; index++)
+            {
+                position += random.Next(1, 6); // Distinct starts, so the order has one answer.
+                var length = random.Next(0, 5);
+                expected.Add((position, length, "v" + index));
+                position += length;
+            }
+            var ranges = new ShiftingRanges<string>();
+            ranges.Set(expected.AsEnumerable().Reverse());
+            for (var edit = 0; edit < 12; edit++)
+            {
+                int offset = random.Next(0, 220), removed = random.Next(0, 9), inserted = random.Next(0, 9);
+                ranges.Shift(offset, removed, inserted);
+                expected = expected.Select(range => (Mapped: DecorationOffsets.MapRange(range.Start, range.Length, offset, removed, inserted), range.Value))
+                    .Where(range => range.Mapped is not null).Select(range => (range.Mapped!.Value.Start, range.Mapped.Value.Length, range.Value)).ToList();
+                Assert.Equal(expected, Enumerable.Range(0, ranges.Count).Select(index => ranges[index]));
+            }
+        }
+    }
+
+    [Fact]
+    public void TheFirstRangeStartingAtAPositionIsFoundAndTheEndIsTheCount()
+    {
+        var ranges = new ShiftingRanges<int>();
+        Assert.Equal(0, ranges.FirstStartingAt(5));
+        ranges.Set([(10, 2, 1), (4, 3, 0), (20, 1, 2)]);
+        Assert.Equal(0, ranges.FirstStartingAt(0));
+        Assert.Equal(1, ranges.FirstStartingAt(5));
+        Assert.Equal(1, ranges.FirstStartingAt(10));
+        Assert.Equal(3, ranges.FirstStartingAt(21));
+        ranges.Shift(0, 30, 0);
+        Assert.Equal(0, ranges.Count);
+        Assert.Throws<ArgumentOutOfRangeException>(() => ranges[0]);
+    }
+}
+
 public sealed class WhitespaceCleanupTests
 {
     [Fact]
@@ -101,6 +146,17 @@ public sealed class WhitespaceCleanupTests
         Assert.Equal("a\nb\n", WhitespaceCleanup.Apply("a\nb", WhitespaceCleanup.Edits("a\nb", ".cs", true, true)));
         Assert.Empty(WhitespaceCleanup.Edits("tidy\n", ".cs", true, true));
         Assert.Empty(WhitespaceCleanup.Edits("", ".cs", true, true));
+    }
+
+    [Fact]
+    public void ALastLineOfOnlyWhitespaceIsTrimmedWithoutAddingASecondLineBreak()
+    {
+        static string Tidy(string text) => WhitespaceCleanup.Apply(text, WhitespaceCleanup.Edits(text, ".cs", trimTrailingWhitespace: true, ensureFinalNewline: true));
+        Assert.Equal("}\n", Tidy("}\n    "));
+        Assert.Equal("}\r\n", Tidy("}\r\n\t"));
+        Assert.Equal("", Tidy("  \t"));
+        // Without trimming, the spaces stay and are a last line of their own, which still needs its line break.
+        Assert.Equal("}\n    \n", WhitespaceCleanup.Apply("}\n    ", WhitespaceCleanup.Edits("}\n    ", ".cs", trimTrailingWhitespace: false, ensureFinalNewline: true)));
     }
 
     [Fact]

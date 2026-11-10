@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Wpf;
@@ -16,7 +17,7 @@ public sealed partial class WpfExplorerViewModel : ObservableObject
     public string[] Categories { get; } = [AllCategory, "Views and controls", "View models", "Dictionaries", "Styles and templates", "Keyed resources", "Converters", "Assets"];
     public ObservableCollection<WpfItem> Items { get; } = [];
     public ObservableCollection<NavigationResult> References { get; } = [];
-    public ObservableCollection<WorkspaceDiagnostic> Issues { get; } = [];
+    public BulkObservableCollection<WorkspaceDiagnostic> Issues { get; } = [];
     [ObservableProperty] public partial string Category { get; set; } = AllCategory;
     [ObservableProperty] public partial string Filter { get; set; } = "";
     [ObservableProperty] public partial WpfItem? SelectedItem { get; set; }
@@ -59,8 +60,7 @@ public sealed partial class WpfExplorerViewModel : ObservableObject
     /// <summary>Replaces the issue list with the diagnostics the shell currently attributes to XAML.</summary>
     public void SetIssues(IEnumerable<WorkspaceDiagnostic> issues)
     {
-        Issues.Clear();
-        foreach (var issue in issues) Issues.Add(issue);
+        Issues.ReplaceAll(issues);
         OnPropertyChanged(nameof(IssueTitle));
     }
 

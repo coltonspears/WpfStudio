@@ -54,7 +54,7 @@ public sealed partial class MemoryProfilerViewModel
         var top = summary.TopRetainers ?? [];
         var max = top.Count == 0 ? 1 : Math.Max(1, top.Max(r => r.RetainedBytes));
         TopRetainers = top.Select(r => new RetainerRow(r, (double)r.RetainedBytes / max)).ToArray();
-        var growing = Types.Where(t => t.BytesDelta > 0).OrderByDescending(t => t.BytesDelta).Take(8).ToArray();
+        var growing = _grownTypes.OrderByDescending(t => t.BytesDelta).Take(8).ToArray();
         var maxGrowth = growing.Length == 0 ? 1 : Math.Max(1, growing.Max(t => t.BytesDelta ?? 0));
         GrowthRows = growing.Select(t => new GrowthRow(t, (double)(t.BytesDelta ?? 0) / maxGrowth)).ToArray();
         RefreshComposition();
@@ -96,7 +96,7 @@ public sealed partial class MemoryProfilerViewModel
     private MemoryInsight? BaselineGrowthInsight()
     {
         if (_baseline is null || Summary is null) return null;
-        var grown = Types.Where(t => t.BytesDelta > 0 && t.CountDelta > 0).OrderByDescending(t => t.BytesDelta).ToArray();
+        var grown = _grownTypes.Where(t => t.CountDelta > 0).OrderByDescending(t => t.BytesDelta).ToArray();
         if (grown.Length == 0) return null;
         var bytes = grown.Sum(t => t.BytesDelta ?? 0);
         var items = grown.Take(20).Select(t => new MemoryInsightItem(t.ShortName, $"{t.CountGrowth} objects · now {t.Count:N0}", t.CountDelta ?? 0, t.BytesDelta ?? 0, t.Key)).ToArray();

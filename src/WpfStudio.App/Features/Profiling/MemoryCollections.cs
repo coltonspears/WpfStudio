@@ -1,24 +1,6 @@
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.ComponentModel;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
-
-/// <summary>An observable collection that can swap its contents with one Reset notification, so a list of thousands of
-/// rows is re-bound once instead of once per item.</summary>
-public sealed class BulkObservableCollection<T> : ObservableCollection<T>
-{
-    public void ReplaceAll(IEnumerable<T> items)
-    {
-        CheckReentrancy();
-        Items.Clear();
-        foreach (var item in items) Items.Add(item);
-        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
-        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
-        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
-    }
-}
 
 /// <summary>Runs a refresh at once, then at most once per interval while requests keep arriving (typing in a filter box),
 /// always finishing with a refresh for the latest request. Continues on the caller's synchronization context.</summary>

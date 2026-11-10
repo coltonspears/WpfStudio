@@ -20,6 +20,8 @@ public sealed class AssistantException(string message) : Exception(message);
 public sealed class OpenRouterClient(HttpClient http)
 {
     private const int MaximumEventCharacters = 131_072;
+    // Generous: a reasoning model can think for a long while, though the provider sends keep-alive comments meanwhile.
+    private static readonly TimeSpan StreamIdleTimeout = TimeSpan.FromMinutes(2);
     public const int MaximumResponseCharacters = 131_072;
     private static readonly Uri Endpoint = new("https://openrouter.ai/api/v1/");
 
@@ -129,9 +131,13 @@ public sealed class OpenRouterClient(HttpClient http)
         char[] buffer = new char[2048];
         var line = new StringBuilder();
         var data = new StringBuilder();
+        // The client's own timeout ends when the response headers arrive, so a provider or proxy that then stalls would leave the
+        // turn "responding" until the user cancelled. Each read gets its own limit; running out is reported as a timeout.
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(token);
         while (true)
         {
-            int read = await reader.ReadAsync(buffer.AsMemory(), token).ConfigureAwait(false);
+            idle.CancelAfter(StreamIdleTimeout);
+            int read = await reader.ReadAsync(buffer.AsMemory(), idle.Token).ConfigureAwait(false);
             if (read == 0) break;
             for (int i = 0; i < read; i++)
             {

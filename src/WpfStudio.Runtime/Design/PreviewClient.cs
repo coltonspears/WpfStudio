@@ -109,10 +109,20 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
             try
             {
                 if (render is not null) await PrepareRenderAsync(deadline.Token, lifetime.Token).ConfigureAwait(false);
-                string? assemblyStamp = render is null ? null : await Task.Run(() => PreviewDependencyCatalog.Read(render).Fingerprint(), deadline.Token).ConfigureAwait(false);
-                // An explicitly chosen host serves everything it is asked to.
-                var runtime = render is null || hostPath is not null ? PreviewRuntime.DotNet
-                    : await Task.Run(() => PreviewHostSelection.Select(render.AssemblyPath), deadline.Token).ConfigureAwait(false);
+                string? assemblyStamp; PreviewRuntime runtime;
+                try
+                {
+                    assemblyStamp = render is null ? null : await Task.Run(() => PreviewDependencyCatalog.Read(render).Fingerprint(), deadline.Token).ConfigureAwait(false);
+                    // An explicitly chosen host serves everything it is asked to.
+                    runtime = render is null || hostPath is not null ? PreviewRuntime.DotNet
+                        : await Task.Run(() => PreviewHostSelection.Select(render.AssemblyPath), deadline.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested && !_shutdown.IsCancellationRequested && !epoch.IsCancellationRequested)
+                {
+                    // Superseded while reading the build output (live preview typing), before anything was sent:
+                    // the host is untouched and healthy, so the newer render must find it running instead of cold-starting one.
+                    throw new SupersededRequestException(token);
+                }
                 if (render != null && (_proxy == null || ProcessId == null || runtime != _runtime || render.Mode == PreviewMode.Compiled || render.Scenario is not null || _scenarioActive ||
                     !string.Equals(_assembly, render.AssemblyPath, StringComparison.OrdinalIgnoreCase) ||
                     _assemblyStamp != assemblyStamp ||

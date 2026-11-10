@@ -91,9 +91,12 @@ public static partial class ProjectDiscovery
     /// first line that opens with a brace; a brace inside a notice does not count. Throws <see cref="JsonException"/> if no line does.</summary>
     public static JsonDocument ParseJsonOutput(string standardOutput)
     {
-        var start = JsonLineRegex().Match(standardOutput);
-        return JsonDocument.Parse(start.Success ? standardOutput[start.Index..] : "");
+        var start = JsonOutputStart(standardOutput);
+        return JsonDocument.Parse(start >= 0 ? standardOutput[start..] : "");
     }
+
+    /// <summary>Where a command's JSON starts in its standard output by the rule of <see cref="ParseJsonOutput"/>, or -1.</summary>
+    public static int JsonOutputStart(string standardOutput) => JsonLineRegex().Match(standardOutput) is { Success: true } start ? start.Index : -1;
 
     [GeneratedRegex(@"^\s*\{", RegexOptions.Multiline)]
     private static partial Regex JsonLineRegex();

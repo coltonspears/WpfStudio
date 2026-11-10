@@ -87,6 +87,24 @@ public class ScaffoldingTests
     }
 
     [Theory]
+    [InlineData("\r\n")]
+    [InlineData("\n")]
+    public void AProjectEditKeepsTheXmlDeclarationAndTheFilesLineEndings(string newLine)
+    {
+        var directory = NewDirectory();
+        var project = Path.Combine(directory, "Legacy.csproj");
+        var text = string.Join(newLine, "<?xml version=\"1.0\" encoding=\"utf-8\"?>", "<Project Sdk=\"Microsoft.NET.Sdk\">", "  <PropertyGroup>", "    <Description>a &amp; b</Description>", "  </PropertyGroup>", "</Project>", "");
+
+        var after = ProjectFileEditor.SetBuildAction(project, text, Path.Combine(directory, "icon.png"), "Resource").After;
+
+        Assert.StartsWith("<?xml version=\"1.0\" encoding=\"utf-8\"?>" + newLine + "<Project Sdk=\"Microsoft.NET.Sdk\">" + newLine + "  <PropertyGroup>" + newLine + "    <Description>a &amp; b</Description>" + newLine, after, StringComparison.Ordinal);
+        Assert.EndsWith("</Project>" + newLine, after, StringComparison.Ordinal);
+        Assert.Equal(newLine == "\n", !after.Contains('\r'));
+        Assert.DoesNotContain("\r\r", after, StringComparison.Ordinal);
+        Assert.Single(XDocument.Parse(after).Descendants("Resource"), item => (string?)item.Attribute("Include") == "icon.png");
+    }
+
+    [Theory]
     [InlineData("class")]
     [InlineData("Bad Name")]
     public async Task InvalidCSharpNamesAreRejected(string name)

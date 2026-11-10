@@ -56,10 +56,13 @@ public sealed partial class WorkspaceEngine
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         budget.CancelAfter(CodeLensBudget);
         int counted = 0;
+        // Whether every declaration this pass set out to count was counted. The result can still be incomplete for other reasons,
+        // such as a multi-targeted project or more declarations than are counted at all.
+        bool countedAll = true;
         foreach (var (symbol, _) in declarations.Take(CodeLensDeclarations))
         {
             if (IsCounted(symbol, counts, changedNames)) continue;
-            if (budget.IsCancellationRequested) { complete = false; break; }
+            if (budget.IsCancellationRequested) { complete = false; countedAll = false; break; }
             try
             {
                 int references = 0, xamlReferences = 0;
@@ -77,7 +80,7 @@ public sealed partial class WorkspaceEngine
                 counts[CountKey(symbol)] = new(references, xamlReferences, xamlName);
                 counted++;
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { complete = false; break; }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { complete = false; countedAll = false; break; }
         }
         EnsureSymbolSnapshotCurrent(snapshot);
         var status = complete ? null : "Some counts are missing: " + string.Join(" ", BoundedWarnings(snapshot.Warnings).DefaultIfEmpty("the analysis budget was reached."));
@@ -86,8 +89,9 @@ public sealed partial class WorkspaceEngine
             if (_codeLensCounts.IsCurrent(path, known))
             {
                 foreach (var (key, count) in counts) known.Counts[key] = count;
-                // Names touched while this counted may have been missed, so they stay for next time.
-                if (known.Edits == edits && complete) known.ChangedNames.Clear();
+                // Names touched while this counted may have been missed, so they stay for next time. Cleared once they have been counted,
+                // even when the result is incomplete for another reason: kept, they would have every later pause count them again.
+                if (known.Edits == edits && countedAll) known.ChangedNames.Clear();
                 known.Complete = complete;
                 known.Status = status;
             }

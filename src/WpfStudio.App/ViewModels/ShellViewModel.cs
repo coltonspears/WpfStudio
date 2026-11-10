@@ -189,8 +189,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var restoring = requested == null && settings.WorkspacePath != null && File.Exists(settings.WorkspacePath);
         // Read the previous session's files while the language worker loads; tabs still open in their saved order afterwards.
         var prefetched = restoring ? settings.OpenDocuments.Where(File.Exists).Select(PrefetchDocumentAsync).ToArray() : [];
-        if (requested != null) await LoadWorkspaceAsync(requested);
-        else if (restoring) await LoadWorkspaceAsync(settings.WorkspacePath!);
+        // Guarded: a workspace that cannot load, for example for a missing SDK, must not skip the recovery prompt, the saved layout and the recovery loop below.
+        if (requested != null) await GuardAsync(() => LoadWorkspaceAsync(requested));
+        else if (restoring) await GuardAsync(() => LoadWorkspaceAsync(settings.WorkspacePath!));
         if (Workspace != null && requested == null)
         {
             StartupProject = Projects.FirstOrDefault(p => p.ProjectPath == settings.StartupProject) ?? StartupProject;
@@ -217,15 +218,33 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private async Task RecoveryLoopAsync(CancellationToken token)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
-        try { while (await timer.WaitForNextTickAsync(token)) await _store.WriteRecoveryAsync(token); }
+        // A failed tick must not end the loop: one locked record or a full disk would otherwise leave every later edit without a recovery copy.
+        // The failure is reported once, and again only after a tick has succeeded in between.
+        var failing = false;
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                try { await _store.WriteRecoveryAsync(token); failing = false; }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    if (failing) continue;
+                    failing = true;
+                    _logger.LogError(ex, "Recovery persistence failed");
+                    _dispatcher.Post(() => AppendOutput("Recovery: " + ex.Message));
+                }
+            }
+        }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { _logger.LogError(ex, "Recovery persistence failed"); _dispatcher.Post(() => AppendOutput("Recovery: " + ex.Message)); }
     }
     [RelayCommand] private Task OpenWorkspaceAsync() => GuardAsync(async () => { var path = await _files.OpenFileAsync("Open solution or project", "Solutions and projects|*.sln;*.slnx;*.csproj"); if (path != null) await LoadWorkspaceAsync(path); });
     [RelayCommand] private Task OpenRecentAsync(string? path) => path == null ? Task.CompletedTask : GuardAsync(() => LoadWorkspaceAsync(path));
     [RelayCommand] private Task OpenFileAsync() => GuardAsync(async () => { var path = await _files.OpenFileAsync("Open file", "Source files|*.cs;*.xaml;*.sql;*.json;*.xml;*.props;*.targets;*.csproj;*.md;*.txt|All files|*.*"); if (path != null) await OpenDocumentAsync(path); });
     public async Task LoadWorkspaceAsync(string path)
     {
+        // The language worker starts in the solution's folder and resolves the path again there, so a relative command-line argument
+        // would name a different file in the worker, and would be saved as a relative recent entry.
+        path = Path.GetFullPath(path);
         if (IsBusy) { Status = "Wait for the current workspace operation to finish"; return; }
         if (IsPreviewOpen) { Status = "Finish or cancel the change preview before switching workspaces"; return; }
         if (!await CloseAllDocumentsForWorkspaceAsync()) return;
@@ -235,6 +254,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (_operations.TryEnter() is not { } lease) { Status = "Wait for the current workspace operation to finish"; return; }
         _loading = true;
         var token = lease.Token;
+        var loaded = false;
         try
         {
             Status = "Loading " + Path.GetFileName(path) + "…";
@@ -250,7 +270,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             catch (IOException ex) { _allFiles = []; AppendOutput("File listing: " + ex.Message); }
             Explorer.ShowFiles(directory, _allFiles);
             Status = "Loading language services for " + Path.GetFileName(path) + "…";
-            Workspace = await loading;
+            Workspace = await loading; loaded = true;
             RefreshConfigurations();
             Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
             StartupProject = Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
@@ -266,6 +286,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             TaskList.RefreshCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
             ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
             await SaveSettingsAsync();
+        }
+        catch when (!loaded)
+        {
+            // The previous workspace's tabs are closed and its worker is stopped by now, so it must not stay the target of Build, Run and the title.
+            Projects.Clear(); StartupProject = null; Workspace = null;
+            throw;
         }
         finally { _loading = false; lease.Dispose(); XamlAnalysis.Request(); if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); CheckRuntimes(path); }
         if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
@@ -671,7 +697,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var path in await _edits.UndoAsync())
         {
             var document = Documents.FirstOrDefault(d => d.State.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
-            if (document != null) { document.Dispose(); Documents.Remove(document); }
+            // The same bookkeeping as closing the tab: otherwise the designer stays on a file that no longer exists and XAML analysis keeps its text as an overlay.
+            if (document != null)
+            {
+                if (Designer.SourcePath == document.State.Path) await Designer.CloseAsync();
+                document.Dispose(); Documents.Remove(document); XamlAnalysis.UntrackDocument(document.State);
+            }
             await _workspace.CloseDocumentAsync(path);
         }
         if (ActiveDocument != null && !Documents.Contains(ActiveDocument)) ActiveDocument = Documents.LastOrDefault();
@@ -822,21 +853,28 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var source = await _files.OpenFileAsync("Import resource asset", "Assets|*.png;*.jpg;*.jpeg;*.ico;*.svg;*.ttf;*.otf|All files|*.*"); if (source == null) return;
         var destination = Path.Combine(Path.GetDirectoryName(targetProject.ProjectPath)!, "Assets", Path.GetFileName(source));
         if (File.Exists(destination)) throw new IOException("An asset with that name already exists.");
-        var project = await _store.OpenAsync(targetProject.ProjectPath);
-        var change = ProjectFileEditor.SetBuildAction(project.Path, project.Content, destination, "Resource");
-        if (!await PreviewAsync("Import asset", [change], $"Copy {source} to {destination}")) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.Copy(source, destination, false);
-        try { await ApplyChangesAsync([change]); }
-        catch { File.Delete(destination); throw; }
-        Status = ProjectFileEditor.PackUri(project.Path, destination, targetProject.AssemblyName);
+        // A review that is declined must not leave the project file behind as a hidden buffer that no later change on disk refreshes.
+        await _verifiedEdits.ReleasingOpenedTargetsAsync([targetProject.ProjectPath], async () =>
+        {
+            var project = await _store.OpenAsync(targetProject.ProjectPath);
+            var change = ProjectFileEditor.SetBuildAction(project.Path, project.Content, destination, "Resource");
+            if (!await PreviewAsync("Import asset", [change], $"Copy {source} to {destination}")) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.Copy(source, destination, false);
+            try { await ApplyChangesAsync([change]); }
+            catch { File.Delete(destination); throw; }
+            Status = ProjectFileEditor.PackUri(project.Path, destination, targetProject.AssemblyName);
+        });
     });
     [RelayCommand] private Task SetBuildActionAsync() => GuardAsync(async () =>
     {
         var path = WpfExplorer.SelectedItem?.Path ?? Explorer.SelectedNode?.Path; if (path == null) return;
         var owner = ResolveAssetOwner(path);
-        var project = await _store.OpenAsync(owner.ProjectPath);
-        var change = ProjectFileEditor.SetBuildAction(project.Path, project.Content, path, SelectedBuildAction);
-        if (await PreviewAsync("Change build action", [change], "")) await ApplyChangesAsync([change]);
+        await _verifiedEdits.ReleasingOpenedTargetsAsync([owner.ProjectPath], async () =>
+        {
+            var project = await _store.OpenAsync(owner.ProjectPath);
+            var change = ProjectFileEditor.SetBuildAction(project.Path, project.Content, path, SelectedBuildAction);
+            if (await PreviewAsync("Change build action", [change], "")) await ApplyChangesAsync([change]);
+        });
     });
     private WorkspaceProject ResolveAssetOwner(string path)
     {
@@ -856,10 +894,16 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Prepares, reviews and applies a worker edit result: the shared tail of the edit commands that need no further verification.</summary>
     private async Task<bool> ReviewAndApplyAsync(string title, WorkspaceEditResult result)
     {
-        var changes = await _edits.PrepareAsync(result);
-        if (!await PreviewAsync(title, changes, string.Join(Environment.NewLine, result.Warnings))) return false;
-        await ApplyChangesAsync(changes);
-        return true;
+        var applied = false;
+        // Preparing opens every target file; the ones nobody kept are closed again when the review is declined or preparing fails part-way.
+        await _verifiedEdits.ReleasingOpenedTargetsAsync(result.Documents.Select(edit => edit.Path), async () =>
+        {
+            var changes = await _edits.PrepareAsync(result);
+            if (!await PreviewAsync(title, changes, string.Join(Environment.NewLine, result.Warnings))) return;
+            await ApplyChangesAsync(changes);
+            applied = true;
+        });
+        return applied;
     }
     [RelayCommand] private void QuickOpen() => Palette.OpenFiles();
     [RelayCommand] private void CommandPalette() => Palette.OpenCommands();

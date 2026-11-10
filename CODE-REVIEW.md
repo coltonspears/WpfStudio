@@ -75,7 +75,7 @@ Work landed in PRs coltonspears/WpfStudio#13 through #25 and is tracked here aga
 
 ### Pending
 
-Nothing. These known gaps were found along the way and left on purpose:
+Nothing from the first review. A second pass for performance and bugs on 2026-11-10 found more; what it fixed and what it left open is in [Second pass](#second-pass-performance-and-bugs-2026-11-10) at the end. These known gaps were found along the way in the first review and left on purpose:
 
 - **Language worker:** overlapping publishes can leave `_solution` belonging to a disposed workspace, and a publish finishing after `Dispose` leaks its workspace. The client's `_lifecycle` normally serializes publishes, and the worker exits after `Dispose`.
 - **Debugger:** a `breakpoint` event sent just before a `setBreakpoints` answer also waits for it, so it is applied after the answer even though it is older; telling them apart needs wire order from the transport. A command that races a termination still shows its request error. A renderer crash after the terminal has started still ends the session.
@@ -479,3 +479,67 @@ B75, the cause of the `SavingAndClosingAFixedXamlFile` failures:
 - `CloseDocumentAsync` now marks the file's index issues stale before exposing them. `RefreshWpfAsync` scans up to three times, 50 ms apart, instead of giving up. If all three go out of date, the index stays behind until the next refresh, but the old error stays hidden.
 - The test now runs on a real dispatcher thread (`ShellTestContext.OnUiThreadAsync`). `AnOldIndexErrorStaysHiddenWhenTheWatcherHasNotReportedTheSaveYet` reproduces the bug on every run without depending on timing, and `AWatchedFileChangeRewritesTheIssueListsOnlyOnTheUiThread` fails if a watched change rewrites the issue lists off the UI thread. Breaking each part of the fix failed the matching test 3 times of 3.
 - Most Shell tests still use `InlineDispatcher`, so they cannot see ordering bugs of this kind.
+
+---
+
+## Second pass: performance and bugs (2026-11-10)
+
+Scope: every project under `src/`, read again for concrete bugs and performance problems only. Each item below was traced through its callers before it was changed.
+
+How it was checked: this pass ran on Linux, where only the Core, Workspace, Code Assist and Profiling suites run. Core (416 passing) and Workspace (695 passing, with the Windows Desktop reference pack linked into the SDK) fail exactly the tests they fail on an untouched checkout, all of them tests that need Windows. Everything else, the app, the runtime, the preview hosts, the inspection agent and the database pane, was built with warnings as errors for every target, and the Shell, Runtime, Database and NativeView test projects compile against it, but **those suites and the app itself were not run**. Run them on Windows before relying on the items marked "built only".
+
+### Fixed
+
+| Area | What | Checked by |
+|------|------|-----------|
+| Documents | A recovery record is rewritten only when its document changed (it was re-serialized and replaced every 3 s), and one record that cannot be written no longer leaves the others unwritten | Core test |
+| Documents | Tidying on save added a second line break after a last line of only whitespace | Core test |
+| Tasks | A file-level option that cannot be read failed the reload of every tasks file; it is now a problem of that file | Core test |
+| Project files | Edits dropped the XML declaration and rewrote every line ending in the operating system's style | Core test |
+| WPF index | Resource lookup searched every declaration of the workspace at every dictionary it visited, and each attribute's offset was found by scanning from the start of the file | Core tests |
+| Change margin | The word-level comparison of every modified line was computed and thrown away | Core tests |
+| Profiler engine | A dominator page built a row for every child to return the first few hundred; the top-level list was rebuilt per request; a path search did not stop inside a hub's referrers; the sparse-array insight reported full arrays as empty on a capture that stopped at a limit | Profiling tests |
+| Language worker | Closing a tab with the text it was saved with recompiled its project and rebuilt the page projection of every project | Workspace tests |
+| Language worker | Replaying buffers after a refresh computed each buffer's diagnostics for nobody, under the lifecycle lock | Workspace tests |
+| Language worker | CodeLens recounted changed names on every pause when the result was incomplete for another reason (a multi-targeted project, more than 300 declarations) | Workspace tests |
+| Language worker | A cancelled write could leave a truncated generated source at a content-addressed path for good; preview reference JSON was found by the first brace; the batch cache evicted the entry it had just added | Workspace tests |
+| XAML | `clr-namespace:System;assembly=mscorlib` resolved no types on .NET, which also switched off ElementName support for the page | Workspace test, fails without the fix |
+| XAML | A completion list cut at 250 entries never said so, so `<` could not offer a type further down the alphabet | Workspace test, fails without the fix |
+| XAML | A `CollectionViewSource` binding source was bound as the object itself; symbol edits were applied in quadratic time; two lookups ran the costly ignored test first | Workspace tests |
+| Shell | A workspace that failed to load at startup skipped the recovery prompt, the saved layout and the recovery loop; the recovery loop ended for the session after one failed tick | Built only |
+| Shell | A failed or cancelled load left the previous workspace as the target of Build and Run; a relative command-line path named a different file in the worker | Built only |
+| Shell | Declining an asset or refactoring review left the files it opened as hidden buffers nothing refreshed; undo of a workspace edit skipped the tab-close bookkeeping; one unreadable file ended the whole check for outside changes | Built only |
+| Problems | Each editor result rebuilt the whole Problems list once per diagnostic, and a task's output once per parsed line; the lists now change with one notification | Built only |
+| Debugger | A session whose adapter crashed or sent an unreadable frame was never torn down, so every later launch was refused; every event, including each line of output, queued an operation on the UI thread | Built only |
+| Preview | A render superseded while the build output was read killed the healthy host; the .NET Framework host kept two remoting objects, and the response text, alive per call; one parse scanned from the start of the text per element | Built only |
+| Inspection | A frozen Freezable used as content failed the whole window's tree | Built only |
+| Editor | Every document change copied every semantic span of the file (one change per line of a batch edit); bracket boxes stayed put after an edit that did not move the caret; a removed fold stayed hovered with unclamped offsets | Span logic by Core test, the rest built only |
+| Diff | A press on a scroll bar level with a collapsed row expanded the row and swallowed the press | Built only |
+| Git | A refresh that found the committed text unchanged repeated the file's diff and blame | Built only |
+| Designer | Closing the previewed tab left Live preview off | Built only |
+| Profiler UI | Overview growth counted only the types the Types view's filter showed; the timeline threw on a very narrow plot; Go to address rejected padded addresses | Built only |
+| Database | Each text cell allocated a 131 KB buffer; dates lost their fractions of a second and were shown month-first; the completion feed was quadratic | Built only |
+| Assistant | A stalled streaming response never timed out | Built only |
+
+### Open
+
+Found and traced, but left: each needs a design choice, a larger change, or a run on Windows that this pass could not make.
+
+| Area | Finding |
+|------|---------|
+| Documents | A file without a byte order mark that is not valid UTF-8 (Windows-1252, GBK) is decoded with replacement characters and silently rewritten as UTF-8 on save. `DocumentStore.OpenAsync` should detect invalid UTF-8 and either keep an ANSI encoding or open read-only. The SQL script editor has the same loss, and also drops a UTF-16 byte order mark (`QueryDocumentsViewModel`). The language worker treats such a C# file as unavailable, which withholds XAML analysis for its project and dependents |
+| XAML | `DataGrid` and `GridView` column bindings are checked against the inherited DataContext instead of the row item: false XAMLBIND001, wrong completion, and rename can rewrite the wrong binding (`XamlBindingSources.DetermineContext`) |
+| XAML | An unterminated attribute value swallows markup up to the next quote, and accepting a completion then deletes it (`XamlSyntax.cs`); end the value at `<` |
+| XAML | Every XAML buffer sync rebuilds the page projection of all pages of all projects; needs an incremental path for edits that change no field or base type |
+| XAML | The event service resolves the whole document on every completion, hover and F12; type resolution is not memoized (about 40 metadata probes per lookup); schema completion builds documentation for every candidate before filtering; resource lookups have no per-container index and can exhaust the 65,536 work budget |
+| Language worker | "Generated" is decided by an `/obj/` substring anywhere in the path, so a workspace under `D:\obj\` or a source folder named `Obj` loses language services; each C# sync parses the file three times; F12 on any field is quadratic in the project's pages; the generated-source folder under `%TEMP%` is never pruned; a worker whose IDE dies before connecting waits for ever |
+| Problems | With several XAML tabs open, each keystroke still rebuilds the shell's diagnostics list once per tab; coalescing the rebuild needs the Shell tests to confirm the ordering they rely on |
+| Git | Each refresh still runs seven Git processes per open file on every save and window activation; resolve the repository, HEAD and upstream once per pass. Local branches containing `/` are drawn as remote refs (`--decorate=full` fixes it). A bare `\r` is a line break for the editor but not for the diff, margin or blame |
+| Diff | Split view cannot scroll horizontally past the narrower side's content; the gutter and background allocate text, typefaces and brushes per line per frame |
+| Inspection | The live tree is cleared and rebuilt on every 2 s refresh, so collapsed nodes reopen |
+| Preview | Every snapshot probes every dependency property of every node for bindings with no budget; the dependency catalog and `project.assets.json` are re-read before every render; `XamlSchemaContext` is created per lookup |
+| Profiler UI | Opening a type the "My code" switch or the 5,000-row limit hides does nothing; the first-view load can replace the object the user just opened; clicks during a capture load are dropped; the graph surface redraws every node on each pan or hover frame, and its dot grid stops partway across a large surface; dragging a node misroutes back-edges; the process sampler runs on the UI thread and keeps polling after the process exits |
+| Profiler engine | `Neighbors` sorts every neighbour of a hub to return 64 |
+| Shell | Quick Open rescores every workspace file on each keystroke (a binding delay would make Enter act on a stale list, so cache the names instead); the source watcher allocates per root on each event and is built on the UI thread |
+| Build | `Directory.Build.props` recognizes test fixtures by `\Fixtures\`, so on Linux the fixtures get the product's analyzers and the solution does not build as a whole |
+

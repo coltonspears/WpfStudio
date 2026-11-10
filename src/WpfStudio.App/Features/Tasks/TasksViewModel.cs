@@ -44,6 +44,10 @@ public sealed partial class TasksViewModel : ObservableObject, IDisposable
     private readonly List<TaskItemViewModel> _all = [];
     private int _reloads;
     private bool _disposed;
+    // Rows the terminal's reader thread has posted and the UI thread has not added yet; the other two belong to the UI thread.
+    private int _queuedDiagnostics;
+    private bool _diagnosticsChanged;
+    private long _diagnosticsReported;
 
     public TasksViewModel(ITaskHost host, TerminalViewModel terminal, IUiDispatcher dispatcher, IMessenger messenger)
     {
@@ -226,8 +230,19 @@ public sealed partial class TasksViewModel : ObservableObject, IDisposable
             var directory = launch.WorkingDirectory;
             var lines = new TaskOutputLines(line =>
             {
-                if (BuildService.ParseDiagnostic(line, directory) is { } diagnostic)
-                    _dispatcher.Post(() => { if (!_disposed && item.AddDiagnostic(diagnostic)) _host.TaskDiagnosticsChanged(); });
+                if (BuildService.ParseDiagnostic(line, directory) is not { } diagnostic) return;
+                Interlocked.Increment(ref _queuedDiagnostics);
+                _dispatcher.Post(() =>
+                {
+                    var last = Interlocked.Decrement(ref _queuedDiagnostics) == 0;
+                    if (_disposed) return;
+                    if (item.AddDiagnostic(diagnostic)) _diagnosticsChanged = true;
+                    // The host rebuilds the whole Problems list when told, so a burst of rows tells it once, with its last row,
+                    // or every 100 ms while output keeps coming, instead of once per row.
+                    if (!_diagnosticsChanged || (!last && Environment.TickCount64 - _diagnosticsReported < 100)) return;
+                    _diagnosticsChanged = false; _diagnosticsReported = Environment.TickCount64;
+                    _host.TaskDiagnosticsChanged();
+                });
             });
             observe = bytes => lines.Write(bytes);
         }

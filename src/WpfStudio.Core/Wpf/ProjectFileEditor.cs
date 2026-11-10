@@ -1,3 +1,5 @@
+using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 using WpfStudio.Core.Documents;
 
@@ -23,7 +25,23 @@ public sealed class ProjectFileEditor
     /// <summary>The RootNamespace the file itself declares, for when MSBuild could not evaluate the project.</summary>
     public string? DeclaredRootNamespace => _project.Descendants().FirstOrDefault(e => e.Name.LocalName == "RootNamespace")?.Value;
 
-    private FileChange Change(string description) => new(_projectPath, _projectText, _project.ToString(), description);
+    private FileChange Change(string description) => new(_projectPath, _projectText, Serialize(_project, _projectText), description);
+
+    /// <summary>
+    /// The edited document as text that differs from <paramref name="original"/> only by the edit. <c>XDocument.ToString()</c>
+    /// alone drops the XML declaration, and writes every line break in the operating system's style whatever the file used.
+    /// </summary>
+    private static string Serialize(XDocument document, string original)
+    {
+        var builder = new StringBuilder(original.Length + 256);
+        using (var writer = XmlWriter.Create(builder, new XmlWriterSettings { OmitXmlDeclaration = true, NewLineHandling = NewLineHandling.None }))
+            document.Save(writer);
+        // Parsing turned every line break into a line feed; the file's own style is put back.
+        if (original.Contains("\r\n", StringComparison.Ordinal)) builder.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        // The declaration is kept as written: a writer into text would declare UTF-16 whatever the file is saved in.
+        var declarationEnd = original.StartsWith("<?xml", StringComparison.Ordinal) ? original.IndexOf("?>", StringComparison.Ordinal) : -1;
+        return declarationEnd < 0 ? builder.ToString() : builder.Insert(0, original.AsSpan(0, declarationEnd + 2)).ToString();
+    }
 
     /// <summary>The edits that make the toolkit available, or none when the project already has it.</summary>
     public async Task<IReadOnlyList<FileChange>> AddToolkitAsync(ScaffoldProjectContext? context, CancellationToken token)
@@ -42,7 +60,7 @@ public sealed class ProjectFileEditor
             {
                 var centralNamespace = central.Root!.Name.Namespace;
                 central.Root.Add(new XElement(centralNamespace + "ItemGroup", new XElement(centralNamespace + "PackageVersion", new XAttribute("Include", ToolkitPackage), new XAttribute("Version", ToolkitVersion))));
-                changes.Add(new(centralPath, centralText, central.ToString(), $"Add {ToolkitPackage} central package version"));
+                changes.Add(new(centralPath, centralText, Serialize(central, centralText), $"Add {ToolkitPackage} central package version"));
             }
         }
         else package.Add(new XAttribute("Version", ToolkitVersion));
@@ -127,6 +145,6 @@ public sealed class ProjectFileEditor
         group.Add(new XElement(ns + buildAction, new XAttribute("Include", relative)));
         group.Add(metadataUpdates);
         project.Root.Add(group);
-        return new(projectPath, projectText, project.ToString(), $"Set {relative} build action to {buildAction}");
+        return new(projectPath, projectText, Serialize(project, projectText), $"Set {relative} build action to {buildAction}");
     }
 }

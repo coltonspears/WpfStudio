@@ -115,10 +115,21 @@ internal sealed class EngineBridge(string? shadowDirectory, string? shadowToken,
         var completion = new EngineCompletion();
         // The first call copies the project's output and creates its domain. That must not stop this connection from reading its next message.
         var server = await Task.Run(() => Server(method, argument), cancellationToken).ConfigureAwait(false);
-        var cancellation = server.Invoke(method, argument?.ToString(Formatting.None), completion);
-        using (cancellationToken.Register(cancellation.Cancel))
-            // Raw, because the engine has already produced exactly the text this call must answer with.
-            return new JRaw(await completion.Task.ConfigureAwait(false));
+        try
+        {
+            var cancellation = server.Invoke(method, argument?.ToString(Formatting.None), completion);
+            using (cancellationToken.Register(() =>
+            {
+                // The engine disconnects the cancellation when its call ends, which can be just before this registration is removed.
+                try { cancellation.Cancel(); }
+                catch (System.Runtime.Remoting.RemotingException) { }
+            }))
+                // Raw, because the engine has already produced exactly the text this call must answer with.
+                return new JRaw(await completion.Task.ConfigureAwait(false));
+        }
+        // The completion has no lease, so remoting keeps it, and with it the whole response text, until it is disconnected.
+        // The engine has finished with it by now: the task above completes only through the engine's last call on it.
+        finally { System.Runtime.Remoting.RemotingServices.Disconnect(completion); }
     }
 
     private FrameworkEngineServer Server(string method, JToken? argument)

@@ -15,6 +15,9 @@ public sealed class DocumentStore
     private readonly ConcurrentDictionary<string, DocumentState> _documents = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private readonly SemaphoreSlim _recoveryGate = new(1, 1);
+    // Guarded by _recoveryGate: the version of each document whose recovery record is on disk, so the periodic writer
+    // does not serialize and replace the record of a dirty document that has not changed since the last tick.
+    private readonly Dictionary<string, (DocumentState Document, long Version)> _recoveryWritten = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _recoveryDirectory;
     public DocumentStore(string dataDirectory)
     {
@@ -78,11 +81,7 @@ public sealed class DocumentStore
             try
             {
                 if (!document.IsDirty) DeleteRecoveryCore(document.Path);
-                else
-                {
-                    var recovery = new RecoveryDocument(document.Path, document.Content, DateTimeOffset.UtcNow);
-                    await AtomicFile.WriteAsync(RecoveryPath(document.Path), JsonSerializer.SerializeToUtf8Bytes(recovery), cancellationToken).ConfigureAwait(false);
-                }
+                else await WriteRecoveryCoreAsync(document, cancellationToken).ConfigureAwait(false);
             }
             finally { _recoveryGate.Release(); }
         }
@@ -123,15 +122,33 @@ public sealed class DocumentStore
         try
         {
         Directory.CreateDirectory(_recoveryDirectory);
+        // One record that cannot be written, for example while a scanner holds it, must not leave the other documents without theirs.
+        Exception? failure = null;
         foreach (var doc in Documents)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!doc.IsDirty) { DeleteRecoveryCore(doc.Path); continue; }
-            var recovery = new RecoveryDocument(doc.Path, doc.Content, DateTimeOffset.UtcNow);
-            await AtomicFile.WriteAsync(RecoveryPath(doc.Path), JsonSerializer.SerializeToUtf8Bytes(recovery), cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (!doc.IsDirty) DeleteRecoveryCore(doc.Path);
+                else await WriteRecoveryCoreAsync(doc, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failure ??= ex; }
         }
+        foreach (var closed in _recoveryWritten.Keys.Where(path => !_documents.ContainsKey(path)).ToArray()) _recoveryWritten.Remove(closed);
+        if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
         }
         finally { _recoveryGate.Release(); }
+    }
+    // Called with _recoveryGate held.
+    private async Task WriteRecoveryCoreAsync(DocumentState document, CancellationToken cancellationToken)
+    {
+        // The version is read before the text: an edit between the two is then written again on the next tick instead of being skipped.
+        var version = document.Version;
+        var file = RecoveryPath(document.Path);
+        if (_recoveryWritten.TryGetValue(document.Path, out var written) && ReferenceEquals(written.Document, document) && written.Version == version && File.Exists(file)) return;
+        var recovery = new RecoveryDocument(document.Path, document.Content, DateTimeOffset.UtcNow);
+        await AtomicFile.WriteAsync(file, JsonSerializer.SerializeToUtf8Bytes(recovery), cancellationToken).ConfigureAwait(false);
+        _recoveryWritten[document.Path] = (document, version);
     }
     public async Task<IReadOnlyList<RecoveryDocument>> ReadRecoveryAsync(CancellationToken cancellationToken = default)
     {
@@ -159,7 +176,7 @@ public sealed class DocumentStore
         try { DeleteRecoveryCore(path); }
         finally { _recoveryGate.Release(); }
     }
-    private void DeleteRecoveryCore(string path) { var file = RecoveryPath(path); if (File.Exists(file)) File.Delete(file); }
+    private void DeleteRecoveryCore(string path) { _recoveryWritten.Remove(path); var file = RecoveryPath(path); if (File.Exists(file)) File.Delete(file); }
     private string RecoveryPath(string path) => System.IO.Path.Combine(_recoveryDirectory, Hash(Encoding.UTF8.GetBytes(path.ToUpperInvariant())) + ".json");
     public static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
 }

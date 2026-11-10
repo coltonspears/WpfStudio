@@ -61,7 +61,8 @@ public sealed partial class TextDiff
     public bool IsExact { get; }
     public bool IsIdentical => _blocks.Length == 0;
 
-    public static TextDiff Compute(string? before, string? after, int maxEditDistance = 3000, CancellationToken cancellationToken = default)
+    /// <param name="wordSpans">False leaves the changed ranges within modified lines out, for callers that only need which lines changed.</param>
+    public static TextDiff Compute(string? before, string? after, int maxEditDistance = 3000, CancellationToken cancellationToken = default, bool wordSpans = true)
     {
         var oldLines = SplitLines(before);
         var newLines = SplitLines(after);
@@ -80,7 +81,7 @@ public sealed partial class TextDiff
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var (oldText, newText) = (oldLines[deleted[i]], newLines[inserted[i]]);
-                var (oldSpans, newSpans) = WordSpans(oldText, newText);
+                var (oldSpans, newSpans) = wordSpans ? WordSpans(oldText, newText) : ([], []);
                 rows.Add(new(DiffRowKind.Modified, deleted[i] + 1, inserted[i] + 1, oldText, newText, oldSpans, newSpans));
             }
             for (int i = paired; i < deleted.Count; i++)

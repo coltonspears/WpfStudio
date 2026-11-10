@@ -489,9 +489,10 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         catch (OperationCanceledException) { }
         catch (Exception exception) { Status = exception.Message; }
     }
-    [RelayCommand] private async Task StopAsync()
+    // Stopping by hand also turns Live off, so that the next edit does not start the preview again.
+    [RelayCommand] private Task StopAsync() { AutoRefresh = false; return StopCoreAsync(); }
+    private async Task StopCoreAsync()
     {
-        AutoRefresh = false;
         Invalidate(); IsBusy = false;
         ClearCanvas();
         try { await _client.StopAsync(_lifetime.Token); Status = "Preview stopped. Refresh to resume."; }
@@ -504,7 +505,8 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         _document = null; OnPropertyChanged(nameof(SourcePath));
         Scenarios.Reset();
         DocumentName = "Open a XAML document and choose Preview";
-        await StopAsync();
+        // Not the Stop command: closing the previewed tab must not leave Live off for the next document that is previewed.
+        await StopCoreAsync();
     }
     /// <summary>For a request nobody awaits. Safe on any thread.</summary>
     private void ReportFault(Exception fault) => _dispatcher.Post(() => { if (!_disposed) Status = fault.Message; });

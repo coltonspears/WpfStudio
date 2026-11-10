@@ -12,32 +12,27 @@ namespace WpfStudio.App.Controls.Editor;
 /// <summary>Semantic colours from Roslyn layered over syntax highlighting: types, members, parameters.</summary>
 internal sealed class SemanticColorizer : DocumentColorizingTransformer
 {
-    private List<SemanticSpan> _spans = [];
-    public void Set(IReadOnlyList<SemanticSpan> spans) => _spans = [.. spans.OrderBy(span => span.Start)];
-    public void Clear() => _spans = [];
-    public void Shift(int offset, int removed, int inserted)
-    {
-        if (_spans.Count == 0) return;
-        var shifted = new List<SemanticSpan>(_spans.Count);
-        foreach (var span in _spans)
-            if (DecorationOffsets.MapRange(span.Start, span.Length, offset, removed, inserted) is { } mapped) shifted.Add(span with { Start = mapped.Start });
-        _spans = shifted;
-    }
+    // Only the spans that are coloured, and in a form an edit can move without allocating: a file has one per identifier,
+    // and every change to the document, one per line of a batch edit, moves them all.
+    private readonly ShiftingRanges<string> _spans = new();
+    public void Set(IReadOnlyList<SemanticSpan> spans) => _spans.Set(spans.Where(span => IsColoured(span.Kind)).Select(span => (span.Start, span.Length, span.Kind)));
+    public void Clear() => _spans.Clear();
+    public void Shift(int offset, int removed, int inserted) => _spans.Shift(offset, removed, inserted);
     protected override void ColorizeLine(DocumentLine line)
     {
         if (_spans.Count == 0) return;
         int lineStart = line.Offset, lineEnd = line.EndOffset;
         // Spans do not overlap, so the first candidate is at most one before the first span starting on the line.
-        int low = 0, high = _spans.Count;
-        while (low < high) { var middle = (low + high) / 2; if (_spans[middle].Start < lineStart) low = middle + 1; else high = middle; }
-        for (var index = Math.Max(0, low - 1); index < _spans.Count && _spans[index].Start < lineEnd; index++)
+        for (var index = Math.Max(0, _spans.FirstStartingAt(lineStart) - 1); index < _spans.Count && _spans[index].Start < lineEnd; index++)
         {
             var span = _spans[index];
             int start = Math.Max(span.Start, lineStart), end = Math.Min(span.Start + span.Length, lineEnd);
-            if (end <= start || BrushFor(span.Kind) is not { } brush) continue;
+            if (end <= start || BrushFor(span.Value) is not { } brush) continue;
             ChangeLinePart(start, end, element => element.TextRunProperties.SetForegroundBrush(brush));
         }
     }
+    private static bool IsColoured(string kind) => kind is "Type" or "Interface" or "Enum" or "TypeParameter" or "Method"
+        or "Property" or "Field" or "Event" or "Constant" or "EnumMember" or "Parameter";
     private static Brush? BrushFor(string kind) => kind switch
     {
         "Type" => Resource("SyntaxType"), "Interface" => Resource("SyntaxInterface"), "Enum" => Resource("SyntaxEnum"),
