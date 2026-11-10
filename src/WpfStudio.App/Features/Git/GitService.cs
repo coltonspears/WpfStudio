@@ -114,31 +114,56 @@ public sealed class GitService
         return GitOperation.None;
     }
 
+    /// <summary>
+    /// What a repository answers the same for every file of it: where it is, the commit HEAD names, and its remote. One pass over the
+    /// open editors shares these, so the questions are put to Git once per repository instead of once per file.
+    /// </summary>
+    public sealed class FileBasePass
+    {
+        internal System.Collections.Concurrent.ConcurrentDictionary<string, Task<string?>> Roots { get; } = new(StringComparer.OrdinalIgnoreCase);
+        internal System.Collections.Concurrent.ConcurrentDictionary<string, Task<(string? Head, GitRemote? Remote)>> Repositories { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>The committed version of a working file for the editor's change margin and blame; null outside a repository.</summary>
-    public async Task<GitFileBase?> GetFileBaseAsync(string filePath, CancellationToken cancellationToken = default)
+    /// <param name="known">The file's previous answer. It is returned again when HEAD still names the commit it was read from, without asking Git for the file.</param>
+    public async Task<GitFileBase?> GetFileBaseAsync(string filePath, CancellationToken cancellationToken = default, FileBasePass? pass = null, GitFileBase? known = null)
     {
         var directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(filePath));
         if (directory is null || !Directory.Exists(directory)) return null;
-        GitResult discovery;
-        try { discovery = await RunAsync(directory, ["rev-parse", "--show-toplevel"], cancellationToken, allowFailure: true, readOnly: true); }
-        catch (Win32Exception) { return null; }
-        if (discovery.ExitCode != 0) return null;
-        var root = System.IO.Path.GetFullPath(discovery.Output.TrimEnd('\r', '\n'));
+        var root = await (pass?.Roots.GetOrAdd(directory, path => FindRootAsync(path, cancellationToken)) ?? FindRootAsync(directory, cancellationToken));
+        if (root is null) return null;
         var relative = System.IO.Path.GetRelativePath(root, System.IO.Path.GetFullPath(filePath)).Replace('\\', '/');
         if (relative.StartsWith("../", StringComparison.Ordinal)) return null;
-        var head = await RunAsync(root, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken, allowFailure: true, readOnly: true);
+        var (head, remote) = await (pass?.Repositories.GetOrAdd(root, path => ReadRepositoryAsync(path, cancellationToken)) ?? ReadRepositoryAsync(root, cancellationToken));
+        // The committed text of a path changes only when HEAD moves to another commit.
+        if (known is not null && known.HeadCommit == head && known.RelativePath == relative && string.Equals(known.Root, root, StringComparison.OrdinalIgnoreCase))
+            return known.Remote == remote ? known : known with { Remote = remote };
         // Committed means present in HEAD. A newly staged file is in the index only, so all its lines are additions.
-        var tracked = head.ExitCode == 0 && (await RunAsync(root, ["cat-file", "-e", $"HEAD:{relative}"], cancellationToken, allowFailure: true, readOnly: true)).ExitCode == 0;
+        var tracked = head is not null && (await RunAsync(root, ["cat-file", "-e", $"HEAD:{relative}"], cancellationToken, allowFailure: true, readOnly: true)).ExitCode == 0;
         string? text = null;
-        if (tracked && head.ExitCode == 0)
+        if (tracked)
         {
             try { text = await ReadBlobAsync(root, $"HEAD:{relative}", cancellationToken); }
             catch (GitOutputLimitException) { text = null; }
             if (IsBinary(text)) text = null;
         }
+        return new(root, relative, text, tracked, head, remote);
+    }
+
+    private static async Task<string?> FindRootAsync(string directory, CancellationToken cancellationToken)
+    {
+        GitResult discovery;
+        try { discovery = await RunAsync(directory, ["rev-parse", "--show-toplevel"], cancellationToken, allowFailure: true, readOnly: true); }
+        catch (Win32Exception) { return null; }
+        return discovery.ExitCode != 0 ? null : System.IO.Path.GetFullPath(discovery.Output.TrimEnd('\r', '\n'));
+    }
+
+    private async Task<(string? Head, GitRemote? Remote)> ReadRepositoryAsync(string root, CancellationToken cancellationToken)
+    {
+        var head = await RunAsync(root, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken, allowFailure: true, readOnly: true);
         var upstream = await RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true, readOnly: true);
         var remote = await GetRemoteAsync(root, upstream.ExitCode == 0 ? upstream.Output.Trim() : null, cancellationToken);
-        return new(root, relative, text, tracked, head.ExitCode == 0 ? head.Output.Trim() : null, remote);
+        return (head.ExitCode == 0 ? head.Output.Trim() : null, remote);
     }
 
     /// <summary>Blame for the editor's current (possibly unsaved) text, so line numbers match the buffer.</summary>

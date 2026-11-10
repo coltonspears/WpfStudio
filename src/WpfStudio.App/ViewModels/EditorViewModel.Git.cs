@@ -29,14 +29,15 @@ public sealed partial class EditorViewModel
     }
 
     /// <summary>Connects the editor to Git and reads the committed text; call again after commits, checkouts and saves.</summary>
-    public async Task RefreshGitAsync(GitService git, CancellationToken token = default)
+    /// <param name="pass">Shared by the editors refreshed together, so each repository is asked about itself once.</param>
+    public async Task RefreshGitAsync(GitService git, CancellationToken token = default, GitService.FileBasePass? pass = null)
     {
         _git = git;
         if (_disposed || IsReadOnly || !System.IO.File.Exists(State.Path)) return;
         var revision = ++_gitBaseRevision;
         try
         {
-            var gitBase = await git.GetFileBaseAsync(State.Path, token);
+            var gitBase = await git.GetFileBaseAsync(State.Path, token, pass, GitBase);
             if (_disposed || revision != _gitBaseRevision) return;
             // Every save, window activation and Git pane action asks again for every open file, mostly with nothing changed.
             // The margin and blame follow from the committed text and the buffer, and the buffer's own edits already refresh them.

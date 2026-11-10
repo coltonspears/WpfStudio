@@ -282,7 +282,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (State.Extension == ".xaml")
         {
             ClearQuickFixes();
-            Diagnostics.Clear();
+            // Clearing an empty list still announces a change, and the shell rebuilds the whole Problems list on each one. Every open XAML
+            // editor comes here on every keystroke in any of them, most with nothing to clear.
+            if (Diagnostics.Count > 0) Diagnostics.Clear();
             LanguageStatus = _xamlContextUnavailable ?? (_workspace.IsConnected ? "" : "XAML binding analysis unavailable: open a workspace");
             if (_xamlContextUnavailable is not null) return Task.CompletedTask;
         }

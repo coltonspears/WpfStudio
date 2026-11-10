@@ -190,10 +190,16 @@ public sealed class MemoryGraphSurface : FrameworkElement
         var spacing = 24 * Zoom; var brush = ChartPalette.Frozen(dot);
         var startX = _pan.X % spacing; var startY = _pan.Y % spacing;
         var radius = Math.Max(0.6, 1.1 * Zoom);
-        var count = 0;
-        for (var x = startX; x < ActualWidth && count < 6000; x += spacing)
-            for (var y = startY; y < ActualHeight && count < 6000; y += spacing, count++)
-                dc.DrawEllipse(brush, null, new Point(x, y), radius, radius);
+        // One tiled rectangle, with a dot at (startX, startY) and every spacing from there. Drawn dot by dot, with a limit on their
+        // number, the grid stopped partway across a large surface, and thousands of ellipses were issued on every pan and hover frame.
+        var dots = new DrawingBrush(new GeometryDrawing(brush, null, new EllipseGeometry(new Point(radius, radius), radius, radius)))
+        {
+            TileMode = TileMode.Tile, Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top,
+            ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(0, 0, spacing, spacing),
+            ViewportUnits = BrushMappingMode.Absolute, Viewport = new Rect(startX - radius, startY - radius, spacing, spacing)
+        };
+        dots.Freeze();
+        dc.DrawRectangle(dots, null, new Rect(0, 0, ActualWidth, ActualHeight));
     }
 
     private void DrawEdges(DrawingContext dc)
@@ -465,9 +471,14 @@ public sealed class MemoryGraphSurface : FrameworkElement
         foreach (var edge in _layout!.Edges)
         {
             if (edge.Route.Count < 2) continue;
-            if (edge.From == node) edge.Route[0] = new Point(node.Center.X, node.Position.Y + node.Size.Height);
-            if (edge.To == node) edge.Route[^1] = new Point(node.Center.X, node.Position.Y);
+            // As the layout routes them: an edge leaves the bottom of the upper node and enters the top of the lower one, whichever way
+            // the reference points, and an edge within one layer arcs from top to top. Assuming every edge runs downwards flipped the
+            // end of a reference that points back up, such as a child's to its parent, to the far side of the card.
+            bool sameLayer = edge.From.Layer == edge.To.Layer, fromIsUpper = edge.From.Layer < edge.To.Layer;
+            if (edge.From == node) edge.Route[0] = new Point(node.Center.X, fromIsUpper ? node.Position.Y + node.Size.Height : node.Position.Y);
+            if (edge.To == node) edge.Route[^1] = new Point(node.Center.X, sameLayer || fromIsUpper ? node.Position.Y : node.Position.Y + node.Size.Height);
         }
+        _layout.UpdateExtent();
     }
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
