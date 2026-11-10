@@ -709,7 +709,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
         return path;
     }
     private static TextEdit ToEdit(TextChange change) => new(change.Span.Start, change.Span.Length, change.NewText ?? "");
-    private static bool IsGenerated(string path) => path.Replace('\\', '/').Contains("/obj/", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase);
+    private static bool IsGenerated(string path) => path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase) || GeneratedPaths.IsIntermediate(path);
     private static void ValidatePosition(int position, int length) { if (position < 0 || position > length) throw new ArgumentOutOfRangeException(nameof(position)); }
     private static string? PlainDocumentation(string? xml)
     {
