@@ -93,7 +93,17 @@
                 MinWidth="130" MaxWidth="240" AutomationProperties.Name="Preview scenario" Margin="1,0"
                 ToolTip="{Binding ScenarioDescription}"/>
       <CheckBox Content="d:" IsChecked="{Binding UseDesignTimeValues}" IsEnabled="{Binding SupportsLivePreview}" Style="{StaticResource ToolbarToggle}" c:Ui.Icon="Braces"
-                AutomationProperties.Name="Use design-time values" ToolTip="Design-time values: apply supported d: values in Source mode. Refresh to apply changes."/>
+                AutomationProperties.Name="Use design-time values" ToolTip="Design-time values: apply d: values, d:DataContext and sample data in Source mode. Refresh to apply changes."/>
+      <!-- What the view is drawn with: the declared or matched view model and how its data was made. -->
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,2,0" Background="Transparent" ToolTip="{Binding DesignDataToolTip}"
+                  ToolTipService.ShowDuration="60000" AutomationProperties.Name="Design data"
+                  Visibility="{Binding HasDesignData, Converter={StaticResource DesignerBoolVisibility}}">
+       <c:Glyph Kind="Database" Width="14" Height="14" Margin="0,0,5,0" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center"/>
+       <TextBlock Text="{Binding DesignDataSummary}" MaxWidth="300" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
+      </StackPanel>
+      <Button Content="Declare" Command="{Binding DeclareDesignDataCommand}" Style="{StaticResource ToolbarButton}" c:Ui.Icon="Braces" VerticalAlignment="Center"
+              Visibility="{Binding CanDeclareDesignData, Converter={StaticResource DesignerBoolVisibility}}" AutomationProperties.Name="Declare design-time DataContext"
+              ToolTip="The view model was matched to this view by name. Declare writes d:DataContext for it into the view, after you review the change, so the editor completes and checks the view's bindings too."/>
      </WrapPanel>
      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top" Margin="8,0,0,0">
       <Button Command="{Binding UpdateSnapshotCommand}" Style="{StaticResource IconButton}" c:Ui.Icon="Camera"
@@ -128,6 +138,9 @@
        <Button Content="Reload scenarios" Command="{Binding Scenarios.ReloadCommand}" Margin="16,2,2,2" c:Ui.Icon="Refresh"/>
        <Button Content="Open configuration" Command="{Binding Scenarios.OpenConfigurationCommand}" Margin="2" c:Ui.Icon="File"/>
       </WrapPanel>
+      <CheckBox Content="Sample data for a view with no DataContext, from the view model matching its name" IsChecked="{Binding InferDesignData}"
+                IsEnabled="{Binding UseDesignTimeValues}" Margin="0,8,0,0" AutomationProperties.Name="Infer sample data"
+                ToolTip="OrdersView or OrdersPage pairs with OrdersViewModel; MainWindow with MainWindowViewModel or MainViewModel. The view model is filled with sample values without running its constructor. A d:DataContext or a scenario always takes its place. Source mode, after Refresh."/>
       <StackPanel Visibility="{Binding UsesApplicationResources, Converter={StaticResource DesignerBoolVisibility}}" Margin="0,8,0,0">
        <WrapPanel>
         <StackPanel Orientation="Horizontal" Visibility="{Binding IsCompiledPreview, Converter={StaticResource DesignerBoolVisibility}}">

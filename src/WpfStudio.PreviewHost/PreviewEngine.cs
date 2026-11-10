@@ -53,61 +53,81 @@ public sealed class PreviewEngine : IPreviewRpc, IDisposable
     public Task<PreviewSnapshot> RenderAsync(PreviewRequest request, CancellationToken cancellationToken) =>
         OnDispatcher(async () =>
         {
-            ClearPreview();
-            _inspector.ForgetAppearanceEvidence();
-            _scene.Version = request.Version;
-            _log.Clear();
-            _assemblies.ForgetUnresolved();
-            _log.ClearTrace();
-            _status = null;
-            _build = null;
-            _scenario = null;
-#if NETFRAMEWORK
-            _log.Add(new($"Preview is running on {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}, {(Environment.Is64BitProcess ? 64 : 32)}-bit, chosen from this project's build.", "Information"));
-#endif
-            try
+            var failure = await TryRenderAsync(request, cancellationToken);
+            // Design-time markup is an aid to the view, not part of it. When a render that ran some fails, the authored
+            // view is still worth showing, so it is rendered again without any. A second failure is the view's own.
+            if (failure is not null && request.UseDesignTimeValues && _loader.UsedDesignMarkup)
             {
-                if (!double.IsFinite(request.Width) || !double.IsFinite(request.Height) || request.Width < 32 || request.Height < 32 || request.Width > 4096 || request.Height > 4096)
-                    throw new ArgumentException("Preview dimensions must be between 32 and 4096 pixels.");
-                _scene.Width = (int)Math.Ceiling(request.Width);
-                _scene.Height = (int)Math.Ceiling(request.Height);
-                if (request.Mode is not (PreviewMode.Source or PreviewMode.Compiled)) throw new InvalidOperationException("Unknown preview mode.");
-                var assembly = _assemblies.Load(request);
-                // The steps below can each take a while. A render a newer one has replaced stops between them, so the newer one starts sooner.
-                cancellationToken.ThrowIfCancellationRequested();
-                _scene.ScenarioActivation = PreviewScenarioActivation.Validate(request, assembly);
-                var loaded = _loader.Load(request, assembly, _scene.ScenarioActivation, cancellationToken);
-                _scene.Root = loaded.Root; _scene.Document = loaded.Document; _build = loaded.Build; _status = loaded.Status;
-                if (request.SizeToRoot) _scene.ApplyRootSize();
-                if (_scene.ScenarioActivation is { } activation)
-                {
-                    activation.ApplyDataContext(loaded.Root);
-                    _scenario = activation.Provenance(request, loaded.Root, _build);
-                    _status = $"Scenario '{_scenario.Configuration.Name}' · build {_scenario.AssemblySha256[..12]}. " +
-                        (_status ?? "Source preview uses the current XAML buffer. ") +
-                        (_scenario.Configuration.DataContextFactory is null ? "" : " Scenario data overrides the root DataContext before layout.");
-                }
-                _scene.Host();
-                cancellationToken.ThrowIfCancellationRequested();
-                await _scene.SettleLayoutAsync(_dispatcher);
-                cancellationToken.ThrowIfCancellationRequested();
-                _native.Initialize();
-                return Snapshot();
+                string reason = failure.GetBaseException().Message;
+                failure = await TryRenderAsync(request with { UseDesignTimeValues = false }, cancellationToken);
+                if (failure is null)
+                    _log.Add(new($"The preview failed with its design-time values applied, so it is shown without them: {reason}", "Warning"));
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            if (failure is not null)
             {
-                ClearPreview();
-                throw;
-            }
-            catch (Exception exception)
-            {
-                _log.Record(exception, sourceCoordinates: exception is XmlException);
+                _log.Record(failure, sourceCoordinates: failure is XmlException);
                 // Name every assembly the loader asked for and could not find, with the places it looked.
                 _log.AddRange(_assemblies.UnresolvedAssemblies().Select(message => new PreviewDiagnostic(message, "Warning")));
-                ClearPreview();
-                return Snapshot();
             }
+            return Snapshot();
         }, cancellationToken);
+
+    /// <summary>Loads, hosts and lays out the requested view. Returns what stopped it, with the preview cleared, or null once the view is ready to capture.</summary>
+    private async Task<Exception?> TryRenderAsync(PreviewRequest request, CancellationToken cancellationToken)
+    {
+        ClearPreview();
+        _loader.BeginRender();
+        _inspector.ForgetAppearanceEvidence();
+        _scene.Version = request.Version;
+        _log.Clear();
+        _assemblies.ForgetUnresolved();
+        _log.ClearTrace();
+        _status = null;
+        _build = null;
+        _scenario = null;
+#if NETFRAMEWORK
+        _log.Add(new($"Preview is running on {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}, {(Environment.Is64BitProcess ? 64 : 32)}-bit, chosen from this project's build.", "Information"));
+#endif
+        try
+        {
+            if (!double.IsFinite(request.Width) || !double.IsFinite(request.Height) || request.Width < 32 || request.Height < 32 || request.Width > 4096 || request.Height > 4096)
+                throw new ArgumentException("Preview dimensions must be between 32 and 4096 pixels.");
+            _scene.Width = (int)Math.Ceiling(request.Width);
+            _scene.Height = (int)Math.Ceiling(request.Height);
+            if (request.Mode is not (PreviewMode.Source or PreviewMode.Compiled)) throw new InvalidOperationException("Unknown preview mode.");
+            var assembly = _assemblies.Load(request);
+            // The steps below can each take a while. A render a newer one has replaced stops between them, so the newer one starts sooner.
+            cancellationToken.ThrowIfCancellationRequested();
+            _scene.ScenarioActivation = PreviewScenarioActivation.Validate(request, assembly);
+            var loaded = _loader.Load(request, assembly, _scene.ScenarioActivation, cancellationToken);
+            _scene.Root = loaded.Root; _scene.Document = loaded.Document; _build = loaded.Build; _status = loaded.Status;
+            if (request.SizeToRoot) _scene.ApplyRootSize();
+            if (_scene.ScenarioActivation is { } activation)
+            {
+                activation.ApplyDataContext(loaded.Root);
+                _scenario = activation.Provenance(request, loaded.Root, _build);
+                _status = $"Scenario '{_scenario.Configuration.Name}' · build {_scenario.AssemblySha256[..12]}. " +
+                    (_status ?? "Source preview uses the current XAML buffer. ") +
+                    (_scenario.Configuration.DataContextFactory is null ? "" : " Scenario data overrides the root DataContext before layout.");
+            }
+            _scene.Host();
+            cancellationToken.ThrowIfCancellationRequested();
+            await _scene.SettleLayoutAsync(_dispatcher);
+            cancellationToken.ThrowIfCancellationRequested();
+            _native.Initialize();
+            return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            ClearPreview();
+            throw;
+        }
+        catch (Exception exception)
+        {
+            ClearPreview();
+            return exception;
+        }
+    }
 
     public Task<PreviewSnapshot> CaptureAsync(PreviewCaptureRequest request, CancellationToken cancellationToken) =>
         OnDispatcher(async () =>
@@ -201,12 +221,13 @@ public sealed class PreviewEngine : IPreviewRpc, IDisposable
         var image = _scene.CapturePng();
         var bindingFailures = _inspector.BindingFailures();
         string? dataNotice = _scene.Root?.DataContext is null && bindingFailures.Any(failure => failure.UnavailableDataContext)
-            ? "The preview has no root DataContext, and some binding sources are unavailable. Choose a preview scenario with a data factory to supply application data; application startup is not run." : null;
+            ? "The preview has no root DataContext, and some binding sources are unavailable. Declare d:DataContext on the view, for example d:DataContext=\"{d:DesignInstance Type=local:MainViewModel}\", or choose a preview scenario with a data factory; application startup is not run." : null;
         var diagnostics = _log.Snapshot().Concat(bindingFailures.Select(failure => failure.Diagnostic));
         if (dataNotice is not null) diagnostics = diagnostics.Prepend(new PreviewDiagnostic(dataNotice, "Information"));
         string status = _status ?? "Isolated XAML preview. Code-behind and application startup are not executed. Source navigation tracks authored elements, including template instances.";
         return new(_scene.Version, true, image, _scene.Width, _scene.Height, nodes, diagnostics.Distinct().ToArray(),
-            dataNotice is null ? status : dataNotice + " " + status, _build, _scenario, _native.Identity);
+            dataNotice is null ? status : dataNotice + " " + status, _build, _scenario, _native.Identity,
+            _scene.Document?.DesignData is { Count: > 0 } designData ? designData.ToArray() : null);
     }
 
     private void ClearPreview()

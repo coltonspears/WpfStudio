@@ -8,7 +8,8 @@
   <!-- samples/, tests/*/Fixtures and tools/ stay out of everything below. They stand in for user projects or fixed target frameworks (net48, net8.0), so a warning there is not a defect of ours, and they must keep building as a user would see them. -->
   <PropertyGroup>
     <IsProductCode Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">true</IsProductCode>
-    <IsTestCode Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)tests')) And !$(MSBuildProjectDirectory.Contains('\Fixtures\'))">true</IsTestCode>
+    <!-- The separators are normalized so a compile-only build on Linux or macOS (EnableWindowsTargeting) leaves the fixtures out too. -->
+    <IsTestCode Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)tests')) And !$(MSBuildProjectDirectory.Replace('/', '\').Contains('\Fixtures\'))">true</IsTestCode>
   </PropertyGroup>
   <PropertyGroup Condition="'$(IsProductCode)' == 'true' Or '$(IsTestCode)' == 'true'">
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>

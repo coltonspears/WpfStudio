@@ -163,6 +163,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
     // ------------------------------------------------------------------ IDesignerSourceHost
     Task<bool> IDesignerSourceHost.ReviewPropertyEditAsync(XamlPropertyEditResult proposal) => PreviewDesignerEditAsync(proposal);
     Task<bool> IDesignerSourceHost.ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit) => PreviewDesignerLayoutEditAsync(edit);
+    Task<bool> IDesignerSourceHost.ReviewDesignDataEditAsync(XamlPropertyEditResult proposal, Func<bool> isCurrent) => ReviewDesignerEditAsync(proposal, isCurrent, "Declare design-time DataContext");
     Task<string> IDesignerSourceHost.NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken) => NavigatePreviewBindingSourceAsync(navigation, cancellationToken);
     void IDesignerSourceHost.RevealSelection(SourceLocation source) => RevealDesignerSelection(source);
 

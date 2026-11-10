@@ -128,17 +128,17 @@ public sealed class DesignTimePreviewTests(PreviewFixture fixture)
     }
 
     [Theory]
-    [InlineData("{design:DesignInstance Type={x:Type sample:MustNotConstruct}, IsDesignTimeCreatable=True}")]
+    [InlineData("{design:DesignInstance Type={x:Type sample:MustNotConstruct}}")]
     [InlineData("{design:DesignInstance sample:MustNotConstruct, CreateList=True}")]
     [InlineData("{design:DesignData Source=MissingSample.xaml}")]
-    public async Task UnsupportedDesignExtensionsAreReportedWithoutConstructingOrLoadingSamples(string designData)
+    public async Task DesignDataNeverConstructsATypeThatDoesNotAskToBeCreated(string designData)
     {
         MustNotConstruct.ConstructorCalls = 0;
         string markup = $"<Grid {Namespaces} xmlns:sample='clr-namespace:WpfStudio.Preview.Tests;assembly=WpfStudio.Preview.Tests' design:DataContext='{designData}'><TextBlock Text='Runtime'/></Grid>";
         var snapshot = await Render(markup);
         Assert.True(snapshot.Success, string.Join("\n", snapshot.Diagnostics.Select(diagnostic => diagnostic.Message)));
         Assert.Equal(0, MustNotConstruct.ConstructorCalls);
-        Assert.Contains(snapshot.Diagnostics, diagnostic => diagnostic.Severity == "Warning" && diagnostic.Message.Contains("DesignInstance", StringComparison.Ordinal) && diagnostic.Line == 1);
+        Assert.Contains(snapshot.Diagnostics, diagnostic => diagnostic.Line == 1 && diagnostic.Message.Contains("esign data", StringComparison.Ordinal));
     }
 
     [Fact]

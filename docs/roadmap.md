@@ -26,7 +26,7 @@ Status for each item on the wants list, ordered roughly by how much it gives for
 | Pinned File Groups | ✅ Done | File Groups tab beside Solution Explorer |
 | Build/Rebuild/Clean solution or project | 🟢 Existing | Build menu (solution) and Solution Explorer context menu (project) |
 | Formatting | 🟢 Existing | Code > Format document (C# and XAML) |
-| Custom design-time DataContexts | 🟢 Existing (partial) | Preview scenarios (`wpfstudio.preview.json`) |
+| Custom design-time DataContexts | ✅ Done | `d:DataContext` with generated sample data, and preview scenarios (`wpfstudio.preview.json`) |
 | Global/scoped tools and tasks (like VS Code) | ✅ Done | View > Tasks; `Core/Tasks`, `Features/Tasks` |
 | Debug symbols / extra DLLs / source files | ✅ Done (partial) | Settings > Debugging, Debugger > Modules; symbol paths need another adapter |
 | Runtime downloader | ✅ Done | Banner on workspace load; `Workspace/Runtimes`, `Features/Runtimes` |
@@ -106,7 +106,11 @@ Code > Format document (Ctrl+Shift+F) formats C# through Roslyn and XAML through
 4. Make sure the worker loads `.editorconfig` as analyzer config documents, so formatting follows the repository's style.
 
 ### Custom design-time DataContexts
-Preview scenarios already let a project define several named DataContexts (`wpfstudio.preview.json` plus a factory method) and switch between them. **Interact** mode covers live interaction. What is missing is data contexts that live **outside the project**:
+The designer draws a view with [design-time data](xaml-preview-scenarios.md#design-time-data): `d:DataContext` with `d:DesignInstance` (sample values generated from the type without running its constructor, or the constructed instance with `IsDesignTimeCreatable`), `CreateList`, `d:DesignData` files, `d:SampleData`, and any markup extension in a `d:` attribute. A view that declares no DataContext gets sample values from the view model its name pairs it with. Preview scenarios let a project define several named DataContexts (`wpfstudio.preview.json` plus a factory method) and switch between them, and **Interact** mode covers live interaction.
+A view model matched by name can be written into the view as `d:DataContext` with **Declare**, through the change review.
+*Follow-ups:* design-time data in Compiled mode for a view whose code-behind sets no DataContext; `d:DesignData` files with types that have no parameterless constructor; choosing among several view models that match a view equally well.
+
+What is also missing is data contexts that live **outside the project**:
 - Add a scenario source in your profile or in `.wpfstudio/preview/` holding `wpfstudio.preview.json` entries that point to a **C# script file** (`.csx`). Compile it with Roslyn against the project's built assembly inside the preview host, so no factory class has to be in the project.
 - Or, simpler: a `dataContextJson` scenario that deserializes JSON into the view's DataContext type. This suits read-only layouts.
 

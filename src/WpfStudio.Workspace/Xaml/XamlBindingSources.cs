@@ -120,7 +120,7 @@ public sealed partial class XamlLanguageService
                 return relative is null ? BindingSourceInfo.Unknown("RelativeSource is not statically known.") : RelativeSourceObject(relative, owner);
             }
             // The expression assigning DataContext sees the context entering that element.
-            if (attribute.Name == "DataContext") return Context(owner.Parent, 0);
+            if (attribute.Name == "DataContext" || IsDesignDataContext(attribute)) return Context(owner.Parent, 0);
             for (var current = attribute.Owner.Parent; current is not null && current != owner; current = current.Parent)
                 if (current.LocalName.EndsWith(".DataContext", StringComparison.Ordinal)) return Context(owner.Parent, 0);
             return Context(owner, 0);
@@ -335,7 +335,7 @@ public sealed partial class XamlLanguageService
                     return BindingSourceInfo.Unknown("The local design DataContext requires designer-specific value resolution.");
                 return ObjectSource(value, "DataContext declared by a design property element");
             }
-            if (design is not null) return DesignInstanceContext(element, design.Value.Text);
+            if (design is not null) return DesignContext(element, design);
             if (element.Attribute("DataContext") is { } context) return ContextBinding(context);
             var property = element.Children.FirstOrDefault(c => c.LocalName.EndsWith(".DataContext", StringComparison.Ordinal)
                 && c.Namespace == element.Namespace && (c.LocalName == element.LocalName + ".DataContext" || c.LocalName is "FrameworkElement.DataContext" or "FrameworkContentElement.DataContext"));
@@ -357,6 +357,37 @@ public sealed partial class XamlLanguageService
                 || element.LocalName.EndsWith(".Resources", StringComparison.Ordinal)) return BindingSourceInfo.Unknown("The template or resource boundary has no declared DataContext.");
             if (StyleMaySetContext(element)) return BindingSourceInfo.Unknown("A style may replace the inherited DataContext.");
             return Context(element.Parent, depth + 1);
+        }
+        private static bool IsDesignDataContext(XamlSyntax.Attribute attribute) =>
+            SplitName(attribute.Name) is (var prefix, "DataContext") && attribute.Owner.LookupNamespace(prefix) == Design;
+
+        /// <summary>
+        /// The context a d:DataContext attribute declares. The designer builds a d:DesignInstance from its Type and
+        /// evaluates any other extension as it would on DataContext itself, so a static member, a resource and a
+        /// binding describe the design data as exactly as they would describe the runtime data.
+        /// </summary>
+        private BindingSourceInfo DesignContext(Element element, XamlSyntax.Attribute design)
+        {
+            var extension = ParseExtension(design.Value.Text);
+            if (extension is { IsComplete: true })
+            {
+                if (IsExtension(element, extension, Language, "Static")) return StaticMemberContext(element, extension);
+                if (IsExtension(element, extension, Presentation, "StaticResource") || IsExtension(element, extension, Presentation, "Binding")) return ContextBinding(design);
+            }
+            return DesignInstanceContext(element, design.Value.Text);
+        }
+        private BindingSourceInfo StaticMemberContext(Element element, Extension extension)
+        {
+            var member = (extension.Argument("Member") ?? extension.Positional)?.Value.Trim();
+            var dot = member?.LastIndexOf('.') ?? -1;
+            if (member is null || dot <= 0 || extension.Arguments.Count != 1) return BindingSourceInfo.Unknown("The x:Static value is not a single Type.Member name.");
+            var symbol = ResolveTypeValue(element, member[..dot])?.GetMembers(member[(dot + 1)..])
+                .FirstOrDefault(candidate => candidate is { IsStatic: true, DeclaredAccessibility: Accessibility.Public or Accessibility.Internal } and (IPropertySymbol or IFieldSymbol));
+            var type = symbol switch { IPropertySymbol property => property.Type, IFieldSymbol field => field.Type, _ => null };
+            // A member declared as object says nothing about the instance it returns.
+            return type is null || type.SpecialType == SpecialType.System_Object
+                ? BindingSourceInfo.Unknown("The x:Static member's type is not statically known.")
+                : new BindingSourceInfo(type, null, $"DataContext declared by x:Static {member}");
         }
         private BindingSourceInfo DesignInstanceContext(Element element, string value)
         {

@@ -8,6 +8,15 @@ public static class ReleaseNoteCatalog
 {
     public static IReadOnlyList<ReleaseNote> All { get; } =
     [
+        new("Unreleased", "Design-time data in the XAML designer",
+        [
+            "d:DataContext works in the designer. {d:DesignInstance Type=vm:OrdersViewModel} fills the view model with sample values chosen from its property names and types, without running its constructor, so a view model that needs services still previews with lists, names, dates and totals. IsDesignTimeCreatable=True shows the instance its own constructor builds.",
+            "CreateList, d:DesignData files, d:ItemsSource=\"{d:SampleData ItemCount=5}\" and any markup extension in a d: attribute (Binding, StaticResource, x:Static) are supported.",
+            "A view that declares no DataContext is drawn with sample values from the view model its name pairs it with: OrdersView with OrdersViewModel, MainWindow with MainViewModel. Turn this off under Preview settings.",
+            "The designer toolbar names the data a preview is drawn with, and its tooltip lists each design-time data source with its line. Declare writes a view model matched by name into the view as d:DataContext, after you review the change.",
+            "A preview that fails because of a design-time value is shown without design-time values, with the reason as a warning.",
+            "Completion, hover, F12 and binding diagnostics follow a d:DataContext declared with x:Static, StaticResource or Binding, as they already did for d:DesignInstance.",
+        ]),
         new("Unreleased", "Tasks, debugger options and runtime checks",
         [
             "Tasks in Visual Studio Code's tasks.json format, from .vscode/tasks.json and .wpfstudio/tasks.json in the repository and tasks.json in your profile. Run them from View > Tasks, the command palette (Task: ...) or Build > Run build task. Each run gets its own terminal tab; dependencies run together or in order, and the $msCompile problem matcher puts compiler errors in Problems.",
