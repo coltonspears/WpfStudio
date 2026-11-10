@@ -42,8 +42,8 @@ internal static class ToolkitMembers
     /// <summary>A location in a file somebody wrote, as opposed to a source generator's or the compiler's output.</summary>
     public static bool IsAuthored(Location location) => location.IsInSource && location.SourceTree?.FilePath is { Length: > 0 } path && !IsGeneratedPath(path);
 
-    public static bool IsGeneratedPath(string path) => path.Replace('\\', '/').Contains("/obj/", StringComparison.OrdinalIgnoreCase)
-        || path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase);
+    public static bool IsGeneratedPath(string path) => path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase)
+        || GeneratedPaths.IsIntermediate(path);
 
     // The Toolkit's field-to-property naming: _name, m_name and name become Name.
     private static string PropertyName(string field)

@@ -140,9 +140,10 @@ internal static class XamlEventHandlerGenerator
         return token.IsKind(SyntaxKind.IdentifierToken) && !token.ContainsDiagnostics && token.Text == escaped && token.ValueText == name ? escaped : null;
     }
 
-    private static bool GeneratedPath(string path) => path.Replace('\\', '/').Contains("/obj/", StringComparison.OrdinalIgnoreCase) ||
+    private static bool GeneratedPath(string path) =>
         path.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase) ||
-        path.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase);
+        path.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase) ||
+        GeneratedPaths.IsIntermediate(path);
 
     private static string Newline(string text)
     {

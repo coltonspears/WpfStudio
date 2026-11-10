@@ -21,6 +21,8 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
     public const int MaximumDirectories = 128;
     private readonly HashSet<string> _paths;
     private readonly string[] _roots;
+    // Each root with its separator, built once: every file event under the watched folders is tested against them.
+    private readonly string[] _rootPrefixes;
     private readonly List<FileSystemWatcher> _watchers = [];
     private readonly Action<KnownSourceChange> _changed;
     private readonly Action<Exception>? _failed;
@@ -39,9 +41,18 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
         var candidates = paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).Take(MaximumFiles + 1).ToArray();
         _paths = candidates.Take(MaximumFiles).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var allDirectories = _paths.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(path => path.Length).ToArray();
-        var directories = allDirectories.Where(directory => !allDirectories.Any(parent => directory.Length > parent.Length
-            && directory.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))).ToArray();
+        // A directory under another that is watched needs no watcher of its own. Found by walking up from each, not by comparing
+        // every pair: this runs on the UI thread whenever the workspace is set, which is also after every build.
+        var known = allDirectories.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        bool Nested(string directory)
+        {
+            for (var parent = Path.GetDirectoryName(directory); parent is not null; parent = Path.GetDirectoryName(parent))
+                if (!Path.EndsInDirectorySeparator(parent) && known.Contains(parent)) return true;
+            return false;
+        }
+        var directories = allDirectories.Where(directory => !Nested(directory)).ToArray();
         _roots = directories.Take(MaximumDirectories).ToArray();
+        _rootPrefixes = _roots.Select(root => root + Path.DirectorySeparatorChar).ToArray();
         bool partial = candidates.Length > MaximumFiles || directories.Length > MaximumDirectories;
         foreach (var directory in directories.Take(MaximumDirectories))
         {
@@ -140,8 +151,8 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
     private bool Ignored(string path)
     {
         if (_paths.Contains(path)) return false;
-        var root = _roots.FirstOrDefault(root => path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
-        var relative = root is null ? path : Path.GetRelativePath(root, path);
+        var root = Array.FindIndex(_rootPrefixes, prefix => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        var relative = root < 0 ? path : Path.GetRelativePath(_roots[root], path);
         return relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             .Any(part => part.Equals("obj", StringComparison.OrdinalIgnoreCase) || part.Equals("bin", StringComparison.OrdinalIgnoreCase)
                 || part.Equals(".git", StringComparison.OrdinalIgnoreCase) || part.Equals("artifacts", StringComparison.OrdinalIgnoreCase));

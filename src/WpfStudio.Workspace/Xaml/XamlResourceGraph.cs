@@ -120,21 +120,10 @@ internal sealed class XamlResourceGraph(Compilation compilation, XamlResourceCon
                 return SearchDictionary(wrappers[0], key, reference, depth + 1);
             }
 
-            var direct = new List<Element>();
-            bool uncertainKey = false;
-            foreach (var child in container.Children)
-            {
-                if (!Spend()) return Limited();
-                if (XamlSchemaService.IgnoredElement(child) || IsMergeProperty(child)) continue;
-                if (child.LocalName.Contains('.')) return XamlResourceLookup.Unavailable("The dictionary contains unsupported property-element content.");
-                var declared = child.Attribute(Language, "Key");
-                if (declared is not null)
-                {
-                    if (!LiteralKey(declared.Value.Text, out var candidate)) uncertainKey = true;
-                    else if (candidate == key) direct.Add(child);
-                }
-                else if (!PresentationElement(child, "Style") && !PresentationElement(child, "DataTemplate")) uncertainKey = true;
-            }
+            if (DirectEntries(container) is not { } entries) return Limited();
+            if (entries.HasPropertyElement) return XamlResourceLookup.Unavailable("The dictionary contains unsupported property-element content.");
+            bool uncertainKey = entries.UncertainKey;
+            var direct = entries.Keyed.GetValueOrDefault(key) ?? [];
             if (direct.Count > 1) return XamlResourceLookup.Unavailable("The dictionary declares the resource key more than once.");
             if (direct.Count == 1)
             {
@@ -186,6 +175,38 @@ internal sealed class XamlResourceGraph(Compilation compilation, XamlResourceCon
             return XamlResourceLookup.Missing;
         }
         finally { _dictionaryQueries.Remove((container, key)); }
+    }
+
+    /// <summary>What a dictionary declares directly, by key. Whether a key cannot be told without running the application, and whether
+    /// the dictionary holds a property element, are true of the dictionary whatever key is asked for.</summary>
+    private sealed record Entries(Dictionary<string, List<Element>> Keyed, bool UncertainKey, bool HasPropertyElement);
+    private readonly Dictionary<Element, Entries> _entries = [];
+
+    /// <summary>
+    /// Reads a dictionary's own entries once for this operation. Every lookup that reaches a dictionary used to walk all its
+    /// entries, charging the work budget for each: a view with many StaticResource bindings against an application dictionary of a
+    /// few hundred keys ran the budget out, and the rest of its bindings went unresolved. Null when the budget ends while reading.
+    /// </summary>
+    private Entries? DirectEntries(Element container)
+    {
+        if (_entries.TryGetValue(container, out var known)) return known;
+        var keyed = new Dictionary<string, List<Element>>(StringComparer.Ordinal);
+        bool uncertainKey = false;
+        foreach (var child in container.Children)
+        {
+            if (!Spend()) return null;
+            if (XamlSchemaService.IgnoredElement(child) || IsMergeProperty(child)) continue;
+            // Whatever follows a property element is not read, as it was not when each lookup walked the entries itself.
+            if (child.LocalName.Contains('.')) return _entries[container] = new(keyed, uncertainKey, HasPropertyElement: true);
+            var declared = child.Attribute(Language, "Key");
+            if (declared is not null)
+            {
+                if (!LiteralKey(declared.Value.Text, out var candidate)) uncertainKey = true;
+                else (keyed.TryGetValue(candidate, out var same) ? same : keyed[candidate] = []).Add(child);
+            }
+            else if (!PresentationElement(child, "Style") && !PresentationElement(child, "DataTemplate")) uncertainKey = true;
+        }
+        return _entries[container] = new(keyed, uncertainKey, HasPropertyElement: false);
     }
 
     private XamlResourceLookup SearchBasedOn(Element style, string key, Element reference, int depth)
