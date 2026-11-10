@@ -545,7 +545,7 @@ A second round on the same day took the findings left open above. It was checked
 
 ### Fixed in a third round
 
-After PR #46, checked the same way: Workspace (728 passing) fails only the tests it fails on an untouched checkout, and the whole solution builds; the app-side changes are built only.
+The first three rows went in with PR #46 and the rest after it. Checked the same way: Workspace (728 passing) fails only the tests it fails on an untouched checkout, and the whole solution builds; the app-side changes are built only.
 
 | Area | What | Checked by |
 |------|------|-----------|
