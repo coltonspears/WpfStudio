@@ -96,9 +96,20 @@ internal sealed class SchemaTypeResolver
         return Resolve(WithDeclaringAssembly(uri, declaringAssembly), name.Local);
     }
 
+    // One resolver serves one operation on one immutable compilation, on one thread, so what a name resolved to, or that it did not,
+    // holds for the resolver's life. A document names the same few types on almost every element, and each lookup of a presentation
+    // type otherwise asks every mapped assembly and namespace for it in turn.
+    private readonly Dictionary<(string Uri, string Name), INamedTypeSymbol?> _resolved = [];
+
     public INamedTypeSymbol? Resolve(string uri, string name)
     {
         _token.ThrowIfCancellationRequested();
+        if (_resolved.TryGetValue((uri, name), out var known)) return known;
+        return _resolved[(uri, name)] = Find(uri, name);
+    }
+
+    private INamedTypeSymbol? Find(string uri, string name)
+    {
         if (uri == Language)
         {
             var metadata = name switch

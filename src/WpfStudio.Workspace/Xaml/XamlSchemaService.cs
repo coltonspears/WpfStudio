@@ -222,10 +222,10 @@ public sealed class XamlSchemaService
             return Result(version, start, length, owner is null ? [] : SchemaMembers.Instance(owner)
                 .Concat(SchemaMembers.Attached(owner)).Where(member => !member.IsEvent).Select(member => MemberEntry(ownerName + "." + member.Name, member)).Where(item => item.DisplayText.StartsWith(fragment, StringComparison.OrdinalIgnoreCase)));
         }
-        return Result(version, start, length, TypesInScope(element, resolver).Where(item => item.DisplayText.StartsWith(fragment, StringComparison.OrdinalIgnoreCase)));
+        return TypeResult(version, start, length, TypesInScope(element, resolver), fragment);
     }
 
-    private static IEnumerable<CompletionEntry> TypesInScope(Element element, SchemaTypeResolver resolver, bool extensionsOnly = false)
+    private static IEnumerable<(string Name, INamedTypeSymbol Type)> TypesInScope(Element element, SchemaTypeResolver resolver, bool extensionsOnly = false)
     {
         foreach (var (prefix, uri) in Prefixes(element))
         {
@@ -235,7 +235,7 @@ public sealed class XamlSchemaService
                 if (extensionsOnly && !IsMarkupExtension(type)) continue;
                 if (!extensionsOnly && type.TypeKind is not (TypeKind.Class or TypeKind.Struct or TypeKind.Enum)) continue;
                 var name = extensionsOnly && type.Name.EndsWith("Extension", StringComparison.Ordinal) ? type.Name[..^9] : type.Name;
-                yield return Entry((prefix.Length == 0 ? "" : prefix + ":") + name, SchemaMembers.Describe(type), "Class");
+                yield return ((prefix.Length == 0 ? "" : prefix + ":") + name, type);
             }
         }
     }
@@ -248,7 +248,7 @@ public sealed class XamlSchemaService
         var end = start;
         while (end < attribute.ValueEnd && NameCharacter(text[end])) end++;
         if (position >= start && position <= end)
-            return Result(version, start, end - start, TypesInScope(attribute.Owner, resolver, extensionsOnly: true).Where(item => item.DisplayText.StartsWith(text[start..position], StringComparison.OrdinalIgnoreCase)));
+            return TypeResult(version, start, end - start, TypesInScope(attribute.Owner, resolver, extensionsOnly: true), text[start..position]);
         var extensionName = text[start..end];
         var split = SplitName(extensionName);
         if (split.Local != "Type" || attribute.Owner.LookupNamespace(split.Prefix) != Language) return null;
@@ -312,6 +312,16 @@ public sealed class XamlSchemaService
         // "<" lists the first 250 type names in order and a type further down the alphabet is never offered while the list stays open.
         var top = items.DistinctBy(item => item.DisplayText).OrderBy(item => item.DisplayText, StringComparer.Ordinal).Take(251).ToArray();
         return new(version, start, length, top.Length > 250 ? top[..250] : top, top.Length > 250);
+    }
+    /// <summary>
+    /// As <see cref="Result"/>, for types. Each is described, which reads and parses its documentation, only once it is among those
+    /// sent: "&lt;" lists every type of every namespace in scope, and all but 250 of those descriptions were thrown away.
+    /// </summary>
+    private static CompletionResult TypeResult(long version, int start, int length, IEnumerable<(string Name, INamedTypeSymbol Type)> types, string fragment)
+    {
+        var top = types.Where(type => type.Name.StartsWith(fragment, StringComparison.OrdinalIgnoreCase)).DistinctBy(type => type.Name)
+            .OrderBy(type => type.Name, StringComparer.Ordinal).Take(251).ToArray();
+        return new(version, start, length, top.Take(250).Select(type => Entry(type.Name, SchemaMembers.Describe(type.Type), "Class")).ToArray(), top.Length > 250);
     }
     private static bool NameCharacter(char c) => char.IsLetterOrDigit(c) || c is '_' or ':' or '.' or '-';
     private static int Offset(string text, int line, int column)

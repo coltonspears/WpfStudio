@@ -20,7 +20,10 @@ try
     // Register the selected SDK before JIT compilation touches MSBuildWorkspace.
     try { await ToolchainResolver.RegisterAsync(args[workspaceIndex + 1], cancellation.Token); }
     catch (Exception exception) when (exception is not OperationCanceledException) { Console.Error.WriteLine(exception.Message); }
-    await connected;
+    // The IDE gives up on a worker after thirty seconds. One that is still unconnected long after that has lost its IDE, and
+    // would otherwise wait for ever, holding the workspace folder as its working directory.
+    try { await connected.WaitAsync(TimeSpan.FromMinutes(3), cancellation.Token); }
+    catch (TimeoutException) { Console.Error.WriteLine("No client connected; the language worker is exiting."); return 1; }
     using var engine = new WorkspaceEngine();
     using var rpc = new JsonRpc(pipe);
     rpc.AddLocalRpcTarget(engine);
