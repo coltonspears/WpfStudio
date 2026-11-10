@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Data;
 using System.Diagnostics;
 using System.Globalization;
@@ -210,19 +211,37 @@ public sealed class SqlDatabaseService : IDatabaseService
         if (type is "nvarchar" or "varchar" or "nchar" or "char" or "ntext" or "text")
         {
             using TextReader text = reader.GetTextReader(column);
-            var chars = new char[maximumCharacters + 1];
-            int count = await text.ReadBlockAsync(chars, cancellationToken).ConfigureAwait(false);
-            return (new string(chars, 0, Math.Min(count, maximumCharacters)), count > maximumCharacters);
+            // Rented: the limit is usually 65,536 characters whatever the value's length, and a new array of that size for every
+            // text cell of every row is a large-object allocation each.
+            var chars = ArrayPool<char>.Shared.Rent(maximumCharacters + 1);
+            try
+            {
+                int count = await text.ReadBlockAsync(chars.AsMemory(0, maximumCharacters + 1), cancellationToken).ConfigureAwait(false);
+                return (new string(chars, 0, Math.Min(count, maximumCharacters)), count > maximumCharacters);
+            }
+            finally { ArrayPool<char>.Shared.Return(chars); }
         }
         if (type is "binary" or "varbinary" or "image" or "timestamp")
         {
             await using Stream stream = reader.GetStream(column);
             int maximumBytes = Math.Max(0, (maximumCharacters - 2) / 2);
-            var bytes = new byte[maximumBytes + 1];
-            int count = await stream.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
-            return ((maximumCharacters < 2 ? "" : "0x") + Convert.ToHexString(bytes.AsSpan(0, Math.Min(count, maximumBytes))), count > maximumBytes);
+            var bytes = ArrayPool<byte>.Shared.Rent(maximumBytes + 1);
+            try
+            {
+                int count = await stream.ReadAtLeastAsync(bytes.AsMemory(0, maximumBytes + 1), maximumBytes + 1, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                return ((maximumCharacters < 2 ? "" : "0x") + Convert.ToHexString(bytes.AsSpan(0, Math.Min(count, maximumBytes))), count > maximumBytes);
+            }
+            finally { ArrayPool<byte>.Shared.Return(bytes); }
         }
-        string value = Convert.ToString(await reader.GetFieldValueAsync<object>(column, cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture) ?? "";
+        // Dates are written out in full and in sortable order. The general conversion gives "06/15/2024 13:45:30": month first, a
+        // midnight time on every date, and no fractions of a second, so two values a millisecond apart look the same.
+        string value = await reader.GetFieldValueAsync<object>(column, cancellationToken).ConfigureAwait(false) switch
+        {
+            DateTime date when type == "date" => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            DateTime moment => moment.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture),
+            DateTimeOffset moment => moment.ToString("yyyy-MM-dd HH:mm:ss.FFFFFFF zzz", CultureInfo.InvariantCulture),
+            var other => Convert.ToString(other, CultureInfo.InvariantCulture) ?? ""
+        };
         return value.Length > maximumCharacters ? (value[..maximumCharacters], true) : (value, false);
     }
 }
