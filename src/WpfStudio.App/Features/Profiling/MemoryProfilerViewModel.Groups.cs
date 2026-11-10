@@ -72,8 +72,7 @@ public sealed partial class MemoryProfilerViewModel
     [RelayCommand]
     private void GroupByRetention(string? typeKey)
     {
-        if (typeKey is null) return;
-        OpenType(typeKey);
+        if (!TryOpenType(typeKey)) return;
         TypeDetailTab = 1;
         if (InstanceGrouping == "Retention") LoadGroupsAsync(_lifetime.Token).Forget(ReportFault); else InstanceGrouping = "Retention";
     }

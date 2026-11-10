@@ -64,7 +64,7 @@ public sealed partial class XamlEventService
     }
 
     public XamlEventTarget? GetTarget(string text, int position, Compilation compilation, CancellationToken token = default)
-        => Targets(text, compilation, token, out _).FirstOrDefault(target => position >= target.AttributeStart && position <= target.AttributeStart + target.AttributeLength
+        => Targets(text, compilation, token, out _, position).FirstOrDefault(target => position >= target.AttributeStart && position <= target.AttributeStart + target.AttributeLength
             || position >= target.Start && position <= target.Start + target.Length);
 
     public CompletionResult? Complete(string text, int position, long version, Compilation compilation, CancellationToken token = default)
@@ -112,11 +112,18 @@ public sealed partial class XamlEventService
         }).ToArray();
     }
 
-    private static IReadOnlyList<XamlEventTarget> Targets(string text, Compilation compilation, CancellationToken token, out string? status)
+    /// <param name="at">
+    /// When given, only the attribute at that position is resolved. Every completion, hover and go-to-definition in a XAML file asks
+    /// whether its position is an event handler, almost always to learn that it is not; resolving every element and attribute of the
+    /// document for that made each of those requests pay for a whole-document semantic pass.
+    /// </param>
+    private static IReadOnlyList<XamlEventTarget> Targets(string text, Compilation compilation, CancellationToken token, out string? status, int? at = null)
     {
         status = null;
         if (compilation is not CSharpCompilation) return [];
         var elements = Read(text, token);
+        static bool Covers(XamlSyntax.Attribute attribute, int position) => position >= attribute.NameStart && position <= attribute.ValueEnd;
+        if (at is { } asked && !elements.Any(element => element.Attributes.Any(attribute => Covers(attribute, asked)))) return [];
         var root = elements.FirstOrDefault(element => element.Parent is null);
         if (root is null) return [];
         if (root.Attribute(Language, "Subclass") is not null || elements.Any(element => element.Namespace == Language && element.LocalName == "Code"))
@@ -131,9 +138,11 @@ public sealed partial class XamlEventService
         foreach (var element in elements)
         {
             token.ThrowIfCancellationRequested();
+            if (at is { } position && !element.Attributes.Any(attribute => Covers(attribute, position))) continue;
             if (XamlSchemaService.IgnoredElement(element) || resolver.Resolve(element, element.Name) is not { } type || !SchemaMembers.IsComplete(type)) continue;
             foreach (var attribute in element.Attributes)
             {
+                if (at is { } here && !Covers(attribute, here)) continue;
                 if (XamlSchemaService.IgnoredAttribute(attribute)) continue;
                 var member = type.ToDisplayString() == "System.Windows.EventSetter" && attribute.Name == "Handler"
                     ? EventSetterMember(element, resolver) : XamlSchemaService.Member(element, attribute.Name, type, resolver);

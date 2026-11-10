@@ -47,7 +47,7 @@ public sealed class GitService
         var branchTask = RunAsync(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], cancellationToken, allowFailure: true);
         var branchListTask = RunAsync(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"], cancellationToken);
         var hasHeadTask = HasHeadAsync(root, cancellationToken);
-        var logTask = RunAsync(root, ["log", $"-{Math.Max(1, historyLimit)}", "--no-show-signature", HistoryFormat], cancellationToken, allowFailure: true, readOnly: true);
+        var logTask = RunAsync(root, ["log", $"-{Math.Max(1, historyLimit)}", "--no-show-signature", "--decorate=full", HistoryFormat], cancellationToken, allowFailure: true, readOnly: true);
         var upstreamTask = RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true);
         var remoteNamesTask = GetRemoteNamesAsync(root, cancellationToken);
         var operationTask = GetOperationAsync(root, cancellationToken);
@@ -114,38 +114,65 @@ public sealed class GitService
         return GitOperation.None;
     }
 
+    /// <summary>
+    /// What a repository answers the same for every file of it: where it is, the commit HEAD names, and its remote. One pass over the
+    /// open editors shares these, so the questions are put to Git once per repository instead of once per file.
+    /// </summary>
+    public sealed class FileBasePass
+    {
+        internal System.Collections.Concurrent.ConcurrentDictionary<string, Task<string?>> Roots { get; } = new(StringComparer.OrdinalIgnoreCase);
+        internal System.Collections.Concurrent.ConcurrentDictionary<string, Task<(string? Head, GitRemote? Remote)>> Repositories { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>The committed version of a working file for the editor's change margin and blame; null outside a repository.</summary>
-    public async Task<GitFileBase?> GetFileBaseAsync(string filePath, CancellationToken cancellationToken = default)
+    /// <param name="known">The file's previous answer. It is returned again when HEAD still names the commit it was read from, without asking Git for the file.</param>
+    public async Task<GitFileBase?> GetFileBaseAsync(string filePath, CancellationToken cancellationToken = default, FileBasePass? pass = null, GitFileBase? known = null)
     {
         var directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(filePath));
         if (directory is null || !Directory.Exists(directory)) return null;
-        GitResult discovery;
-        try { discovery = await RunAsync(directory, ["rev-parse", "--show-toplevel"], cancellationToken, allowFailure: true, readOnly: true); }
-        catch (Win32Exception) { return null; }
-        if (discovery.ExitCode != 0) return null;
-        var root = System.IO.Path.GetFullPath(discovery.Output.TrimEnd('\r', '\n'));
+        var root = await (pass?.Roots.GetOrAdd(directory, path => FindRootAsync(path, cancellationToken)) ?? FindRootAsync(directory, cancellationToken));
+        if (root is null) return null;
         var relative = System.IO.Path.GetRelativePath(root, System.IO.Path.GetFullPath(filePath)).Replace('\\', '/');
         if (relative.StartsWith("../", StringComparison.Ordinal)) return null;
-        var head = await RunAsync(root, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken, allowFailure: true, readOnly: true);
+        var (head, remote) = await (pass?.Repositories.GetOrAdd(root, path => ReadRepositoryAsync(path, cancellationToken)) ?? ReadRepositoryAsync(root, cancellationToken));
+        // The committed text of a path changes only when HEAD moves to another commit.
+        if (known is not null && known.HeadCommit == head && known.RelativePath == relative && string.Equals(known.Root, root, StringComparison.OrdinalIgnoreCase))
+            return known.Remote == remote ? known : known with { Remote = remote };
         // Committed means present in HEAD. A newly staged file is in the index only, so all its lines are additions.
-        var tracked = head.ExitCode == 0 && (await RunAsync(root, ["cat-file", "-e", $"HEAD:{relative}"], cancellationToken, allowFailure: true, readOnly: true)).ExitCode == 0;
+        var tracked = head is not null && (await RunAsync(root, ["cat-file", "-e", $"HEAD:{relative}"], cancellationToken, allowFailure: true, readOnly: true)).ExitCode == 0;
         string? text = null;
-        if (tracked && head.ExitCode == 0)
+        if (tracked)
         {
             try { text = await ReadBlobAsync(root, $"HEAD:{relative}", cancellationToken); }
             catch (GitOutputLimitException) { text = null; }
             if (IsBinary(text)) text = null;
         }
+        return new(root, relative, text, tracked, head, remote);
+    }
+
+    private static async Task<string?> FindRootAsync(string directory, CancellationToken cancellationToken)
+    {
+        GitResult discovery;
+        try { discovery = await RunAsync(directory, ["rev-parse", "--show-toplevel"], cancellationToken, allowFailure: true, readOnly: true); }
+        catch (Win32Exception) { return null; }
+        return discovery.ExitCode != 0 ? null : System.IO.Path.GetFullPath(discovery.Output.TrimEnd('\r', '\n'));
+    }
+
+    private async Task<(string? Head, GitRemote? Remote)> ReadRepositoryAsync(string root, CancellationToken cancellationToken)
+    {
+        var head = await RunAsync(root, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken, allowFailure: true, readOnly: true);
         var upstream = await RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true, readOnly: true);
         var remote = await GetRemoteAsync(root, upstream.ExitCode == 0 ? upstream.Output.Trim() : null, cancellationToken);
-        return new(root, relative, text, tracked, head.ExitCode == 0 ? head.Output.Trim() : null, remote);
+        return (head.ExitCode == 0 ? head.Output.Trim() : null, remote);
     }
 
     /// <summary>Blame for the editor's current (possibly unsaved) text, so line numbers match the buffer.</summary>
-    public async Task<IReadOnlyList<BlameLine>> BlameAsync(string root, string relativePath, string contents, CancellationToken cancellationToken = default)
+    /// <param name="encoding">The encoding the file is stored in. Git compares bytes, so a buffer sent as UTF-8 would show every
+    /// line with a letter outside ASCII of a code-page file as not committed yet.</param>
+    public async Task<IReadOnlyList<BlameLine>> BlameAsync(string root, string relativePath, string contents, CancellationToken cancellationToken = default, Encoding? encoding = null)
     {
         ValidatePaths(root, [relativePath]);
-        var result = await RunAsync(root, ["blame", "--porcelain", "--contents", "-", "--", relativePath], cancellationToken, input: contents, readOnly: true);
+        var result = await RunAsync(root, ["blame", "--porcelain", "--contents", "-", "--", relativePath], cancellationToken, input: contents, readOnly: true, inputEncoding: encoding);
         return GitBlame.Parse(result.Output);
     }
 
@@ -296,7 +323,7 @@ public sealed class GitService
     /// <summary>Loads older commits for paging through history.</summary>
     public async Task<IReadOnlyList<GitCommit>> LoadHistoryAsync(string root, int skip, int count, CancellationToken cancellationToken = default)
     {
-        var log = await RunAsync(root, ["log", $"--skip={Math.Max(0, skip)}", $"-{Math.Max(1, count)}", "--no-show-signature", HistoryFormat], cancellationToken, readOnly: true);
+        var log = await RunAsync(root, ["log", $"--skip={Math.Max(0, skip)}", $"-{Math.Max(1, count)}", "--no-show-signature", "--decorate=full", HistoryFormat], cancellationToken, readOnly: true);
         return GitOutput.ParseHistory(log.Output);
     }
 
@@ -400,7 +427,7 @@ public sealed class GitService
     /// <summary>Reads a blob such as <c>HEAD:path</c> or <c>:0:path</c>; null when that version does not exist.</summary>
     private static async Task<string?> ReadBlobAsync(string root, string spec, CancellationToken cancellationToken)
     {
-        var result = await RunAsync(root, ["cat-file", "blob", spec], cancellationToken, allowFailure: true, readOnly: true);
+        var result = await RunAsync(root, ["cat-file", "blob", spec], cancellationToken, allowFailure: true, readOnly: true, fileContent: true);
         return result.ExitCode == 0 ? result.Output : null;
     }
 
@@ -413,22 +440,24 @@ public sealed class GitService
         var bytes = new byte[stream.Length];
         var count = await stream.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false, cancellationToken);
         if (bytes.AsSpan(0, count).Contains((byte)0)) return (null, BinaryMessage);
-        // Honour a byte order mark the same way Git's output reader does, so an unchanged file compares equal.
-        using var reader = new StreamReader(new MemoryStream(bytes, 0, count), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        return (await reader.ReadToEndAsync(cancellationToken), null);
+        // Read as a committed version of it is, and as the editor reads it, so an unchanged file compares equal.
+        return (WpfStudio.Core.Text.TextEncoding.Decode(bytes[..count]).Text, null);
     }
 
     /// <param name="readOnly">Adds --no-optional-locks so background reads never hold the index lock a user action needs.</param>
     private static async Task<GitResult> RunAsync(string directory, IEnumerable<string> arguments, CancellationToken cancellationToken,
-        bool allowFailure = false, string? input = null, bool readOnly = false, bool signIn = false, bool noEditor = false)
+        bool allowFailure = false, string? input = null, bool readOnly = false, bool signIn = false, bool noEditor = false,
+        bool fileContent = false, Encoding? inputEncoding = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo("git")
         {
             WorkingDirectory = directory, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
-            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
-            StandardInputEncoding = new UTF8Encoding(false)
+            // A file's content arrives as its bytes, one character each, to be read below as the editor reads the file.
+            StandardOutputEncoding = fileContent ? Encoding.Latin1 : Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
+            // A code page is used as it is; anything else is sent as UTF-8 without a byte order mark, as it always was.
+            StandardInputEncoding = inputEncoding is null || WpfStudio.Core.Text.TextEncoding.IsUnicode(inputEncoding) ? new UTF8Encoding(false) : inputEncoding
         };
         if (readOnly) start.ArgumentList.Add("--no-optional-locks");
         foreach (var argument in new[] { "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "credential.interactive=" + (signIn ? "auto" : "never") }.Concat(arguments))
@@ -468,7 +497,14 @@ public sealed class GitService
         var output = await outputTask;
         var error = await errorTask;
         if (output.Truncated || error.Truncated) throw new GitOutputLimitException();
-        var result = new GitResult(process.ExitCode, output.Text, error.Text);
+        var text = output.Text;
+        // The reader follows a byte order mark by itself, and then the text is already what the file says. Otherwise the bytes are
+        // decoded by the editor's rule: UTF-8 when they are valid UTF-8, else the code page. Read as UTF-8 regardless, the committed
+        // text of a code-page file differed from the editor's in every letter outside ASCII, so unchanged lines were marked as
+        // changed and reverting one put a replacement character into the document.
+        if (fileContent && process.StandardOutput.CurrentEncoding.CodePage == Encoding.Latin1.CodePage)
+            text = WpfStudio.Core.Text.TextEncoding.Decode(Encoding.Latin1.GetBytes(text)).Text;
+        var result = new GitResult(process.ExitCode, text, error.Text);
         return allowFailure ? result : result.EnsureSuccess();
     }
 

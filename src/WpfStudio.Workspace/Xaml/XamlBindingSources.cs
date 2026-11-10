@@ -123,7 +123,44 @@ public sealed partial class XamlLanguageService
             if (attribute.Name == "DataContext" || IsDesignDataContext(attribute)) return Context(owner.Parent, 0);
             for (var current = attribute.Owner.Parent; current is not null && current != owner; current = current.Parent)
                 if (current.LocalName.EndsWith(".DataContext", StringComparison.Ordinal)) return Context(owner.Parent, 0);
+            if (IsColumnBinding(attribute, owner)) return ColumnItemContext(owner);
             return Context(owner, 0);
+        }
+
+        /// <summary>
+        /// A grid column is not in the element tree. Its binding properties, such as <c>Binding</c> and <c>DisplayMemberBinding</c>, are
+        /// applied to the cells generated for each row, and those see the row's item, not the DataContext around the grid. Checked
+        /// against that outer context, every column of a typed view model reported a member that "was not found".
+        /// </summary>
+        private bool IsColumnBinding(XamlSyntax.Attribute attribute, Element owner)
+        {
+            if (!IsGridColumn(owner)) return false;
+            if (ReferenceEquals(attribute.Owner, owner)) return attribute.Name.EndsWith("Binding", StringComparison.Ordinal);
+            // <DataGridTextColumn.Binding><Binding Path="…" /></DataGridTextColumn.Binding>, also through a MultiBinding.
+            var property = attribute.Owner;
+            while (property.Parent is { } parent && !ReferenceEquals(parent, owner)) property = parent;
+            return ReferenceEquals(property.Parent, owner) && property.LocalName.Contains('.') && property.LocalName.EndsWith("Binding", StringComparison.Ordinal);
+        }
+        private bool IsGridColumn(Element element)
+        {
+            if (!element.LocalName.EndsWith("Column", StringComparison.Ordinal)) return false;
+            if (element.LocalName is "GridViewColumn" or "DataGridTextColumn" or "DataGridCheckBoxColumn" or "DataGridComboBoxColumn"
+                or "DataGridHyperlinkColumn" or "DataGridTemplateColumn" && IsPresentationElement(element, element.LocalName)) return true;
+            return ElementType(element) is { } type && TypeHierarchy(type).Any(t => t.ToDisplayString() is "System.Windows.Controls.DataGridColumn" or "System.Windows.Controls.GridViewColumn");
+        }
+        private BindingSourceInfo ColumnItemContext(Element column)
+        {
+            // DataGrid > DataGrid.Columns > column, and ListView > ListView.View > GridView > column.
+            var grid = column.Parent;
+            while (grid is not null && (grid.LocalName.Contains('.') || IsPresentationElement(grid, "GridView"))) grid = grid.Parent;
+            return grid?.Attribute("ItemsSource") is { } source ? ItemsSourceItem(source, "Column cell inferred from ItemsSource")
+                : BindingSourceInfo.Unknown("The column's row item type is not declared.");
+        }
+        private BindingSourceInfo ItemsSourceItem(XamlSyntax.Attribute source, string reason)
+        {
+            var binding = GetBinding(source);
+            if (binding is null || !binding.Complete || ChangesContextValue(source) || !TrySegments(binding.Path, out var segments)) return BindingSourceInfo.Unknown("The item source needs runtime evaluation.");
+            return new BindingSourceInfo(ItemType(Follow(BindingSource(source, binding), segments, source.Owner).Type), null, reason);
         }
         private static string? Option(XamlSyntax.Attribute attribute, BindingPath binding, string name) =>
             binding.Extension?.Argument(name)?.Value ?? (IsPresentationElement(attribute.Owner, "Binding") ? attribute.Owner.Attribute(name)?.Value.Text : null);
@@ -423,6 +460,9 @@ public sealed partial class XamlLanguageService
             var property = template.Parent;
             var owner = property?.Parent;
             if (property is null || owner is null) return BindingSourceInfo.Unknown("The template item type is not declared.");
+            // A column's cell template is applied to each row's cell, whose content is the row's item.
+            if (property.LocalName.EndsWith(".CellTemplate", StringComparison.Ordinal) || property.LocalName.EndsWith(".CellEditingTemplate", StringComparison.Ordinal))
+                return IsGridColumn(owner) ? ColumnItemContext(owner) : BindingSourceInfo.Unknown("The template item type is not declared.");
             var sourceName = property.LocalName.EndsWith(".ItemTemplate", StringComparison.Ordinal) ? "ItemsSource"
                 : property.LocalName.EndsWith(".ContentTemplate", StringComparison.Ordinal) ? "Content" : null;
             if (sourceName is null || owner.Attribute(sourceName) is not { } source) return BindingSourceInfo.Unknown("The template item type is not declared.");

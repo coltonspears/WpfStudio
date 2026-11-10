@@ -76,13 +76,30 @@ internal sealed record PreviewDependencyCatalog(IReadOnlyList<PreviewDependencyA
     }
 
 #if !NETFRAMEWORK
+    // The package folders the last restore file read named. Every render of a live preview reads the catalog, and the restore file,
+    // often megabytes, was parsed whole each time for this one list; it changes only when the project is restored.
+    // A reference, so that renders on different threads read and replace it whole.
+    private sealed record RestoredFolders(string Path, long Length, long WrittenTicks, string[] Folders);
+    private static RestoredFolders? _packageFolders;
+    private static string[] PackageFolders(string assetsPath)
+    {
+        var file = new FileInfo(assetsPath);
+        if (!file.Exists) return [];
+        if (_packageFolders is { } known && known.Length == file.Length && known.WrittenTicks == file.LastWriteTimeUtc.Ticks
+            && string.Equals(known.Path, file.FullName, StringComparison.OrdinalIgnoreCase)) return known.Folders;
+        using var restore = ReadJson(assetsPath);
+        var folders = restore?.RootElement.TryGetProperty("packageFolders", out var listed) == true
+            ? listed.EnumerateObject().Select(folder => Path.GetFullPath(folder.Name)).ToArray() : [];
+        // Not remembered when it could not be read: the next render tries again.
+        if (restore is not null) _packageFolders = new(file.FullName, file.Length, file.LastWriteTimeUtc.Ticks, folders);
+        return folders;
+    }
+
     private static void AddPackageAssets(PreviewRequest request, JsonDocument deps, string depsPath, string output, Dictionary<string, (PreviewDependencyAsset Asset, int Rank)> selected, HashSet<string> inputs)
     {
         string? assetsPath = request.ProjectAssetsPath ?? (request.ProjectDirectory is null ? null : Path.Combine(request.ProjectDirectory, "obj", "project.assets.json"));
-        using var restore = assetsPath is null ? null : ReadJson(assetsPath);
         if (assetsPath is not null) inputs.Add(Path.GetFullPath(assetsPath));
-        var packageFolders = restore?.RootElement.TryGetProperty("packageFolders", out var folders) == true
-            ? folders.EnumerateObject().Select(folder => Path.GetFullPath(folder.Name)).ToArray() : [];
+        var packageFolders = assetsPath is null ? [] : PackageFolders(assetsPath);
         if (packageFolders.Length == 0)
             packageFolders = [Environment.GetEnvironmentVariable("NUGET_PACKAGES") is { Length: > 0 } custom
                 ? Path.GetFullPath(custom) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages")];

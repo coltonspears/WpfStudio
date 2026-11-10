@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using WpfStudio.Core.IO;
+using WpfStudio.Core.Text;
 using WpfStudio.Core.Wpf;
 
 namespace WpfStudio.Core.Documents;
@@ -42,10 +43,7 @@ public sealed class DocumentStore
         if (new FileInfo(path).Length > 16 * 1024 * 1024) throw new IOException("Files larger than 16 MiB should be opened in a specialized editor.");
         var bytes = await ReadSharedAsync(path, cancellationToken);
         if (bytes.Length > 16 * 1024 * 1024) throw new IOException("Files larger than 16 MiB should be opened in a specialized editor.");
-        using var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, true);
-        var text = await reader.ReadToEndAsync(cancellationToken);
-        var encoding = reader.CurrentEncoding;
-        if (encoding.CodePage == Encoding.UTF8.CodePage && !bytes.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())) encoding = new UTF8Encoding(false);
+        var (text, encoding) = TextEncoding.Decode(bytes);
         return _documents.GetOrAdd(path, new DocumentState(path, text, encoding, Hash(bytes)));
     }
     public DocumentState Create(string path, string content = "")
@@ -73,9 +71,11 @@ public sealed class DocumentStore
             }
             else if (document.DiskHash != null && !overwriteExternal) throw new ExternalFileChangedException(document.Path);
             var content = document.Content;
-            byte[] bytes = [.. document.Encoding.GetPreamble(), .. document.Encoding.GetBytes(content)];
+            // A code page that cannot store something the text now holds gives way to UTF-8 rather than write "?" in its place.
+            var (bytes, encoding) = TextEncoding.Encode(content, document.Encoding);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(document.Path)!);
             await AtomicFile.WriteAsync(document.Path, bytes, cancellationToken);
+            document.Encoding = encoding;
             document.MarkSavedSnapshot(content, Hash(bytes));
             await _recoveryGate.WaitAsync(cancellationToken);
             try
@@ -97,21 +97,15 @@ public sealed class DocumentStore
     {
         if (!File.Exists(document.Path)) return null;
         var bytes = await ReadSharedAsync(document.Path, cancellationToken);
-        using var reader = new StreamReader(new MemoryStream(bytes), document.Encoding, true);
-        var text = await reader.ReadToEndAsync(cancellationToken);
-        var encoding = reader.CurrentEncoding;
-        if (encoding.CodePage == Encoding.UTF8.CodePage && !bytes.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())) encoding = new UTF8Encoding(false);
+        var (text, encoding) = TextEncoding.Decode(bytes, document.Encoding);
         return (text, Hash(bytes), encoding);
     }
     public async Task ReloadAsync(DocumentState document, CancellationToken cancellationToken = default)
     {
         var version = document.Version;
         var bytes = await ReadSharedAsync(document.Path, cancellationToken);
-        using var reader = new StreamReader(new MemoryStream(bytes), document.Encoding, true);
-        var content = await reader.ReadToEndAsync(cancellationToken);
+        var (content, encoding) = TextEncoding.Decode(bytes, document.Encoding);
         if (document.Version != version) throw new InvalidOperationException("The document was edited while reloading. Retry the reload.");
-        var encoding = reader.CurrentEncoding;
-        if (encoding.CodePage == Encoding.UTF8.CodePage && !bytes.AsSpan().StartsWith(Encoding.UTF8.GetPreamble())) encoding = new UTF8Encoding(false);
         document.Encoding = encoding;
         document.Content = content;
         document.MarkSaved(Hash(bytes));

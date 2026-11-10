@@ -156,7 +156,12 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
     void IStudioToolsHost.GitWorkspaceFilesChanged() => GuardAsync(WorkspaceMutatedAsync).Forget(ReportBackgroundFault);
     void IStudioToolsHost.OpenAssistantSettings() => OpenSettingsCommand.ExecuteAsync(AssistantPage).Forget(ReportBackgroundFault);
     void IStudioToolsHost.RefreshAssistantContext() => UpdateAssistantContext();
-    private void RefreshEditorGit() { foreach (var document in Documents) document.RefreshGitAsync(Features.GitService, _lifetime.Token).Forget(document.ReportFault); }
+    private void RefreshEditorGit()
+    {
+        // Every save, window activation and Git pane action comes here for every open file.
+        var pass = new WpfStudio.App.Features.Git.GitService.FileBasePass();
+        foreach (var document in Documents) document.RefreshGitAsync(Features.GitService, _lifetime.Token, pass).Forget(document.ReportFault);
+    }
 
     WorkspaceSnapshot? IInspectionSourceHost.Workspace => Workspace;
 

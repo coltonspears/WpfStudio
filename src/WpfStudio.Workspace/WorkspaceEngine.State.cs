@@ -118,6 +118,8 @@ public sealed partial class WorkspaceEngine
         // partials exist only in CurrentSolution, never in the workspace or on disk.
         public Solution? Authored { get { Held(); return field; } set { Held(); field = value; } }
         public XamlPageSemanticProjectionResult? Result { get { Held(); return field; } private set { Held(); field = value; } }
+        // The authored solution Result was built from. While it is still the authored solution, only page texts can have changed.
+        public Solution? ResultAuthored { get { Held(); return field; } private set { Held(); field = value; } }
         public bool Pending { get { Held(); return field; } private set { Held(); field = value; } }
         public long Epoch { get { Held(); return field; } private set { Held(); field = value; } }
         public long LoadEpoch { get { Held(); return field; } private set { Held(); field = value; } }
@@ -127,9 +129,10 @@ public sealed partial class WorkspaceEngine
 
         public void Invalidate() { Pending = true; Epoch++; }
 
-        public void Published(XamlPageSemanticProjectionResult result)
+        public void Published(XamlPageSemanticProjectionResult result, Solution authored)
         {
             Result = result;
+            ResultAuthored = authored;
             Pending = false;
             NameStatuses.Clear();
         }
@@ -138,6 +141,7 @@ public sealed partial class WorkspaceEngine
         {
             Authored = null;
             Result = null;
+            ResultAuthored = null;
             Texts.Clear();
             ReadStatuses.Clear();
             NameStatuses.Clear();

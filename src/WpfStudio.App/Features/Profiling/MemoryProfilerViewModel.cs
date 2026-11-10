@@ -146,10 +146,12 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
             finally { _updating = false; }
             if (SelectedType is not null) background.Add(LoadFlowAsync(SelectedType.Key, token));
             if (IsGrouped) background.Add(LoadGroupsAsync(token));
+            var shown = _objectsShown;
             await QueryObjectsAsync(token);
             // Start the browser on the biggest owner rather than an arbitrary instance of the largest type.
             // Prefer an application type: a runtime cache is rarely what someone opening a snapshot wants to see first.
-            if (Summary?.TopRetainers is { Count: > 0 } owners && _session is not null)
+            // Not over an object the user opened while the first page was loading.
+            if (Summary?.TopRetainers is { Count: > 0 } owners && _session is not null && shown == _objectsShown)
                 await Browser.OpenFirstAsync((owners.FirstOrDefault(o => !MemoryLabels.IsFrameworkModule(o.Module)) ?? owners[0]).Id, token);
         }
         catch (OperationCanceledException) { }

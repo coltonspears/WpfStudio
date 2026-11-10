@@ -79,14 +79,29 @@ public sealed partial class CommandPaletteViewModel : ObservableObject, IDisposa
         else
         {
             var root = _host.WorkspaceRoot;
-            var files = _host.OpenDocumentPaths.Reverse().Concat(_host.WorkspaceFiles).Distinct(StringComparer.OrdinalIgnoreCase);
-            results = query.Length == 0 ? files.Select(_host.FileEntry) : files
-                .Select(path => (path, score: Best(FuzzyScore(Path.GetFileName(path), query), FuzzyScore(Path.GetRelativePath(root.Length > 0 ? root : Path.GetPathRoot(path) ?? "", path), query) - 20)))
+            results = query.Length == 0
+                ? _host.OpenDocumentPaths.Reverse().Concat(_host.WorkspaceFiles).Distinct(StringComparer.OrdinalIgnoreCase).Select(_host.FileEntry)
+                : _host.OpenDocumentPaths.Reverse().Select(path => Names(path, root)).Concat(WorkspaceFileNames(root))
+                .DistinctBy(file => file.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(file => (path: file.Path, score: Best(FuzzyScore(file.Name, query), FuzzyScore(file.Relative, query) - 20)))
                 .Where(x => x.score != null).OrderByDescending(x => x.score).ThenBy(x => x.path.Length).Select(x => _host.FileEntry(x.path));
         }
         foreach (var entry in results.Take(MaximumResults)) Results.Add(entry);
         Selected = Results.FirstOrDefault();
     }
+
+    // Each workspace file's name and workspace-relative path, the two texts a query is scored against. Worked out once for a list
+    // of files, not for every file on every keystroke: the relative path alone costs two path normalizations per file.
+    private (IReadOnlyList<string>? Files, string Root, (string Path, string Name, string Relative)[] Names) _workspaceFileNames = (null, "", []);
+    private (string Path, string Name, string Relative)[] WorkspaceFileNames(string root)
+    {
+        var files = _host.WorkspaceFiles;
+        if (!ReferenceEquals(files, _workspaceFileNames.Files) || root != _workspaceFileNames.Root)
+            _workspaceFileNames = (files, root, files.Select(path => Names(path, root)).ToArray());
+        return _workspaceFileNames.Names;
+    }
+    private static (string Path, string Name, string Relative) Names(string path, string root) =>
+        (path, Path.GetFileName(path), Path.GetRelativePath(root.Length > 0 ? root : Path.GetPathRoot(path) ?? "", path));
 
     /// <summary>'#' mode: search types and members across the solution as the query changes.</summary>
     private void RefreshSymbols(string query)

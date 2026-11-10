@@ -81,7 +81,7 @@ public sealed partial class WorkspaceEngine
             _pages.Authored = candidate;
             CurrentSolution = result.Solution;
             _pages.Invalidate(); // A build still running started from older sources.
-            _pages.Published(result);
+            _pages.Published(result, candidate);
             foreach (var page in result.Pages)
                 if (page.Status is not null) _pages.NameStatuses[page.Input.Path] = page.Status;
             SemanticsChanged();
@@ -95,10 +95,11 @@ public sealed partial class WorkspaceEngine
     {
         token.ThrowIfCancellationRequested();
         XamlGeneratedNameBridgeResult? result = null;
+        string sourcePath = Path.GetFullPath(source.Path);
         lock (_gate)
         {
             var page = _pages.Result?.Pages.SingleOrDefault(item => item.Input.ProjectId == project.Id
-                && string.Equals(item.Input.Path, Path.GetFullPath(source.Path), StringComparison.OrdinalIgnoreCase));
+                && string.Equals(item.Input.Path, sourcePath, StringComparison.OrdinalIgnoreCase));
             if (page is null || field is not null && (field.DeclaringSyntaxReferences is not [var syntax]
                 || project.Solution.GetDocument(syntax.SyntaxTree)?.Id != page.ProjectionDocumentId))
                 return Task.FromResult(result);
@@ -127,13 +128,32 @@ public sealed partial class WorkspaceEngine
         return Task.FromResult<XamlGeneratedNameBridgeResult?>(result);
     }
 
+    /// <summary>The document that declares the field, when it has exactly one declaration: a page's projected document, if it is a XAML name.</summary>
+    private static DocumentId? ProjectedDocument(Project project, IFieldSymbol field) =>
+        field.DeclaringSyntaxReferences is [var syntax] ? project.Solution.GetDocument(syntax.SyntaxTree)?.Id : null;
+
+    /// <summary>The paths of the pages whose projected document declares the field: one for a XAML name, none for any other field.</summary>
+    private HashSet<string> ProjectedPagePaths(Project project, IFieldSymbol field)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (ProjectedDocument(project, field) is not { } declaring) return paths;
+        lock (_gate)
+            foreach (var page in _pages.Result?.Pages ?? [])
+                if (page.Input.ProjectId == project.Id && page.ProjectionDocumentId == declaring) paths.Add(page.Input.Path);
+        return paths;
+    }
+
     private async Task<IReadOnlyList<SourceLocation>?> GetProjectedNameDefinitionAsync(Project origin, IFieldSymbol field, CancellationToken token)
     {
         var project = field.Locations.Where(location => location.SourceTree is not null)
             .Select(location => origin.Solution.GetDocument(location.SourceTree!)?.Project).FirstOrDefault(item => item is not null);
         if (project is null || await project.GetCompilationAsync(token).ConfigureAwait(false) is not { } compilation) return null;
+        // Only the page whose projected document declares the field can answer; every other page answers "not mine". Go to Definition
+        // comes here for every field, not only XAML names, and asking each page of the project in turn, each under the gate and each
+        // scanning all pages again, made it quadratic in the project's pages.
+        if (ProjectedDocument(project, field) is not { } declaring) return null;
         XamlPageProjectionPage[] pages;
-        lock (_gate) pages = _pages.Result?.Pages.Where(page => page.Input.ProjectId == project.Id).ToArray() ?? [];
+        lock (_gate) pages = _pages.Result?.Pages.Where(page => page.Input.ProjectId == project.Id && page.ProjectionDocumentId == declaring).ToArray() ?? [];
         foreach (var page in pages)
         {
             var result = await TryResolveProjectedNameAsync(project, compilation, new(page.Input.Path, page.Input.Text), null, field, token).ConfigureAwait(false);

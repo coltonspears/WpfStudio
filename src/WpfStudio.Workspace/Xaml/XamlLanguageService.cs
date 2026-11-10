@@ -35,9 +35,9 @@ public sealed partial class XamlLanguageService
         foreach (var attribute in element.Attributes)
         {
             token.ThrowIfCancellationRequested();
-            if (IgnoredBindingAttribute(attribute)) continue;
+            // Whether it is a binding at all is asked first: that reads only the value, while the ignored test walks every ancestor.
             var binding = GetBinding(attribute);
-            if (binding is null || !binding.Complete || !TrySegments(binding.Path, out var segments)) continue;
+            if (binding is null || !binding.Complete || IgnoredBindingAttribute(attribute) || !TrySegments(binding.Path, out var segments)) continue;
             foreach (var step in resolver.Walk(attribute, binding, segments))
             {
                 if (!step.IsMissing) continue;

@@ -314,9 +314,15 @@ public sealed class GraphLayout
             if (reversed) points.Reverse();
             edge.Route.AddRange(points);
         }
-        var real = Nodes.Select(n => n.Bounds).ToArray();
-        var extent = real[0];
-        foreach (var r in real.Skip(1)) extent.Union(r);
+        UpdateExtent();
+    }
+
+    /// <summary>Measures the graph again, after the layout and after a node has been dragged: the minimap, Fit and the "all visible" test read it.</summary>
+    internal void UpdateExtent()
+    {
+        if (Nodes.Count == 0) { Extent = Rect.Empty; return; }
+        var extent = Nodes[0].Bounds;
+        foreach (var node in Nodes.Skip(1)) extent.Union(node.Bounds);
         foreach (var edge in Edges) foreach (var p in edge.Route) extent.Union(p);
         Extent = extent;
     }

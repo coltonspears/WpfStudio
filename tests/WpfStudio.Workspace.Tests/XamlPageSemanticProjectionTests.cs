@@ -312,6 +312,88 @@ public sealed class XamlPageSemanticProjectionTests
         Assert.DoesNotContain("CreateDelegate(delegateType, this", synthetic);
     }
 
+    private const string Form = "<StackPanel><TextBlock Text='One'/><Button x:Name='Save' Content='Save'/><local:Named Identifier='Runtime'/></StackPanel>";
+    private const string FormCode = """
+        public partial class View {
+            public void Use() { InitializeComponent(); Save.IsDefault = true; }
+            public System.Windows.Markup.IStyleConnector Connector() => this;
+        }
+        [System.Windows.Markup.RuntimeNameProperty("Identifier")]
+        public class Named : System.Windows.DependencyObject { public string Identifier { get; set; } = ""; }
+        """;
+
+    [Theory]
+    [InlineData("Text='One'", "Text='A much longer caption'")]
+    [InlineData("<TextBlock Text='One'/>", "")]
+    [InlineData("Content='Save'/>", "Content='Save'/><Border><Grid/></Border>")]
+    [InlineData("<StackPanel>", "<StackPanel>\n  <!-- a note -->\n  ")]
+    public async Task AnEditThatLeavesThePagesDeclarationsAloneCarriesTheResultOverAndMatchesAFullBuild(string from, string to)
+    {
+        using var fixture = new Fixture(FormCode);
+        var authored = fixture.WithGenerated(helpers: true);
+        string edited = Page(Form).Replace(from, to, StringComparison.Ordinal);
+        Assert.NotEqual(Page(Form), edited);
+        var built = await XamlPageSemanticProjection.BuildAsync(authored, [fixture.Input(Page(Form))]);
+        Assert.True(built.Pages[0].IsComplete, built.Pages[0].Status);
+
+        var carried = await XamlPageSemanticProjection.TryUpdateAsync(built, [fixture.Input(edited)]);
+
+        Assert.NotNull(carried);
+        Assert.Same(built.Solution, carried.Solution);
+        var full = await XamlPageSemanticProjection.BuildAsync(authored, [fixture.Input(edited)]);
+        var (expected, actual) = (Assert.Single(full.Pages), Assert.Single(carried.Pages));
+        Assert.Equal((expected.Input, expected.TextHash, expected.IsComplete, expected.Status, expected.ProjectionDocumentId, expected.StyleConnector, expected.DelegateHelper),
+            (actual.Input, actual.TextHash, actual.IsComplete, actual.Status, actual.ProjectionDocumentId, actual.StyleConnector, actual.DelegateHelper));
+        Assert.Equal(expected.Fields, actual.Fields);
+        Assert.Equal(expected.ReplacedDocuments, actual.ReplacedDocuments);
+        Assert.Equal(["Save", "Runtime"], actual.Fields.Select(field => edited.Substring(field.Start, field.Length)));
+        Assert.Equal((await full.Solution.GetDocument(expected.ProjectionDocumentId!)!.GetTextAsync()).ToString(),
+            (await carried.Solution.GetDocument(actual.ProjectionDocumentId!)!.GetTextAsync()).ToString());
+        // Nothing changed since: the same result, not a copy of it.
+        Assert.Same(carried, await XamlPageSemanticProjection.TryUpdateAsync(carried, [fixture.Input(edited)]));
+    }
+
+    [Theory]
+    [InlineData("x:Name='Save'", "x:Name='Store'")]
+    [InlineData("<Button x:Name='Save'", "<CheckBox x:Name='Save'")]
+    [InlineData("<TextBlock Text='One'/>", "<TextBlock x:Name='Caption' Text='One'/>")]
+    [InlineData("Identifier='Runtime'", "Identifier='Other'")]
+    [InlineData("x:Name='Save' ", "")]
+    [InlineData("x:Class='ProjectionFixture.View'", "x:Class='ProjectionFixture.Other'")]
+    [InlineData("x:Class='ProjectionFixture.View'", "")]
+    [InlineData("x:Name='Save'", "x:Name='Save' x:FieldModifier='public'")]
+    [InlineData("Text='One'/>", "Text='One'>")]
+    [InlineData("<local:Named", "<local:Missing")]
+    public async Task AnEditThatChangesWhatThePageDeclaresOrHowCompleteItIsIsLeftToAFullBuild(string from, string to)
+    {
+        using var fixture = new Fixture(FormCode);
+        string edited = Page(Form).Replace(from, to, StringComparison.Ordinal);
+        Assert.NotEqual(Page(Form), edited);
+        var built = await XamlPageSemanticProjection.BuildAsync(fixture.WithGenerated(helpers: true), [fixture.Input(Page(Form))]);
+
+        Assert.Null(await XamlPageSemanticProjection.TryUpdateAsync(built, [fixture.Input(edited)]));
+    }
+
+    [Fact]
+    public async Task ABrokenPageStaysCarriedOverWhileItStaysBrokenAndAnotherInventoryIsAnotherBuild()
+    {
+        using var fixture = new Fixture(FormCode);
+        var authored = fixture.WithGenerated(helpers: true);
+        string broken = Page(Form).Replace("Text='One'/>", "Text='One'>", StringComparison.Ordinal);
+        var built = await XamlPageSemanticProjection.BuildAsync(authored, [fixture.Input(broken)]);
+        Assert.False(built.Pages[0].IsComplete);
+
+        string stillBroken = broken.Replace("Text='One'>", "Text='One' Foreground='Red'>", StringComparison.Ordinal);
+        var carried = await XamlPageSemanticProjection.TryUpdateAsync(built, [fixture.Input(stillBroken)]);
+        Assert.NotNull(carried);
+        var full = await XamlPageSemanticProjection.BuildAsync(authored, [fixture.Input(stillBroken)]);
+        Assert.Equal((full.Pages[0].Status, full.Pages[0].TextHash), (carried.Pages[0].Status, carried.Pages[0].TextHash));
+        Assert.Equal(full.Pages[0].Fields, carried.Pages[0].Fields);
+
+        Assert.Null(await XamlPageSemanticProjection.TryUpdateAsync(built, []));
+        Assert.Null(await XamlPageSemanticProjection.TryUpdateAsync(built, [new(fixture.ProjectId, fixture.XamlPath + ".other.xaml", broken)]));
+    }
+
     private static string Page(string body) => $"<UserControl {Namespaces} x:Class='ProjectionFixture.View'>{body}</UserControl>";
 
     private sealed class Fixture : IDisposable

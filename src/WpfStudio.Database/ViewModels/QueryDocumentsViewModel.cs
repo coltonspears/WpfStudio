@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts;
 using WpfStudio.Core.IO;
+using WpfStudio.Core.Text;
 using WpfStudio.Database.Models;
 using WpfStudio.Database.Services;
 
@@ -198,7 +199,12 @@ public partial class QueryDocumentsViewModel : ObservableObject
     {
         string? path = await _files.OpenFileAsync("Open SQL script", "SQL files|*.sql|All files|*.*");
         if (path is null) return;
-        try { Open(new QueryDocumentViewModel(Path.GetFileName(path), await File.ReadAllTextAsync(path, cancellationToken)) { FilePath = path }); }
+        try
+        {
+            // Read as the editor reads any file: a script from SQL Server Management Studio is often UTF-16, and an older one a code page.
+            var (text, encoding) = TextEncoding.Decode(await File.ReadAllBytesAsync(path, cancellationToken));
+            Open(new QueryDocumentViewModel(Path.GetFileName(path), text) { FilePath = path, Encoding = encoding });
+        }
         catch (Exception exception) { _report(exception.Message); }
     }
 
@@ -216,17 +222,24 @@ public partial class QueryDocumentsViewModel : ObservableObject
         if (path is null) return false;
         try
         {
+            var encoding = document.Encoding;
             if (document.FilePath is not null && Path.GetFullPath(path).Equals(Path.GetFullPath(document.FilePath), StringComparison.OrdinalIgnoreCase)
-                && await Task.Run(() => File.Exists(path), cancellationToken) && await File.ReadAllTextAsync(path, cancellationToken) != document.SavedText)
+                && await Task.Run(() => File.Exists(path), cancellationToken))
             {
-                if (!await _dialogs.ConfirmAsync("SQL script changed outside WpfStudio", $"Overwrite the external changes to {Path.GetFileName(path)} with the editor content?"))
+                var disk = TextEncoding.Decode(await File.ReadAllBytesAsync(path, cancellationToken), encoding);
+                encoding ??= disk.Encoding;
+                if (disk.Text != document.SavedText && !await _dialogs.ConfirmAsync("SQL script changed outside WpfStudio", $"Overwrite the external changes to {Path.GetFileName(path)} with the editor content?"))
                 {
                     _report("Save cancelled: the SQL script has external changes.");
                     return false;
                 }
             }
             path = Path.GetFullPath(path);
-            await AtomicFile.WriteAsync(path, new System.Text.UTF8Encoding(false).GetBytes(text), cancellationToken, writeThrough: true);
+            // In the encoding it was read in, with its byte order mark: written as bare UTF-8, a UTF-16 or code-page script would
+            // be misread by the tools that wrote it.
+            var (bytes, written) = TextEncoding.Encode(text, encoding ?? new System.Text.UTF8Encoding(false));
+            await AtomicFile.WriteAsync(path, bytes, cancellationToken, writeThrough: true);
+            document.Encoding = written;
             document.MarkSaved(text);
             document.FilePath = path;
             await FlushRecoveryAsync();

@@ -123,16 +123,25 @@ public sealed partial class TextDiff
         return hunks;
     }
 
-    /// <summary>Splits text into lines without terminators. A final line terminator does not create an empty line.</summary>
+    /// <summary>
+    /// Splits text into lines without terminators. A final line terminator does not create an empty line. A line ends at \r\n, \n or
+    /// a bare \r, as it does for the editor: counted by \n alone, the rows after a bare \r were numbered one short of the editor's lines,
+    /// and the change margin marked, and reverted, the wrong ones.
+    /// </summary>
     public static string[] SplitLines(string? text)
     {
         if (string.IsNullOrEmpty(text)) return [];
-        var lines = text.Split('\n');
-        int count = lines.Length;
-        if (lines[^1].Length == 0) count--;
-        var result = new string[count];
-        for (int i = 0; i < count; i++) result[i] = lines[i].EndsWith('\r') ? lines[i][..^1] : lines[i];
-        return result;
+        var lines = new List<string>();
+        int start = 0;
+        while (start < text.Length)
+        {
+            int end = text.AsSpan(start).IndexOfAny('\r', '\n');
+            if (end < 0) { lines.Add(text[start..]); break; }
+            end += start;
+            lines.Add(text[start..end]);
+            start = text[end] == '\r' && end + 1 < text.Length && text[end + 1] == '\n' ? end + 2 : end + 1;
+        }
+        return [.. lines];
     }
 
     /// <summary>Word-level changed ranges for a paired line; empty when the lines are too different to align usefully.</summary>

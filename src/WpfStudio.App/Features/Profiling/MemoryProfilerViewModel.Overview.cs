@@ -163,8 +163,11 @@ public sealed partial class MemoryProfilerViewModel
     [RelayCommand] private void OpenGrowth(GrowthRow? row) { if (row is not null) OpenType(row.Type.Key); }
 
     /// <summary>Opens an object in the browser without leaving the current view.</summary>
+    // How many objects have been opened on request. A list that loads meanwhile must not put its first row over one of them.
+    private int _objectsShown;
     private void ShowObject(int id)
     {
+        _objectsShown++;
         ShowBrowser = true; if (FocusGraph) FocusGraph = false;
         Browser.InspectObjectAsync(id, _lifetime.Token).Forget(ReportFault);
     }
@@ -173,13 +176,27 @@ public sealed partial class MemoryProfilerViewModel
     [RelayCommand(CanExecute = nameof(CanOpenComparisonRow))] private void OpenComparisonRow(ComparisonRow? row) => OpenType(row?.Key);
 
     [RelayCommand(CanExecute = nameof(CanLoad))]
-    private void OpenType(string? typeKey)
+    private void OpenType(string? typeKey) => TryOpenType(typeKey);
+
+    /// <summary>Selects the type in the Types view. False when it cannot be shown, so that a caller does not go on to act on whichever type was selected before.</summary>
+    private bool TryOpenType(string? typeKey)
     {
-        if (typeKey is null) return;
-        if (TypeFilter.Length > 0 && !Types.Any(t => t.Key == typeKey)) TypeFilter = "";
+        if (typeKey is null) return false;
+        if (!Types.Any(t => t.Key == typeKey) && HasType(typeKey))
+        {
+            // The list is hiding it, by the filter text or by "My code": a framework type opened from a chart or a finding is the usual case.
+            // Rebuilt here and now, because a change to the filter text alone is applied only when its throttle next allows.
+            TypeFilter = ""; OnlyApplicationTypes = false;
+            RefreshTypes();
+        }
         var row = Types.FirstOrDefault(t => t.Key == typeKey);
-        if (row is null) return;
+        if (row is null)
+        {
+            if (HasType(typeKey)) Status = $"{MemoryLabels.ShortType(TypeNameOf(typeKey) ?? typeKey)} is beyond the types the list shows. Sort the list or filter by its name to reach it.";
+            return false;
+        }
         SelectedView = TypesView;
         SelectedType = row;
+        return true;
     }
 }

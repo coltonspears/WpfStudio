@@ -103,7 +103,12 @@ public sealed partial class RetentionViewModel(IMemorySessionHost host) : Observ
     }
 
     /// <summary>Forgets the capture's tree and charts.</summary>
-    internal void Reset() { DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear(); Sunburst = null; }
+    internal void Reset()
+    {
+        DominatorRoots.Clear(); RetentionMapItems = []; RetentionTrail.Clear(); Sunburst = null;
+        // These name nodes of the capture that is gone: left set, the title still read "What X keeps alive" and Up acted on a dead node.
+        RetentionFocus = null; SelectedDominator = null; SelectedRetentionKey = null;
+    }
 
     private IEnumerable<DominatorNodeViewModel> Wrap(MemoryDominatorPage page, DominatorNodeViewModel? parent)
     {

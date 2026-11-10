@@ -220,6 +220,19 @@ public sealed class XamlSchemaTests
     }
 
     [Fact]
+    public void AValueThatLostItsClosingQuoteEndsWithItsTagAndCompletionReplacesOnlyTheValue()
+    {
+        var (text, result) = Complete(Window("<c:CustomerControl Tone=\"Oc$$/>\n<Button Content=\"OK\" />"));
+
+        Assert.Equal("Oc", text.Substring(result.Start, result.Length));
+        Assert.Contains(result.Items, item => item.InsertText == "Ocean");
+        // The element after it is still read as an element, so its own attributes complete.
+        var (next, attributes) = Complete(Window("<c:CustomerControl Tone=\"Ocean />\n<Button Conte$$ />"));
+        Assert.Equal("Conte", next.Substring(attributes.Start, attributes.Length));
+        Assert.Contains(attributes.Items, item => item.InsertText == "Content");
+    }
+
+    [Fact]
     public void ATruncatedCompletionListSaysSoAndNarrowsAsTheNameIsTyped()
     {
         var (_, all) = Complete(Window("<Grid><$$ /></Grid>"));

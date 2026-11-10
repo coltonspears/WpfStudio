@@ -79,20 +79,24 @@ public sealed partial class WorkspaceEngine
                 Solution authored;
                 long epoch;
                 XamlPageProjectionInput[] inputs;
+                XamlPageSemanticProjectionResult? previous;
                 lock (_gate)
                 {
                     if (!_pages.Pending || _pages.Authored is null) return;
                     authored = _pages.Authored;
                     epoch = _pages.Epoch;
+                    previous = ReferenceEquals(_pages.ResultAuthored, authored) ? _pages.Result : null;
                     inputs = PageProjectionInventory().Select(item => new XamlPageProjectionInput(item.Project, item.Path,
                         _documents.Text(item.Path) ?? _pages.Texts.GetValueOrDefault(item.Path) ?? "")).ToArray();
                 }
-                var result = await XamlPageSemanticProjection.BuildAsync(authored, inputs, token).ConfigureAwait(false);
+                // The usual edit to a page changes nothing it declares, and then the last result stands for all but that page's text.
+                var result = (previous is null ? null : await XamlPageSemanticProjection.TryUpdateAsync(previous, inputs, token).ConfigureAwait(false))
+                    ?? await XamlPageSemanticProjection.BuildAsync(authored, inputs, token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
                 lock (_gate)
                 {
                     if (!ReferenceEquals(authored, _pages.Authored) || epoch != _pages.Epoch) continue;
-                    _pages.Published(result);
+                    _pages.Published(result, authored);
                     CurrentSolution = result.Solution;
                     foreach (var page in result.Pages)
                     {

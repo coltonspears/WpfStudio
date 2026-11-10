@@ -163,16 +163,29 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
             foreach (var node in nodes)
             {
                 if (!_nodes.TryGetValue(node.Id, out var vm)) _nodes[node.Id] = vm = new(node);
-                vm.Node = node; vm.Children.Clear();
+                vm.Node = node;
             }
-            Tree.Clear();
+            var roots = new List<RuntimeNodeViewModel>();
+            var children = new Dictionary<RuntimeNodeViewModel, List<RuntimeNodeViewModel>>();
             foreach (var node in nodes.Where(n => ShowLogicalTree || n.IsVisual))
             {
                 string? parent = ShowLogicalTree ? node.LogicalParentId : node.ParentId;
                 var vm = _nodes[node.Id];
-                if (parent is not null && parent != node.Id && _nodes.TryGetValue(parent, out var owner)) owner.Children.Add(vm);
-                else Tree.Add(vm);
+                if (parent is not null && parent != node.Id && _nodes.TryGetValue(parent, out var owner))
+                    (children.TryGetValue(owner, out var siblings) ? siblings : children[owner] = []).Add(vm);
+                else roots.Add(vm);
             }
+            // Only a list whose rows changed is touched. This runs on every automatic refresh, every two seconds: emptying and
+            // refilling every list each time rebuilt the whole tree view, so a collapsed branch opened again and the keyboard
+            // focus inside the tree was lost.
+            static void Replace(ObservableCollection<RuntimeNodeViewModel> list, List<RuntimeNodeViewModel>? rows)
+            {
+                if (rows is null ? list.Count == 0 : list.SequenceEqual(rows)) return;
+                list.Clear();
+                if (rows is not null) foreach (var row in rows) list.Add(row);
+            }
+            foreach (var vm in _nodes.Values) Replace(vm.Children, children.GetValueOrDefault(vm));
+            Replace(Tree, roots);
             SelectedNode = selectedId is not null && _nodes.TryGetValue(selectedId, out var selected) ? selected : null;
             if (SelectedNode == null)
             {

@@ -14,7 +14,7 @@ internal sealed record XamlPageProjectionField(ProjectId ProjectId, string Path,
     string TypeIdentity, int Start, int Length, DocumentId DocumentId, int TypeStart, int TypeLength);
 internal sealed record XamlPageProjectionPage(XamlPageProjectionInput Input, string TextHash, bool IsComplete,
     string? Status, IReadOnlyList<XamlPageProjectionField> Fields, IReadOnlyList<DocumentId> ReplacedDocuments,
-    DocumentId? ProjectionDocumentId);
+    DocumentId? ProjectionDocumentId, bool StyleConnector = false, bool DelegateHelper = false);
 internal sealed record XamlPageSemanticProjectionResult(Solution Solution, IReadOnlyList<XamlPageProjectionPage> Pages);
 
 /// <summary>
@@ -132,7 +132,71 @@ internal static class XamlPageSemanticProjection
         return new(derived, pages.Select(page => new XamlPageProjectionPage(page.Input, page.Hash, page.IsComplete, page.Status,
             page.Document is null ? [] : page.Fields.Select(field => new XamlPageProjectionField(page.Input.ProjectId,
                 page.Input.Path, page.Class!, field.Name, field.TypeIdentity, field.Start, field.Length, page.Document,
-                field.TypeStart, field.TypeLength)).ToArray(), page.Replaced.ToArray(), page.Document)).ToArray());
+                field.TypeStart, field.TypeLength)).ToArray(), page.Replaced.ToArray(), page.Document, page.StyleConnector, page.DelegateHelper)).ToArray());
+    }
+
+    /// <summary>
+    /// Carries a result over to new page texts without building it again, or returns null when only a full build can tell.
+    /// <paramref name="previous"/> must have been built from the same authored solution, so that only page texts can differ.
+    /// <para>
+    /// Most edits to a page, a changed attribute value or text, leave what the page declares to C# exactly as it was: the same class,
+    /// base, fields and their types. The page's declarations are worked out again against the compilation the result already holds
+    /// and compared, as text, with the document that declares them there. When they are equal, nothing any other page or any C# file
+    /// can see has changed, so the solution stands and only this page's text, hash and field positions are replaced. A full build
+    /// parses every page of every project and compiles each page project three times, and it ran on every pause while typing XAML.
+    /// </para>
+    /// </summary>
+    internal static async Task<XamlPageSemanticProjectionResult?> TryUpdateAsync(XamlPageSemanticProjectionResult previous,
+        IReadOnlyList<XamlPageProjectionInput> inputs, CancellationToken token = default)
+    {
+        if (inputs.Count != previous.Pages.Count) return null;
+        long totalBefore = 0, totalAfter = 0;
+        var changed = new List<int>();
+        for (int index = 0; index < inputs.Count; index++)
+        {
+            var before = previous.Pages[index].Input;
+            // Another inventory, or another order of it, is another build.
+            if (before.ProjectId != inputs[index].ProjectId || !string.Equals(before.Path, inputs[index].Path, StringComparison.OrdinalIgnoreCase)) return null;
+            totalBefore += before.Text.Length; totalAfter += inputs[index].Text.Length;
+            if (!ReferenceEquals(before.Text, inputs[index].Text) && before.Text != inputs[index].Text) changed.Add(index);
+        }
+        // The text budget decides which pages are withheld, in order; near it, one page's growth can change another's outcome.
+        if (changed.Count > 2 || totalBefore > MaximumTotalCharacters || totalAfter > MaximumTotalCharacters) return null;
+        if (changed.Count == 0) return previous;
+        var pages = previous.Pages.ToArray();
+        foreach (int index in changed)
+        {
+            token.ThrowIfCancellationRequested();
+            var old = pages[index];
+            // The same page must not be listed twice: a duplicate is withheld by the full build.
+            if (pages.Count(other => other.Input.ProjectId == old.Input.ProjectId && string.Equals(other.Input.Path, old.Input.Path, StringComparison.OrdinalIgnoreCase)) != 1) return null;
+            // What the compiler's own generated file for this page established does not depend on the page's current text.
+            var page = new Page(inputs[index]) { StyleConnector = old.StyleConnector, DelegateHelper = old.DelegateHelper };
+            Parse(page, token);
+            if ((page.Class is null) != (old.ProjectionDocumentId is null)) return null;
+            if (page.Class is not null)
+            {
+                var document = previous.Solution.GetDocument(old.ProjectionDocumentId);
+                if (document is null || await document.Project.GetCompilationAsync(token).ConfigureAwait(false) is not { } compilation) return null;
+                // The steps of the full build, in its order, so that the first reason a page is incomplete is the same one.
+                var type = new SchemaTypeResolver(compilation, token).Resolve(page.Root!, page.Root!.Name);
+                if (type is not null && !type.IsGenericType && type.TypeKind == TypeKind.Class)
+                    page.Base = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                else page.Incomplete("The current XAML root type is unresolved or requires unsupported generic page declarations.");
+                DiscoverFields(page, compilation, token);
+                bool connector = Canonical(compilation, "System.Windows.Markup.IComponentConnector", "PresentationFramework", "WindowsBase", "System.Xaml") is not null;
+                if (!connector) page.Incomplete("The WPF component connector metadata is unavailable.");
+                if (!(await document.GetTextAsync(token).ConfigureAwait(false)).ContentEquals(SourceText.From(Emit(page, connector)))) return null;
+                page.Document = document.Id;
+            }
+            // Reasons the skipped steps of a full build give, such as a project without a compilation, are not known here.
+            if (page.IsComplete != old.IsComplete || page.Status != old.Status) return null;
+            pages[index] = new(page.Input, page.Hash, page.IsComplete, page.Status,
+                page.Document is null ? [] : page.Fields.Select(field => new XamlPageProjectionField(page.Input.ProjectId,
+                    page.Input.Path, page.Class!, field.Name, field.TypeIdentity, field.Start, field.Length, page.Document,
+                    field.TypeStart, field.TypeLength)).ToArray(), old.ReplacedDocuments, old.ProjectionDocumentId, old.StyleConnector, old.DelegateHelper);
+        }
+        return new(previous.Solution, pages);
     }
 
     private static void Parse(Page page, CancellationToken token)

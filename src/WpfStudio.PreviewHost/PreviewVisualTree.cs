@@ -14,7 +14,7 @@ internal sealed class PreviewVisualTree(PreviewScene scene, PreviewDiagnosticLog
 {
     private readonly Dictionary<string, DependencyObject> _objects = new(StringComparer.Ordinal);
     private readonly Dictionary<DependencyObject, string> _ids = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<Type, IReadOnlyList<DependencyProperty>> _propertyCache = [];
+    private readonly Dictionary<Type, (DependencyProperty[] Properties, HashSet<DependencyProperty> Known)> _propertyCache = [];
 
     public IEnumerable<KeyValuePair<string, DependencyObject>> Objects => _objects;
     public bool TryGet(string nodeId, [NotNullWhen(true)] out DependencyObject? target) => _objects.TryGetValue(nodeId, out target);
@@ -97,14 +97,20 @@ internal sealed class PreviewVisualTree(PreviewScene scene, PreviewDiagnosticLog
                     if (field.FieldType == typeof(DependencyProperty) && field.GetValue(null) is DependencyProperty property) properties.Add(property);
             foreach (PropertyDescriptor descriptor in TypeDescriptor.GetProperties(target))
                 if (DependencyPropertyDescriptor.FromProperty(descriptor)?.DependencyProperty is { } property) properties.Add(property);
-            cached = properties.ToArray();
+            properties.Remove(PreviewSource.IdProperty);
+            cached = (properties.ToArray(), properties);
             _propertyCache[type] = cached;
         }
+        // The type's own list serves as it is unless the object holds a value for a property outside it, an attached one such as
+        // Grid.Row. Every snapshot asks this of every node, so copying the whole set for each was most of what a snapshot allocated.
+        List<DependencyProperty>? attached = null;
         var local = target.GetLocalValueEnumerator();
-        var all = new HashSet<DependencyProperty>(cached);
-        while (local.MoveNext()) all.Add(local.Current.Property);
-        all.Remove(PreviewSource.IdProperty);
-        return all.ToArray();
+        while (local.MoveNext())
+        {
+            var property = local.Current.Property;
+            if (property != PreviewSource.IdProperty && !cached.Known.Contains(property) && attached?.Contains(property) != true) (attached ??= []).Add(property);
+        }
+        return attached is null ? cached.Properties : [.. cached.Properties, .. attached];
     }
 
     public static string PropertyName(DependencyProperty property, DependencyObject target) =>
