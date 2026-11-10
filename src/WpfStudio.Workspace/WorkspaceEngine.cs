@@ -321,8 +321,12 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             else
             {
                 var text = SourceText.From(request.Text);
+                // The texts the comparison below the lock was made with, each derived from its document's previous text, so that the
+                // compiler parses again only around the edit. They belong to the solution they were derived from.
+                var derived = ReferenceEquals(solution, sameDeclarations?.Solution) ? sameDeclarations!.Value.Texts : null;
+                SourceText TextFor(DocumentId id) => derived?.GetValueOrDefault(id) ?? text;
                 var projected = ReferenceEquals(solution, sameDeclarations?.Solution) && !_pages.Pending && ids.All(id => CurrentSolution?.ContainsDocument(id) == true) ? CurrentSolution : null;
-                foreach (var id in ids) solution = solution.WithDocumentText(id, text, PreservationMode.PreserveIdentity);
+                foreach (var id in ids) solution = solution.WithDocumentText(id, TextFor(id), PreservationMode.PreserveIdentity);
                 if (projected is null)
                 {
                     SetAuthoredSolution(solution);
@@ -331,7 +335,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
                 else
                 {
                     // Pages are projected from declarations, so the projection holds. Building it again would cost every keystroke its whole cost.
-                    foreach (var id in ids) projected = projected.WithDocumentText(id, text, PreservationMode.PreserveIdentity);
+                    foreach (var id in ids) projected = projected.WithDocumentText(id, TextFor(id), PreservationMode.PreserveIdentity);
                     _pages.Authored = solution;
                     CurrentSolution = projected;
                     _projectDiagnostics.CancelRunning();
@@ -361,30 +365,50 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
     /// The solution this text can replace a document in without changing what anything outside the file sees: it differs only
     /// inside method bodies, in non-constant initializers, in comments or in whitespace. Null when it declares something different.
     /// </summary>
-    private async Task<(Solution Solution, HashSet<string> ChangedNames)?> SolutionWithSameDeclarationsAsync(string path, UpdateDocumentRequest request, CancellationToken cancellationToken)
+    private async Task<(Solution Solution, HashSet<string> ChangedNames, Dictionary<DocumentId, SourceText> Texts)?> SolutionWithSameDeclarationsAsync(string path, UpdateDocumentRequest request, CancellationToken cancellationToken)
     {
         Solution? authored;
+        string? synchronized;
         lock (_gate)
         {
             // Most updates repeat the version the worker already has, and those change nothing to compare.
             if (_documents.OpenVersion(path) == request.Version) return null;
             authored = _pages.Pending ? null : _pages.Authored;
+            synchronized = _documents.Text(path);
         }
         if (authored is null) return null;
         var ids = authored.GetDocumentIdsWithFilePath(path);
         if (ids.IsEmpty) return null;
-        var source = SourceText.From(request.Text);
+        var whole = SourceText.From(request.Text);
         var changedNames = new HashSet<string>(StringComparer.Ordinal);
+        var texts = new Dictionary<DocumentId, SourceText>();
         foreach (var id in ids)
         {
             // Each target framework has its own document: an edit inside #if can be a comment to one and a declaration to another.
-            var before = authored.GetDocument(id) is { } document ? await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false) : null;
+            var document = authored.GetDocument(id);
+            var before = document is null ? null : await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
             if (before is null) return null;
+            // A text with no relation to the previous one has the whole file parsed again: here, in the authored solution and in the
+            // projected one, on every pause in typing. Stated as one change to the previous text, all three parse around the edit.
+            var source = texts[id] = ChangedText(await document!.GetTextAsync(cancellationToken).ConfigureAwait(false), synchronized, request.Text) ?? whole;
             var after = before.WithChangedText(source);
             if (!before.IsEquivalentTo(after, topLevel: true)) return null;
             changedNames.UnionWith(ChangedNames(await before.GetRootAsync(cancellationToken).ConfigureAwait(false), await after.GetRootAsync(cancellationToken).ConfigureAwait(false)));
         }
-        return (authored, changedNames);
+        return (authored, changedNames, texts);
+    }
+
+    /// <summary>
+    /// <paramref name="after"/> as one change to <paramref name="current"/>, or null when the worker's copy of the buffer,
+    /// <paramref name="synchronized"/>, is not what the document holds: the change is found by comparing the two strings.
+    /// </summary>
+    private static SourceText? ChangedText(SourceText current, string? synchronized, string after)
+    {
+        if (synchronized is null || current.Length != synchronized.Length || !current.ContentEquals(SourceText.From(synchronized))) return null;
+        int prefix = synchronized.AsSpan().CommonPrefixLength(after);
+        int limit = Math.Min(synchronized.Length, after.Length) - prefix, suffix = 0;
+        while (suffix < limit && synchronized[synchronized.Length - 1 - suffix] == after[after.Length - 1 - suffix]) suffix++;
+        return current.WithChanges(new TextChange(TextSpan.FromBounds(prefix, synchronized.Length - suffix), after[prefix..(after.Length - suffix)]));
     }
 
     /// <summary>The names that appear a different number of times after an edit.</summary>
