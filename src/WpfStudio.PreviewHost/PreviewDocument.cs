@@ -24,7 +24,28 @@ internal sealed partial class PreviewDocument
     internal XmlReader CreateSourceReader() => new OriginalPositionXmlReader(
         (_sourceDocument ?? throw new InvalidOperationException("The preview document has not been parsed.")).CreateReader());
 
+    /// <summary>
+    /// What one parse works out more than once: where each line of the text starts, and the type of each element name. Every element
+    /// asks for its source position, and for its own and each ancestor's type. Only types that were found are remembered, because a
+    /// library loaded later in the parse can make a name resolve that did not before.
+    /// </summary>
+    private sealed class ParseCache(string text)
+    {
+        public string Text { get; } = text;
+        public int[]? LineStarts { get; set; }
+        public Dictionary<(XName Name, Assembly? Assembly), Type> Types { get; } = [];
+    }
+    [ThreadStatic] private static ParseCache? _parse;
+
     public static PreviewDocument Parse(PreviewRequest request, Assembly? projectAssembly)
+    {
+        var outer = _parse;
+        _parse = new ParseCache(request.Text);
+        try { return ParseCore(request, projectAssembly); }
+        finally { _parse = outer; }
+    }
+
+    private static PreviewDocument ParseCore(PreviewRequest request, Assembly? projectAssembly)
     {
         var result = new PreviewDocument();
         result.InitializeLayoutSources(request);
@@ -183,11 +204,20 @@ internal sealed partial class PreviewDocument
     private static SourceLocation GetSource(PreviewRequest request, XElement element)
     {
         var info = (IXmlLineInfo)element;
-        int start = 0;
-        for (int line = 1; line < info.LineNumber && start < request.Text.Length; line++)
+        int start;
+        if (_parse is { } parse && ReferenceEquals(parse.Text, request.Text))
         {
-            while (start < request.Text.Length && request.Text[start] is not ('\r' or '\n')) start++;
-            if (start < request.Text.Length && request.Text[start++] == '\r' && start < request.Text.Length && request.Text[start] == '\n') start++;
+            var lines = parse.LineStarts ??= LineStarts(request.Text);
+            start = info.LineNumber <= 1 ? 0 : info.LineNumber - 1 < lines.Length ? lines[info.LineNumber - 1] : request.Text.Length;
+        }
+        else
+        {
+            start = 0;
+            for (int line = 1; line < info.LineNumber && start < request.Text.Length; line++)
+            {
+                while (start < request.Text.Length && request.Text[start] is not ('\r' or '\n')) start++;
+                if (start < request.Text.Length && request.Text[start++] == '\r' && start < request.Text.Length && request.Text[start] == '\n') start++;
+            }
         }
         start = Math.Min(request.Text.Length, start + Math.Max(0, info.LinePosition - 1));
         // LINQ to XML positions the element on the first character of its name.
@@ -205,7 +235,29 @@ internal sealed partial class PreviewDocument
             Math.Max(1, info.LinePosition - 1), element.Name.LocalName);
     }
 
+    /// <summary>The offset each line starts at, by the rule of the scan in <see cref="GetSource"/>: a line ends at \r\n, \r or \n.</summary>
+    private static int[] LineStarts(string text)
+    {
+        var starts = new List<int> { 0 };
+        for (int index = 0; index < text.Length; index++)
+        {
+            if (text[index] is not ('\r' or '\n')) continue;
+            if (text[index] == '\r' && index + 1 < text.Length && text[index + 1] == '\n') index++;
+            starts.Add(index + 1);
+        }
+        return starts.ToArray();
+    }
+
     private static Type? ResolveType(XName name, Assembly? projectAssembly)
+    {
+        if (_parse is not { } parse) return FindType(name, projectAssembly);
+        if (parse.Types.TryGetValue((name, projectAssembly), out var known)) return known;
+        var found = FindType(name, projectAssembly);
+        if (found is not null) parse.Types[(name, projectAssembly)] = found;
+        return found;
+    }
+
+    private static Type? FindType(XName name, Assembly? projectAssembly)
     {
         if (name.Namespace == Presentation)
         {

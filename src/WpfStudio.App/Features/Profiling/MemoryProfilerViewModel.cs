@@ -270,7 +270,7 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
         _updating = true;
         try
         {
-            Summary = null; Types.Clear(); Objects.Clear(); SelectedType = null; SelectedObject = null;
+            Summary = null; Types.Clear(); _grownTypes = []; Objects.Clear(); SelectedType = null; SelectedObject = null;
             Browser.ClearObject(); Graph = null; Flow = null; TotalObjects = 0;
             Retention.Reset(); ResetGroups();
         }

@@ -13,6 +13,8 @@ public sealed partial class MemoryProfilerViewModel
     private long _queryRevision, _flowRevision;
     private int _skip;
     public BulkObservableCollection<MemoryTypeRow> Types { get; } = [];
+    /// <summary>Every type that grew since the baseline, whatever the Types view currently shows.</summary>
+    private MemoryTypeRow[] _grownTypes = [];
     private RefreshThrottle TypeFilterThrottle => field ??= new(RefreshTypes);
     public BulkObservableCollection<MemoryObjectInfo> Objects { get; } = [];
     public IReadOnlyList<string> TypeSortOptions { get; } = ["Total managed bytes", "Retained bytes", "Largest retained object", "Object count", "Growth since baseline"];
@@ -65,14 +67,18 @@ public sealed partial class MemoryProfilerViewModel
         var keys = current.Keys.Concat(baseline?.Keys ?? Enumerable.Empty<string>()).Distinct(StringComparer.Ordinal);
         var maxBytes = current.Count == 0 ? 0 : current.Values.Max(t => t.Bytes);
         var maxRetained = current.Count == 0 ? 0 : current.Values.Max(t => t.RetainedBytes);
-        var summaries = keys.Select(key =>
+        var all = keys.Select(key =>
         {
             MemoryTypeSummary? previous = null;
             if (baseline is not null) baseline.TryGetValue(key, out previous);
             current.TryGetValue(key, out var type);
             type ??= new(key, previous!.Name, previous.Module, 0, 0, 0, 0);
             return (Type: type, Previous: previous);
-        }).Where(x => (x.Type.Name + " " + x.Type.Module).Contains(TypeFilter, StringComparison.OrdinalIgnoreCase))
+        }).ToArray();
+        // Taken before the list's filter, "My code" switch and row limit: the Overview reports growth over the whole capture.
+        _grownTypes = baseline is null ? [] : all.Where(x => x.Type.Bytes > (x.Previous?.Bytes ?? 0))
+            .Select(x => new MemoryTypeRow(x.Type, x.Previous?.Count ?? 0, x.Previous?.Bytes ?? 0)).ToArray();
+        var summaries = all.Where(x => (x.Type.Name + " " + x.Type.Module).Contains(TypeFilter, StringComparison.OrdinalIgnoreCase))
           .Where(x => !OnlyApplicationTypes || !MemoryLabels.IsFrameworkModule(x.Type.Module)).ToArray();
         var maxDelta = baseline is null || summaries.Length == 0 ? 0 : summaries.Max(x => Math.Abs(x.Type.Bytes - (x.Previous?.Bytes ?? 0)));
         var rows = summaries.Select(x => new MemoryTypeRow(x.Type, baseline is null ? null : x.Previous?.Count ?? 0, baseline is null ? null : x.Previous?.Bytes ?? 0,
