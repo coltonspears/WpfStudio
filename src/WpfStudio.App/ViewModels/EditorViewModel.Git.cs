@@ -98,7 +98,7 @@ public sealed partial class EditorViewModel
         Task.Run(async () =>
         {
             await Task.Delay(BlameVersion < 0 ? 0 : 1200, token); // Blame the first time at once, then after typing pauses.
-            var blame = await git.BlameAsync(gitBase.Root, gitBase.RelativePath, text, token);
+            var blame = await git.BlameAsync(gitBase.Root, gitBase.RelativePath, text, token, State.Encoding);
             await _dispatcher.InvokeAsync(() =>
             {
                 if (token.IsCancellationRequested || _disposed || version != State.Version || !ReferenceEquals(gitBase, GitBase)) return;

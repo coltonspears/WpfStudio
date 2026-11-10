@@ -167,10 +167,12 @@ public sealed class GitService
     }
 
     /// <summary>Blame for the editor's current (possibly unsaved) text, so line numbers match the buffer.</summary>
-    public async Task<IReadOnlyList<BlameLine>> BlameAsync(string root, string relativePath, string contents, CancellationToken cancellationToken = default)
+    /// <param name="encoding">The encoding the file is stored in. Git compares bytes, so a buffer sent as UTF-8 would show every
+    /// line with a letter outside ASCII of a code-page file as not committed yet.</param>
+    public async Task<IReadOnlyList<BlameLine>> BlameAsync(string root, string relativePath, string contents, CancellationToken cancellationToken = default, Encoding? encoding = null)
     {
         ValidatePaths(root, [relativePath]);
-        var result = await RunAsync(root, ["blame", "--porcelain", "--contents", "-", "--", relativePath], cancellationToken, input: contents, readOnly: true);
+        var result = await RunAsync(root, ["blame", "--porcelain", "--contents", "-", "--", relativePath], cancellationToken, input: contents, readOnly: true, inputEncoding: encoding);
         return GitBlame.Parse(result.Output);
     }
 
@@ -425,7 +427,7 @@ public sealed class GitService
     /// <summary>Reads a blob such as <c>HEAD:path</c> or <c>:0:path</c>; null when that version does not exist.</summary>
     private static async Task<string?> ReadBlobAsync(string root, string spec, CancellationToken cancellationToken)
     {
-        var result = await RunAsync(root, ["cat-file", "blob", spec], cancellationToken, allowFailure: true, readOnly: true);
+        var result = await RunAsync(root, ["cat-file", "blob", spec], cancellationToken, allowFailure: true, readOnly: true, fileContent: true);
         return result.ExitCode == 0 ? result.Output : null;
     }
 
@@ -438,22 +440,24 @@ public sealed class GitService
         var bytes = new byte[stream.Length];
         var count = await stream.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false, cancellationToken);
         if (bytes.AsSpan(0, count).Contains((byte)0)) return (null, BinaryMessage);
-        // Honour a byte order mark the same way Git's output reader does, so an unchanged file compares equal.
-        using var reader = new StreamReader(new MemoryStream(bytes, 0, count), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        return (await reader.ReadToEndAsync(cancellationToken), null);
+        // Read as a committed version of it is, and as the editor reads it, so an unchanged file compares equal.
+        return (WpfStudio.Core.Text.TextEncoding.Decode(bytes[..count]).Text, null);
     }
 
     /// <param name="readOnly">Adds --no-optional-locks so background reads never hold the index lock a user action needs.</param>
     private static async Task<GitResult> RunAsync(string directory, IEnumerable<string> arguments, CancellationToken cancellationToken,
-        bool allowFailure = false, string? input = null, bool readOnly = false, bool signIn = false, bool noEditor = false)
+        bool allowFailure = false, string? input = null, bool readOnly = false, bool signIn = false, bool noEditor = false,
+        bool fileContent = false, Encoding? inputEncoding = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo("git")
         {
             WorkingDirectory = directory, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
-            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
-            StandardInputEncoding = new UTF8Encoding(false)
+            // A file's content arrives as its bytes, one character each, to be read below as the editor reads the file.
+            StandardOutputEncoding = fileContent ? Encoding.Latin1 : Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
+            // A code page is used as it is; anything else is sent as UTF-8 without a byte order mark, as it always was.
+            StandardInputEncoding = inputEncoding is null || WpfStudio.Core.Text.TextEncoding.IsUnicode(inputEncoding) ? new UTF8Encoding(false) : inputEncoding
         };
         if (readOnly) start.ArgumentList.Add("--no-optional-locks");
         foreach (var argument in new[] { "--no-pager", "--literal-pathspecs", "-c", "core.quotepath=false", "-c", "color.ui=false", "-c", "credential.interactive=" + (signIn ? "auto" : "never") }.Concat(arguments))
@@ -493,7 +497,14 @@ public sealed class GitService
         var output = await outputTask;
         var error = await errorTask;
         if (output.Truncated || error.Truncated) throw new GitOutputLimitException();
-        var result = new GitResult(process.ExitCode, output.Text, error.Text);
+        var text = output.Text;
+        // The reader follows a byte order mark by itself, and then the text is already what the file says. Otherwise the bytes are
+        // decoded by the editor's rule: UTF-8 when they are valid UTF-8, else the code page. Read as UTF-8 regardless, the committed
+        // text of a code-page file differed from the editor's in every letter outside ASCII, so unchanged lines were marked as
+        // changed and reverting one put a replacement character into the document.
+        if (fileContent && process.StandardOutput.CurrentEncoding.CodePage == Encoding.Latin1.CodePage)
+            text = WpfStudio.Core.Text.TextEncoding.Decode(Encoding.Latin1.GetBytes(text)).Text;
+        var result = new GitResult(process.ExitCode, text, error.Text);
         return allowFailure ? result : result.EnsureSuccess();
     }
 
