@@ -137,7 +137,9 @@ public partial class DiffView : UserControl
         margin.SeparatorClicked += Expand;
         editor.TextArea.LeftMargins.Insert(0, margin);
         editor.TextArea.TextView.BackgroundRenderers.Add(new DiffBackgroundRenderer(editor, lines));
-        editor.PreviewMouseLeftButtonDown += (_, e) =>
+        // On the text area, not the editor: the editor's scroll bars are outside it, and a press on one level with a
+        // collapsed row must scroll, not expand the row and swallow the press.
+        editor.TextArea.PreviewMouseLeftButtonDown += (_, e) =>
         {
             if (LineAt(editor, lines(), e.GetPosition(editor.TextArea.TextView).Y) is { Kind: DiffLineKind.Separator } separator)
             {

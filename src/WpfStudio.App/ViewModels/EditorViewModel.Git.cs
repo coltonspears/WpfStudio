@@ -38,6 +38,9 @@ public sealed partial class EditorViewModel
         {
             var gitBase = await git.GetFileBaseAsync(State.Path, token);
             if (_disposed || revision != _gitBaseRevision) return;
+            // Every save, window activation and Git pane action asks again for every open file, mostly with nothing changed.
+            // The margin and blame follow from the committed text and the buffer, and the buffer's own edits already refresh them.
+            if (gitBase == GitBase) return;
             GitBase = gitBase;
             ScheduleGitChanges(immediate: true);
             ScheduleBlame();

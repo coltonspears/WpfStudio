@@ -130,7 +130,12 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
         }
     }
     private static bool IsSource(string path) => Path.GetExtension(path).ToLowerInvariant() is ".cs" or ".xaml";
-    private bool IsKnownSourceDirectory(string path) => _paths.Any(source => source.StartsWith(path + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+    private bool IsKnownSourceDirectory(string path)
+    {
+        // Built once, not once per known file: this runs for every file created or deleted anywhere under the watched folders.
+        var prefix = path + Path.DirectorySeparatorChar;
+        return _paths.Any(source => source.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
     private static bool IsProjectShape(string path) => Path.GetExtension(path).ToLowerInvariant() is ".csproj" or ".props" or ".targets" or ".sln" or ".slnx";
     private bool Ignored(string path)
     {

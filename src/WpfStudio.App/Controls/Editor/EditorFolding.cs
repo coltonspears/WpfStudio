@@ -73,10 +73,12 @@ internal sealed class EditorFolding
     {
         _timer.Stop();
         if (_manager is null || _owner.ViewModel is not { } vm) return;
-        if (_owner.Document.TextLength > MaximumFoldingCharacters) { _manager.Clear(); return; }
+        if (_owner.Document.TextLength > MaximumFoldingCharacters) { _manager.Clear(); SetHoveredFold(null); return; }
         if (vm.State.Extension == ".cs")
             _manager.UpdateFoldings(CSharpFolding.Find(_owner.Text).Select(region => new NewFolding(region.Start, region.End) { Name = region.Title }), -1);
         else _xmlFolding.UpdateFoldings(_manager, _owner.Document); // Keeps the previous foldings while XML is malformed.
+        // A removed section keeps its last offsets and no longer follows edits, so it must not stay the one drawn as hovered.
+        if (_hoveredFold is { } hovered && !_manager.AllFoldings.Contains(hovered)) SetHoveredFold(null);
     }
 
     public void SetAllFolded(bool folded)
@@ -167,7 +169,7 @@ internal sealed class EditorFolding
         {
             var document = view.Document;
             if (document is null || section.IsFolded) return;
-            var first = document.GetLineByOffset(section.StartOffset).LineNumber;
+            var first = document.GetLineByOffset(Math.Min(section.StartOffset, document.TextLength)).LineNumber;
             var last = document.GetLineByOffset(Math.Min(section.EndOffset, document.TextLength)).LineNumber;
             double? top = null, bottom = null;
             foreach (var line in view.VisualLines)
@@ -244,7 +246,7 @@ internal sealed class EditorFolding
         public void Draw(TextView textView, DrawingContext drawingContext)
         {
             if (folding._hoveredFold is not { IsFolded: false } section || textView.Document is not { } document || !textView.VisualLinesValid) return;
-            var first = document.GetLineByOffset(section.StartOffset).LineNumber;
+            var first = document.GetLineByOffset(Math.Min(section.StartOffset, document.TextLength)).LineNumber;
             var last = document.GetLineByOffset(Math.Min(section.EndOffset, document.TextLength)).LineNumber;
             var brush = ThemeBrush(owner, "FoldRegionBrush", Brushes.Transparent);
             foreach (var line in textView.VisualLines)

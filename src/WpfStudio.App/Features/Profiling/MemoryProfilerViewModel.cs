@@ -190,19 +190,25 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     {
         var text = GoToText.Trim();
         if (text.Length == 0 || _session is not { } session) return;
-        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) || text.All(Uri.IsHexDigit) && text.Length >= 8)
+        // Debuggers print addresses padded with zeros, and WinDbg with a backtick in the middle; the capture lists them unpadded.
+        var digits = text.Replace("`", "", StringComparison.Ordinal);
+        if (digits.StartsWith("0x", StringComparison.OrdinalIgnoreCase) || digits.All(Uri.IsHexDigit) && digits.Length >= 8)
         {
-            var address = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? text : "0x" + text;
+            digits = (digits.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? digits[2..] : digits).TrimStart('0');
+            var address = "0x" + (digits.Length == 0 ? "0" : digits);
+            var revision = _revision;
             try
             {
                 var page = await session.GetObjectsAsync(new(null, address, 0, 5), _lifetime.Token);
+                // The capture was replaced while the search ran: its object ids mean nothing in the new one.
+                if (revision != _revision) return;
                 var match = page.Objects.FirstOrDefault(o => o.Address.Equals(address, StringComparison.OrdinalIgnoreCase)) ?? page.Objects.FirstOrDefault();
                 if (match is null) { Status = $"No object at {address} in this capture."; return; }
                 ShowObject(match.Id); SelectedView = GraphView;
                 Status = $"Opened {MemoryLabels.ShortType(match.Type)} at {match.Address}.";
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Status = "Search failed: " + ex.Message; }
+            catch (Exception ex) { if (revision == _revision) Status = "Search failed: " + ex.Message; }
             return;
         }
         TypeFilter = text; SelectedView = TypesView;
