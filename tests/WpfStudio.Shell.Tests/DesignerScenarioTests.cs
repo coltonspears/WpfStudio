@@ -181,6 +181,112 @@ public sealed class DesignerScenarioTests
     }
 
     [Fact]
+    public async Task DesignDataIsNamedFromTheViewsOwnContextAndForgottenWithThePreview()
+    {
+        await using var context = new ScenarioContext();
+        var changed = new List<string?>();
+        context.Model.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+        context.Client.Render = request => Task.FromResult(Snapshot(request) with
+        {
+            DesignData =
+            [
+                new("ItemsSource", PreviewDesignDataKinds.Untyped, null, "Design data: 5 sample items.", 9, 4),
+                new("DataContext", PreviewDesignDataKinds.Sample, "Demo.ViewModels.OrdersViewModel", "Design data: sample values generated from Demo.ViewModels.OrdersViewModel; its constructor was not run.", 2, 3)
+            ]
+        });
+        await context.OpenAsync();
+        Assert.True(context.Model.HasDesignData);
+        Assert.Equal("OrdersViewModel · sample data +1", context.Model.DesignDataSummary);
+        Assert.Contains("Line 2: Design data: sample values generated from Demo.ViewModels.OrdersViewModel", context.Model.DesignDataToolTip);
+        Assert.Contains("Line 9: Design data: 5 sample items.", context.Model.DesignDataToolTip);
+        Assert.Contains("d:DataContext", context.Model.DesignDataToolTip);
+        Assert.Contains("design data: OrdersViewModel", context.Model.ScenarioDescription);
+        Assert.Contains(nameof(DesignerViewModel.DesignDataSummary), changed);
+
+        // The summary describes the frame on the canvas; it goes with it when the source changes.
+        context.Document.Content += " ";
+        Assert.False(context.Model.HasDesignData);
+        Assert.Equal("", context.Model.DesignDataSummary);
+        Assert.Equal("", context.Model.DesignDataToolTip);
+
+        foreach (var (kind, type, expected) in new[]
+        {
+            (PreviewDesignDataKinds.Created, "Demo.Main", "Main · constructed"),
+            (PreviewDesignDataKinds.Inferred, "Demo.MainViewModel", "MainViewModel · sample data, matched by name"),
+            (PreviewDesignDataKinds.File, "Demo.Customer", "Customer · design data file"),
+            (PreviewDesignDataKinds.Untyped, null, "Sample data")
+        })
+        {
+            context.Client.Render = request => Task.FromResult(Snapshot(request) with { DesignData = [new("DataContext", kind, type, "Design data.")] });
+            await context.Model.RefreshCommand.ExecuteAsync(null);
+            Assert.Equal(expected, context.Model.DesignDataSummary);
+        }
+    }
+
+    [Fact]
+    public async Task AMatchedViewModelCanBeDeclaredThroughTheChangeReview()
+    {
+        await using var context = new ScenarioContext();
+        var host = context.Model.StubHost();
+        await context.OpenAsync();
+        // Nothing was matched by name, so there is nothing to declare.
+        Assert.False(context.Model.CanDeclareDesignData);
+        Assert.False(context.Model.DeclareDesignDataCommand.CanExecute(null));
+
+        context.Client.Render = request => Task.FromResult(Snapshot(request) with
+        {
+            DesignData = [new("DataContext", PreviewDesignDataKinds.Inferred, "Demo.ViewModels.OrdersViewModel", "Design data.", 1, 2, "Demo.Core")]
+        });
+        await context.Model.RefreshCommand.ExecuteAsync(null);
+        Assert.True(context.Model.CanDeclareDesignData);
+
+        XamlPropertyEditResult? reviewed = null;
+        bool currentDuringReview = false;
+        host.DesignDataEdit = (proposal, isCurrent) => { reviewed = proposal; currentDuringReview = isCurrent(); return Task.FromResult(true); };
+        await context.Model.DeclareDesignDataCommand.ExecuteAsync(null);
+        Assert.True(currentDuringReview);
+        Assert.Contains("declared", context.Model.Status);
+        var edit = Assert.Single(reviewed!.Edit!.Edits);
+        Assert.Equal(context.Document.Path, reviewed.Edit.Path);
+        Assert.Equal(context.Document.Version, reviewed.Edit.Version);
+        // The view model lives in another assembly than the view, so the mapping names it.
+        Assert.Contains("xmlns:vm=\"clr-namespace:Demo.ViewModels;assembly=Demo.Core\"", edit.NewText);
+        Assert.Contains("d:DataContext=\"{d:DesignInstance Type=vm:OrdersViewModel}\"", edit.NewText);
+
+        host.DesignDataEdit = (_, _) => Task.FromResult(false);
+        await context.Model.DeclareDesignDataCommand.ExecuteAsync(null);
+        Assert.Contains("cancelled", context.Model.Status);
+
+        // A declared context is the author's choice; there is nothing further to declare, nor in a compiled preview.
+        context.Client.Render = request => Task.FromResult(Snapshot(request) with
+        {
+            DesignData = [new("DataContext", PreviewDesignDataKinds.Sample, "Demo.ViewModels.OrdersViewModel", "Design data.")]
+        });
+        await context.Model.RefreshCommand.ExecuteAsync(null);
+        Assert.False(context.Model.CanDeclareDesignData);
+    }
+
+    [Fact]
+    public async Task InferredSampleDataIsRequestedByDefaultAndTurningItOffInvalidatesTheSourcePreview()
+    {
+        await using var context = new ScenarioContext();
+        await context.OpenAsync();
+        Assert.True(context.Client.Requests.Last().InferDesignData);
+        context.Model.InferDesignData = false;
+        Assert.False(context.Model.IsCurrent);
+        Assert.Contains("Refresh", context.Model.Status);
+        await context.Model.RefreshCommand.ExecuteAsync(null);
+        Assert.False(context.Client.Requests.Last().InferDesignData);
+        Assert.True(context.Model.IsCurrent);
+
+        // With design-time values off there is nothing for the setting to change.
+        context.Model.UseDesignTimeValues = false;
+        await context.Model.RefreshCommand.ExecuteAsync(null);
+        context.Model.InferDesignData = true;
+        Assert.True(context.Model.IsCurrent);
+    }
+
+    [Fact]
     public async Task WrongScenarioProvenanceCannotBecomeCurrentAndFailedScenarioRemainsSelected()
     {
         await using var context = new ScenarioContext();

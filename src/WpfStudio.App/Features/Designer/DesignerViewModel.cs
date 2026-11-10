@@ -138,7 +138,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         LayoutDetails.Clear("Preview changed. Refresh and select an element to inspect current layout.");
         ClearAppearance("Preview changed. Refresh and select a property to inspect its appearance.");
         OnPropertyChanged(nameof(BuildDescription));
-        OnPropertyChanged(nameof(ScenarioDescription));
+        NotifyDesignData();
         NotifyCanvasState();
     }
     [RelayCommand] private Task RefreshAsync() => RenderAsync(debounce: false);
@@ -192,7 +192,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
                 assembly, ProjectDirectory, Mode,
                 string.IsNullOrWhiteSpace(ViewTypeName) ? null : ViewTypeName,
                 string.IsNullOrWhiteSpace(ApplicationResourcePath) ? null : ApplicationResourcePath,
-                scenario, UseDesignTimeValues, Canvas.AutoSize, _projectAssetsPath, _references), token);
+                scenario, UseDesignTimeValues, Canvas.AutoSize, _projectAssetsPath, _references, InferDesignData), token);
             if (!Current(revision) || document.Version != sourceVersion || snapshot.Version != revision) return;
             if (!await Scenarios.VerifyAsync(revision, token) || !Current(revision) || document.Version != sourceVersion) return;
             if (snapshot.Success && snapshot.Scenario?.Configuration != scenario)
@@ -218,7 +218,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         UpdateCanvas(snapshot);
         UpdateInteractionSnapshot();
         OnPropertyChanged(nameof(BuildDescription));
-        OnPropertyChanged(nameof(ScenarioDescription));
+        NotifyDesignData();
         Diagnostics.Clear(); foreach (var diagnostic in snapshot.Diagnostics.Distinct()) Diagnostics.Add(diagnostic);
         foreach (var warning in Scenarios.Warnings) Diagnostics.Add(new(warning, "Warning"));
         RebuildTree();
@@ -290,6 +290,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         if (!value) LayoutDetails.Clear("Preview unavailable. Refresh to inspect current layout.");
         if (!value) ClearAppearance("Preview unavailable. Refresh to inspect appearance.");
         RefreshBindingSourceState();
+        NotifyDesignData();
     }
     partial void OnSelectedNodeChanging(DesignerNode? oldValue, DesignerNode? newValue)
     {

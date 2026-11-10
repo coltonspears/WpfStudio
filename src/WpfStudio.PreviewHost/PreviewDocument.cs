@@ -51,6 +51,7 @@ internal sealed partial class PreviewDocument
                 if (attribute.Name == Xaml + "Class" || attribute.Name == Xaml + "ClassModifier" ||
                     attribute.Name == Xaml + "FieldModifier" || attribute.Name == Xaml + "Subclass")
                 {
+                    if (element == root && attribute.Name == Xaml + "Class") result.ClassName = attribute.Value.Trim();
                     result.AddSuppression(attribute, $"{attribute.Name.LocalName} is omitted from the preview; code-behind is not executed.");
                     attribute.Remove();
                 }
@@ -97,7 +98,7 @@ internal sealed partial class PreviewDocument
             }
         }
 
-        result.ApplyDesignTimeValues(root, request, projectAssembly, sourceNamespace);
+        result.ApplyDesignTimeValues(root, request, projectAssembly, sourceNamespace, sourcePrefix);
 
         // Windows retain their real type and use the engine's hidden Window
         // surface, preserving Window ancestor bindings and attached behaviors.
@@ -121,33 +122,36 @@ internal sealed partial class PreviewDocument
         // EventSetter has no meaning without its handler and otherwise fails load.
         foreach (var eventSetter in root.Descendants(Presentation + "EventSetter").Where(e => e.Attribute("Handler") is null).ToArray()) eventSetter.Remove();
 
-        if (projectAssembly is not null)
-        {
-            // An XML name stores its expanded namespace URI independently of the xmlns
-            // attribute. Update both together; changing only the declaration leaves custom
-            // element/property names in the old URI and can produce conflicting prefixes.
-            var namespaces = root.DescendantsAndSelf().Attributes()
-                .Where(a => a.IsNamespaceDeclaration && a.Value.StartsWith("clr-namespace:", StringComparison.Ordinal) && !a.Value.Contains(";assembly=", StringComparison.Ordinal))
-                .Select(a => a.Value).Distinct(StringComparer.Ordinal)
-                .ToDictionary(uri => uri, uri => XNamespace.Get(uri + ";assembly=" + projectAssembly.GetName().Name), StringComparer.Ordinal);
-            foreach (var element in root.DescendantsAndSelf())
-            {
-                if (namespaces.TryGetValue(element.Name.NamespaceName, out var elementNamespace))
-                    element.Name = elementNamespace + element.Name.LocalName;
-                var attributes = element.Attributes().ToArray();
-                if (!attributes.Any(a => a.IsNamespaceDeclaration ? namespaces.ContainsKey(a.Value) : namespaces.ContainsKey(a.Name.NamespaceName))) continue;
-                foreach (var attribute in attributes.Where(attribute => attribute.IsNamespaceDeclaration))
-                    if (namespaces.TryGetValue(attribute.Value, out var declaredNamespace)) attribute.Value = declaredNamespace.NamespaceName;
-                // Keep unchanged XAttribute instances: their original line information
-                // belongs to authored bindings even when an xmlns value is normalized.
-                if (attributes.Any(attribute => !attribute.IsNamespaceDeclaration && namespaces.ContainsKey(attribute.Name.NamespaceName)))
-                    element.ReplaceAttributes(attributes.Select(attribute => !attribute.IsNamespaceDeclaration && namespaces.TryGetValue(attribute.Name.NamespaceName, out var memberNamespace)
-                        ? CopySourceAnnotations(attribute, new XAttribute(memberNamespace + attribute.Name.LocalName, attribute.Value)) : attribute));
-            }
-        }
+        if (projectAssembly is not null) QualifyProjectNamespaces(root, projectAssembly);
         result.Markup = document.ToString(SaveOptions.DisableFormatting);
         result._sourceDocument = document;
         return result;
+    }
+
+    /// <summary>Names the project assembly in every <c>clr-namespace</c> mapping that leaves it out, as the XAML compiler does for a project's own markup. Loose XAML has no assembly of its own to default to.</summary>
+    private static void QualifyProjectNamespaces(XElement root, Assembly projectAssembly)
+    {
+        // An XML name stores its expanded namespace URI independently of the xmlns
+        // attribute. Update both together; changing only the declaration leaves custom
+        // element/property names in the old URI and can produce conflicting prefixes.
+        var namespaces = root.DescendantsAndSelf().Attributes()
+            .Where(a => a.IsNamespaceDeclaration && a.Value.StartsWith("clr-namespace:", StringComparison.Ordinal) && !a.Value.Contains(";assembly=", StringComparison.Ordinal))
+            .Select(a => a.Value).Distinct(StringComparer.Ordinal)
+            .ToDictionary(uri => uri, uri => XNamespace.Get(uri + ";assembly=" + projectAssembly.GetName().Name), StringComparer.Ordinal);
+        foreach (var element in root.DescendantsAndSelf())
+        {
+            if (namespaces.TryGetValue(element.Name.NamespaceName, out var elementNamespace))
+                element.Name = elementNamespace + element.Name.LocalName;
+            var attributes = element.Attributes().ToArray();
+            if (!attributes.Any(a => a.IsNamespaceDeclaration ? namespaces.ContainsKey(a.Value) : namespaces.ContainsKey(a.Name.NamespaceName))) continue;
+            foreach (var attribute in attributes.Where(attribute => attribute.IsNamespaceDeclaration))
+                if (namespaces.TryGetValue(attribute.Value, out var declaredNamespace)) attribute.Value = declaredNamespace.NamespaceName;
+            // Keep unchanged XAttribute instances: their original line information
+            // belongs to authored bindings even when an xmlns value is normalized.
+            if (attributes.Any(attribute => !attribute.IsNamespaceDeclaration && namespaces.ContainsKey(attribute.Name.NamespaceName)))
+                element.ReplaceAttributes(attributes.Select(attribute => !attribute.IsNamespaceDeclaration && namespaces.TryGetValue(attribute.Name.NamespaceName, out var memberNamespace)
+                    ? CopySourceAnnotations(attribute, new XAttribute(memberNamespace + attribute.Name.LocalName, attribute.Value)) : attribute));
+        }
     }
 
     private static XAttribute CopySourceAnnotations(XAttribute source, XAttribute replacement)
@@ -205,25 +209,28 @@ internal sealed partial class PreviewDocument
             Math.Max(1, info.LinePosition - 1), element.Name.LocalName);
     }
 
-    private static Type? ResolveType(XName name, Assembly? projectAssembly)
+    private static Type? ResolveType(XName name, Assembly? projectAssembly) => ResolveType(name.NamespaceName, name.LocalName, projectAssembly);
+
+    /// <summary>Takes the names apart from an <see cref="XName"/>, so a type named in an attribute value, such as a nested <c>Outer+Inner</c>, resolves too.</summary>
+    private static Type? ResolveType(string namespaceName, string localName, Assembly? projectAssembly)
     {
-        if (name.Namespace == Presentation)
+        if (namespaceName == Presentation.NamespaceName)
         {
             foreach (var assembly in new[] { typeof(FrameworkElement).Assembly, typeof(System.Windows.Media.Brush).Assembly, typeof(DependencyObject).Assembly })
                 foreach (string prefix in new[] { "System.Windows.", "System.Windows.Controls.", "System.Windows.Controls.Primitives.", "System.Windows.Documents.", "System.Windows.Shapes.", "System.Windows.Media." })
-                    if (assembly.GetType(prefix + name.LocalName) is { } type) return type;
+                    if (assembly.GetType(prefix + localName) is { } type) return type;
         }
-        else if (name.NamespaceName.StartsWith("clr-namespace:", StringComparison.Ordinal))
+        else if (namespaceName.StartsWith("clr-namespace:", StringComparison.Ordinal))
         {
-            string[] parts = name.NamespaceName[14..].Split(';');
+            string[] parts = namespaceName[14..].Split(';');
             string? assemblyName = parts.FirstOrDefault(p => p.StartsWith("assembly=", StringComparison.Ordinal))?[9..];
             Assembly? assembly = assemblyName is null ? projectAssembly : Assembly.Load(new AssemblyName(assemblyName));
-            return assembly?.GetType(parts[0] + "." + name.LocalName);
+            return assembly?.GetType(parts[0] + "." + localName);
         }
-        else if (!name.LocalName.Contains('.'))
+        else if (!localName.Contains('.'))
         {
             // XmlnsDefinition libraries are discovered before preprocessing.
-            return new System.Xaml.XamlSchemaContext().GetXamlType(new System.Xaml.Schema.XamlTypeName(name.NamespaceName, name.LocalName))?.UnderlyingType;
+            return new System.Xaml.XamlSchemaContext().GetXamlType(new System.Xaml.Schema.XamlTypeName(namespaceName, localName))?.UnderlyingType;
         }
         return null;
     }

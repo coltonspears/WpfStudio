@@ -22,6 +22,8 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Placeholder pictures for sample data, reached by pack URI so a string or Uri member converts to an image with no file on disk. -->
+    <Resource Include="DesignData/*.png" />
     <Compile Include="../Shared/PreviewDependencyCatalog.cs" Link="PreviewDependencyCatalog.cs" />
     <Compile Include="../Shared/XamlNamespaceIndex.cs" Link="XamlNamespaceIndex.cs" />
     <Compile Include="../Shared/XamlNamespaceLibrary.cs" Link="XamlNamespaceLibrary.cs" />

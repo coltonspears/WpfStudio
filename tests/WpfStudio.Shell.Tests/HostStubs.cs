@@ -26,6 +26,7 @@ internal sealed class DesignerHostStub : IDesignerSourceHost
 {
     public Func<XamlPropertyEditResult, Task<bool>>? PropertyEdit { get; set; }
     public Func<DesignerLayoutSourceEdit, Task<bool>>? LayoutEdit { get; set; }
+    public Func<XamlPropertyEditResult, Func<bool>, Task<bool>>? DesignDataEdit { get; set; }
     public Func<PreviewBindingSourceNavigation, CancellationToken, Task<string>>? BindingSource { get; set; }
     public Action<SourceLocation>? Revealed { get; set; }
     public void RevealSelection(SourceLocation source) => Revealed?.Invoke(source);
@@ -33,6 +34,8 @@ internal sealed class DesignerHostStub : IDesignerSourceHost
         (PropertyEdit ?? throw new InvalidOperationException("Unexpected property edit."))(proposal);
     public Task<bool> ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit) =>
         (LayoutEdit ?? throw new InvalidOperationException("Unexpected layout edit."))(edit);
+    public Task<bool> ReviewDesignDataEditAsync(XamlPropertyEditResult proposal, Func<bool> isCurrent) =>
+        (DesignDataEdit ?? throw new InvalidOperationException("Unexpected design data edit."))(proposal, isCurrent);
     public Task<string> NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken) =>
         (BindingSource ?? throw new InvalidOperationException("Unexpected binding source request."))(navigation, cancellationToken);
 }

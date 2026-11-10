@@ -13,6 +13,8 @@ public interface IDesignerSourceHost
     Task<bool> ReviewPropertyEditAsync(XamlPropertyEditResult proposal);
     /// <summary>Reviews and applies a layout gesture; false when the review was cancelled.</summary>
     Task<bool> ReviewLayoutEditAsync(DesignerLayoutSourceEdit edit);
+    /// <summary>Reviews and applies the declaration of the view's design-time DataContext; false when the review was cancelled.</summary>
+    Task<bool> ReviewDesignDataEditAsync(XamlPropertyEditResult proposal, Func<bool> isCurrent);
     /// <summary>Opens a verified binding declaration and returns the status to show.</summary>
     Task<string> NavigateBindingSourceAsync(PreviewBindingSourceNavigation navigation, CancellationToken cancellationToken);
     /// <summary>The user chose this element in the designer: show its markup in the editor.</summary>
