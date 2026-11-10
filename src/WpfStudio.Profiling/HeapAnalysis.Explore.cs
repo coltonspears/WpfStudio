@@ -99,7 +99,18 @@ public sealed partial class HeapAnalysis
                 return new MemoryDominatorNode(type.Key, type.Name, members.Length, retained, shallow, members.Length, null, vias.Length == 1 ? vias[0] : "several owners");
             }).OrderByDescending(n => n.RetainedBytes).ThenByDescending(n => n.ShallowBytes).ToList();
         }
-        else nodes = scoped.Select(c => Single(c, ParentFor(c, query.ParentId))).ToList();
+        else
+        {
+            // Only the rows that are shown are described: expanding "150,000 × String" would otherwise build 150,000 rows,
+            // each with its address text and owner label, to return the first few hundred. The rest is summed from the ids.
+            var ids = scoped as int[] ?? scoped.ToArray();
+            token.ThrowIfCancellationRequested();
+            var listed = new MemoryDominatorNode[Math.Min(take, ids.Length)];
+            for (var i = 0; i < listed.Length; i++) listed[i] = Single(ids[i], ParentFor(ids[i], query.ParentId));
+            long remaining = 0; for (var i = listed.Length; i < ids.Length; i++) remaining += RetainedBytes[ids[i]];
+            return new(query.ParentId, query.TypeKey, ids.Length, query.ParentId is int owner ? RetainedBytes[owner] : total, listed,
+                ids.Length - listed.Length, remaining);
+        }
         token.ThrowIfCancellationRequested();
         var shown = nodes.Take(take).ToArray(); var rest = nodes.Skip(take).ToArray();
         return new(query.ParentId, query.TypeKey, nodes.Count, query.ParentId is int p ? RetainedBytes[p] : total, shown,
@@ -117,7 +128,10 @@ public sealed partial class HeapAnalysis
     private int? ParentFor(int id, int? parent) =>
         parent is null && ImmediateDominators[id] >= 0 && _staticsHolder[ImmediateDominators[id]] ? ImmediateDominators[id] : parent;
 
-    private int[] TopLevelDominated()
+    // The analysis never changes, and every top-level dominator, group and retention request asks for this list. Callers only read it.
+    private int[]? _topLevelDominated;
+    private int[] TopLevelDominated() => _topLevelDominated ??= FindTopLevelDominated();
+    private int[] FindTopLevelDominated()
     {
         var result = new List<int>();
         foreach (var child in DominatedBy(-1))
@@ -352,6 +366,8 @@ public sealed partial class HeapAnalysis
                 }
                 if (via.ContainsKey(edge.From)) continue;
                 via[edge.From] = edgeId; queue.Enqueue(edge.From);
+                // Checked here too: one object shared by tens of thousands of referrers would add them all before the loop above looks again.
+                if (via.Count >= 4_000) break;
             }
         }
         token.ThrowIfCancellationRequested();
