@@ -121,9 +121,14 @@ public sealed class FrameworkEngineServer : MarshalByRefObject
         }
         catch (TargetInvocationException exception) { failure = exception.GetBaseException(); }
         catch (Exception exception) { failure = exception; }
-        if (failure is OperationCanceledException) completion.Cancel();
-        else if (failure is not null) completion.Fail(failure.Message);
-        else completion.Succeed(result!);
+        try
+        {
+            if (failure is OperationCanceledException) completion.Cancel();
+            else if (failure is not null) completion.Fail(failure.Message);
+            else completion.Succeed(result!);
+        }
+        // An object with no lease stays registered with remoting, and so alive, until it is disconnected or its domain unloads. One per call would otherwise accumulate.
+        finally { System.Runtime.Remoting.RemotingServices.Disconnect(cancellation); }
     }
 
     /// <summary>Ends the WPF thread. The caller bounds this, because a control can block its dispatcher.</summary>

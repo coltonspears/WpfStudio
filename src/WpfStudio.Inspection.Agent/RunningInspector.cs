@@ -101,6 +101,9 @@ internal sealed partial class RunningInspector(BindingTraceBuffer traces, Wpf.Di
             var (target, parent) = stack.Pop();
             if (IsInspectionAdornment(target)) continue;
             if (!visited.Add(target)) continue;
+            // A frozen Freezable used as content, such as a shared brush or geometry, belongs to no dispatcher. CheckAccess passes for it,
+            // but every later read of the node goes through its dispatcher, so listing it would fail the whole window's tree.
+            if (target.Dispatcher is null) continue;
             // Cross-dispatcher objects can only appear as external references.
             if (!target.CheckAccess()) { omitted = true; continue; }
             string id = GetId(target);
