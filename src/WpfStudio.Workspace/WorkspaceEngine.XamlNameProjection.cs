@@ -81,7 +81,7 @@ public sealed partial class WorkspaceEngine
             _pages.Authored = candidate;
             CurrentSolution = result.Solution;
             _pages.Invalidate(); // A build still running started from older sources.
-            _pages.Published(result);
+            _pages.Published(result, candidate);
             foreach (var page in result.Pages)
                 if (page.Status is not null) _pages.NameStatuses[page.Input.Path] = page.Status;
             SemanticsChanged();
