@@ -138,6 +138,62 @@ public sealed class XamlDesignDataContextTests
         Assert.Empty(Analyze(Document($"<Grid design:DataContext='{{design:DesignInstance {options}}}'><TextBlock Text='{{Binding RuntimeOnly}}'/></Grid>")));
     }
 
+    [Fact]
+    public void StaticMemberDesignContextDrivesDiagnosticsCompletionAndNavigation()
+    {
+        string text = Document("<Grid design:DataContext='{lang:Static vm:DesignData.Sample}'><TextBlock Text='{Binding Name}'/><TextBlock Text='{Binding Nmae}'/></Grid><TextBlock Text='{Binding Title}'/>");
+        var diagnostic = Assert.Single(Analyze(text));
+        Assert.Equal("Nmae", text.Substring(diagnostic.Start, diagnostic.Length));
+        Assert.Contains("Customer", diagnostic.Message);
+        var completion = Service.Complete(text, text.IndexOf("Name}", StringComparison.Ordinal) + 2, 1, Compilation.Value);
+        Assert.NotNull(completion);
+        Assert.Contains(completion.Items, item => item.DisplayText == "Name");
+        Assert.DoesNotContain(completion.Items, item => item.DisplayText == "Title");
+        var location = Assert.Single(Service.GetDefinition("View.xaml", text, text.IndexOf("Name}", StringComparison.Ordinal) + 1, Compilation.Value));
+        Assert.Equal("Models.cs", location.Path);
+        // A field and the Member= form name the same thing.
+        Assert.Single(Analyze(text.Replace("vm:DesignData.Sample", "Member=vm:DesignData.SampleField", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void StaticResourceDesignContextUsesTheResourcesDeclaredType()
+    {
+        string text = Document("<Window.Resources><vm:Customer lang:Key='Sample'/></Window.Resources><Grid design:DataContext='{StaticResource Sample}'><TextBlock Text='{Binding Name}'/><TextBlock Text='{Binding Nmae}'/></Grid>");
+        var diagnostic = Assert.Single(Analyze(text));
+        Assert.Equal("Nmae", text.Substring(diagnostic.Start, diagnostic.Length));
+        Assert.Contains("Customer", diagnostic.Message);
+    }
+
+    [Fact]
+    public void BindingDesignContextFollowsTheContextEnteringTheElement()
+    {
+        string text = Document("<Grid design:DataContext='{Binding Selected}'><TextBlock Text='{Binding Name}'/><TextBlock Text='{Binding Nmae}'/><TextBlock Text='{Binding Title}'/></Grid>");
+        var diagnostics = Analyze(text);
+        Assert.Equal(["Nmae", "Title"], diagnostics.Select(diagnostic => text.Substring(diagnostic.Start, diagnostic.Length)).Order());
+        Assert.All(diagnostics, diagnostic => Assert.Contains("Customer", diagnostic.Message));
+    }
+
+    [Theory]
+    [InlineData("{lang:Static vm:DesignData.Opaque}")]
+    [InlineData("{lang:Static vm:DesignData.Missing}")]
+    [InlineData("{lang:Static vm:Missing.Sample}")]
+    [InlineData("{lang:Static vm:DesignData.Instance}")]
+    [InlineData("{lang:Static Sample}")]
+    [InlineData("{lang:Static vm:DesignData.Sample, Extra=1}")]
+    [InlineData("{design:DesignData Source=Sample.xaml}")]
+    [InlineData("{design:SampleData}")]
+    [InlineData("{Binding Selected, Converter={StaticResource C}}")]
+    [InlineData("{Binding NoSuchMember}")]
+    [InlineData("{StaticResource NoSuchResource}")]
+    public void DesignContextsTheEditorCannotTypeAreUnknownBoundaries(string value)
+    {
+        string text = Document($"<Grid design:DataContext='{value}'><TextBlock Text='{{Binding RuntimeOnly}}'/></Grid>");
+        Assert.Empty(Analyze(text));
+        var completion = Service.Complete(text, text.IndexOf("RuntimeOnly}", StringComparison.Ordinal) + 11, 1, Compilation.Value);
+        Assert.NotNull(completion);
+        Assert.Empty(completion.Items);
+    }
+
     private static CSharpCompilation CreateCompilation()
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path));
@@ -155,9 +211,16 @@ public sealed class XamlDesignDataContextTests
                 public class ItemsControl : FrameworkElement { public System.Collections.IEnumerable ItemsSource { get; set; } }
             }
             namespace Demo {
-                public class Parent { public string Title { get; set; } }
+                public class Parent { public string Title { get; set; } public Customer Selected { get; set; } }
                 public class Other { public string OtherName { get; set; } }
                 public class Customer { public string Name { get; set; } }
+                public class DesignData
+                {
+                    public static Customer Sample { get; } = new();
+                    public static readonly Customer SampleField = new();
+                    public static object Opaque { get; } = new Customer();
+                    public Customer Instance { get; } = new();
+                }
             }
             """, path: "Models.cs");
         return CSharpCompilation.Create("DesignDataFixture", [source], references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
