@@ -543,19 +543,31 @@ A second round on the same day took the findings left open above. It was checked
 | Shell | Quick Open scores cached file names | Built only |
 | Build | Test fixtures are left out of the analyzers on Linux and macOS (PR #44), so the solution builds as a whole there | Solution build |
 
+### Fixed in a third round
+
+After PR #46, checked the same way: Workspace (728 passing) fails only the tests it fails on an untouched checkout, and the whole solution builds; the app-side changes are built only.
+
+| Area | What | Checked by |
+|------|------|-----------|
+| Git | A file's committed text is read as the editor reads the file (found by the review of PR #46): read as UTF-8 regardless, a code-page file's unchanged lines were marked as changed and reverting one put a replacement character into the document | Built only |
+| XAML | An edit that changes no declaration carries the page projection over instead of rebuilding it for every page of every project. A field added or renamed, another class or base, or a page that stops or starts being well formed is still a full build | Workspace tests, each compared with a full build |
+| XAML | A resource lookup reads each dictionary's entries once per operation, so a view with many `{StaticResource}` bindings no longer runs the work budget out | Workspace tests |
+| Language worker | A C# edit is stated as one change to the previous text, so the compiler parses around it instead of parsing the whole file three times | Workspace tests |
+| Language worker | A file is compiler output only when its `obj` folder is a build's: a workspace under a folder named `obj`, or a source folder named `Obj`, keeps its language services | Workspace tests |
+| Profiler | Expanding a hub selects the neighbours shown instead of sorting all of them; the graph draws only the cards in view | Profiling tests; built only |
+| Diff | The gutter reads its font once per render and shares its brushes across lines | Built only |
+| Shell | The source watcher finds nested directories by walking up, and builds each root's prefix once | Built only |
+
 ### Open
 
-Found and traced, but still left: each needs a design choice, a larger change, or a run on Windows that these passes could not make.
+Found and traced, but still left: each needs a design choice or a run on Windows that these passes could not make.
 
 | Area | Finding |
 |------|---------|
-| XAML | Every XAML buffer sync rebuilds the page projection of all pages of all projects; needs an incremental path for edits that change no field or base type. This is the largest remaining cost of typing in XAML |
-| XAML | Resource lookups have no per-container index and can exhaust the 65,536 work budget on a view with many `{StaticResource}` bindings; one analysis parses the same text four times; a diagnostic's line is counted from the start of the text each time |
-| Language worker | "Generated" is decided by an `/obj/` substring anywhere in the path, so a workspace under `D:\obj\` or a source folder named `Obj` loses language services. The fix needs each project's evaluated intermediate directory and touches seventeen call sites |
-| Language worker | Each C# sync parses the file three times, where one change range against the previous text would make all three incremental; the generated-source folder under `%TEMP%` is never pruned |
+| XAML | One analysis parses the same text four times, once per service; a diagnostic's line is counted from the start of the text each time. Both are small next to what was fixed |
+| Language worker | The generated-source folder under `%TEMP%` is never pruned. Pruning by age can delete a file under an open tab, so it wants a rule for what is still in use |
 | Problems | Each editor whose diagnostics change still rebuilds the shell's whole list; coalescing the rebuild needs the Shell tests to confirm the ordering they rely on |
-| Diff | Split view cannot scroll horizontally past the narrower side's content: the narrower editor clamps the offset and the clamp is mirrored back. A fix has to tell a scroll from a clamp, and needs the window to try it in. The gutter and background allocate text, typefaces and brushes per line per frame |
+| Diff | Split view cannot scroll horizontally past the narrower side's content: the narrower editor clamps the offset and the clamp is mirrored back. A fix has to tell a scroll from a clamp, and needs the window to try it in. The background renderer still makes its brushes per render |
 | Preview | Every snapshot still probes every dependency property of every node for bindings, with no budget; the output folder is listed and `deps.json` parsed before every render |
-| Profiler UI | Clicks during a capture load are dropped; a type beyond the 5,000 rows listed can only be reached by sorting or filtering; the graph surface redraws every node on each pan or hover frame, and the treemap every cell on each hover |
-| Profiler engine | `Neighbors` sorts every neighbour of a hub to return 64 |
-| Shell | The source watcher allocates per root on each event and is built on the UI thread |
+| Profiler UI | Clicks during a capture load are dropped; a type beyond the 5,000 rows listed can only be reached by sorting or filtering; the treemap redraws every cell on each hover |
+| Shell | The source watcher is still built on the UI thread |
