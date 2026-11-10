@@ -12,6 +12,12 @@ internal sealed record PreviewLoad(FrameworkElement Root, PreviewDocument? Docum
 /// <summary>Creates the root a render shows, from the project's build or from the XAML buffer. Hosting it is the scene's job.</summary>
 internal sealed class PreviewXamlLoader(PreviewAssemblyResolver assemblies, PreviewDiagnosticLog log)
 {
+    /// <summary>Whether the last source load ran markup that came from design-time declarations, which a failed render can then be retried without.</summary>
+    public bool UsedDesignMarkup { get; private set; }
+
+    /// <summary>Starts a render with no design markup on record, so a failure before any source is read is not put down to it.</summary>
+    public void BeginRender() => UsedDesignMarkup = false;
+
     public PreviewLoad Load(PreviewRequest request, Assembly? assembly, PreviewScenarioActivation? activation, CancellationToken cancellationToken) =>
         request.Mode == PreviewMode.Compiled ? LoadCompiled(request, assembly, activation) : LoadSource(request, assembly, activation, cancellationToken);
 
@@ -36,6 +42,7 @@ internal sealed class PreviewXamlLoader(PreviewAssemblyResolver assemblies, Prev
         }
         log.AddRange(assemblies.PrepareXamlNamespaces(request.Text));
         var document = PreviewDocument.Parse(request, assembly);
+        UsedDesignMarkup = document.UsesDesignMarkup;
         log.AddRange(document.Diagnostics);
         // The secure source parse retains the original base URI and XML
         // positions, including attributes moved by preview transforms.

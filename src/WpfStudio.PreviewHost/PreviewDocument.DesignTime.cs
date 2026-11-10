@@ -14,7 +14,11 @@ internal sealed partial class PreviewDocument
     private static readonly XNamespace Design = "http://schemas.microsoft.com/expression/blend/2008";
     private readonly Dictionary<string, HashSet<DependencyProperty>> _designProperties = new(StringComparer.Ordinal);
     private sealed record DesignMember(DependencyProperty Property, XName AttributeName, XName ElementName);
-    private sealed record DesignValue(XObject Source, DesignMember Member, string? Literal, XElement? Element);
+    /// <param name="Data">The design-time data the value stands for, recorded and reported once the value is applied.</param>
+    private sealed record DesignValue(XObject Source, DesignMember Member, string? Literal, XElement? Element, PreviewDesignData? Data = null);
+    // Bookkeeping the Visual Studio and Blend designers keep on elements. None of it changes what is drawn.
+    private static readonly HashSet<string> DesignerBookkeeping = new(StringComparer.Ordinal)
+        { "LayoutOverrides", "IsLocked", "IsDataSource", "LayoutRounding", "IsOptimized", "UseSampleData", "IsStaticText", "DataContextSource" };
 
     public bool IsDesignTimeProperty(DependencyObject target, DependencyProperty property)
     {
@@ -31,10 +35,13 @@ internal sealed partial class PreviewDocument
         return false;
     }
 
-    private void ApplyDesignTimeValues(XElement root, PreviewRequest request, Assembly? assembly, XNamespace sourceNamespace)
+    private void ApplyDesignTimeValues(XElement root, PreviewRequest request, Assembly? assembly, XNamespace sourceNamespace, string sourcePrefix)
     {
         int count = 0;
         bool budgetReported = false;
+        // Decided before anything is rewritten: a declaration that fails is still the author's choice, and no guess replaces it.
+        bool rootContextDeclared = root.Attributes().Any(attribute => attribute.Name.Namespace == Design && attribute.Name.LocalName == "DataContext")
+            || root.Elements().Any(child => child.Name.Namespace == Design && child.Name.LocalName.EndsWith(".DataContext", StringComparison.Ordinal));
         foreach (var element in root.DescendantsAndSelf().ToArray())
         {
             if (element != root && element.Document is null) continue;
@@ -54,7 +61,7 @@ internal sealed partial class PreviewDocument
                 foreach (var child in propertyElements) child.Remove();
                 continue;
             }
-            Type? type = ResolveType(element.Name, assembly);
+            Type? type = ResolveType(element.Name, assembly) ?? ResolveFrameworkType(element.Name);
             var values = new List<DesignValue>();
             foreach (var source in attributes.Cast<XObject>().Concat(propertyElements))
             {
@@ -66,6 +73,25 @@ internal sealed partial class PreviewDocument
                 }
                 string name = source is XAttribute attribute ? attribute.Name.LocalName : ((XElement)source).Name.LocalName;
                 string? literal = (source as XAttribute)?.Value;
+                if (literal is not null)
+                {
+                    if (DesignerBookkeeping.Contains(name)) continue;
+                    // d:DataContext on a template or style describes the data for the editor. Only an element has a DataContext to set.
+                    if (name == "DataContext" && type is not null && !typeof(FrameworkElement).IsAssignableFrom(type) && !typeof(FrameworkContentElement).IsAssignableFrom(type)) continue;
+                    if (name == "IsHidden")
+                    {
+                        // The designers' eye toggle: hidden on the design surface only.
+                        if (!bool.TryParse(literal, out bool hidden) || !hidden || attributes.Any(other => other.Name.LocalName == "Visibility")) continue;
+                        name = "Visibility"; literal = "Hidden";
+                    }
+                    else if (name == "IsEffectDisabled")
+                    {
+                        if (!bool.TryParse(literal, out bool disabled) || !disabled || element.GetPrefixOfNamespace(Xaml) is not { } language) continue;
+                        name = "Effect"; literal = "{" + language + ":Null}";
+                    }
+                    // The data sources window writes d:DesignSource on a CollectionViewSource for its design-time list.
+                    else if (name == "DesignSource" && type is not null && typeof(System.Windows.Data.CollectionViewSource).IsAssignableFrom(type)) name = "Source";
+                }
                 bool sizeHint = name is "DesignWidth" or "DesignHeight";
                 if (sizeHint)
                 {
@@ -83,13 +109,34 @@ internal sealed partial class PreviewDocument
                     DesignDiagnostic(source, $"Design-time member '{name}' is not a supported writable dependency property.");
                     continue;
                 }
-                if (literal is not null)
+                PreviewDesignData? data = null;
+                if (literal is not null && literal.TrimStart().StartsWith('{') && !literal.TrimStart().StartsWith("{}", StringComparison.Ordinal))
                 {
-                    if (literal.TrimStart().StartsWith('{') && !literal.StartsWith("{}", StringComparison.Ordinal))
+                    // The loader reads an attribute as an extension only when the brace comes first.
+                    literal = literal.Trim();
+                    if (DesignMarkup.Parse(literal) is not { } markup)
                     {
-                        DesignDiagnostic(source, $"Design-time markup for '{name}' is unsupported (including DesignInstance, CreateList, DesignData and binding expressions); the authored runtime value is retained.");
+                        DesignDiagnostic(source, $"Design-time markup for '{name}' is not a well-formed markup extension; the authored runtime value is retained.");
                         continue;
                     }
+                    if (NamespaceOf(element, markup.Prefix) == Design)
+                    {
+                        // A data-shape declaration inside a template describes the items for the editor. The items
+                        // themselves come from the list or the templated control, and must not be replaced by one sample.
+                        if (member.Property == FrameworkElement.DataContextProperty && element.Ancestors().Any(ancestor => IsTemplate(ancestor, assembly))) continue;
+                        if (ResolveDesignData(element, source, member, markup, assembly, request, sourcePrefix) is not { } resolved) continue;
+                        (literal, data) = resolved;
+                    }
+                    else if (ContainsDesignExtension(element, literal))
+                    {
+                        DesignDiagnostic(source, $"Design-time markup for '{name}' nests a design extension inside another extension, which is not supported; the authored runtime value is retained.");
+                        continue;
+                    }
+                    // Any other extension (Binding, StaticResource, x:Static, a project's own) is evaluated by the loader, as for a runtime attribute.
+                    UsesDesignMarkup = true;
+                }
+                else if (literal is not null)
+                {
                     string scalar = literal.StartsWith("{}", StringComparison.Ordinal) ? literal[2..] : literal;
                     if (!ScalarPropertyValues.TryConvert(member.Property.PropertyType, scalar, false, out var value, out var error) || !member.Property.IsValidValue(value))
                     {
@@ -106,7 +153,7 @@ internal sealed partial class PreviewDocument
                         continue;
                     }
                 }
-                values.Add(new(source, member, literal, source as XElement));
+                values.Add(new(source, member, literal, source as XElement, data));
             }
             foreach (var group in values.GroupBy(value => value.Member.Property))
             {
@@ -127,11 +174,38 @@ internal sealed partial class PreviewDocument
                     if (!_designProperties.TryGetValue(identity.Value, out var properties)) _designProperties[identity.Value] = properties = [];
                     properties.Add(value.Member.Property);
                 }
-                DesignDiagnostic(value.Source, $"Design-time '{value.Member.Property.Name}' overrides the authored runtime value in this preview; any replaced binding is not evaluated here.", "Information");
+                if (value.Data is not null) DesignData.Add(value.Data);
+                DesignDiagnostic(value.Source, value.Data?.Summary ?? $"Design-time '{value.Member.Property.Name}' overrides the authored runtime value in this preview; any replaced binding is not evaluated here.", "Information");
             }
             foreach (var attribute in attributes) attribute.Remove();
             foreach (var child in propertyElements.Where(child => child.Name.Namespace == Design)) child.Remove();
         }
+        if (!rootContextDeclared) InferDataContext(root, request, assembly, sourceNamespace, sourcePrefix);
+    }
+
+    /// <summary>
+    /// A presentation type outside the namespaces <see cref="ResolveType(XName, Assembly?)"/> knows by heart, such as
+    /// CollectionViewSource in System.Windows.Data. The schema lookup is slower, so it is asked only for an element
+    /// that carries design declarations.
+    /// </summary>
+    private static Type? ResolveFrameworkType(XName name) => name.Namespace == Presentation && !name.LocalName.Contains('.')
+        ? new System.Xaml.XamlSchemaContext().GetXamlType(new System.Xaml.Schema.XamlTypeName(name.NamespaceName, name.LocalName))?.UnderlyingType : null;
+
+    private static XNamespace? NamespaceOf(XElement element, string? prefix) => prefix is null ? element.GetDefaultNamespace() : element.GetNamespaceOfPrefix(prefix);
+
+    private static bool IsTemplate(XElement element, Assembly? assembly) =>
+        !element.Name.LocalName.Contains('.') && ResolveType(element.Name, assembly) is { } type && typeof(FrameworkTemplate).IsAssignableFrom(type);
+
+    /// <summary>Whether an extension somewhere inside <paramref name="markup"/> belongs to the design namespace, which the loader has no types for.</summary>
+    private static bool ContainsDesignExtension(XElement element, string markup)
+    {
+        for (int open = markup.IndexOf('{', 1); open >= 0 && open + 1 < markup.Length; open = markup.IndexOf('{', open + 1))
+        {
+            int end = open + 1;
+            while (end < markup.Length && (char.IsLetterOrDigit(markup[end]) || markup[end] is '_' or '.')) end++;
+            if (end < markup.Length && end > open + 1 && markup[end] == ':' && NamespaceOf(element, markup.Substring(open + 1, end - open - 1)) == Design) return true;
+        }
+        return false;
     }
 
     private static DesignMember? ResolveDesignMember(XElement element, Type type, string name, Assembly? assembly, XNamespace? declaredNamespace = null)

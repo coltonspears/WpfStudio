@@ -90,10 +90,24 @@ entry and WPF resource assembly using public .NET/WPF APIs. This lets absolute
 against the project. This process-wide identity is another reason each compiled
 render requires a fresh host; the project entry point is never invoked.
 
-When a view has no root DataContext and observed binding sources are unavailable,
-the preview status explains how to provide a scenario data factory. Individual
-binding failures remain available; the notice does not hide errors or fabricate
-application data by running startup.
+Design-time data is resolved while the source is read. `PreviewDocument.DesignData`
+turns `d:DesignInstance`, `d:DesignData` and `d:SampleData` into objects and leaves a
+`DesignDataExtension` where each declaration stood, which hands the object to the loader,
+including every time a template that contains it is instantiated. `DesignSampleFactory`
+allocates a declared type without running a constructor and fills the fields behind its
+public properties; `DesignSampleValues` chooses each value from the member's name and
+type; `DesignSampleItem` answers bindings by name where no type is declared. A view that
+declares no DataContext gets sample values from the view model `DesignDataConventions`
+matches to its `x:Class` by name. Any other markup extension in a `d:` attribute is
+evaluated by the loader as it is on the runtime attribute. When a render that ran
+design-time markup fails, `PreviewEngine` renders once more without design-time values
+and reports the first failure as a warning. The snapshot lists what each declaration
+resolved to (`PreviewSnapshot.DesignData`).
+
+When a view still has no root DataContext and observed binding sources are unavailable,
+the preview status explains how to declare `d:DataContext` or provide a scenario data
+factory. Individual binding failures remain available; the notice does not hide errors,
+and application data is never fabricated by running startup.
 
 Property validation converts values without applying setters. Property identities
 include declaring owner type and assembly, and ambiguous display names are
@@ -106,7 +120,7 @@ Explicit named scenarios can invoke public static project view/data factories,
 including developer-supplied DI composition. Every scenario render uses a fresh
 host; data factories replace the root DataContext before layout without writing
 through an existing TwoWay binding. See [preview scenarios](../../docs/xaml-preview-scenarios.md)
-for configuration and design-time value support. Factory discovery never loads
+for configuration and [design-time data](../../docs/xaml-preview-scenarios.md#design-time-data). Factory discovery never loads
 project code into the IDE. The host does not infer project application startup,
 dependency-injection composition or a running application's state.
 It does not promise fidelity for .NET versions before 10. The inspection logic in
