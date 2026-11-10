@@ -114,5 +114,18 @@ public sealed class TextDiffTests
     [InlineData("x\n", 1)]
     [InlineData("x\n\n", 2)]
     [InlineData("x\r\ny", 2)]
+    [InlineData("x\ry", 2)]
+    [InlineData("x\r", 1)]
+    [InlineData("x\r\r\ny\n", 3)]
+    [InlineData("\n", 1)]
     public void SplitLinesIgnoresOneFinalTerminator(string text, int count) => Assert.Equal(count, TextDiff.SplitLines(text).Length);
+
+    [Fact]
+    public void ABareCarriageReturnEndsALineAsItDoesInTheEditor()
+    {
+        Assert.Equal(["one", "two", "", "three"], TextDiff.SplitLines("one\rtwo\r\n\nthree\r"));
+        // The change is on the editor's third line, not the second that counting line feeds alone would give.
+        var change = Assert.Single(WpfStudio.Core.Git.LineChanges.Compute("a\rb\nc\n", "a\rb\nC\n"));
+        Assert.Equal((3, 1), (change.StartLine, change.LineCount));
+    }
 }

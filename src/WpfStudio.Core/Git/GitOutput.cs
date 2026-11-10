@@ -33,11 +33,21 @@ public sealed record GitCommit(string Id, string ShortId, string Author, string 
 
 public sealed record GitRef(string Name, bool IsHead, bool IsTag, bool IsRemote)
 {
+    /// <summary>
+    /// One decoration as <c>git log</c> prints it. History asks for full names (<c>--decorate=full</c>), which say what each is. A short
+    /// name does not: the local branch <c>feature/login</c> and the remote <c>origin/main</c> look alike, so a short name with a slash
+    /// can only be guessed to be remote.
+    /// </summary>
     public static GitRef Parse(string text)
     {
-        if (text.StartsWith("HEAD -> ", StringComparison.Ordinal)) return new(text[8..], true, false, false);
-        if (text.StartsWith("tag: ", StringComparison.Ordinal)) return new(text[5..], false, true, false);
+        if (text.StartsWith("HEAD -> ", StringComparison.Ordinal)) return Parse(text[8..]) with { IsHead = true };
+        if (text.StartsWith("tag: ", StringComparison.Ordinal)) return new(Strip(text[5..], "refs/tags/") ?? text[5..], false, true, false);
+        if (Strip(text, "refs/heads/") is { } local) return new(local, false, false, false);
+        if (Strip(text, "refs/remotes/") is { } remote) return new(remote, false, false, true);
+        if (Strip(text, "refs/tags/") is { } tag) return new(tag, false, true, false);
+        if (text.StartsWith("refs/", StringComparison.Ordinal)) return new(text[5..], false, false, false);
         return new(text, text == "HEAD", false, text.Contains('/'));
+        static string? Strip(string name, string prefix) => name.StartsWith(prefix, StringComparison.Ordinal) ? name[prefix.Length..] : null;
     }
 }
 

@@ -54,6 +54,18 @@ public sealed class GitFeatureTests
         Assert.Empty(GitOutput.ParseHistory(""));
     }
 
+    [Fact]
+    public void FullRefNamesTellALocalBranchWithASlashFromARemoteOne()
+    {
+        var refs = new GitCommit("1", "1", "A", "", "s", "HEAD -> refs/heads/feature/login, tag: refs/tags/v1, refs/heads/fix/crash, refs/remotes/origin/main, refs/stash").RefList;
+
+        Assert.Equal(["feature/login", "v1", "fix/crash", "origin/main", "stash"], refs.Select(reference => reference.Name));
+        Assert.Equal([true, false, false, false, false], refs.Select(reference => reference.IsHead));
+        Assert.Equal([false, true, false, false, false], refs.Select(reference => reference.IsTag));
+        Assert.Equal([false, false, false, true, false], refs.Select(reference => reference.IsRemote));
+        Assert.True(GitRef.Parse("HEAD").IsHead);
+    }
+
     [Theory]
     [InlineData("fatal: Authentication failed for 'https://example.invalid/r.git/'")]
     [InlineData("fatal: could not read Username for 'https://github.com': terminal prompts disabled")]

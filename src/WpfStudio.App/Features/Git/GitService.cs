@@ -47,7 +47,7 @@ public sealed class GitService
         var branchTask = RunAsync(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], cancellationToken, allowFailure: true);
         var branchListTask = RunAsync(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"], cancellationToken);
         var hasHeadTask = HasHeadAsync(root, cancellationToken);
-        var logTask = RunAsync(root, ["log", $"-{Math.Max(1, historyLimit)}", "--no-show-signature", HistoryFormat], cancellationToken, allowFailure: true, readOnly: true);
+        var logTask = RunAsync(root, ["log", $"-{Math.Max(1, historyLimit)}", "--no-show-signature", "--decorate=full", HistoryFormat], cancellationToken, allowFailure: true, readOnly: true);
         var upstreamTask = RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true);
         var remoteNamesTask = GetRemoteNamesAsync(root, cancellationToken);
         var operationTask = GetOperationAsync(root, cancellationToken);
@@ -296,7 +296,7 @@ public sealed class GitService
     /// <summary>Loads older commits for paging through history.</summary>
     public async Task<IReadOnlyList<GitCommit>> LoadHistoryAsync(string root, int skip, int count, CancellationToken cancellationToken = default)
     {
-        var log = await RunAsync(root, ["log", $"--skip={Math.Max(0, skip)}", $"-{Math.Max(1, count)}", "--no-show-signature", HistoryFormat], cancellationToken, readOnly: true);
+        var log = await RunAsync(root, ["log", $"--skip={Math.Max(0, skip)}", $"-{Math.Max(1, count)}", "--no-show-signature", "--decorate=full", HistoryFormat], cancellationToken, readOnly: true);
         return GitOutput.ParseHistory(log.Output);
     }
 

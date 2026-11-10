@@ -246,7 +246,7 @@ public sealed partial class CommitHistoryViewModel(GitService service, IGitOpera
         bool Matches(GitCommit commit) => filter.Length == 0
             || commit.Subject.Contains(filter, StringComparison.CurrentCultureIgnoreCase)
             || commit.Author.Contains(filter, StringComparison.CurrentCultureIgnoreCase)
-            || commit.Refs.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || commit.RefList.Any(reference => reference.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
             || commit.Id.StartsWith(filter, StringComparison.OrdinalIgnoreCase);
         var visible = 0;
         foreach (var commit in History)
