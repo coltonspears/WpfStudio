@@ -51,7 +51,17 @@ public sealed partial class ProcessMemoryTimeline(IProcessMemorySampler sampler,
         try
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-            do SampleMemory(); while (await timer.WaitForNextTickAsync(token));
+            // The first sample is taken at once, so the title names the process as monitoring starts. The loop ends with the
+            // process: it used to go on asking for a process that was gone, for as long as the pane was open.
+            if (!TakeSample()) return;
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                if (host.IsDisposed || Process is not { } process) continue;
+                // Off the UI thread: refreshing a process's counters asks the system about every process, once a second.
+                var sample = await Task.Run(() => sampler.Sample(process.Id, process.StartTimeUtcTicks), token);
+                if (host.IsDisposed || !ReferenceEquals(process, Process)) continue;
+                if (!Apply(sample)) break;
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) when (ex is not OutOfMemoryException) { if (!host.IsDisposed) LiveMemoryText = "Memory sampling stopped: " + ex.Message; }
@@ -63,17 +73,21 @@ public sealed partial class ProcessMemoryTimeline(IProcessMemorySampler sampler,
     }
 
     /// <summary>Takes one process-memory sample for the timeline. Public so tests can drive the timeline without a timer.</summary>
-    public void SampleMemory()
+    public void SampleMemory() => TakeSample();
+
+    private bool TakeSample() => host.IsDisposed || Process is not { } process || Apply(sampler.Sample(process.Id, process.StartTimeUtcTicks));
+
+    /// <summary>Adds a sample to the timeline. False when there is none, which means the process is gone for good.</summary>
+    private bool Apply(ProcessMemorySample? sample)
     {
-        if (host.IsDisposed || Process is not { } process) return;
-        var sample = sampler.Sample(process.Id, process.StartTimeUtcTicks);
-        if (sample is null) { LiveMemoryText = "Process has exited"; return; }
+        if (sample is null) { LiveMemoryText = "Process has exited"; return false; }
         var first = _samples.Count == 0;
         _samples.Add(sample);
         if (_samples.Count > MaxSamples) _samples.RemoveRange(0, _samples.Count - MaxSamples);
         LiveSamples = _samples.ToArray();
         LiveMemoryText = $"Private {MemorySize.Format(sample.PrivateBytes)} · working set {MemorySize.Format(sample.WorkingSetBytes)}";
         if (first) samplesChanged();
+        return true;
     }
 
     internal void Stop() { _monitor?.Cancel(); _monitor?.Dispose(); _monitor = null; }

@@ -21,8 +21,7 @@ public sealed partial class MemoryProfilerViewModel
     [RelayCommand]
     private void ShowRetentionPaths(string? typeKey)
     {
-        if (typeKey is null) return;
-        OpenType(typeKey); TypeDetailTab = 0;
+        if (TryOpenType(typeKey)) TypeDetailTab = 0;
     }
 
     [RelayCommand]

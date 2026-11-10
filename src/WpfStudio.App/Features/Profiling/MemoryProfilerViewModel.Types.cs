@@ -115,6 +115,7 @@ public sealed partial class MemoryProfilerViewModel
         if (_session is not { } session || _disposed || IsBusy) return;
         _query?.Cancel(); _query?.Dispose(); _query = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
         var queryToken = _query.Token; var revision = _revision; var queryRevision = ++_queryRevision;
+        var shown = _objectsShown;
         Browser.ClearObject(); Graph = null;
         try
         {
@@ -127,7 +128,9 @@ public sealed partial class MemoryProfilerViewModel
             ObjectPageDescription = page.Objects.Count == 0 ? "No matching objects in this capture."
                 : $"{_skip + 1:N0}–{_skip + page.Objects.Count:N0} of {page.TotalCount:N0} objects · largest retained first";
             PreviousObjectsCommand.NotifyCanExecuteChanged(); NextObjectsCommand.NotifyCanExecuteChanged();
-            SelectedObject = Objects.FirstOrDefault();
+            // The worker answers one request at a time, so on a large capture this page can arrive seconds after it was asked for.
+            // An object opened from a finding or a chart in that time stays; the first row would otherwise replace it.
+            if (shown == _objectsShown) SelectedObject = Objects.FirstOrDefault();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!_disposed && revision == _revision && queryRevision == _queryRevision) Status = "Object search failed: " + ex.Message; }

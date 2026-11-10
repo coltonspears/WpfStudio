@@ -34,6 +34,7 @@ internal sealed partial class PreviewDocument
         public string Text { get; } = text;
         public int[]? LineStarts { get; set; }
         public Dictionary<(XName Name, Assembly? Assembly), Type> Types { get; } = [];
+        public System.Xaml.XamlSchemaContext? Schema { get; set; }
     }
     [ThreadStatic] private static ParseCache? _parse;
 
@@ -280,7 +281,10 @@ internal sealed partial class PreviewDocument
         else if (!localName.Contains('.'))
         {
             // XmlnsDefinition libraries are discovered before preprocessing.
-            return new System.Xaml.XamlSchemaContext().GetXamlType(new System.Xaml.Schema.XamlTypeName(namespaceName, localName))?.UnderlyingType;
+            // One context for a parse. Each new one reads the XmlnsDefinition attributes of every loaded assembly again, and a view
+            // of a control library names a type from such a namespace on nearly every element. It follows assemblies loaded later.
+            var schema = _parse is { } parse ? parse.Schema ??= new System.Xaml.XamlSchemaContext() : new System.Xaml.XamlSchemaContext();
+            return schema.GetXamlType(new System.Xaml.Schema.XamlTypeName(namespaceName, localName))?.UnderlyingType;
         }
         return null;
     }
