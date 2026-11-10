@@ -178,7 +178,12 @@ public sealed class MemoryGraphSurface : FrameworkElement
         DrawDots(dc, C("CanvasDotBrush", Color.FromRgb(0x24, 0x26, 0x2D)));
         dc.PushTransform(new TranslateTransform(_pan.X, _pan.Y)); dc.PushTransform(new ScaleTransform(Zoom, Zoom));
         DrawEdges(dc);
-        foreach (var node in _layout.Nodes) DrawNode(dc, node);
+        // Only the cards in view, with room for the handles and outlines drawn just outside a card. Every pan, drag and hover frame
+        // draws again, and each card costs several texts and brushes; a graph grown by a few expansions is mostly off screen.
+        var inView = new Rect(World(new Point(0, 0)), World(new Point(ActualWidth, ActualHeight)));
+        inView.Inflate(32, 32);
+        foreach (var node in _layout.Nodes)
+            if (inView.IntersectsWith(node.Bounds)) DrawNode(dc, node);
         dc.Pop(); dc.Pop();
         if (ShowMinimap) DrawMinimap(dc);
         if (IsKeyboardFocusWithin) dc.DrawRectangle(null, ChartPalette.Pen(C("AccentBrush", Colors.SlateBlue), 1), new Rect(0.5, 0.5, Math.Max(0, ActualWidth - 1), Math.Max(0, ActualHeight - 1)));

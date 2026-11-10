@@ -112,13 +112,24 @@ internal sealed class DiffLineNumberMargin(FrameworkElement owner, Func<IReadOnl
     private int _digits = 3;
     public event Action<DiffDisplayLine>? SeparatorClicked;
 
-    private Typeface Typeface => new(owner.GetValue(TextElement.FontFamilyProperty) as FontFamily ?? new FontFamily("Consolas"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
-    private double FontSize => (double)owner.GetValue(TextElement.FontSizeProperty) - 1;
+    // The font is read once for a measure or a render, at the column width both start from, not once for every number and marker
+    // drawn: each read made a typeface and asked for the display's scale, and the margin is drawn again on every scroll step.
+    private Typeface? _typeface;
+    private double _fontSize, _pixelsPerDip;
+    private void ReadFont()
+    {
+        _typeface = new(owner.GetValue(TextElement.FontFamilyProperty) as FontFamily ?? new FontFamily("Consolas"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        _fontSize = (double)owner.GetValue(TextElement.FontSizeProperty) - 1;
+        _pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+    }
 
-    private FormattedText Text(string text, Brush brush) => new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Typeface, FontSize, brush,
-        VisualTreeHelper.GetDpi(this).PixelsPerDip);
+    private FormattedText Text(string text, Brush brush)
+    {
+        if (_typeface is null) ReadFont();
+        return new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface!, _fontSize, brush, _pixelsPerDip);
+    }
 
-    private double ColumnWidth => Text(new string('9', _digits), Brushes.Black).WidthIncludingTrailingWhitespace;
+    private double ColumnWidth { get { ReadFont(); return Text(new string('9', _digits), Brushes.Black).WidthIncludingTrailingWhitespace; } }
 
     protected override Size MeasureOverride(Size availableSize) =>
         new(Gap + ColumnWidth * (columns == DiffNumberColumns.Both ? 2 : 1) + (columns == DiffNumberColumns.Both ? Gap : 0) + MarkerWidth + 6, 0);
@@ -148,6 +159,8 @@ internal sealed class DiffLineNumberMargin(FrameworkElement owner, Func<IReadOnl
         var numbers = DiffPalette.Brush(owner, "GutterTextBrush", Brushes.Gray);
         var removed = DiffPalette.Removed(owner);
         var added = DiffPalette.Added(owner);
+        // Made when first needed, then shared by the lines of this render.
+        Brush? filler = null, removedMarker = null, addedMarker = null;
         double column = ColumnWidth;
         foreach (var visual in view.VisualLines)
         {
@@ -160,7 +173,7 @@ internal sealed class DiffLineNumberMargin(FrameworkElement owner, Func<IReadOnl
                 drawing.DrawRectangle(DiffPalette.Brush(owner, "RaisedBrush", Brushes.DimGray), null, rect);
                 continue;
             }
-            if (line.Kind == DiffLineKind.Filler) { drawing.DrawRectangle(DiffPalette.Filler(owner), null, rect); continue; }
+            if (line.Kind == DiffLineKind.Filler) { drawing.DrawRectangle(filler ??= DiffPalette.Filler(owner), null, rect); continue; }
             if (line.Kind is DiffLineKind.Removed or DiffLineKind.Added)
                 drawing.DrawRectangle(line.Kind == DiffLineKind.Removed ? removed.Line : added.Line, null, rect);
             double x = Gap;
@@ -178,7 +191,8 @@ internal sealed class DiffLineNumberMargin(FrameworkElement owner, Func<IReadOnl
             if (columns != DiffNumberColumns.Old) Number(line.NewLine);
             if (line.Kind is DiffLineKind.Removed or DiffLineKind.Added)
             {
-                var marker = Text(line.Kind == DiffLineKind.Removed ? "−" : "+", DiffPalette.Tint(line.Kind == DiffLineKind.Removed ? removed.Solid : added.Solid, 255));
+                var marker = line.Kind == DiffLineKind.Removed ? Text("−", removedMarker ??= DiffPalette.Tint(removed.Solid, 255))
+                    : Text("+", addedMarker ??= DiffPalette.Tint(added.Solid, 255));
                 drawing.DrawText(marker, new Point(x + 4 + (MarkerWidth - marker.Width) / 2, rect.Top + (rect.Height - marker.Height) / 2));
             }
         }
