@@ -53,7 +53,8 @@ internal sealed class XamlResourceGraph(Compilation compilation, XamlResourceCon
                 {
                     if (current.Attribute("Resources") is not null)
                         return XamlResourceLookup.Unavailable("The local Resources value is not a dictionary object declaration.");
-                    if (current.Children.Any(child => !XamlSchemaService.IgnoredElement(child) && child.LocalName.EndsWith(".Resources", StringComparison.Ordinal)
+                    // The name is tested first: the ignored test walks every ancestor, and this runs for every child of every ancestor of each lookup.
+                    if (current.Children.Any(child => child.LocalName.EndsWith(".Resources", StringComparison.Ordinal) && !XamlSchemaService.IgnoredElement(child)
                         && !IsResourcesProperty(current, child)))
                         return XamlResourceLookup.Unavailable("A local Resources property has an unverified owner or dictionary type.");
                     var containers = current.Children.Where(child => IsResourcesProperty(current, child)).Take(2).ToArray();
@@ -274,7 +275,7 @@ internal sealed class XamlResourceGraph(Compilation compilation, XamlResourceCon
 
     private bool IsResourcesProperty(Element owner, Element property)
     {
-        if (XamlSchemaService.IgnoredElement(property) || !property.LocalName.EndsWith(".Resources", StringComparison.Ordinal)) return false;
+        if (!property.LocalName.EndsWith(".Resources", StringComparison.Ordinal) || XamlSchemaService.IgnoredElement(property)) return false;
         var declaring = _types.Resolve(property, property.Name[..property.Name.LastIndexOf('.')], DeclaringAssembly(property));
         var actual = _types.Resolve(owner, owner.Name, DeclaringAssembly(owner));
         if (declaring is null || actual is null || !SchemaMembers.DerivesFrom(actual, declaring)) return false;

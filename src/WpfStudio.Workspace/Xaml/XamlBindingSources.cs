@@ -291,7 +291,8 @@ public sealed partial class XamlLanguageService
                 if (element.Attribute(Language, "FactoryMethod") is not null || element.Children.Any(child => child.Namespace == Language && child.LocalName == "Arguments"))
                     return BindingSourceInfo.Unknown("The resource value requires factory or constructor-argument evaluation.");
                 var type = ElementType(element);
-                if (type is not null && TypeHierarchy(type).Any(t => t.ToDisplayString() is "System.Windows.Markup.MarkupExtension" or "System.Windows.Data.DataSourceProvider"))
+                // A binding to a CollectionViewSource binds to the view it provides, not to the CollectionViewSource object.
+                if (type is not null && TypeHierarchy(type).Any(t => t.ToDisplayString() is "System.Windows.Markup.MarkupExtension" or "System.Windows.Data.DataSourceProvider" or "System.Windows.Data.CollectionViewSource"))
                     return BindingSourceInfo.Unknown("The resource's runtime-provided value is not statically known.");
                 return new BindingSourceInfo(type, element, reason);
             }

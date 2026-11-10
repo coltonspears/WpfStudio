@@ -306,8 +306,13 @@ public sealed class XamlSchemaService
 
     private static CompletionEntry MemberEntry(string name, SchemaMember member) => Entry(name, SchemaMembers.Describe(member.Symbol), member.IsEvent ? "Event" : "Property");
     private static CompletionEntry Entry(string name, string description, string tag) => new(name, name, name, description, [tag]);
-    private static CompletionResult Result(long version, int start, int length, IEnumerable<CompletionEntry> items) =>
-        new(version, start, length, items.DistinctBy(item => item.DisplayText).OrderBy(item => item.DisplayText, StringComparer.Ordinal).Take(250).ToArray());
+    private static CompletionResult Result(long version, int start, int length, IEnumerable<CompletionEntry> items)
+    {
+        // One more than is sent, to learn whether more matched. Saying so has the editor ask again as the name is typed: without it,
+        // "<" lists the first 250 type names in order and a type further down the alphabet is never offered while the list stays open.
+        var top = items.DistinctBy(item => item.DisplayText).OrderBy(item => item.DisplayText, StringComparer.Ordinal).Take(251).ToArray();
+        return new(version, start, length, top.Length > 250 ? top[..250] : top, top.Length > 250);
+    }
     private static bool NameCharacter(char c) => char.IsLetterOrDigit(c) || c is '_' or ':' or '.' or '-';
     private static int Offset(string text, int line, int column)
     {

@@ -112,8 +112,10 @@ internal sealed class SchemaTypeResolver
             };
             return metadata is null ? null : _compilation.GetTypeByMetadataName(metadata);
         }
-        var candidates = Mappings(uri).Select(mapping => mapping.Assembly.GetTypeByMetadataName(Qualify(mapping.Namespace, name)))
-            .OfType<INamedTypeSymbol>().Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default).Take(2).ToArray();
+        // A facade such as mscorlib on .NET declares the namespace but forwards its types, and a lookup by name does not follow forwarders:
+        // without the second lookup, xmlns:sys="clr-namespace:System;assembly=mscorlib" finds no sys:String.
+        var candidates = Mappings(uri).Select(mapping => { var metadataName = Qualify(mapping.Namespace, name); return mapping.Assembly.GetTypeByMetadataName(metadataName) ?? mapping.Assembly.ResolveForwardedType(metadataName); })
+            .OfType<INamedTypeSymbol>().Where(type => type.TypeKind != TypeKind.Error).Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default).Take(2).ToArray();
         return candidates.Length == 1 ? candidates[0] : null;
     }
 

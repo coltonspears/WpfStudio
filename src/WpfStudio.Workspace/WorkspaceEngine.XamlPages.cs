@@ -152,11 +152,14 @@ public sealed partial class WorkspaceEngine
         lock (_gate)
         {
             if (epoch != _pages.LoadEpoch || _documents.OpenVersion(path) != version || _documents.Text(path) != text) return;
+            // A page closed with the text it was saved with declares what it declared before, as when an unchanged page is opened:
+            // rebuilding the projection of every page for it would only delay the close and whatever waits behind it.
+            bool unchanged = read.Text is not null && read.Text == (text ?? _pages.Texts.GetValueOrDefault(path)) && !_pages.ReadStatuses.ContainsKey(path);
             _documents.Remove(path);
             _pages.Texts[path] = read.Text ?? "";
             if (read.Text is null) _pages.ReadStatuses[path] = read.Status ?? "Saved XAML is unavailable.";
             else _pages.ReadStatuses.Remove(path);
-            _pages.Invalidate();
+            if (!unchanged) _pages.Invalidate();
             SemanticRevision++;
         }
         await EnsurePageProjectionAsync(token).ConfigureAwait(false);

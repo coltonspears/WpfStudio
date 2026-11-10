@@ -140,7 +140,9 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         lock (_bufferGate) buffers = _buffers.Values.ToArray();
         foreach (var buffer in buffers)
         {
-            var synchronized = await Proxy.UpdateDocumentAsync(buffer, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            // Text only. With analysis the worker would compute each buffer's diagnostics here, under the lifecycle lock, for nobody:
+            // the replay does not publish them, and the editors analyze again when the semantic change below is announced.
+            var synchronized = await Proxy.UpdateDocumentAsync(buffer with { Analyze = false }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
             if (synchronized.Accepted && synchronized.Version == buffer.Version) RememberAcceptedDocument(buffer);
         }
         var replayPlans = NameProjectionPlans();
