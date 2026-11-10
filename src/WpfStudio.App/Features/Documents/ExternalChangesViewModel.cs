@@ -113,29 +113,34 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
                 _recheckFiles = false; _recheckFromApp = false;
                 foreach (var doc in _host.Documents.ToArray())
                 {
-                    if (doc.IsReadOnly) continue;
-                    var disk = await _store.ReadDiskAsync(doc.State, lifetime);
-                    var pending = Changes.FirstOrDefault(change => ReferenceEquals(change.Document, doc));
-                    // The disk is back to what the editor last loaded or saved: nothing is left to decide.
-                    if (disk?.Hash == doc.State.DiskHash) { if (pending is not null || doc.State.HasExternalChange) Forget(doc); continue; }
-                    if (disk is { } same && same.Text == doc.State.Content)
+                    // Each file on its own: one that cannot be read, because another program holds it, must not leave the tabs after it unchecked.
+                    try
                     {
-                        // The disk now holds exactly the editor text, e.g. the same edit made elsewhere.
-                        doc.State.MarkSavedSnapshot(same.Text, same.Hash);
-                        if (pending is not null) Changes.Remove(pending);
-                        continue;
+                        if (doc.IsReadOnly) continue;
+                        var disk = await _store.ReadDiskAsync(doc.State, lifetime);
+                        var pending = Changes.FirstOrDefault(change => ReferenceEquals(change.Document, doc));
+                        // The disk is back to what the editor last loaded or saved: nothing is left to decide.
+                        if (disk?.Hash == doc.State.DiskHash) { if (pending is not null || doc.State.HasExternalChange) Forget(doc); continue; }
+                        if (disk is { } same && same.Text == doc.State.Content)
+                        {
+                            // The disk now holds exactly the editor text, e.g. the same edit made elsewhere.
+                            doc.State.MarkSavedSnapshot(same.Text, same.Hash);
+                            if (pending is not null) Changes.Remove(pending);
+                            continue;
+                        }
+                        if (disk is not null && !doc.State.IsDirty && (fromAppOperation || AutoReloadUnchangedFiles))
+                        {
+                            await _store.ReloadAsync(doc.State, lifetime);
+                            reloaded.Add(doc.State.Name);
+                            if (pending is not null) Changes.Remove(pending);
+                            continue;
+                        }
+                        if (pending is null) Changes.Add(pending = new ExternalChange(doc));
+                        var summarized = pending.UpdateAsync(disk?.Text, disk?.Hash);
+                        doc.State.HasExternalChange = true;
+                        await summarized;
                     }
-                    if (disk is not null && !doc.State.IsDirty && (fromAppOperation || AutoReloadUnchangedFiles))
-                    {
-                        await _store.ReloadAsync(doc.State, lifetime);
-                        reloaded.Add(doc.State.Name);
-                        if (pending is not null) Changes.Remove(pending);
-                        continue;
-                    }
-                    if (pending is null) Changes.Add(pending = new ExternalChange(doc));
-                    var summarized = pending.UpdateAsync(disk?.Text, disk?.Hash);
-                    doc.State.HasExternalChange = true;
-                    await summarized;
+                    catch (Exception ex) when (ex is not OperationCanceledException) { _host.AppendOutput($"Checking files changed outside WpfStudio: {doc.State.Name}: {ex.Message}"); }
                 }
             } while (_recheckFiles);
         }

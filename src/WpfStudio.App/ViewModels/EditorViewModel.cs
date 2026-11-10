@@ -74,7 +74,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public string Title => State.Title;
     public string ContentId => State.Path;
     public bool IsReadOnly => State.Path.Contains(System.IO.Path.Combine("WpfStudio", "GeneratedSources"), StringComparison.OrdinalIgnoreCase);
-    public ObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
+    public BulkObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
     public ObservableCollection<XamlQuickFix> QuickFixes { get; } = [];
     /// <summary>The shell computes a XAML quick fix's edits and opens the change review.</summary>
     public Func<EditorViewModel, XamlCodeAction, Task>? XamlCodeActionApplier { get; init; }
@@ -326,7 +326,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             await _dispatcher.InvokeAsync(() =>
             {
                 if (!IsCurrentAnalysis(version, semanticRevision, resources.Generation, token) || !_workspace.IsConnected) return;
-                Diagnostics.Clear(); foreach (var item in diagnostics) Diagnostics.Add(item);
+                // One notification: the shell rebuilds the whole Problems list on each change to this collection.
+                Diagnostics.ReplaceAll(diagnostics);
                 LanguageStatus = status ?? ""; // Counts are shown by the status bar's error and warning summary.
                 if (decorations is { } current && current.Version == version)
                 {

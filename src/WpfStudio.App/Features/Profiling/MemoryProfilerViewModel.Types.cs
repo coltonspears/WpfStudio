@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts.Profiling;
+using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 
 namespace WpfStudio.App.Features.Profiling;
