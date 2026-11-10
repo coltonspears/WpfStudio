@@ -23,7 +23,8 @@ public static class LineChanges
         var originalLines = TextDiff.SplitLines(original);
         var currentLines = TextDiff.SplitLines(current);
         if (originalLines.Length > MaximumLines || currentLines.Length > MaximumLines) return [];
-        var diff = TextDiff.Compute(original, current);
+        // The margin marks whole lines, and this runs after every pause in typing: the word-level comparison of each modified line would be thrown away.
+        var diff = TextDiff.Compute(original, current, wordSpans: false);
         var changes = new List<LineChange>();
         var rows = diff.Rows;
         var nextNewLine = 1;

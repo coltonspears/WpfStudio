@@ -26,7 +26,7 @@ public sealed partial record WpfIndexSnapshot(IReadOnlyList<WpfItem> Items, IRea
 public sealed partial class WpfIndexService
 {
     private static readonly XNamespace Xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
-    private sealed record Parsed(string Path, string Text, XDocument Xml, IReadOnlyList<string> ProjectPaths);
+    private sealed record Parsed(string Path, string Text, int[] LineStarts, XDocument Xml, IReadOnlyList<string> ProjectPaths);
     private sealed record Candidate(ResourceDeclaration Declaration, XElement Element);
     [GeneratedRegex(@"\{(StaticResource|DynamicResource)\s+(?:ResourceKey\s*=\s*)?([^{}\s,]+)\s*\}")]
     private static partial Regex ResourcePattern();
@@ -71,7 +71,8 @@ public sealed partial class WpfIndexService
                 using var reader = XmlReader.Create(new StringReader(text), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
                 var xml = XDocument.Load(reader, LoadOptions.SetLineInfo | LoadOptions.PreserveWhitespace);
                 if (xml.Root == null) continue;
-                parsed[file.Path] = new(file.Path, text, xml, projectPaths);
+                var lineStarts = LineStarts(text);
+                parsed[file.Path] = new(file.Path, text, lineStarts, xml, projectPaths);
                 var rootKind = xml.Root.Name.LocalName;
                 items.Add(new(rootKind, xml.Root.Attribute(Xaml + "Class")?.Value ?? file.Name, file.Path, 1));
                 foreach (var element in xml.Descendants())
@@ -79,7 +80,7 @@ public sealed partial class WpfIndexService
                     var key = element.Attribute(Xaml + "Key");
                     if (key != null && !key.Value.StartsWith('{'))
                     {
-                        var span = AttributeValueSpan(text, key);
+                        var span = AttributeValueSpan(text, lineStarts, key);
                         var declaration = new ResourceDeclaration(key.Value, file.Path, Line(key), span.Start, span.Length, ScopeId(element.Parent));
                         declarations.Add(new(declaration, element));
                         items.Add(new(element.Name.LocalName, key.Value, file.Path, Line(key), key.Value));
@@ -93,6 +94,15 @@ public sealed partial class WpfIndexService
         foreach (var group in declarations.GroupBy(d => (d.Declaration.Path, d.Declaration.Scope, d.Declaration.Key)).Where(g => g.Count() > 1))
         foreach (var item in group.Skip(1)) diagnostics.Add(new("XAML002", $"Duplicate resource key '{item.Declaration.Key}' in the same dictionary.", "Error", item.Declaration.Path, item.Declaration.Line, 1, item.Declaration.ValueStart, item.Declaration.ValueLength));
 
+        // The keys each dictionary element declares directly, the last declaration of a key winning. A usage's lookup visits every
+        // dictionary it can reach, so searching all declarations of the workspace at each one made the index quadratic.
+        var scopes = new Dictionary<XElement, Dictionary<string, ResourceDeclaration>>();
+        foreach (var candidate in declarations)
+        {
+            if (candidate.Element.Parent is not { } scope) continue;
+            if (!scopes.TryGetValue(scope, out var keys)) scopes[scope] = keys = new(StringComparer.Ordinal);
+            keys[candidate.Declaration.Key] = candidate.Declaration;
+        }
         var edges = parsed.Values.ToDictionary(p => p.Path, p => p.Xml.Descendants().Where(e => e.Name.LocalName == "ResourceDictionary").Select(e => e.Attribute("Source")?.Value).OfType<string>().Select(source => ResolveDictionary(p, source, workspace)).OfType<string>().ToArray(), StringComparer.OrdinalIgnoreCase);
         foreach (var file in parsed.Values)
         {
@@ -102,7 +112,7 @@ public sealed partial class WpfIndexService
             foreach (var attribute in file.Xml.Descendants().Attributes())
             {
                 if (!attribute.Value.StartsWith('{') || attribute.Value.StartsWith("{}", StringComparison.Ordinal)) continue;
-                var span = AttributeValueSpan(file.Text, attribute);
+                var span = AttributeValueSpan(file.Text, file.LineStarts, attribute);
                 // XML attributes expose decoded values; edits must use offsets in the original escaped source.
                 var rawValue = file.Text.Substring(span.Start, span.Length);
                 foreach (Match match in ResourcePattern().Matches(rawValue))
@@ -110,7 +120,7 @@ public sealed partial class WpfIndexService
                     var key = System.Net.WebUtility.HtmlDecode(match.Groups[2].Value);
                     var keyStart = span.Start + match.Groups[2].Index;
                     var keyLength = match.Groups[2].Length;
-                    var resolved = ResolveResource(file, attribute.Parent!, key, parsed, declarations, workspace);
+                    var resolved = ResolveResource(file, attribute.Parent!, key, parsed, scopes, workspace);
                     var dynamic = match.Groups[1].Value == "DynamicResource";
                     usages.Add(new(key, file.Path, Line(attribute), keyStart, keyLength, dynamic, resolved?.Path, resolved?.ValueStart));
                     if (resolved == null && !dynamic)
@@ -134,19 +144,19 @@ public sealed partial class WpfIndexService
         return changes.Select(c => new FileChange(c.Key, index.Texts[c.Key], WorkspaceEditTransaction.ApplyTextEdits(index.Texts[c.Key], c.Value), $"Rename resource {resource.Key} → {newName}")).ToArray();
     }
 
-    private static ResourceDeclaration? ResolveResource(Parsed file, XElement element, string key, Dictionary<string, Parsed> parsed, List<Candidate> declarations, WorkspaceSnapshot workspace)
+    private static ResourceDeclaration? ResolveResource(Parsed file, XElement element, string key, Dictionary<string, Parsed> parsed, Dictionary<XElement, Dictionary<string, ResourceDeclaration>> scopes, WorkspaceSnapshot workspace)
     {
         foreach (var ancestor in element.AncestorsAndSelf())
         {
             if (ancestor.Name.LocalName == "ResourceDictionary")
             {
-                var found = SearchDictionary(file, ancestor, key, parsed, declarations, workspace, []);
+                var found = SearchDictionary(file, ancestor, key, parsed, scopes, workspace, []);
                 if (found != null) return found;
             }
             var resources = ancestor.Elements().FirstOrDefault(e => e.Name.LocalName.EndsWith(".Resources", StringComparison.Ordinal));
             if (resources != null)
             {
-                var found = SearchDictionary(file, resources, key, parsed, declarations, workspace, []);
+                var found = SearchDictionary(file, resources, key, parsed, scopes, workspace, []);
                 if (found != null) return found;
             }
         }
@@ -158,30 +168,29 @@ public sealed partial class WpfIndexService
             var resources = app.Xml.Root!.Elements().FirstOrDefault(e => e.Name.LocalName == "Application.Resources");
             if (resources != null)
             {
-                var found = SearchDictionary(app, resources, key, parsed, declarations, workspace, []);
+                var found = SearchDictionary(app, resources, key, parsed, scopes, workspace, []);
                 if (found != null) return found;
             }
         }
         return null;
     }
-    private static ResourceDeclaration? SearchDictionary(Parsed file, XElement container, string key, Dictionary<string, Parsed> parsed, List<Candidate> declarations, WorkspaceSnapshot workspace, HashSet<string> visited)
+    private static ResourceDeclaration? SearchDictionary(Parsed file, XElement container, string key, Dictionary<string, Parsed> parsed, Dictionary<XElement, Dictionary<string, ResourceDeclaration>> scopes, WorkspaceSnapshot workspace, HashSet<string> visited)
     {
         var id = file.Path + ":" + ScopeId(container);
         if (!visited.Add(id)) return null;
-        var direct = declarations.LastOrDefault(c => c.Declaration.Path == file.Path && c.Element.Parent == container && c.Declaration.Key == key);
-        if (direct != null) return direct.Declaration;
+        if (scopes.TryGetValue(container, out var keys) && keys.TryGetValue(key, out var direct)) return direct;
         foreach (var child in container.Elements().Where(e => e.Name.LocalName == "ResourceDictionary").Reverse())
         {
-            var value = SearchDictionary(file, child, key, parsed, declarations, workspace, visited);
+            var value = SearchDictionary(file, child, key, parsed, scopes, workspace, visited);
             if (value != null) return value;
         }
         foreach (var merged in container.Elements().Where(e => e.Name.LocalName == "ResourceDictionary.MergedDictionaries").SelectMany(e => e.Elements()).Reverse())
         {
-            var value = SearchDictionary(file, merged, key, parsed, declarations, workspace, visited);
+            var value = SearchDictionary(file, merged, key, parsed, scopes, workspace, visited);
             if (value != null) return value;
         }
         if (container.Attribute("Source") is { } source && ResolveDictionary(file, source.Value, workspace) is { } path && parsed.TryGetValue(path, out var other) && other.Xml.Root != null)
-            return SearchDictionary(other, other.Xml.Root, key, parsed, declarations, workspace, visited);
+            return SearchDictionary(other, other.Xml.Root, key, parsed, scopes, workspace, visited);
         return null;
     }
     private static string? ResolveDictionary(Parsed file, string source, WorkspaceSnapshot workspace)
@@ -211,18 +220,25 @@ public sealed partial class WpfIndexService
     private static string ScopeId(XElement? element) => element == null ? "root" : $"{Line(element)}:{((IXmlLineInfo)element).LinePosition}";
     private static int Line(XObject obj) => ((IXmlLineInfo)obj).LineNumber;
     public static int LineAt(string text, int offset) => text.AsSpan(0, Math.Clamp(offset, 0, text.Length)).Count('\n') + 1;
-    private static (int Start, int Length) AttributeValueSpan(string text, XAttribute attribute)
+    /// <summary>The offset each line starts at, found once per file: every keyed resource and markup extension asks for its line's.</summary>
+    private static int[] LineStarts(string text)
     {
-        var info = (IXmlLineInfo)attribute;
-        var offset = 0;
+        var starts = new List<int> { 0 };
         // XmlReader ends a line at \r\n, \n or a bare \r.
-        for (var line = 1; line < info.LineNumber; line++)
+        for (var offset = 0; ;)
         {
             var next = text.AsSpan(offset).IndexOfAny('\r', '\n');
             if (next < 0) break;
             offset += next + 1;
             if (text[offset - 1] == '\r' && offset < text.Length && text[offset] == '\n') offset++;
+            starts.Add(offset);
         }
+        return [.. starts];
+    }
+    private static (int Start, int Length) AttributeValueSpan(string text, int[] lineStarts, XAttribute attribute)
+    {
+        var info = (IXmlLineInfo)attribute;
+        var offset = lineStarts[Math.Clamp(info.LineNumber, 1, lineStarts.Length) - 1];
         offset += info.LinePosition - 1;
         var equal = text.IndexOf('=', offset);
         var quote = equal + 1;

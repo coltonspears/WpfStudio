@@ -34,7 +34,11 @@ public static class TaskFileReader
             if (!root.TryGetProperty("tasks", out var list)) return new(path, source, [], []);
             if (list.ValueKind != JsonValueKind.Array) return new(path, source, [], [new(path, "\"tasks\" must be a list.", 1)]);
             var lines = TaskLines(bytes);
-            var defaults = ReadDefaults(root);
+            // The file's own options apply to every task, so none of its tasks is offered without them. The fault stays a problem of this
+            // file: thrown from here, it would stop the tasks of every other file from loading too.
+            FileDefaults defaults;
+            try { defaults = ReadDefaults(root); }
+            catch (TaskConfigurationException exception) { return new(path, source, [], [new(path, exception.Message, 1)]); }
             var tasks = new List<StudioTask>();
             var index = 0;
             foreach (var element in list.EnumerateArray())

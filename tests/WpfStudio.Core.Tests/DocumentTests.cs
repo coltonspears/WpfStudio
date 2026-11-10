@@ -106,6 +106,34 @@ public class DocumentTests
     }
 
     [Fact]
+    public async Task ARecoveryRecordIsRewrittenOnlyWhenItsDocumentChangedOrTheRecordIsGone()
+    {
+        var directory = DirectoryPath();
+        var store = new DocumentStore(directory);
+        var document = store.Create(Path.Combine(directory, "draft.cs"), "first");
+        await store.WriteRecoveryAsync();
+        var record = Assert.Single(Directory.GetFiles(Path.Combine(directory, "Recovery"), "*.json"));
+        var written = (await store.ReadRecoveryAsync())[0].SavedAt;
+
+        await store.WriteRecoveryAsync();
+        Assert.Equal(written, (await store.ReadRecoveryAsync())[0].SavedAt);
+
+        document.Content = "second";
+        await store.WriteRecoveryAsync();
+        var rewritten = Assert.Single(await store.ReadRecoveryAsync());
+        Assert.Equal("second", rewritten.Content);
+        Assert.NotEqual(written, rewritten.SavedAt);
+
+        // A record removed behind the store's back is written again, and one the store removed is too.
+        File.Delete(record);
+        await store.WriteRecoveryAsync();
+        Assert.Equal("second", Assert.Single(await store.ReadRecoveryAsync()).Content);
+        await store.DeleteRecoveryAsync(document.Path);
+        await store.WriteRecoveryAsync();
+        Assert.Equal("second", Assert.Single(await store.ReadRecoveryAsync()).Content);
+    }
+
+    [Fact]
     public async Task EmptyNewDocumentIsDirtyAndRecoveryIgnoresCorruptRecords()
     {
         var directory = DirectoryPath();

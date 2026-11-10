@@ -15,6 +15,8 @@ public static class WhitespaceCleanup
     public static IReadOnlyList<TextReplacement> Edits(string text, string extension, bool trimTrailingWhitespace, bool ensureFinalNewline)
     {
         var edits = new List<TextReplacement>();
+        // Judged after trimming: a last line of only spaces is trimmed away, and the text then already ends in a line break, or is empty.
+        var endsWithNewline = text.Length > 0 && text[^1] == '\n';
         if (trimTrailingWhitespace && !extension.Equals(".md", StringComparison.OrdinalIgnoreCase))
         {
             for (var lineStart = 0; lineStart <= text.Length;)
@@ -25,10 +27,11 @@ public static class WhitespaceCleanup
                 var trimmed = contentEnd;
                 while (trimmed > lineStart && text[trimmed - 1] is ' ' or '\t') trimmed--;
                 if (trimmed < contentEnd) edits.Add(new(trimmed, contentEnd - trimmed, ""));
+                if (lineEnd == text.Length && trimmed == lineStart) endsWithNewline = true;
                 lineStart = lineEnd + 1;
             }
         }
-        if (ensureFinalNewline && text.Length > 0 && text[^1] != '\n')
+        if (ensureFinalNewline && text.Length > 0 && !endsWithNewline)
             edits.Add(new(text.Length, 0, text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n"));
         return edits;
     }

@@ -104,6 +104,17 @@ public sealed class WhitespaceCleanupTests
     }
 
     [Fact]
+    public void ALastLineOfOnlyWhitespaceIsTrimmedWithoutAddingASecondLineBreak()
+    {
+        static string Tidy(string text) => WhitespaceCleanup.Apply(text, WhitespaceCleanup.Edits(text, ".cs", trimTrailingWhitespace: true, ensureFinalNewline: true));
+        Assert.Equal("}\n", Tidy("}\n    "));
+        Assert.Equal("}\r\n", Tidy("}\r\n\t"));
+        Assert.Equal("", Tidy("  \t"));
+        // Without trimming, the spaces stay and are a last line of their own, which still needs its line break.
+        Assert.Equal("}\n    \n", WhitespaceCleanup.Apply("}\n    ", WhitespaceCleanup.Edits("}\n    ", ".cs", trimTrailingWhitespace: false, ensureFinalNewline: true)));
+    }
+
+    [Fact]
     public void ApplyHandlesEditsInAnyOrderAndAtBothEndsOfTheText()
     {
         Assert.Equal("text", WhitespaceCleanup.Apply("text", []));
