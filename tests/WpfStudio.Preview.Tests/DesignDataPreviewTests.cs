@@ -433,6 +433,32 @@ public sealed class DesignDataPreviewTests(PreviewFixture fixture)
         Assert.False(string.IsNullOrEmpty(model.StoredElsewhere));
         Assert.Null(model.ThrowsOnSet);
     }
+
+    [Fact]
+    public void ACollectionTypeThatHoldsItselfIsFilledToABoundedDepth()
+    {
+        // Each of these recursed without end before lists counted as a level: the element of the list is the list's own type.
+        var factory = new DesignSampleFactory(typeof(DesignNest).Assembly);
+        var (holder, direct, items, abstractNest) = fixture.OnDispatcher(() => (
+            (DesignNestHolder)factory.Create(typeof(DesignNestHolder))!,
+            (DesignNest?)factory.CreateSequence(typeof(DesignNest)),
+            factory.CreateList(typeof(DesignNest), 5),
+            factory.CreateSequence(typeof(DesignAbstractNest))));
+        static int Depth(DesignNest nest) => 1 + (nest.Count == 0 ? 0 : nest.Max(Depth));
+        Assert.NotNull(holder.Nest);
+        Assert.InRange(Depth(holder.Nest!), 2, 4);
+        Assert.NotNull(direct);
+        Assert.Equal(5, direct!.Count);
+        Assert.InRange(Depth(direct), 2, 4);
+        Assert.All(items.Cast<DesignNest>(), nest => Assert.InRange(Depth(nest), 1, 4));
+        // An abstract collection of itself has nothing to construct; it ends empty-handed instead of overflowing.
+        Assert.Null(abstractNest);
+        // Ordinary nested lists still receive their items, fewer at each level.
+        Assert.Equal(5, holder.Grid.Count);
+        Assert.All(holder.Grid, row => Assert.Equal(3, row.Count));
+        Assert.Equal(5, holder.Jagged.Length);
+        Assert.All(holder.Jagged, row => Assert.Equal(3, row.Length));
+    }
 }
 
 public interface IDesignService { string Load(); }
@@ -518,6 +544,22 @@ public sealed class DesignNode
 {
     public string Title { get; set; } = "";
     public List<DesignNode> Children { get; set; } = [];
+}
+
+/// <summary>A tree written as a collection of its own type.</summary>
+public sealed class DesignNest : List<DesignNest>;
+
+public abstract class DesignAbstractNest : IEnumerable<DesignAbstractNest>
+{
+    public abstract IEnumerator<DesignAbstractNest> GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+public sealed class DesignNestHolder
+{
+    public DesignNest? Nest { get; set; }
+    public List<List<int>> Grid { get; set; } = [];
+    public string[][] Jagged { get; set; } = [];
 }
 
 public sealed class DesignCatalog

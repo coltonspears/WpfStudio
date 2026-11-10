@@ -199,8 +199,10 @@ internal sealed class DesignSampleFactory(Assembly? projectAssembly)
     private object? Sequence(Type type, string member, int index, int depth)
     {
         _ = index;
-        // Fewer items the deeper a list sits, so a tree of lists stays small.
+        // Fewer items the deeper a list sits, so a tree of lists stays small. A list counts against the budget like
+        // any other object, so lists of lists run out of it too.
         int count = _objects >= MaximumObjects ? 0 : depth switch { 0 => 5, 1 => 3, 2 => 2, _ => 0 };
+        _objects++;
         if (type.IsArray)
         {
             // Bytes are a file or a picture, never a list to show; made-up ones would only fail to decode.
@@ -242,9 +244,12 @@ internal sealed class DesignSampleFactory(Assembly? projectAssembly)
     {
         string singular = member.EndsWith("ies", StringComparison.Ordinal) ? member.Remove(member.Length - 3) + "y"
             : member.Length > 1 && member.EndsWith('s') && !member.EndsWith("ss", StringComparison.Ordinal) ? member.Substring(0, member.Length - 1) : member;
+        // A list inside a list sits one level deeper, as a model inside a list does. Without this a collection type
+        // that holds itself, such as class Nodes : List<Nodes>, would nest without end.
+        int itemDepth = IsSequence(Nullable.GetUnderlyingType(itemType) ?? itemType) ? depth + 1 : depth;
         var items = new List<object>();
         for (int item = 0; item < count; item++)
-            if (Value(itemType, singular, null, item, depth) is { } value && itemType.IsInstanceOfType(value)) items.Add(value);
+            if (Value(itemType, singular, null, item, itemDepth) is { } value && itemType.IsInstanceOfType(value)) items.Add(value);
         return items;
     }
 
