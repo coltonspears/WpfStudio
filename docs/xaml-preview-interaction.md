@@ -10,7 +10,7 @@ Interaction is temporarily hidden when an IDE overlay is open, the designer is a
 
 ## Work on the canvas
 
-The designer is laid out as **Outline**, **canvas** and **inspector**. One toolbar holds the document, the Source/Compiled mode, **Refresh**, **Live**, **Interact**/**Inspect**, **Edit layout**, snapping, the scenario and design-time (`d:`) values. **Update snapshot**, **Restart**, **Stop** and the settings toggle sit at its right edge; settings hold the artboard size, compiled view type, application resources and scenario configuration.
+The designer is laid out as **Outline**, **canvas** and **inspector**. One toolbar holds the document, the Source/Compiled mode, **Refresh**, **Live**, **Interact**/**Inspect**, **Edit layout**, snapping, the scenario and design-time (`d:`) values, followed by the [design-time data](xaml-preview-scenarios.md#design-time-data) the preview is drawn with, such as `OrdersViewModel · sample data`. **Update snapshot**, **Restart**, **Stop** and the settings toggle sit at its right edge; settings hold the artboard size, sample data for views with no DataContext, compiled view type, application resources and scenario configuration.
 
 **Artboard.** The rendered view sits on a dotted pasteboard with its file name and size above it. **Auto** size uses the root's explicit `Width`/`Height`, including an applied `d:DesignWidth`/`d:DesignHeight`, so a `Window Width="500" Height="350"` previews at 500 × 350. A dimension the root leaves automatic uses the settings size. Choose a preset such as 1280 × 720, or type a custom size in settings; with Live preview on, a new size renders immediately in Source mode.
 
