@@ -141,9 +141,21 @@ internal static class XamlSyntax
                 var quote = text[i++];
                 var valueStart = i;
                 var valueEnd = text.IndexOf(quote, i);
-                if (valueEnd < 0) valueEnd = text.Length;
+                // "<" cannot be written in an attribute value, so a value that reaches one has lost its closing quote, as happens for a
+                // moment while typing. It ends where its tag does, or at that "<". Read up to the next quote, it took in the rest of its
+                // tag and the start of the next element, and accepting a completion for it then deleted them.
+                var nextTag = text.IndexOf('<', i);
+                var unterminated = nextTag >= 0 && (valueEnd < 0 || nextTag < valueEnd);
+                if (unterminated)
+                {
+                    var tagEnd = text.IndexOf('>', i, nextTag - i);
+                    valueEnd = tagEnd < 0 ? nextTag : tagEnd > i && text[tagEnd - 1] == '/' ? tagEnd - 1 : tagEnd;
+                    while (valueEnd > valueStart && char.IsWhiteSpace(text[valueEnd - 1])) valueEnd--;
+                }
+                else if (valueEnd < 0) valueEnd = text.Length;
                 element.Attributes.Add(new Attribute(attributeName, valueStart, valueEnd, text[valueStart..valueEnd], element, attributeStart));
-                i = Math.Min(text.Length, valueEnd + 1);
+                // An unterminated value's tag end, or the next tag, is still to be read.
+                i = unterminated ? valueEnd : Math.Min(text.Length, valueEnd + 1);
             }
             element.StartTagEnd = i;
             element.IsClosed = selfClosing;

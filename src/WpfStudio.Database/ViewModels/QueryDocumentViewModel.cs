@@ -13,6 +13,9 @@ public partial class QueryDocumentViewModel(string title, string sql) : Observab
     public string DisplayTitle => Title + (IsDirty ? " *" : "");
     public bool IsDirty => SqlText != _savedText;
     public string? FilePath { get; set; }
+    /// <summary>The encoding the script was read in and is written back in. Null until it is known: a script restored after a crash
+    /// has a file but was not read from it, so its encoding is taken from that file when it is saved.</summary>
+    internal System.Text.Encoding? Encoding { get; set; }
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(IsDirty))] [NotifyPropertyChangedFor(nameof(DisplayTitle))] public partial string SqlText { get; set; } = sql;
     [ObservableProperty] public partial string SelectedText { get; set; } = "";
     [ObservableProperty] public partial int SelectionStartLine { get; set; } = 1;

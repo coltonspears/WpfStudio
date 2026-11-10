@@ -89,7 +89,7 @@ public sealed partial class WorkspaceEngine
                 // oversized merely because earlier files consumed this call's aggregate budget.
                 if (DiskRefreshCharacters - total < DiskDocumentCharacters) break;
                 int available = DiskDocumentCharacters;
-                var read = await ReadBoundedTextAsync(path, available, cancellationToken).ConfigureAwait(false);
+                var read = await ReadBoundedTextAsync(path, available, cancellationToken, codePageSource: path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ConfigureAwait(false);
                 reads.Add(path, read);
                 pending.Remove(path);
                 verifying.Remove(path);
@@ -335,7 +335,38 @@ public sealed partial class WorkspaceEngine
         return result;
     }
 
-    private static async Task<DiskText> ReadBoundedTextAsync(string path, int maximumCharacters, CancellationToken cancellationToken)
+    /// <summary>
+    /// What the C# compiler assumes for a source file that is neither marked nor valid UTF-8: the system's ANSI code page, or
+    /// Latin-1 where there is none.
+    /// </summary>
+    private static readonly Encoding LegacySourceEncoding = FindLegacySourceEncoding();
+    private static Encoding FindLegacySourceEncoding()
+    {
+        try
+        {
+            if (CodePagesEncodingProvider.Instance.GetEncoding(0) is { CodePage: not (65001 or 1200 or 1201 or 12000 or 12001) } ansi) return ansi;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException) { }
+        return Encoding.Latin1;
+    }
+
+    /// <param name="codePageSource">
+    /// True for C# sources. The compiler builds a file that is not valid UTF-8 by reading it in a code page, so here it is read the
+    /// same way; reported as unavailable instead, one such file, with only a "©" in a comment, withheld XAML analysis from its
+    /// project and every project that depends on it. XAML states its own encoding and stays strict.
+    /// </param>
+    private static async Task<DiskText> ReadBoundedTextAsync(string path, int maximumCharacters, CancellationToken cancellationToken, bool codePageSource = false)
+    {
+        try { return await ReadBoundedTextAsync(path, maximumCharacters, new UTF8Encoding(false, true), cancellationToken).ConfigureAwait(false); }
+        catch (DecoderFallbackException) when (codePageSource)
+        {
+            try { return await ReadBoundedTextAsync(path, maximumCharacters, LegacySourceEncoding, cancellationToken).ConfigureAwait(false); }
+            catch (DecoderFallbackException exception) { return new(null, "Unavailable", $"The source file could not be read ({exception.GetType().Name})."); }
+        }
+        catch (DecoderFallbackException exception) { return new(null, "Unavailable", $"The source file could not be read ({exception.GetType().Name})."); }
+    }
+
+    private static async Task<DiskText> ReadBoundedTextAsync(string path, int maximumCharacters, Encoding unmarked, CancellationToken cancellationToken)
     {
         try
         {
@@ -343,7 +374,7 @@ public sealed partial class WorkspaceEngine
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
             // UTF-32 needs four bytes per character; reject before allocating for much larger files.
             if (stream.Length > (long)maximumCharacters * 4 + 4) return new(null, "TooLarge", "The source file exceeds the text read budget.");
-            using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: true, bufferSize: 8192, leaveOpen: true);
+            using var reader = new StreamReader(stream, unmarked, detectEncodingFromByteOrderMarks: true, bufferSize: 8192, leaveOpen: true);
             var text = new StringBuilder(Math.Min(maximumCharacters, 8192));
             var buffer = new char[8192];
             while (true)
@@ -356,7 +387,7 @@ public sealed partial class WorkspaceEngine
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         { return new(null, "Missing", "The evaluated source file is missing from disk."); }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         { return new(null, "Unavailable", $"The source file could not be read ({exception.GetType().Name})."); }
     }
 }

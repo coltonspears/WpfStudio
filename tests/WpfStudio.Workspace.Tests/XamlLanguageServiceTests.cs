@@ -32,6 +32,33 @@ public sealed class XamlLanguageServiceTests
     }
 
     [Fact]
+    public void GridColumnBindingsAreCheckedAgainstTheRowItemNotTheContextAroundTheGrid()
+    {
+        var text = Window("""
+            <DataGrid ItemsSource="{Binding Customers}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="{Binding Title}" Binding="{Binding Name}" />
+                    <DataGridTextColumn Binding="{Binding Ctiy}" />
+                    <DataGridTextColumn><DataGridTextColumn.Binding><Binding Path="City" /></DataGridTextColumn.Binding></DataGridTextColumn>
+                    <DataGridTemplateColumn>
+                        <DataGridTemplateColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding Name}" /></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+            <ListView ItemsSource="{Binding Customers}"><ListView.View><GridView>
+                <GridViewColumn DisplayMemberBinding="{Binding City}" />
+            </GridView></ListView.View></ListView>
+            <DataGrid><DataGrid.Columns><DataGridTextColumn Binding="{Binding RowsComeFromCodeBehind}" /></DataGrid.Columns></DataGrid>
+            """);
+
+        var issue = Assert.Single(Analyze(text));
+
+        AssertSpan(issue, text, "Ctiy");
+        Assert.Contains("Customer", issue.Message);
+        Assert.Contains("City", issue.Message);
+    }
+
+    [Fact]
     public void EntityEncodedBindingSegmentsReportTheirRawSourceSpan()
     {
         var text = Window("<TextBlock Tag=\"A&amp;B 😀\" Text=\"{Binding Selected.&#78;mae}\" />");

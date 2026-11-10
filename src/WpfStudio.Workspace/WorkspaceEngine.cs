@@ -414,7 +414,7 @@ public sealed partial class WorkspaceEngine : IWorkspaceRpc, IDisposable
             version = _documents.OpenVersion(path);
             synchronizedText = _documents.Text(path);
         }
-        var read = await ReadBoundedTextAsync(path, DiskDocumentCharacters, cancellationToken).ConfigureAwait(false);
+        var read = await ReadBoundedTextAsync(path, DiskDocumentCharacters, cancellationToken, codePageSource: true).ConfigureAwait(false);
         lock (_gate)
         {
             // A new edit/reopen can arrive while disk I/O is pending. It owns the buffer.

@@ -150,6 +150,33 @@ public class DocumentTests
     }
 
     [Fact]
+    public async Task SavingAFileThatIsNotUtf8KeepsTheLettersOutsideAscii()
+    {
+        var directory = DirectoryPath();
+        var path = Path.Combine(directory, "legacy.cs");
+        byte[] original = [.. "// "u8, 0xA9, .. " M"u8, 0xFC, .. "ller\nclass C { }\n"u8];
+        await File.WriteAllBytesAsync(path, original);
+        var store = new DocumentStore(directory);
+        var document = await store.OpenAsync(path);
+
+        document.Content += "// added\n";
+        await store.SaveAsync(document);
+
+        var saved = await File.ReadAllBytesAsync(path);
+        Assert.Equal(original, saved.AsSpan(0, original.Length).ToArray());
+        Assert.False(await store.IsExternallyChangedAsync(document));
+        Assert.Equal(document.Content, (await store.ReadDiskAsync(document))!.Value.Text);
+
+        // Text the code page cannot hold turns the file into marked UTF-8, and the document follows.
+        document.Content += "// \u4e2d\u6587\n";
+        await store.SaveAsync(document);
+        Assert.True((await File.ReadAllBytesAsync(path)).AsSpan().StartsWith(Encoding.UTF8.GetPreamble()));
+        await store.ReloadAsync(document);
+        Assert.EndsWith("// \u4e2d\u6587\n", document.Content);
+        Assert.DoesNotContain('\uFFFD', document.Content);
+    }
+
+    [Fact]
     public async Task ReloadUsesTheNewEncoding()
     {
         var directory = DirectoryPath();
