@@ -314,7 +314,7 @@ public sealed partial class HeapAnalysis
                 columns.Add(id, Math.Max(-16, i - path.References.Count + 1));
             }
         var owners = Neighbors(request.ObjectId, incoming: true);
-        foreach (var owner in owners.Take(Math.Clamp(request.MaxOwners, 0, 64)))
+        foreach (var owner in owners.Largest.Take(Math.Clamp(request.MaxOwners, 0, 64)))
         {
             if (columns.ContainsKey(owner)) continue;
             if (columns.Count >= limit) { truncated = true; break; }
@@ -322,7 +322,7 @@ public sealed partial class HeapAnalysis
         }
         if (owners.Count > request.MaxOwners) truncated = true;
         var children = Neighbors(request.ObjectId, incoming: false);
-        foreach (var child in children.Take(Math.Clamp(request.MaxChildren, 0, 64)))
+        foreach (var child in children.Largest.Take(Math.Clamp(request.MaxChildren, 0, 64)))
         {
             if (columns.ContainsKey(child)) continue;
             if (columns.Count >= limit) { truncated = true; break; }
@@ -343,7 +343,7 @@ public sealed partial class HeapAnalysis
         var take = Math.Clamp(request.Take, 1, 100);
         var all = Neighbors(request.ObjectId, request.Incoming);
         var ids = new List<int> { request.ObjectId };
-        ids.AddRange(all.Take(take));
+        ids.AddRange(all.Largest.Take(take));
         var truncated = all.Count > take;
         var edges = ReferencesAmong(ids, null, ref truncated);
         // Keep only the slots that connect the expanded object, plus its own roots when expanding owners.
@@ -362,7 +362,12 @@ public sealed partial class HeapAnalysis
         return new(Describe(id), column, focus, _graph.IsRooted(id), degreeIn, degreeOut);
     }
 
-    private List<int> Neighbors(int id, bool incoming)
+    /// <summary>
+    /// The objects one reference away, largest first, and how many there are. The order is left to whoever takes the first few: taking
+    /// from an ordered sequence selects just those, where sorting all of them first cost a full sort of half a million owners to show
+    /// sixty-four of a hub such as the dispatcher.
+    /// </summary>
+    private (IEnumerable<int> Largest, int Count) Neighbors(int id, bool incoming)
     {
         var set = new HashSet<int>();
         foreach (var edgeId in (incoming ? _graph.Incoming : _graph.Outgoing).For(id))
@@ -370,7 +375,7 @@ public sealed partial class HeapAnalysis
             var edge = _graph.Edges[edgeId]; var other = incoming ? edge.From : edge.To;
             if (other != id) set.Add(other);
         }
-        return set.OrderByDescending(n => Reachable[n]).ThenByDescending(n => RetainedBytes[n]).ThenByDescending(n => _graph.Objects[n].Size).ToList();
+        return (set.OrderByDescending(n => Reachable[n]).ThenByDescending(n => RetainedBytes[n]).ThenByDescending(n => _graph.Objects[n].Size), set.Count);
     }
 
     private List<int> ReferencesAmong(IEnumerable<int> nodes, HashSet<string>? hiddenKinds, ref bool truncated)
