@@ -9,6 +9,7 @@ using WpfStudio.App.Features.Profiling;
 using WpfStudio.App.ViewModels;
 using WpfStudio.CodeAssist;
 using WpfStudio.Contracts;
+using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Contracts.Profiling;
 using WpfStudio.Core;
 using WpfStudio.Core.Debugging;
@@ -48,6 +49,9 @@ public static class StudioServices
         services.AddSingleton(sp => new DocumentStore(DataDirectory(sp)));
         services.AddSingleton(sp => new SettingsStore(DataDirectory(sp)));
         services.AddSingleton<WorkspaceEditTransaction>();
+        // One monitor for the process: the language, preview and Code Assist clients take it as an optional constructor argument.
+        services.AddSingleton(_ => new PerfMonitor());
+        services.AddSingleton(sp => new PerfLog(sp.GetRequiredService<PerfMonitor>(), DataDirectory(sp)));
         return services;
     }
 

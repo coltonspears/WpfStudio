@@ -6,6 +6,7 @@ using ICSharpCode.AvalonEdit.Editing;
 using WpfStudio.App.Services;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
+using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Core.Text;
 
 namespace WpfStudio.App.Controls.Editor;
@@ -78,6 +79,7 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorTyping typing,
     private async Task ShowCompletionAsync()
     {
         if (owner.ViewModel == null || owner.IsReadOnly || _input.IsPending) return;
+        long asked = PerfMonitor.Now;
         CancelRequest(); _request = new();
         var token = _request.Token; var vm = owner.ViewModel; var version = vm.State.Version; var caret = owner.CaretOffset;
         long contextRevision = vm.XamlContextRevision;
@@ -115,6 +117,8 @@ internal sealed class EditorCompletion(EditorSurface owner, EditorTyping typing,
             list.SelectedItem = recommended ?? list.SelectedItem ?? list.CompletionData.FirstOrDefault();
             _unconfirmed = list.SelectedItem;
             _openedAt = caret;
+            // What the person waited: synchronizing the buffer, the worker's answer, ranking, and building the list.
+            vm.Performance?.RecordSince(PerfAreas.Completion, vm.IsXaml ? "XAML list, asked to shown" : "C# list, asked to shown", asked);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (vm == owner.ViewModel) vm.LanguageStatus = ex.Message; }

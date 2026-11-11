@@ -1,5 +1,5 @@
 using System.IO.Pipes;
-using StreamJsonRpc;
+using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Workspace;
 
 var pipeIndex = Array.IndexOf(args, "--pipe");
@@ -25,8 +25,12 @@ try
     try { await connected.WaitAsync(TimeSpan.FromMinutes(3), cancellation.Token); }
     catch (TimeoutException) { Console.Error.WriteLine("No client connected; the language worker is exiting."); return 1; }
     using var engine = new WorkspaceEngine();
-    using var rpc = new JsonRpc(pipe);
+    // Every request is timed, and the IDE is told of the slow ones over the same connection, beside the workspace protocol.
+    var perf = new PerfMonitor("worker");
+    using var diagnostics = new WorkerDiagnostics(perf);
+    using var rpc = new TimedJsonRpc(pipe, perf);
     rpc.AddLocalRpcTarget(engine);
+    rpc.AddLocalRpcTarget<IWorkerDiagnosticsRpc>(diagnostics, null);
     rpc.StartListening();
     await rpc.Completion;
     return 0;

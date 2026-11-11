@@ -83,6 +83,16 @@ public sealed partial class ShellViewModel
     [RelayCommand] private void ShowAbout() { IsWhatsNewPage = false; OnPropertyChanged(nameof(AboutText)); IsAboutOpen = true; }
     [RelayCommand] private void ShowWhatsNew() { IsWhatsNewPage = true; IsAboutOpen = true; }
     [RelayCommand] private void CloseAbout() => IsAboutOpen = false;
+    /// <summary>
+    /// Shows what the IDE and the language worker measured since the last report, and starts counting again: reproduce
+    /// what felt slow, then ask for the report, and it covers just that. The same text goes to the performance log.
+    /// </summary>
+    [RelayCommand] private Task ShowPerformanceReportAsync() => GuardAsync(async () =>
+    {
+        AppendOutput(await _performance.ReportAsync(_workspace, reset: true, _lifetime.Token));
+        ToolRequested?.Invoke(Workbenches.Output);
+        Status = "Performance report written to " + _performance.Path;
+    });
     [RelayCommand] private void CopyAboutText() => Status = _clipboard.TrySetText(AboutText) ? "Version information copied" : "Another application is using the clipboard. Try again.";
 
     private IEnumerable<PaletteEntry> WorkbenchCommands()
@@ -97,6 +107,7 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Refresh Task List", TaskList.RefreshCommand, icon: "Refresh");
         foreach (var entry in FileGroupCommands()) yield return entry;
         foreach (var entry in TaskCommands()) yield return entry;
+        yield return Command("Help", "Performance report", ShowPerformanceReportCommand, icon: "Output", detail: "Where the time went since the last report: UI thread, language worker, preview");
         yield return Command("Help", "About WpfStudio", ShowAboutCommand, icon: "Info", detail: "Version, runtime and data folder");
         yield return Command("Help", "What's new", ShowWhatsNewCommand, icon: "Bulb", detail: "Recent features and fixes");
     }

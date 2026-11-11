@@ -1,6 +1,8 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using StreamJsonRpc;
 using WpfStudio.Contracts;
+using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Hosting;
 
 namespace WpfStudio.Workspace;
@@ -16,9 +18,12 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private readonly Dictionary<string, string> _acceptedDocumentTexts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, XamlNameProjectionPlan> _nameProjections = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _bufferGate = new();
+    private readonly PerfMonitor _perf;
     private WorkerProcessHost? _worker;
     private JsonRpc? _rpc;
     private IWorkspaceRpc? _proxy;
+    private IWorkerDiagnosticsRpc? _diagnostics;
+    private string _lifecycleHolder = "";
     private LoadWorkspaceRequest? _lastLoad;
     private bool _disposed;
     // The worker listens before resolving the SDK, so this only has to cover its start.
@@ -27,10 +32,12 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private string WorkerError => _worker?.ErrorTail ?? _stoppedWorkerError;
 
     /// <param name="disposeTimeout">How long shutdown waits for an in-flight call to let go of the lifecycle lock before the worker is stopped regardless.</param>
-    public WorkspaceClient(string? hostPath = null, TimeSpan? disposeTimeout = null)
+    /// <param name="perf">Where each request's duration is recorded, and where the worker's own slow operations are passed on.</param>
+    public WorkspaceClient(string? hostPath = null, TimeSpan? disposeTimeout = null, PerfMonitor? perf = null)
     {
         _hostPath = hostPath;
         _disposeTimeout = disposeTimeout ?? TimeSpan.FromSeconds(5);
+        _perf = perf ?? new PerfMonitor();
     }
     public event EventHandler<WorkspaceDiagnosticEvent>? DiagnosticsReceived;
     public event EventHandler<string>? WorkerExited;
@@ -51,7 +58,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         cancellationToken = lifetime.Token;
-        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await EnterLifecycleAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -61,7 +68,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             _lastLoad = request with { UseCache = false };
             await StartWorkerAsync(request.Path, cancellationToken).ConfigureAwait(false);
             // RPC cancellation otherwise waits for the server to acknowledge it. User build tasks may ignore cancellation.
-            var snapshot = await Proxy.LoadAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            var snapshot = await Timed(PerfMonitor.Now, Proxy.LoadAsync(request, cancellationToken), nameof(IWorkspaceRpc.LoadAsync)).WaitAsync(cancellationToken).ConfigureAwait(false);
             SemanticStateChanged?.Invoke(this, EventArgs.Empty);
             NotifyNameProjectionChanged();
             return snapshot;
@@ -74,14 +81,14 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         cancellationToken = lifetime.Token;
-        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await EnterLifecycleAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var request = _lastLoad ?? throw new InvalidOperationException("No workspace has been opened.");
             StopWorker();
             await StartWorkerAsync(request.Path, cancellationToken).ConfigureAwait(false);
-            var snapshot = await Proxy.LoadAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            var snapshot = await Timed(PerfMonitor.Now, Proxy.LoadAsync(request, cancellationToken), nameof(IWorkspaceRpc.LoadAsync)).WaitAsync(cancellationToken).ConfigureAwait(false);
             await ReplayBuffersAsync(cancellationToken).ConfigureAwait(false);
             return snapshot;
         }
@@ -92,7 +99,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     /// <summary>Stops the language worker and forgets the loaded workspace, as when its solution is closed.</summary>
     public async Task UnloadAsync(CancellationToken cancellationToken = default)
     {
-        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await EnterLifecycleAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_disposed) return;
@@ -113,16 +120,16 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         cancellationToken = lifetime.Token;
         IWorkspaceRpc proxy;
         WorkerProcessHost? worker;
-        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await EnterLifecycleAsync(cancellationToken).ConfigureAwait(false);
         try { ObjectDisposedException.ThrowIf(_disposed, this); proxy = Proxy; worker = _worker; }
         finally { _lifecycle.Release(); }
         request = request with { UseCache = false };
-        await proxy.PrepareRefreshAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
-        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await Timed(PerfMonitor.Now, proxy.PrepareRefreshAsync(request, cancellationToken), nameof(IWorkspaceRpc.PrepareRefreshAsync)).WaitAsync(cancellationToken).ConfigureAwait(false);
+        await EnterLifecycleAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!ReferenceEquals(worker, _worker)) throw new OperationCanceledException("The language worker restarted while the project model was refreshing.");
-            var snapshot = await Proxy.CommitRefreshAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+            var snapshot = await Timed(PerfMonitor.Now, Proxy.CommitRefreshAsync(request, cancellationToken), nameof(IWorkspaceRpc.CommitRefreshAsync)).WaitAsync(cancellationToken).ConfigureAwait(false);
             await ReplayBuffersAsync(cancellationToken).ConfigureAwait(false);
             return snapshot;
         }
@@ -159,7 +166,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public async Task<DocumentUpdateResult> UpdateDocumentAsync(UpdateDocumentRequest request, CancellationToken cancellationToken = default)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
-        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        await EnterLifecycleAsync(lifetime.Token).ConfigureAwait(false);
         try { return await UpdateDocumentCoreAsync(request, lifetime.Token).ConfigureAwait(false); }
         finally { _lifecycle.Release(); }
     }
@@ -176,7 +183,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         DocumentUpdateResult result;
         // WaitAsync bounds the call by our token even when the worker never acknowledges the cancellation; this runs
         // under the lifecycle lock, so an unbounded wait here would also block close, reload and shutdown.
-        try { result = await proxy.UpdateDocumentAsync(request, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false); }
+        try { result = await Timed(PerfMonitor.Now, proxy.UpdateDocumentAsync(request, cancellationToken), nameof(UpdateDocumentAsync)).WaitAsync(cancellationToken).ConfigureAwait(false); }
         catch
         {
             // The worker can commit authored text before cancellable projection
@@ -241,7 +248,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public async Task CloseDocumentAsync(string path, CancellationToken cancellationToken = default)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
-        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        await EnterLifecycleAsync(lifetime.Token).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -251,7 +258,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             {
                 var proxy = Proxy;
                 lifetime.Token.ThrowIfCancellationRequested();
-                try { await proxy.CloseDocumentAsync(path, lifetime.Token).WaitAsync(lifetime.Token).ConfigureAwait(false); }
+                try { await _perf.TimeAsync(PerfAreas.WorkerCall, nameof(CloseDocumentAsync), PerfMonitor.Now, proxy.CloseDocumentAsync(path, lifetime.Token)).WaitAsync(lifetime.Token).ConfigureAwait(false); }
                 catch { ForgetAcceptedDocument(path); throw; }
             }
             ForgetAcceptedDocument(path);
@@ -265,7 +272,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public async Task<XamlNameProjectionResult> ApplyXamlNameProjectionAsync(XamlNameProjectionRequest request, CancellationToken cancellationToken = default)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
-        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        await EnterLifecycleAsync(lifetime.Token).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -273,7 +280,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
                 if (!_nameProjections.ContainsKey(request.Plan.XamlPath) && _nameProjections.Count >= 32)
                     return new(false, "The generated-name projection limit was reached. Save, build and reload before another page rename.");
             ValidateProjectionBuffers(request.Documents);
-            var result = await Proxy.ApplyXamlNameProjectionAsync(request, lifetime.Token).WaitAsync(lifetime.Token).ConfigureAwait(false);
+            var result = await Timed(PerfMonitor.Now, Proxy.ApplyXamlNameProjectionAsync(request, lifetime.Token)).WaitAsync(lifetime.Token).ConfigureAwait(false);
             if (result.Accepted)
             {
                 foreach (var document in request.Documents) { RememberBuffer(document); RememberAcceptedDocument(document); }
@@ -291,7 +298,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     public async Task<XamlNameProjectionResult> ReconcileNameProjectionsAsync(IReadOnlyList<UpdateDocumentRequest> documents, CancellationToken cancellationToken = default)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
-        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        await EnterLifecycleAsync(lifetime.Token).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -342,45 +349,83 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private static bool IsXaml(string path) => Path.GetExtension(path).Equals(".xaml", StringComparison.OrdinalIgnoreCase);
     private static bool IsCSharp(string path) => Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase);
 
-    public Task<CompletionResult> GetCompletionsAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetCompletionsAsync(request, cancellationToken);
-    public Task<XamlAnalysisResult> AnalyzeXamlAsync(XamlDocumentRequest request, CancellationToken cancellationToken = default) => Proxy.AnalyzeXamlAsync(request, cancellationToken);
-    public Task<XamlProjectAnalysisResult> AnalyzeXamlProjectAsync(XamlProjectAnalysisRequest request, CancellationToken cancellationToken = default) => Proxy.AnalyzeXamlProjectAsync(request, cancellationToken);
+    public Task<CompletionResult> GetCompletionsAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetCompletionsAsync(request, cancellationToken));
+    public Task<XamlAnalysisResult> AnalyzeXamlAsync(XamlDocumentRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.AnalyzeXamlAsync(request, cancellationToken));
+    public Task<XamlProjectAnalysisResult> AnalyzeXamlProjectAsync(XamlProjectAnalysisRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.AnalyzeXamlProjectAsync(request, cancellationToken));
     public async Task<RefreshDiskDocumentsResult> RefreshDiskDocumentsAsync(RefreshDiskDocumentsRequest request, CancellationToken cancellationToken = default)
     {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
-        await _lifecycle.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        await EnterLifecycleAsync(lifetime.Token).ConfigureAwait(false);
         try
         {
-            var result = await Proxy.RefreshDiskDocumentsAsync(request, lifetime.Token).WaitAsync(lifetime.Token).ConfigureAwait(false);
+            var result = await Timed(PerfMonitor.Now, Proxy.RefreshDiskDocumentsAsync(request, lifetime.Token)).WaitAsync(lifetime.Token).ConfigureAwait(false);
             if (result.Changed) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }
             return result;
         }
         finally { _lifecycle.Release(); }
     }
-    public Task<XamlCompletionResult> GetXamlCompletionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlCompletionsAsync(request, cancellationToken);
-    public Task<IReadOnlyList<SourceLocation>> GetXamlDefinitionAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlDefinitionAsync(request, cancellationToken);
-    public Task<XamlHoverInfo?> GetXamlHoverAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlHoverAsync(request, cancellationToken);
-    public Task<IReadOnlyList<XamlCodeAction>> GetXamlCodeActionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Proxy.GetXamlCodeActionsAsync(request, cancellationToken);
-    public Task<TextEdit?> GetCompletionEditAsync(CompletionEditRequest request, CancellationToken cancellationToken = default) => Proxy.GetCompletionEditAsync(request, cancellationToken);
-    public Task<QuickInfoResult?> GetCompletionDetailsAsync(CompletionEditRequest request, CancellationToken cancellationToken = default) => Proxy.GetCompletionDetailsAsync(request, cancellationToken);
-    public Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetSignatureHelpAsync(request, cancellationToken);
-    public Task<QuickInfoResult?> GetQuickInfoAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetQuickInfoAsync(request, cancellationToken);
-    public Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.GetDefinitionAsync(request, cancellationToken);
-    public Task<DefinitionResult> FindDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.FindDefinitionAsync(request, cancellationToken);
-    public Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.FindReferencesAsync(request, cancellationToken);
-    public Task<IReadOnlyList<SourceLocation>> FindImplementationsAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Proxy.FindImplementationsAsync(request, cancellationToken);
-    public Task<IReadOnlyList<SymbolSearchResult>> SearchSymbolsAsync(SymbolSearchRequest request, CancellationToken cancellationToken = default) => Proxy.SearchSymbolsAsync(request, cancellationToken);
-    public Task<SymbolReferenceResult> FindSymbolReferencesAsync(SymbolReferenceRequest request, CancellationToken cancellationToken = default) => Proxy.FindSymbolReferencesAsync(request, cancellationToken);
-    public Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken = default) => Proxy.FormatDocumentAsync(request, cancellationToken);
-    public Task<WorkspaceEditResult> FormatXamlAsync(XamlFormattingRequest request, CancellationToken cancellationToken = default) => Proxy.FormatXamlAsync(request, cancellationToken);
-    public Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken = default) => Proxy.RenameAsync(request, cancellationToken);
-    public Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken = default) => Proxy.RefactorAsync(request, cancellationToken);
-    public Task<EditorDecorationsResult> GetEditorDecorationsAsync(DocumentRequest request, CancellationToken cancellationToken = default) => Proxy.GetEditorDecorationsAsync(request, cancellationToken);
-    public Task<CodeLensResult> GetCodeLensAsync(DocumentRequest request, CancellationToken cancellationToken = default) => Proxy.GetCodeLensAsync(request, cancellationToken);
-    public Task<CodeActionsResult> GetCodeActionsAsync(CodeActionsRequest request, CancellationToken cancellationToken = default) => Proxy.GetCodeActionsAsync(request, cancellationToken);
-    public Task<WorkspaceEditResult> ApplyCodeActionAsync(ApplyCodeActionRequest request, CancellationToken cancellationToken = default) => Proxy.ApplyCodeActionAsync(request, cancellationToken);
+    public Task<XamlCompletionResult> GetXamlCompletionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetXamlCompletionsAsync(request, cancellationToken));
+    public Task<IReadOnlyList<SourceLocation>> GetXamlDefinitionAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetXamlDefinitionAsync(request, cancellationToken));
+    public Task<XamlHoverInfo?> GetXamlHoverAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetXamlHoverAsync(request, cancellationToken));
+    public Task<IReadOnlyList<XamlCodeAction>> GetXamlCodeActionsAsync(XamlCompletionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetXamlCodeActionsAsync(request, cancellationToken));
+    public Task<TextEdit?> GetCompletionEditAsync(CompletionEditRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetCompletionEditAsync(request, cancellationToken));
+    public Task<QuickInfoResult?> GetCompletionDetailsAsync(CompletionEditRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetCompletionDetailsAsync(request, cancellationToken));
+    public Task<SignatureHelpResult> GetSignatureHelpAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetSignatureHelpAsync(request, cancellationToken));
+    public Task<QuickInfoResult?> GetQuickInfoAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetQuickInfoAsync(request, cancellationToken));
+    public Task<IReadOnlyList<SourceLocation>> GetDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetDefinitionAsync(request, cancellationToken));
+    public Task<DefinitionResult> FindDefinitionAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.FindDefinitionAsync(request, cancellationToken));
+    public Task<IReadOnlyList<SourceLocation>> FindReferencesAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.FindReferencesAsync(request, cancellationToken));
+    public Task<IReadOnlyList<SourceLocation>> FindImplementationsAsync(DocumentPositionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.FindImplementationsAsync(request, cancellationToken));
+    public Task<IReadOnlyList<SymbolSearchResult>> SearchSymbolsAsync(SymbolSearchRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.SearchSymbolsAsync(request, cancellationToken));
+    public Task<SymbolReferenceResult> FindSymbolReferencesAsync(SymbolReferenceRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.FindSymbolReferencesAsync(request, cancellationToken));
+    public Task<WorkspaceEditResult> FormatDocumentAsync(DocumentRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.FormatDocumentAsync(request, cancellationToken));
+    public Task<WorkspaceEditResult> FormatXamlAsync(XamlFormattingRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.FormatXamlAsync(request, cancellationToken));
+    public Task<WorkspaceEditResult> RenameAsync(RenameRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.RenameAsync(request, cancellationToken));
+    public Task<WorkspaceEditResult> RefactorAsync(RefactorRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.RefactorAsync(request, cancellationToken));
+    public Task<EditorDecorationsResult> GetEditorDecorationsAsync(DocumentRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetEditorDecorationsAsync(request, cancellationToken));
+    public Task<CodeLensResult> GetCodeLensAsync(DocumentRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetCodeLensAsync(request, cancellationToken));
+    public Task<CodeActionsResult> GetCodeActionsAsync(CodeActionsRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.GetCodeActionsAsync(request, cancellationToken));
+    public Task<WorkspaceEditResult> ApplyCodeActionAsync(ApplyCodeActionRequest request, CancellationToken cancellationToken = default) => Timed(PerfMonitor.Now, Proxy.ApplyCodeActionAsync(request, cancellationToken));
 
     private IWorkspaceRpc Proxy => _proxy ?? throw new InvalidOperationException($"Workspace worker is not connected. Reopen or restart the workspace. {WorkerError}");
+
+    // The clock is read before the proxy is called, so the time it takes to write and send the request is counted.
+    private Task<T> Timed<T>(long started, Task<T> call, [CallerMemberName] string operation = "") => _perf.TimeAsync(PerfAreas.WorkerCall, operation, started, call);
+
+    // Edits, closes and reloads reach the worker one at a time. A request that finds another in its way waits here, where
+    // neither its own timing nor the worker's shows it, so a wait that was not immediate is measured and names what held it.
+    private async Task EnterLifecycleAsync(CancellationToken cancellationToken, [CallerMemberName] string operation = "")
+    {
+        var entered = _lifecycle.WaitAsync(cancellationToken);
+        if (!entered.IsCompletedSuccessfully)
+        {
+            long started = PerfMonitor.Now;
+            string holder = _lifecycleHolder;
+            await entered.ConfigureAwait(false);
+            _perf.RecordSince(PerfAreas.Wait, operation + ", for the worker connection", started, "held by " + holder);
+        }
+        _lifecycleHolder = operation;
+    }
+
+    // What the worker measured as slow is reported here, in the same log as what the IDE measured. The language service
+    // does not depend on it: a worker that cannot be asked about its performance is still a worker.
+    private void AttachDiagnostics(JsonRpc rpc)
+    {
+        try
+        {
+            _diagnostics = rpc.Attach<IWorkerDiagnosticsRpc>();
+            _diagnostics.SlowOperationReported += (_, operation) => _perf.Publish(operation);
+        }
+        catch (Exception) { _diagnostics = null; }
+    }
+
+    /// <summary>The worker's own measurements as a table, or null when no worker is connected or it does not answer.</summary>
+    public async Task<string?> GetWorkerPerformanceReportAsync(bool reset = false, CancellationToken cancellationToken = default)
+    {
+        if (_diagnostics is not { } diagnostics || !IsConnected) return null;
+        try { return await diagnostics.GetPerformanceReportAsync(reset, cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { return null; }
+    }
 
     private async Task StartWorkerAsync(string workspacePath, CancellationToken cancellationToken)
     {
@@ -412,6 +457,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             await worker.ConnectAsync(cancellationToken).ConfigureAwait(false);
             _rpc = new JsonRpc(worker.Pipe);
             _proxy = _rpc.Attach<IWorkspaceRpc>();
+            AttachDiagnostics(_rpc);
             var rpc = _rpc;
             _proxy.SemanticStateChanged += (_, _) =>
             {
@@ -459,6 +505,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
         if (worker is not null) _stoppedWorkerError = worker.ErrorTail;
         _worker = null;
         _proxy = null;
+        _diagnostics = null;
         _rpc?.Dispose(); _rpc = null;
         lock (_bufferGate) _acceptedDocumentTexts.Clear();
         if (worker is not null) { SemanticStateChanged?.Invoke(this, EventArgs.Empty); NotifyNameProjectionChanged(); }

@@ -267,6 +267,7 @@
           <MenuItem Header="All commands and shortcuts…" c:Ui.Icon="Keyboard" Command="{Binding ShowShortcutsCommand}" />
           <MenuItem Header="What's new" c:Ui.Icon="Bulb" Command="{Binding ShowWhatsNewCommand}" />
           <Separator />
+          <MenuItem Header="Performance report" c:Ui.Icon="Output" Command="{Binding ShowPerformanceReportCommand}" />
           <MenuItem Header="Open data folder" c:Ui.Icon="FolderOpen" Command="{Binding OpenDataFolderCommand}" />
           <MenuItem Header="About WpfStudio" c:Ui.Icon="Info" Command="{Binding ShowAboutCommand}" />
         </MenuItem>

@@ -27,4 +27,4 @@ public sealed record ShellDesktopServices(IFileDialogService Files, IUserDialogS
 /// build them itself, and the shell only hands these on.
 /// </summary>
 public sealed record ShellToolServices(WorkspaceStateStore<UserTaskItem> Tasks, WorkspaceStateStore<FileGroup> FileGroups,
-    OpenDocumentWatcherFactory WatchOpenDocuments, KnownSourceWatcherFactory WatchSources, WpfStudio.App.Features.Runtimes.RuntimeCheckServices Runtimes);
+    OpenDocumentWatcherFactory WatchOpenDocuments, KnownSourceWatcherFactory WatchSources, WpfStudio.App.Features.Runtimes.RuntimeCheckServices Runtimes, PerfLog Performance);

@@ -1,7 +1,9 @@
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using StreamJsonRpc;
 using WpfStudio.Contracts;
+using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Hosting;
 using WpfStudio.Inspection.Protocol;
 using WpfStudio.PreviewDependencies;
@@ -16,8 +18,9 @@ public interface IPreviewClient : IPreviewRpc, IAsyncDisposable
 }
 
 /// <summary>Owns one isolated WPF process, with bounded requests and an independent native-interaction watchdog.</summary>
-public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? requestTimeout = null, TimeSpan? supersededRequestGrace = null) : IPreviewClient
+public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? requestTimeout = null, TimeSpan? supersededRequestGrace = null, PerfMonitor? perf = null) : IPreviewClient
 {
+    private readonly PerfMonitor _perf = perf ?? new PerfMonitor();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _lifecycle = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -78,8 +81,13 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         return result;
     }
 
-    private async Task<T> ExecuteAsync<T>(Func<IPreviewRpc, Task<T>> action, PreviewRequest? render, CancellationToken token,
-        PreviewProcessLease? expectedLease = null, Func<bool>? stillCurrent = null)
+    // Timed as the caller sees it: the wait for the request before it, starting a host when one is needed, and the request itself.
+    private Task<T> ExecuteAsync<T>(Func<IPreviewRpc, Task<T>> action, PreviewRequest? render, CancellationToken token,
+        PreviewProcessLease? expectedLease = null, Func<bool>? stillCurrent = null, [CallerMemberName] string operation = "") =>
+        _perf.TimeAsync(PerfAreas.PreviewCall, operation, PerfMonitor.Now, ExecuteCoreAsync(action, render, token, expectedLease, stillCurrent, operation));
+
+    private async Task<T> ExecuteCoreAsync<T>(Func<IPreviewRpc, Task<T>> action, PreviewRequest? render, CancellationToken token,
+        PreviewProcessLease? expectedLease, Func<bool>? stillCurrent, string operation)
     {
         CancellationTokenSource lifetimeSource;
         CancellationToken epoch;
@@ -94,7 +102,15 @@ public sealed partial class PreviewClient(string? hostPath = null, TimeSpan? req
         // A request made after Stop uses a fresh epoch, but must not start a new
         // host until that stop has finished cleaning up its predecessor.
         await stopBarrier.WaitAsync(lifetime.Token).ConfigureAwait(false);
-        await _gate.WaitAsync(lifetime.Token).ConfigureAwait(false);
+        // The host serves one request at a time, and a render that typing superseded keeps it until it finishes. The next
+        // request waits here for that, which its own duration would not tell apart from a slow render.
+        long queued = PerfMonitor.Now;
+        var entered = _gate.WaitAsync(lifetime.Token);
+        if (!entered.IsCompletedSuccessfully)
+        {
+            await entered.ConfigureAwait(false);
+            _perf.RecordSince(PerfAreas.Wait, operation + ", for the preview process", queued);
+        }
         bool releaseGate = true, abandoned = false;
         try
         {

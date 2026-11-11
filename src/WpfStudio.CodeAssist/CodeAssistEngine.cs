@@ -1,4 +1,6 @@
+using System.Runtime.CompilerServices;
 using WpfStudio.Contracts;
+using WpfStudio.Contracts.Diagnostics;
 
 namespace WpfStudio.CodeAssist;
 
@@ -14,8 +16,9 @@ public sealed record CodeAssistOptions(bool Enabled, string? MemberModelVersion 
 /// load on first use, on a pool thread. A failure is reported in <see cref="Status"/> and leaves completion as Roslyn
 /// returned it; this feature can never cost the user the completions they already had.
 /// </summary>
-public sealed class CodeAssistEngine(AssistModelCatalog catalog) : IDisposable
+public sealed class CodeAssistEngine(AssistModelCatalog catalog, PerfMonitor? perf = null) : IDisposable
 {
+    private readonly PerfMonitor _perf = perf ?? new PerfMonitor();
     /// <summary>How many names get a star. The evaluation's top-5 recall measures this list.</summary>
     public const int MaxRecommendations = 5;
     /// <summary>The most a line may add. A line that runs longer is usually the model repeating itself.</summary>
@@ -93,8 +96,10 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog) : IDisposable
         model.Manifest.Lines!.FeatureVersion == TransformerLineGenerator.SupportedFeatureVersion ? TransformerLineGenerator.Load(model) : LineGenerator.Load(model);
 
     // A failure stops here, so a request abandoned at the ranking budget cannot leave a fault nobody observes.
-    private Task<TResult?> RunAsync<T, TResult>(ModelSlot<T> slot, Func<AssistModel?> model, Func<T, TResult?> run, CancellationToken token) where T : class, IDisposable where TResult : class => Task.Run(() =>
+    // A model runs on a pool thread for as long as it takes, also after a caller stopped waiting at its budget, so the run is timed here and not at the call.
+    private Task<TResult?> RunAsync<T, TResult>(ModelSlot<T> slot, Func<AssistModel?> model, Func<T, TResult?> run, CancellationToken token, [CallerMemberName] string operation = "") where T : class, IDisposable where TResult : class => Task.Run(() =>
     {
+        long started = PerfMonitor.Now;
         try
         {
             var result = slot.Use(model, run, out bool changed);
@@ -107,6 +112,7 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog) : IDisposable
             StatusChanged?.Invoke(this, EventArgs.Empty);
             return null;
         }
+        finally { _perf.RecordSince(PerfAreas.Assist, operation, started); }
     }, token);
 
     // A lone ";" costs more attention than it saves, and it is not counted as an offer when models are scored.
