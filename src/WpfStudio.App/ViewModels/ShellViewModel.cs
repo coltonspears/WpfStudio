@@ -38,6 +38,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly IClipboardService _clipboard;
     private readonly IUiDispatcher _dispatcher;
     private readonly ILogger<ShellViewModel> _logger;
+    private readonly PerfLog _performance;
     private readonly StudioPaths _paths;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly OperationGate _operations;
@@ -65,6 +66,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Palette = new(this); ChangeReview = new(this, dispatcher); _verifiedEdits = new(this, store, _edits);
         Tasks = new(this, Terminal, dispatcher, messenger); Runtimes = new(this, tools.Runtimes);
         XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
+        _performance = tools.Performance;
         Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
         LiveInspection = new(dispatcher);
@@ -472,6 +474,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources)
         {
             Preferences = Editor,
+            Performance = _performance.Monitor,
             CodeAssist = CodeAssist.Engine,
             DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
             XamlCodeActionApplier = ApplyXamlCodeActionAsync,

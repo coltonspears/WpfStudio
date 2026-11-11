@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.CodeAssist;
 using WpfStudio.Contracts;
+using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Core.Documents;
 using WpfStudio.App.Services;
 using WpfStudio.Workspace;
@@ -68,6 +69,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public DocumentState State { get; }
     /// <summary>The editor settings its surface follows; without any, the surface keeps its defaults.</summary>
     public EditorPreferences? Preferences { get; init; }
+    /// <summary>Where this editor and its surface record what a keystroke costs; without one nothing is recorded.</summary>
+    public PerfMonitor? Performance { get; init; }
     /// <summary>Experimental member ranking and line suggestions. It decides for itself whether it is on.</summary>
     public CodeAssistEngine? CodeAssist { get; init; }
     public bool SuggestsLines => CodeAssist is { SuggestsLines: true } && IsCSharp && !IsReadOnly;
@@ -217,9 +220,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private void ContentChanged(object? sender, EventArgs e)
     {
         if (_disposed) return;
-        ContextChanged?.Invoke();
-        OnGitContentChanged();
-        StartAnalysisAsync(debounce: true).Forget(ReportFault);
+        // This runs for every character, inside the key press that typed it. Each part is timed by itself, so that a slow
+        // keystroke can be put down to one of them.
+        using (Performance?.Measure(PerfAreas.Edit, "text changed: context subscribers")) ContextChanged?.Invoke();
+        using (Performance?.Measure(PerfAreas.Edit, "text changed: Git margin and blame")) OnGitContentChanged();
+        using (Performance?.Measure(PerfAreas.Edit, "text changed: analysis start")) StartAnalysisAsync(debounce: true).Forget(ReportFault);
     }
     private void StatePropertyChanged(object? sender, PropertyChangedEventArgs args)
     {

@@ -217,6 +217,8 @@ Performance goals are a usable shell within 2 seconds, a navigable 20-project/5,
 
 Run `./tools/Measure-Performance.ps1` to generate a restored 20-project/5,000-source-file WPF fixture under `artifacts/performance`, measure worker load and 25 warm completion requests, and write `artifacts/performance/results.json`. This benchmark labels harness/worker memory separately; it does not substitute for measuring actual shell startup, first tree display, or optional terminal/debugger/SQL overhead.
 
+The running IDE measures itself: how long the UI thread keeps a key press waiting, every input event and dispatcher operation by the name of the code that ran, every request to the language worker from both sides, preview requests, Code Assist model runs, and startup. **Help > Performance report** shows where the time went since the last report, and operations over their limit are written to `Logs/performance.log` in the data folder as they happen. Nothing is sent anywhere, and the log holds names and durations only. See [performance tracing](docs/performance-tracing.md).
+
 The portable package includes `samples/CounterApp/CounterApp.csproj` for a small WPF/MVVM editing and debugging walkthrough. Open that project, build, set a breakpoint in `CounterViewModel.cs`, and press F5.
 
 See [validation results and remaining manual checks](VALIDATION.md) and [third-party notices](THIRD-PARTY-NOTICES.md). `tools/Smoke-Portable.ps1` verifies the real published executable with an isolated settings directory; `WPFSTUDIO_DATA_DIRECTORY` can override the default profile for test runs.

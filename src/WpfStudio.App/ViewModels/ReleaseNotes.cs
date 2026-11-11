@@ -8,6 +8,12 @@ public static class ReleaseNoteCatalog
 {
     public static IReadOnlyList<ReleaseNote> All { get; } =
     [
+        new("Unreleased", "Performance report",
+        [
+            "Help > Performance report shows where the time went since the last report: how long the UI thread kept input waiting, each input event and dispatcher operation under the name of the code that ran, each language worker request as the IDE and as the worker saw it, preview requests and Code Assist runs.",
+            "Operations that take longer than they should are written to Logs/performance.log in the data folder as they happen, with what the garbage collector did meanwhile. A stall of half a second or more is also noted in Output.",
+            "The measurements stay on this machine and contain names and durations only: no source text, file names or keys.",
+        ]),
         new("Unreleased", "Design-time data in the XAML designer",
         [
             "d:DataContext works in the designer. {d:DesignInstance Type=vm:OrdersViewModel} fills the view model with sample values chosen from its property names and types, without running its constructor, so a view model that needs services still previews with lists, names, dates and totals. IsDesignTimeCreatable=True shows the instance its own constructor builds.",

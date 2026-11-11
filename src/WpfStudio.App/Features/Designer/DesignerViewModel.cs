@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Layout;
 using WpfStudio.Contracts;
+using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Core.Documents;
 using WpfStudio.Runtime.Design;
 
@@ -49,6 +50,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
 {
     private readonly IPreviewClient _client;
     private readonly IUiDispatcher _dispatcher;
+    private readonly PerfMonitor? _perf;
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _render;
     private DocumentState? _document;
@@ -64,9 +66,9 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     private PreviewReferenceSet? _references;
     private bool _disposed;
     private bool _picking;
-    public DesignerViewModel(IPreviewClient client, IUiDispatcher dispatcher)
+    public DesignerViewModel(IPreviewClient client, IUiDispatcher dispatcher, PerfMonitor? perf = null)
     {
-        _client = client; _dispatcher = dispatcher;
+        _client = client; _dispatcher = dispatcher; _perf = perf;
         Canvas = new(() => DocumentName, ArtboardSizeChanged);
         Scenarios = new(this, dispatcher);
         LayoutGesture = new(this);
@@ -119,6 +121,8 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
     partial void OnDocumentNameChanged(string value) => Canvas.NotifyDocumentName();
     private void ContentChanged(object? sender, EventArgs args)
     {
+        // Inside the key press that changed the source, for every character typed while this view is in the designer.
+        using var timed = _perf?.Measure(PerfAreas.Edit, "text changed: designer invalidation");
         Invalidate();
         if (IsCompiledPreview) { Status = "Source changed. Rebuild the project, then refresh to see compiled changes."; return; }
         Status = AutoRefresh ? "Source changed; updating preview…" : "Source changed; refresh the preview";

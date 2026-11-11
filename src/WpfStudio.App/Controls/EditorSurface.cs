@@ -13,6 +13,7 @@ using ICSharpCode.AvalonEdit.Search;
 using WpfStudio.App.Controls.Editor;
 using WpfStudio.App.ViewModels;
 using WpfStudio.Contracts;
+using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Core.Documents;
 using WpfStudio.Core.Git;
 
@@ -210,6 +211,8 @@ public sealed partial class EditorSurface : TextEditor
     private void OnEditorTextChanged(object? sender, EventArgs args)
     {
         if (_syncing || ViewModel == null) return;
+        // Everything that follows a text change synchronously: the model and all who listen to it. Its named parts are timed where they run.
+        using var timed = ViewModel.Performance?.Measure(PerfAreas.Edit, "text changed: everything");
         _syncing = true; try { ViewModel.State.Content = Text; } finally { _syncing = false; }
         _lineSuggestion.OnTextChanged();
     }
