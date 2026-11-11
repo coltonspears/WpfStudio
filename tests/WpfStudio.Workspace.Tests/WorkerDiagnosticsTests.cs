@@ -44,11 +44,15 @@ public sealed class WorkerDiagnosticsTests : IAsyncLifetime
         Assert.Equal(["GetCompletionsAsync", "LoadAsync", "UpdateDocumentAsync"], calls.Keys.Order(StringComparer.Ordinal));
         Assert.All(calls.Values, stat => Assert.Equal(1, stat.Count));
 
-        // As the worker saw them. Loading a project through MSBuild takes long enough for the worker to report it by itself.
-        var waited = Stopwatch.StartNew();
-        while (!reported.Any(operation => operation.Source == "worker") && waited.Elapsed < TimeSpan.FromSeconds(30)) await Task.Delay(20);
-        var load = Assert.Single(reported, operation => operation is { Source: "worker", Area: PerfAreas.Worker, Name: "LoadAsync" });
-        Assert.InRange(load.Milliseconds, 250, calls["LoadAsync"].MaxMilliseconds);
+        // As the worker saw them. Loading a project through MSBuild takes seconds, long enough for the worker to report the
+        // load by itself. On a machine where it took under one, there may have been nothing to report.
+        if (calls["LoadAsync"].MaxMilliseconds >= 1000)
+        {
+            var waited = Stopwatch.StartNew();
+            while (!reported.Any(operation => operation.Source == "worker") && waited.Elapsed < TimeSpan.FromSeconds(30)) await Task.Delay(20);
+            var load = Assert.Single(reported, operation => operation is { Source: "worker", Area: PerfAreas.Worker, Name: "LoadAsync" });
+            Assert.InRange(load.Milliseconds, 250, calls["LoadAsync"].MaxMilliseconds);
+        }
 
         var report = await client.GetWorkerPerformanceReportAsync(reset: true);
         Assert.NotNull(report);
