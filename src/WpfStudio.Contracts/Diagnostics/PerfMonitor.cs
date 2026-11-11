@@ -144,10 +144,18 @@ public sealed class PerfCounter
     // Durations fall into buckets a quarter of an octave wide, from 64 microseconds to over two minutes. A percentile is
     // then known to within 25% from 86 counters, where keeping the measurements themselves would grow without bound.
     private const int FirstOctave = 6, LastOctave = 26, BucketCount = (LastOctave - FirstOctave + 1) * 4 + 2;
-    private readonly long[] _buckets = new long[BucketCount];
     private readonly PerfMonitor _owner;
     private readonly long _slowTicks;
-    private long _totalTicks, _maxTicks;
+    private Tally _tally = new();
+
+    // What was recorded in one reporting period. A reset replaces it whole, so a measurement that is being recorded
+    // while another thread resets lands entirely in the period that ended or entirely in the one that began. Cleared
+    // in place, it could leave its count in the new period and its duration in the old.
+    private sealed class Tally
+    {
+        public readonly long[] Buckets = new long[BucketCount];
+        public long TotalTicks, MaxTicks;
+    }
 
     internal PerfCounter(PerfMonitor owner, string area, string name, TimeSpan slowAfter)
     {
@@ -173,10 +181,11 @@ public sealed class PerfCounter
     private bool Count(TimeSpan elapsed)
     {
         long ticks = Math.Max(0, elapsed.Ticks);
-        Interlocked.Increment(ref _buckets[Bucket(ticks)]);
-        Interlocked.Add(ref _totalTicks, ticks);
+        var tally = Volatile.Read(ref _tally);
+        Interlocked.Increment(ref tally.Buckets[Bucket(ticks)]);
+        Interlocked.Add(ref tally.TotalTicks, ticks);
         long max;
-        while (ticks > (max = Volatile.Read(ref _maxTicks)) && Interlocked.CompareExchange(ref _maxTicks, ticks, max) != max) { }
+        while (ticks > (max = Volatile.Read(ref tally.MaxTicks)) && Interlocked.CompareExchange(ref tally.MaxTicks, ticks, max) != max) { }
         if (StudioEventSource.Log.IsEnabled()) StudioEventSource.Log.Operation(_owner.Source, Area, Name, elapsed.TotalMilliseconds);
         return ticks >= _slowTicks;
     }
@@ -206,11 +215,12 @@ public sealed class PerfCounter
 
     internal PerfStat Read()
     {
+        var tally = Volatile.Read(ref _tally);
         var counts = new long[BucketCount];
         long count = 0;
-        for (int index = 0; index < BucketCount; index++) count += counts[index] = Volatile.Read(ref _buckets[index]);
-        double max = TimeSpan.FromTicks(Volatile.Read(ref _maxTicks)).TotalMilliseconds;
-        return new(Area, Name, count, TimeSpan.FromTicks(Volatile.Read(ref _totalTicks)).TotalMilliseconds, Percentile(counts, count, 0.50, max), Percentile(counts, count, 0.95, max), max);
+        for (int index = 0; index < BucketCount; index++) count += counts[index] = Volatile.Read(ref tally.Buckets[index]);
+        double max = TimeSpan.FromTicks(Volatile.Read(ref tally.MaxTicks)).TotalMilliseconds;
+        return new(Area, Name, count, TimeSpan.FromTicks(Volatile.Read(ref tally.TotalTicks)).TotalMilliseconds, Percentile(counts, count, 0.50, max), Percentile(counts, count, 0.95, max), max);
     }
     private static double Percentile(long[] counts, long count, double fraction, double max)
     {
@@ -220,11 +230,7 @@ public sealed class PerfCounter
         return max;
     }
 
-    internal void Clear()
-    {
-        for (int index = 0; index < BucketCount; index++) Volatile.Write(ref _buckets[index], 0);
-        Volatile.Write(ref _totalTicks, 0); Volatile.Write(ref _maxTicks, 0);
-    }
+    internal void Clear() => Volatile.Write(ref _tally, new Tally());
 }
 
 /// <summary>Records the time from its creation to its disposal.</summary>

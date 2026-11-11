@@ -94,7 +94,7 @@ The IDE and the language worker are separate processes and each needs its own re
 
 ## Cost
 
-Recording one measurement is two clock reads and a few interlocked additions: about 85 ns in all on a four-core Linux machine that was busy with other work at the time, of which the recording is 30 ns when the caller keeps its counter and 65 ns when it gives a name. Nothing is written or allocated for an operation that was fast, and the name of a dispatcher operation is looked up only when the operation took a millisecond or more. The two probes each wake a thread ten times a second. There is no switch to turn the tracing off.
+Recording one measurement is two clock reads and a few interlocked additions: about 75 ns in all in a release build on a four-core Linux machine, of which the recording is 13 ns when the caller keeps its counter and 50 ns when it gives a name. Nothing is written or allocated for an operation that was fast, and the name of a dispatcher operation is looked up only when the operation took a millisecond or more. The two probes each wake a thread ten times a second. There is no switch to turn the tracing off.
 
 What the hooks cost the UI thread per operation on Windows has not been measured.
 

@@ -116,6 +116,29 @@ public sealed class PerformanceTracingTests
     }
 
     [Fact]
+    public void AResetWhileOthersRecordLeavesEveryMeasurementWholeInOnePeriod()
+    {
+        var perf = new PerfMonitor();
+        var counter = perf.Counter("area", "busy");
+        var one = Ms(1);
+        for (int round = 0; round < 200; round++)
+        {
+            bool stop = false;
+            var recorders = Enumerable.Range(0, 3).Select(_ => new Thread(() => { while (!Volatile.Read(ref stop)) counter.Record(one); })).ToArray();
+            foreach (var recorder in recorders) recorder.Start();
+            Thread.SpinWait(20_000);
+            perf.Reset();
+            Volatile.Write(ref stop, true);
+            foreach (var recorder in recorders) recorder.Join();
+            // Nothing records now, so what the new period holds is final. Every measurement was one millisecond: a count
+            // that the total or the longest does not match is a measurement that the reset cut in two.
+            if (perf.Snapshot().SingleOrDefault() is not { } stat) continue;
+            Assert.Equal(stat.Count, stat.TotalMilliseconds, 6);
+            Assert.Equal(1, stat.MaxMilliseconds, 6);
+        }
+    }
+
+    [Fact]
     public void NamesBeyondTheLimitShareOneCounterSoAMistakeCannotGrowWithoutBound()
     {
         var perf = new PerfMonitor();
