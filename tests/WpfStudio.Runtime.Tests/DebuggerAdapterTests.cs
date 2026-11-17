@@ -35,6 +35,27 @@ public sealed class DebuggerAdapterTests
         Assert.Equal(Environment.ProcessPath, session.AdapterPath);
     }
 
+    [Fact]
+    public async Task TheAttachListNamesRunningProcessesAndFollowsTheTypedId()
+    {
+        await using var model = new DebuggerViewModel(new DebugSession { AdapterPath = Missing }, new Inline(), new NoDebugAdapter(), new WeakReferenceMessenger());
+        using var other = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/d /c ping -n 30 127.0.0.1 >nul") { CreateNoWindow = true })!;
+        try
+        {
+            model.AttachProcessId = other.Id;
+            await model.RefreshProcessesCommand.ExecuteAsync(null);
+            Assert.DoesNotContain(model.Processes, process => process.Id == Environment.ProcessId);
+            Assert.Equal(model.Processes.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ThenBy(p => p.Id), model.Processes);
+            Assert.Equal((other.Id, "cmd"), (model.SelectedProcess?.Id, model.SelectedProcess?.Name));
+
+            model.AttachProcessId = -1;
+            Assert.Null(model.SelectedProcess);
+            model.SelectedProcess = model.Processes.First(process => process.Id == other.Id);
+            Assert.Equal(other.Id, model.AttachProcessId);
+        }
+        finally { other.Kill(true); }
+    }
+
     private sealed class FakeAdapters : IDebugAdapterProvider
     {
         public string? Located { get; init; }

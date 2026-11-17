@@ -161,6 +161,31 @@ public sealed class TasksViewModelTests
         Assert.Contains("// Your own tasks", await File.ReadAllTextAsync(host.PersonalFile));
     });
 
+    [Fact]
+    public void EnvironmentRowsBecomeTheTaskEnvironment()
+    {
+        var editor = new TaskEditorViewModel { Label = "env", Command = "dotnet" };
+        editor.AddVariableCommand.Execute(null);
+        Assert.True(Assert.Single(editor.EnvironmentVariables).FocusName);
+        editor.EnvironmentVariables[0].Name = " DOTNET_ENVIRONMENT ";
+        editor.EnvironmentVariables[0].Value = "Development";
+        // A row added and left empty is left out.
+        editor.AddVariableCommand.Execute(null);
+        editor.AddVariableCommand.Execute(null);
+        editor.EnvironmentVariables[2].Name = "PAIR";
+        editor.EnvironmentVariables[2].Value = "a=b";
+        Assert.Equal(new Dictionary<string, string> { ["DOTNET_ENVIRONMENT"] = "Development", ["PAIR"] = "a=b" }, editor.ToDraft().Environment);
+
+        editor.EnvironmentVariables[1].Value = "orphan";
+        Assert.Equal("Name the environment variable whose value is \"orphan\".", Assert.Throws<TaskConfigurationException>(() => editor.ToDraft()).Message);
+        editor.RemoveVariableCommand.Execute(editor.EnvironmentVariables[1]);
+        editor.EnvironmentVariables[0].Name = "A=B";
+        Assert.Contains("cannot contain '='", Assert.Throws<TaskConfigurationException>(() => editor.ToDraft()).Message);
+
+        editor.Reset(personal: false);
+        Assert.Empty(editor.EnvironmentVariables);
+    }
+
     // ------------------------------------------------------------------ Harness
 
     private static async Task Until(Func<bool> condition)

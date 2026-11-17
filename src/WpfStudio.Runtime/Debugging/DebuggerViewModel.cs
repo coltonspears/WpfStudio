@@ -129,6 +129,23 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         await GuardAsync(async () => { await store.SaveAsync(); if (IsActive) await ApplyFileBreakpointsAsync(path); });
     }
 
+    /// <summary>Running processes to attach to, by name; read when the attach options open and on Refresh.</summary>
+    [ObservableProperty] public partial IReadOnlyList<AttachableProcess> Processes { get; private set; } = [];
+    [ObservableProperty] public partial AttachableProcess? SelectedProcess { get; set; }
+    /// <summary>True while the attach options are shown.</summary>
+    [ObservableProperty] public partial bool IsAttachExpanded { get; set; }
+    partial void OnIsAttachExpandedChanged(bool value) { if (value) _ = RefreshProcessesCommand.ExecuteAsync(null); }
+    // The list and the ID box show the same process; an ID typed by hand that is not listed leaves nothing chosen.
+    partial void OnSelectedProcessChanged(AttachableProcess? value) { if (value is not null) AttachProcessId = value.Id; }
+    partial void OnAttachProcessIdChanged(int value) { if (SelectedProcess?.Id != value) SelectedProcess = Processes.FirstOrDefault(process => process.Id == value); }
+
+    [RelayCommand] private Task RefreshProcessesAsync() => GuardAsync(async () =>
+    {
+        var processes = await Task.Run(AttachableProcess.List);
+        Processes = processes;
+        SelectedProcess = processes.FirstOrDefault(process => process.Id == AttachProcessId);
+    });
+
     [RelayCommand] private Task AttachAsync() => GuardAsync(async () =>
     {
         if (IsAdapterMissing) { Error = "Install the debugger first: choose Install debugger above."; return; }
@@ -164,6 +181,8 @@ public sealed partial class DebuggerViewModel : ObservableObject, IAsyncDisposab
         Breakpoints.Remove(selected); await store.SaveAsync(); if (IsActive) await ApplyFileBreakpointsAsync(selected.Path);
     });
     [RelayCommand] private void NavigateBreakpoint() { if (SelectedBreakpoint is { } selected) messenger.Send(new DebuggerSourceMessage(selected.Path, selected.Line)); }
+    /// <summary>Asks the shell to open the settings of the selected breakpoint.</summary>
+    [RelayCommand] private void EditBreakpoint() { if (SelectedBreakpoint is { } selected) messenger.Send(new EditBreakpointMessage(selected)); }
     [RelayCommand] private Task EnableAllBreakpointsAsync() => SetAllBreakpointsAsync(true);
     [RelayCommand] private Task DisableAllBreakpointsAsync() => SetAllBreakpointsAsync(false);
     private Task SetAllBreakpointsAsync(bool enabled) => GuardAsync(async () =>

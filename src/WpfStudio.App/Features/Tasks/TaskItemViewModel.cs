@@ -1,4 +1,6 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Tasks;
 using WpfStudio.Runtime.Terminal;
@@ -59,6 +61,15 @@ public sealed partial class TaskItemViewModel(StudioTask task) : ObservableObjec
     internal void ClearDiagnostics() { Diagnostics.Clear(); _known.Clear(); }
 }
 
+/// <summary>One environment variable of the New task form.</summary>
+public sealed partial class EnvironmentVariableRow : ObservableObject
+{
+    [ObservableProperty] public partial string Name { get; set; } = "";
+    [ObservableProperty] public partial string Value { get; set; } = "";
+    /// <summary>Asks the view to focus the name; the view clears it once done.</summary>
+    [ObservableProperty] public partial bool FocusName { get; set; }
+}
+
 /// <summary>The New task form: what it holds becomes a task in the shared or the personal tasks file.</summary>
 public sealed partial class TaskEditorViewModel : ObservableObject
 {
@@ -70,8 +81,8 @@ public sealed partial class TaskEditorViewModel : ObservableObject
     [ObservableProperty] public partial string Command { get; set; } = "";
     [ObservableProperty] public partial string Arguments { get; set; } = "";
     [ObservableProperty] public partial string WorkingDirectory { get; set; } = "";
-    /// <summary>One <c>NAME=value</c> per line.</summary>
-    [ObservableProperty] public partial string EnvironmentText { get; set; } = "";
+    /// <summary>Variables set for the task only, one row each.</summary>
+    public ObservableCollection<EnvironmentVariableRow> EnvironmentVariables { get; } = [];
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasGroup))] public partial TaskGroup Group { get; set; }
     [ObservableProperty] public partial bool IsDefault { get; set; }
     [ObservableProperty] public partial bool MatchMSBuildProblems { get; set; }
@@ -82,9 +93,17 @@ public sealed partial class TaskEditorViewModel : ObservableObject
     public bool HasGroup => Group != TaskGroup.None;
     internal TaskItemViewModel? TestRun { get; set; }
 
+    [RelayCommand]
+    private void AddVariable()
+    {
+        var row = new EnvironmentVariableRow { FocusName = true };
+        EnvironmentVariables.Add(row);
+    }
+    [RelayCommand] private void RemoveVariable(EnvironmentVariableRow? row) { if (row != null) EnvironmentVariables.Remove(row); }
+
     public void Reset(bool personal)
     {
-        Label = ""; IsProcess = false; Command = ""; Arguments = ""; WorkingDirectory = ""; EnvironmentText = "";
+        Label = ""; IsProcess = false; Command = ""; Arguments = ""; WorkingDirectory = ""; EnvironmentVariables.Clear();
         Group = TaskGroup.None; IsDefault = false; MatchMSBuildProblems = false; SaveToPersonal = personal; Error = ""; TestStatus = "";
     }
 
@@ -96,11 +115,17 @@ public sealed partial class TaskEditorViewModel : ObservableObject
         var command = Command.Trim();
         if (command.Length == 0) throw new TaskConfigurationException("Enter the command to run.");
         var environment = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var line in EnvironmentText.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        foreach (var variable in EnvironmentVariables)
         {
-            var equals = line.IndexOf('=', StringComparison.Ordinal);
-            if (equals <= 0) throw new TaskConfigurationException($"Write each environment variable as NAME=value: \"{line}\".");
-            environment[line[..equals].Trim()] = line[(equals + 1)..];
+            var name = variable.Name.Trim();
+            if (name.Length == 0)
+            {
+                // An empty row, such as one added and not filled in, is left out.
+                if (variable.Value.Length == 0) continue;
+                throw new TaskConfigurationException($"Name the environment variable whose value is \"{variable.Value}\".");
+            }
+            if (name.Contains('=', StringComparison.Ordinal)) throw new TaskConfigurationException($"An environment variable name cannot contain '=': \"{name}\".");
+            environment[name] = variable.Value;
         }
         var args = WpfStudio.Workspace.BuildService.SplitArguments(Arguments.Trim());
         return new TaskDraft(label, IsProcess ? TaskKind.Process : TaskKind.Shell, command, args, WorkingDirectory.Trim() is { Length: > 0 } directory ? directory : null,

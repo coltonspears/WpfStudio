@@ -20,6 +20,19 @@ public sealed class DebuggerBehaviorTests
     }
 
     [Theory]
+    [InlineData(HitConditionKind.Always, 0, "")]
+    [InlineData(HitConditionKind.Equal, 5, "5")]
+    [InlineData(HitConditionKind.AtLeast, 3, ">=3")]
+    [InlineData(HitConditionKind.Multiple, 12, "%12")]
+    public void HitConditionsFormatAsTheyParse(HitConditionKind kind, int count, string text)
+    {
+        var condition = new HitCondition(kind, count);
+        Assert.Equal(text, condition.Format());
+        Assert.True(HitCondition.TryParse(condition.Format(), out var parsed, out _));
+        Assert.Equal(kind == HitConditionKind.Always ? HitCondition.Always : condition, parsed);
+    }
+
+    [Theory]
     [InlineData("0")]
     [InlineData("-2")]
     [InlineData(">5")]

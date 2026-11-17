@@ -41,6 +41,7 @@
   </MenuItem>
   <MenuItem Header="Breakpoint" c:Ui.Icon="Bug">
    <MenuItem Header="Toggle breakpoint" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.ToggleBreakpoint}" InputGestureText="F9"/>
+   <MenuItem Header="Settings…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.BreakpointSettings}" ToolTip="Condition, hit count and tracepoint message in one place"/>
    <MenuItem Header="Condition…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.BreakpointCondition}"/>
    <MenuItem Header="Hit count…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.BreakpointHitCount}"/>
    <MenuItem Header="Log message (tracepoint)…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.BreakpointLogMessage}"/>

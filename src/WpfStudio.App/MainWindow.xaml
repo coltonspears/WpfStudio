@@ -10,6 +10,7 @@
         xmlns:debug="clr-namespace:WpfStudio.Runtime.Debugging;assembly=WpfStudio.Runtime"
         xmlns:sql="clr-namespace:WpfStudio.Database.Views;assembly=WpfStudio.Database"
         xmlns:shell="clr-namespace:WpfStudio.App.Views.Shell"
+        xmlns:debugging="clr-namespace:WpfStudio.App.Features.Debugging"
         Title="{Binding WindowTitle}" Icon="/WpfStudio;component/Resources/WpfStudio.ico"
         Width="1480" Height="940" MinWidth="1000" MinHeight="680" WindowStartupLocation="CenterScreen"
         b:Interaction.CloseGuard="{Binding}">
@@ -130,6 +131,10 @@
     <shell:CommandPaletteOverlay Grid.RowSpan="4" Panel.ZIndex="20" Visibility="{Binding Palette.IsOpen, Converter={StaticResource BooleanToVisibility}}" />
 
     <shell:NewItemOverlay Grid.RowSpan="4" Panel.ZIndex="30" Visibility="{Binding IsScaffoldOpen, Converter={StaticResource BooleanToVisibility}}" />
+
+    <shell:FileGroupPickerOverlay Grid.RowSpan="4" Panel.ZIndex="35" DataContext="{Binding FileGroups.Picker}" Visibility="{Binding IsOpen, Converter={StaticResource BooleanToVisibility}}" />
+
+    <debugging:BreakpointSettingsOverlay Grid.RowSpan="4" Panel.ZIndex="35" DataContext="{Binding Breakpoints.Settings}" Visibility="{Binding IsOpen, Converter={StaticResource BooleanToVisibility}}" />
 
     <shell:ChangeReviewOverlay Grid.RowSpan="4" Panel.ZIndex="40" Visibility="{Binding IsPreviewOpen, Converter={StaticResource BooleanToVisibility}}" />
 
