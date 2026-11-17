@@ -128,7 +128,7 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
         {
             _activated = true;
             try { Settings = await _credentials.LoadSettingsAsync(); }
-            catch (InvalidOperationException ex) { Error = ex.Message; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Error = "DevOps settings could not be read: " + ex.Message; }
         }
         await ConnectIfChangedAsync();
     }

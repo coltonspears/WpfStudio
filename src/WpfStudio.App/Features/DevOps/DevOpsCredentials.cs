@@ -70,7 +70,8 @@ public sealed class DevOpsCredentials(string directory, GitService git) : IDevOp
             // Deserialized dictionaries compare keys exactly; keys differ only in case when typed by hand.
             return settings with { ProtectedTokens = new(settings.ProtectedTokens, StringComparer.OrdinalIgnoreCase) };
         }
-        catch (JsonException) { throw new InvalidOperationException("DevOps settings could not be read. Sign in again to replace the damaged file " + _path + "."); }
+        // A damaged file reads as empty, so signing in again replaces it instead of failing on it.
+        catch (JsonException) { return new(); }
     }
 
     public async Task SaveSettingsAsync(Func<DevOpsSettings, DevOpsSettings> change, CancellationToken cancellationToken = default)
@@ -88,10 +89,12 @@ public sealed class DevOpsCredentials(string directory, GitService git) : IDevOp
     public async Task<DevOpsSignIn?> FindAsync(DevOpsTarget target, string repositoryRoot, CancellationToken cancellationToken = default)
     {
         var settings = await LoadSettingsAsync(cancellationToken);
-        if (settings.ProtectedTokens.TryGetValue(target.CredentialKey, out var stored)) return new(Unprotect(stored), DevOpsSignInSource.PersonalAccessToken);
+        // A token saved by another Windows account (a copied profile) cannot be read here: it is passed over, and signing in replaces it.
+        if (settings.ProtectedTokens.TryGetValue(target.CredentialKey, out var stored) && TryUnprotect(stored) is { } token)
+            return new(token, DevOpsSignInSource.PersonalAccessToken);
         if (settings.GitSignInDeclined.Contains(target.CredentialKey, StringComparer.OrdinalIgnoreCase)) return null;
-        return await git.GetCredentialTokenAsync(repositoryRoot, target.CredentialUrl, interactive: false, cancellationToken) is { } token
-            ? new(token, DevOpsSignInSource.GitCredentialManager) : null;
+        return await git.GetCredentialTokenAsync(repositoryRoot, target.CredentialUrl, interactive: false, cancellationToken) is { } fromGit
+            ? new(fromGit, DevOpsSignInSource.GitCredentialManager) : null;
     }
 
     public async Task<DevOpsSignIn?> SignInWithGitAsync(DevOpsTarget target, string repositoryRoot, CancellationToken cancellationToken = default)
@@ -131,7 +134,8 @@ public sealed class DevOpsCredentials(string directory, GitService git) : IDevOp
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }
 
-    private static string Unprotect(string value)
+    /// <summary>The saved token, or null when this Windows account cannot decrypt it.</summary>
+    private static string? TryUnprotect(string value)
     {
         byte[]? bytes = null;
         try
@@ -139,8 +143,7 @@ public sealed class DevOpsCredentials(string directory, GitService git) : IDevOp
             bytes = ProtectedData.Unprotect(Convert.FromBase64String(value), Entropy, DataProtectionScope.CurrentUser);
             return Encoding.UTF8.GetString(bytes);
         }
-        catch (Exception ex) when (ex is CryptographicException or FormatException)
-        { throw new InvalidOperationException("The saved token cannot be unlocked by this Windows account. Sign out and sign in again."); }
+        catch (Exception ex) when (ex is CryptographicException or FormatException) { return null; }
         finally { if (bytes is not null) CryptographicOperations.ZeroMemory(bytes); }
     }
 }
