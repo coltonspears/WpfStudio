@@ -4,7 +4,8 @@
              xmlns:c="clr-namespace:WpfStudio.App.Controls"
              xmlns:svc="clr-namespace:WpfStudio.App.Services"
              xmlns:vm="clr-namespace:WpfStudio.App.ViewModels"
-             xmlns:ai="clr-namespace:WpfStudio.App.Features.ColtonGpt">
+             xmlns:ai="clr-namespace:WpfStudio.App.Features.ColtonGpt"
+             xmlns:api="clr-namespace:WpfStudio.App.Features.Api">
   <!-- Settings: a page list on the left, one scrolling page on the right. DataContext is the shell. -->
   <UserControl.Resources>
     <Style x:Key="PageTitle" TargetType="TextBlock">
@@ -48,6 +49,7 @@
       <Setter Property="Cursor" Value="Hand" />
     </Style>
     <BooleanToVisibilityConverter x:Key="SettingsBoolVisibility" />
+    <api:ChoiceConverter x:Key="ProxyChoice" />
     <DataTemplate x:Key="ModelFact">
       <Grid Margin="0,5,0,0">
         <Grid.ColumnDefinitions>
@@ -102,6 +104,7 @@
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.IntelligencePage}" c:Ui.Icon="Bulb" Content="Code intelligence" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.FilesPage}" c:Ui.Icon="Save" Content="Files and saving" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.DebuggingPage}" c:Ui.Icon="Bug" Content="Debugging" ContentTemplate="{StaticResource NavEntry}" />
+        <ListBoxItem Tag="{x:Static vm:ShellViewModel.NetworkPage}" c:Ui.Icon="Globe" Content="Network" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.AssistantPage}" c:Ui.Icon="Chat" Content="ColtonGPT" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.ExperimentalPage}" c:Ui.Icon="Flask" Content="Experimental" ContentTemplate="{StaticResource NavEntry}" />
         <ListBoxItem Tag="{x:Static vm:ShellViewModel.ShortcutsPage}" c:Ui.Icon="Keyboard" Content="Keyboard shortcuts" ContentTemplate="{StaticResource NavEntry}" />
@@ -444,6 +447,75 @@
             </StackPanel>
           </Border>
           <TextBlock Text="Which assemblies loaded with symbols is listed on the Modules tab of the Debugger pane while a program runs. The bundled debugger reads symbols from next to each assembly, so it has no symbol search paths to set." Style="{StaticResource RowNote}" TextWrapping="Wrap" Margin="2,10,0,0" />
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ================================================== Network -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Network}">
+        <StackPanel Margin="28,22,28,24" DataContext="{Binding Network}">
+          <TextBlock Text="Network" Style="{StaticResource PageTitle}" />
+          <TextBlock Text="Where WpfStudio's own HTTP requests go: the API client, the DevOps workbench, ColtonGPT and .NET runtime downloads. NuGet restores and Git keep their own proxy settings, in NuGet.Config and git config." Style="{StaticResource PageIntro}" TextWrapping="Wrap" />
+          <TextBlock Text="PROXY" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}" Padding="16,14">
+            <StackPanel>
+              <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal">
+                  <RadioButton Style="{StaticResource Segment}" GroupName="ProxyMode" Content="System proxy" IsChecked="{Binding Mode, Converter={StaticResource ProxyChoice}, ConverterParameter=System}" />
+                  <RadioButton Style="{StaticResource Segment}" GroupName="ProxyMode" Content="No proxy" IsChecked="{Binding Mode, Converter={StaticResource ProxyChoice}, ConverterParameter=None}" />
+                  <RadioButton Style="{StaticResource Segment}" GroupName="ProxyMode" Content="Manual" IsChecked="{Binding Mode, Converter={StaticResource ProxyChoice}, ConverterParameter=Manual}" />
+                </StackPanel>
+              </Border>
+              <TextBlock Text="{Binding Explanation}" Style="{StaticResource RowNote}" Margin="0,8,0,0" />
+              <StackPanel Visibility="{Binding IsManual, Converter={StaticResource SettingsBoolVisibility}}" Margin="0,6,0,0">
+                <TextBlock Text="Proxy server" Style="{StaticResource RowName}" Margin="0,10,0,6" />
+                <TextBox Text="{Binding Address, UpdateSourceTrigger=LostFocus}" c:Ui.Placeholder="http://proxy.example.com:8080" AutomationProperties.Name="Proxy server" />
+                <TextBlock Text="{Binding AddressError}" Foreground="{DynamicResource DangerBrush}" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding AddressError, Converter={StaticResource Presence}}" />
+                <TextBlock Text="host:port, http://host:port, https://host:port or socks5://host:port." Style="{StaticResource RowNote}" />
+                <TextBlock Text="Skip the proxy for" Style="{StaticResource RowName}" Margin="0,12,0,6" />
+                <TextBox Text="{Binding Bypass, UpdateSourceTrigger=LostFocus}" c:Ui.Placeholder="*.corp.example.com; 10.*; build-server:8080" AutomationProperties.Name="Hosts that skip the proxy" />
+                <TextBlock Text="Hosts separated by semicolons. * matches any characters and each entry must match the whole host; &lt;local&gt; matches names without a dot." Style="{StaticResource RowNote}" />
+                <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding BypassLocalAddresses}">
+                  <StackPanel><TextBlock Text="Skip the proxy for local addresses" Style="{StaticResource RowName}" /><TextBlock Text="localhost, 127.0.0.1, this computer's name and single-label intranet names go direct." Style="{StaticResource RowNote}" /></StackPanel>
+                </CheckBox>
+              </StackPanel>
+              <StackPanel Visibility="{Binding UsesProxy, Converter={StaticResource SettingsBoolVisibility}}">
+                <Border Style="{StaticResource Divider}" Margin="0,8,0,2" />
+                <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding UseDefaultCredentials}">
+                  <StackPanel><TextBlock Text="Sign in to the proxy as the Windows user" Style="{StaticResource RowName}" /><TextBlock Text="NTLM or Kerberos, with the account WpfStudio runs as. Most company proxies want this." Style="{StaticResource RowNote}" /></StackPanel>
+                </CheckBox>
+                <Grid IsEnabled="{Binding UseDefaultCredentials, Converter={StaticResource Not}}">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <TextBlock Text="User name" Style="{StaticResource RowName}" Margin="0,4,0,6" />
+                    <TextBox Text="{Binding UserName, UpdateSourceTrigger=LostFocus}" c:Ui.Placeholder="user or DOMAIN\user" AutomationProperties.Name="Proxy user name" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Text="Password" Style="{StaticResource RowName}" Margin="0,4,0,6" />
+                    <PasswordBox api:ApiPassword.Value="{Binding Password, Mode=TwoWay}" AutomationProperties.Name="Proxy password" />
+                  </StackPanel>
+                </Grid>
+                <TextBlock Text="Leave the user name empty when the proxy needs no sign-in. The password is protected for your Windows account in settings.json." Style="{StaticResource RowNote}" Margin="0,6,0,4" />
+                <TextBlock Text="{Binding Notice}" Foreground="{DynamicResource WarningBrush}" FontSize="11.5" TextWrapping="Wrap" Visibility="{Binding Notice, Converter={StaticResource Presence}}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <TextBlock Text="TEST" Style="{StaticResource GroupLabel}" />
+          <Border Style="{StaticResource Group}" Padding="16,14">
+            <StackPanel>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Test connection" Command="{Binding TestCommand}" Margin="8,0,0,0" />
+                <TextBox Text="{Binding TestAddress, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Address to test" VerticalContentAlignment="Center" />
+              </DockPanel>
+              <TextBlock Text="{Binding TestResult}" Style="{StaticResource RowNote}" Margin="0,8,0,0" Visibility="{Binding TestResult, Converter={StaticResource Presence}}" />
+              <TextBlock Style="{StaticResource RowNote}" Margin="0,6,0,0"><Run Text="Requests now go through: " /><Run Text="{Binding Summary, Mode=OneWay}" FontWeight="SemiBold" /></TextBlock>
+            </StackPanel>
+          </Border>
+          <Border Style="{StaticResource Card}" Background="{DynamicResource AccentSoftBrush}" BorderThickness="0">
+            <DockPanel>
+              <c:Glyph DockPanel.Dock="Left" Kind="Request" Width="16" Height="16" Margin="0,1,10,0" VerticalAlignment="Top" Foreground="{DynamicResource AccentBrush}" />
+              <TextBlock TextWrapping="Wrap" Text="In the API client, a collection or a single request can choose another proxy, or none, in its Proxy section. Everything else follows this page." />
+            </DockPanel>
+          </Border>
         </StackPanel>
       </ScrollViewer>
 

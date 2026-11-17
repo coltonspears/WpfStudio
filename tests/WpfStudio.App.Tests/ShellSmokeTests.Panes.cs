@@ -31,7 +31,7 @@ public sealed partial class ShellSmokeTests
             shell.ShowToolCommand.Execute(id); await Idle();
             return Assert.IsAssignableFrom<FrameworkElement>(Placed(id).Content);
         }
-        Assert.Equal(["Packages", "Git", "Profiler", "Designer", "LiveInspection"], shell.RetainedPanes.Select(pane => pane.ContentId));
+        Assert.Equal(["Packages", "Git", "DevOps", "Profiler", "ApiClient", "Designer", "LiveInspection"], shell.RetainedPanes.Select(pane => pane.ContentId));
         var ids = shell.RetainedPanes.Select(pane => pane.ContentId).Append("Terminal").ToArray();
         var views = new Dictionary<string, FrameworkElement>();
         foreach (var pane in shell.RetainedPanes)

@@ -14,7 +14,9 @@ public sealed partial class ShellViewModel
     [
         new(Workbenches.Packages, "NuGet packages", Features.Packages),
         new(Workbenches.Git, "Git changes", Features.Git),
+        new(Workbenches.DevOps, "DevOps", Features.DevOps),
         new(Workbenches.Profiler, "Memory profiler", MemoryProfiler),
+        new(Workbenches.ApiClient, "API client", Features.ApiClient),
         new(Workbenches.Designer, "XAML Designer", Designer),
         new(Workbenches.LiveInspection, "Live XAML", LiveInspection),
     ];
@@ -46,12 +48,16 @@ public sealed partial class ShellViewModel
             _gitToolOpened = true;
             _ = GuardAsync(() => Features.Git.SetWorkspaceAsync(Workspace?.Path));
         }
+        else if (name == Workbenches.DevOps)
+            _ = GuardAsync(ActivateDevOpsAsync);
         else if (name == Workbenches.Packages && !_packagesToolOpened)
         {
             _packagesToolOpened = true;
             Features.Packages.SetWorkspace(Workspace);
             _ = GuardAsync(() => Features.Packages.ActivateAsync());
         }
+        // Loads collections, environments and the tabs left open last time; later calls return at once.
+        else if (name == Workbenches.ApiClient) _ = GuardAsync(Features.ApiClient.InitializeAsync);
     }
     [RelayCommand] private Task OpenSettingsAsync(string? page) => GuardAsync(async () =>
     {
@@ -75,7 +81,29 @@ public sealed partial class ShellViewModel
             Features.Packages.SelectedProject = selected;
         await Features.Packages.ActivateAsync();
     });
+    /// <summary>The model generator on its own, for a JSON sample or schema that did not come from a request.</summary>
+    [RelayCommand] private Task OpenModelGeneratorAsync() => GuardAsync(async () => { ToolRequested?.Invoke(Workbenches.ApiClient); await Features.ApiClient.InitializeAsync(); await Features.ApiClient.OpenModelGeneratorAsync(); });
+    [RelayCommand] private Task OpenApiClientAsync() => GuardAsync(async () => { ToolRequested?.Invoke(Workbenches.ApiClient); await Features.ApiClient.InitializeAsync(); });
     [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { _gitToolOpened = true; ToolRequested?.Invoke(Workbenches.Git); await Features.Git.SetWorkspaceAsync(Workspace?.Path); });
+    /// <summary>Opens the DevOps workbench: pull requests, work items and pipelines of the repository the Git pane follows.</summary>
+    [RelayCommand] private Task OpenDevOpsAsync() => GuardAsync(async () => { ToolRequested?.Invoke(Workbenches.DevOps); await ActivateDevOpsAsync(); });
+    /// <summary>Opens a DevOps tab (0 pull requests, 1 work items, 2 pipelines, 3 access) and the workbench with it.</summary>
+    [RelayCommand] private Task OpenDevOpsTabAsync(string? tab) => GuardAsync(async () =>
+    {
+        if (int.TryParse(tab, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var index)) Features.DevOps.SelectedTab = index;
+        ToolRequested?.Invoke(Workbenches.DevOps);
+        await ActivateDevOpsAsync();
+    });
+    /// <summary>The DevOps workbench follows the Git pane's repository, so the repository is loaded first if nothing opened it yet.</summary>
+    private async Task ActivateDevOpsAsync()
+    {
+        if (!_gitToolOpened)
+        {
+            _gitToolOpened = true;
+            await Features.Git.SetWorkspaceAsync(Workspace?.Path);
+        }
+        await Features.DevOps.ActivateAsync();
+    }
     [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { UpdateAssistantContext(); ToolRequested?.Invoke(Workbenches.Assistant); await Features.Assistant.InitializeAsync(); });
     [RelayCommand] private Task RefactorAsync(string? action) => GuardAsync(async () =>
     {

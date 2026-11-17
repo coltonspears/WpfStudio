@@ -1,0 +1,152 @@
+<UserControl x:Class="WpfStudio.App.Features.DevOps.WorkItemsView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls" xmlns:b="clr-namespace:WpfStudio.App.Behaviors" xmlns:core="clr-namespace:WpfStudio.Core.DevOps;assembly=WpfStudio.Core">
+ <!-- DataContext: WorkItemsViewModel. -->
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="DevOpsStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+   <Style x:Key="WorkItemListItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+    <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
+    <Setter Property="ContextMenu"><Setter.Value>
+     <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+      <MenuItem Header="Open on the web" c:Ui.Icon="Link" Command="{Binding OpenInBrowserCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+      <MenuItem Header="Copy link" c:Ui.Icon="Copy" Command="{Binding CopyLinkCommand}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+      <MenuItem Header="Copy title" Command="{x:Static b:Interaction.CopyCommand}" CommandParameter="{Binding PlacementTarget.DataContext.Title, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+     </ContextMenu>
+    </Setter.Value></Setter>
+   </Style>
+  </ResourceDictionary>
+ </UserControl.Resources>
+
+ <Grid>
+  <Grid.ColumnDefinitions><ColumnDefinition Width="360" MinWidth="260"/><ColumnDefinition Width="5"/><ColumnDefinition Width="*" MinWidth="420"/></Grid.ColumnDefinitions>
+
+  <DockPanel Margin="10,10,8,8">
+   <DockPanel DockPanel.Dock="Top">
+    <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" Content="New" c:Ui.Icon="Plus" Command="{Binding StartCreateCommand}" Margin="8,0,0,0"/>
+    <ComboBox ItemsSource="{Binding Queries}" SelectedItem="{Binding SelectedQuery}" DisplayMemberPath="Label" AutomationProperties.Name="Work item list"/>
+   </DockPanel>
+   <Grid DockPanel.Dock="Top" Margin="0,8,0,0">
+    <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Padding="26,0,26,0" c:Ui.Placeholder="Search by number or title words, then Enter" AutomationProperties.Name="Search work items">
+     <TextBox.InputBindings><KeyBinding Key="Enter" Command="{Binding SearchCommand}"/></TextBox.InputBindings>
+    </TextBox>
+    <c:Glyph Kind="Search" Width="14" Height="14" HorizontalAlignment="Left" Margin="8,0,0,0" Foreground="{DynamicResource SubtleBrush}" IsHitTestVisible="False"/>
+    <Button Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="22" Height="22" HorizontalAlignment="Right" Margin="0,0,3,0" Command="{Binding ClearSearchCommand}"
+            ToolTip="Clear search" AutomationProperties.Name="Clear search" Visibility="{Binding SearchText, Converter={StaticResource Presence}}"/>
+   </Grid>
+   <TextBlock DockPanel.Dock="Top" Text="{Binding ListHeading}" Style="{StaticResource Meta}" Margin="2,8,0,6"/>
+   <Grid>
+    <ListBox ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" ItemTemplate="{StaticResource WorkItemTemplate}" ItemContainerStyle="{StaticResource WorkItemListItem}"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Work items" b:Interaction.ActivateCommand="{Binding OpenInBrowserCommand}"/>
+    <TextBlock Text="{Binding EmptyText}" Style="{StaticResource EmptyHint}" Visibility="{Binding Items.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
+   </Grid>
+  </DockPanel>
+  <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext"/>
+  <Border Grid.Column="1" Width="1" HorizontalAlignment="Center" Background="{DynamicResource BorderBrush}" IsHitTestVisible="False"/>
+
+  <Grid Grid.Column="2">
+   <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding HasDetails, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+    <c:Glyph Kind="WorkItem" Width="28" Height="28" Foreground="{DynamicResource SubtleBrush}"/>
+    <TextBlock Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0" Text="Select an item to read it, change it or start a branch for it."/>
+   </StackPanel>
+   <DockPanel Visibility="{Binding HasDetails, Converter={StaticResource BooleanToVisibility}}">
+    <Border DockPanel.Dock="Top" Padding="18,14,16,10" Background="{DynamicResource EditorBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+     <StackPanel>
+      <TextBlock Style="{StaticResource Meta}"><Run Text="{Binding Details.Item.Type, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding Details.Item.Id, Mode=OneWay}"/></TextBlock>
+      <TextBlock Text="{Binding Details.Item.Title}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,2,0,0"/>
+      <WrapPanel Margin="0,6,0,0">
+       <Border Style="{StaticResource Chip}" BorderBrush="{DynamicResource AccentBrush}" TextElement.Foreground="{DynamicResource AccentBrush}"><TextBlock Style="{StaticResource ChipText}" Text="{Binding Details.Item.State}"/></Border>
+       <TextBlock Style="{StaticResource Meta}" Margin="0,0,10,0"><Run Text="Assigned to "/><Run Text="{Binding Details.Item.AssignedTo, Mode=OneWay, TargetNullValue=nobody}" Foreground="{DynamicResource TextBrush}"/></TextBlock>
+       <TextBlock Style="{StaticResource Meta}" Text="{Binding Details.Item.IterationPath}" Margin="0,0,10,0" Visibility="{Binding Details.Item.IterationPath, Converter={StaticResource Presence}}" ToolTip="Iteration or milestone"/>
+       <TextBlock Style="{StaticResource Meta}" Text="{Binding Details.Item.AreaPath}" Margin="0,0,10,0" Visibility="{Binding Details.Item.AreaPath, Converter={StaticResource Presence}}" ToolTip="Area"/>
+       <TextBlock Style="{StaticResource Meta}" Margin="0,0,10,0" Visibility="{Binding Details.Item.Priority, Converter={StaticResource Presence}, FallbackValue=Collapsed}"><Run Text="Priority "/><Run Text="{Binding Details.Item.Priority, Mode=OneWay}"/></TextBlock>
+       <ItemsControl ItemsSource="{Binding Details.Item.TagList}" Focusable="False">
+        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Chip}"><TextBlock Style="{StaticResource ChipText}" Text="{Binding}"/></Border></DataTemplate></ItemsControl.ItemTemplate>
+       </ItemsControl>
+      </WrapPanel>
+      <WrapPanel Margin="0,10,0,0">
+       <ComboBox ItemsSource="{Binding Details.AllowedStates}" SelectedItem="{Binding NewState}" MinWidth="140" Margin="0,0,4,4" AutomationProperties.Name="State"/>
+       <Button Style="{StaticResource ActionButton}" Content="Set state" Command="{Binding ApplyStateCommand}"/>
+       <Border Width="1" Height="18" Background="{DynamicResource BorderBrush}" Margin="4,0,8,4"/>
+       <Button Style="{StaticResource ActionButton}" Content="Assign to me" Command="{Binding AssignToMeCommand}"/>
+       <Button Style="{StaticResource ActionButton}" Content="Unassign" Command="{Binding UnassignCommand}"/>
+       <Button Style="{StaticResource ActionButton}" Content="Create branch" c:Ui.Icon="Git" Command="{Binding CreateBranchCommand}" ToolTip="{Binding BranchPreview}" ToolTipService.ShowOnDisabled="True"/>
+       <Button Style="{StaticResource ActionButton}" Content="Copy as Markdown" c:Ui.Icon="Copy" Command="{Binding CopyMarkdownCommand}" ToolTip="The item, its description and recent comments, to paste into ColtonGPT, a commit or a chat"/>
+       <Button Style="{StaticResource IconButton}" c:Ui.Icon="Link" Command="{Binding OpenInBrowserCommand}" ToolTip="Open on the web" AutomationProperties.Name="Open on the web" Margin="0,0,4,4"/>
+       <Button Style="{StaticResource IconButton}" c:Ui.Icon="Copy" Command="{Binding CopyLinkCommand}" ToolTip="Copy link" AutomationProperties.Name="Copy link" Margin="0,0,4,4"/>
+      </WrapPanel>
+     </StackPanel>
+    </Border>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+     <StackPanel Margin="18,8,18,18" MaxWidth="900" HorizontalAlignment="Left">
+      <TextBlock Text="DESCRIPTION" Style="{StaticResource Heading}" Margin="0,8,0,8"/>
+      <TextBox Text="{Binding Details.Description, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0" AutomationProperties.Name="Description"
+               Visibility="{Binding Details.Description, Converter={StaticResource Presence}}"/>
+      <TextBlock Text="No description." Style="{StaticResource Caption}" Visibility="{Binding Details.Description, Converter={StaticResource Presence}, ConverterParameter=Invert}"/>
+      <ItemsControl ItemsSource="{Binding Details.ExtraFields}" Focusable="False">
+       <ItemsControl.ItemTemplate>
+        <DataTemplate>
+         <StackPanel>
+          <TextBlock Text="{Binding Key}" Style="{StaticResource Heading}"/>
+          <TextBox Text="{Binding Value, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0"/>
+         </StackPanel>
+        </DataTemplate>
+       </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <StackPanel Visibility="{Binding Details.Links.Count, Converter={StaticResource Presence}, FallbackValue=Collapsed}">
+       <TextBlock Text="LINKS" Style="{StaticResource Heading}"/>
+       <ItemsControl ItemsSource="{Binding Details.Links}" Focusable="False">
+        <ItemsControl.ItemTemplate>
+         <DataTemplate DataType="{x:Type core:DevOpsWorkItemLink}">
+          <DockPanel Margin="0,2">
+           <TextBlock DockPanel.Dock="Left" Text="{Binding Kind}" Style="{StaticResource Meta}" Width="110"/>
+           <Button Style="{StaticResource QuietButton}" Content="{Binding Title}" HorizontalAlignment="Left" Padding="4,1" HorizontalContentAlignment="Left"
+                   Command="{Binding DataContext.OpenLinkCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"/>
+          </DockPanel>
+         </DataTemplate>
+        </ItemsControl.ItemTemplate>
+       </ItemsControl>
+      </StackPanel>
+
+      <TextBlock Text="DISCUSSION" Style="{StaticResource Heading}"/>
+      <ItemsControl ItemsSource="{Binding Details.Comments}" ItemTemplate="{StaticResource CommentTemplate}" Focusable="False"/>
+      <TextBlock Text="No comments yet." Style="{StaticResource Caption}" Visibility="{Binding Details.Comments.Count, Converter={StaticResource Presence}, ConverterParameter=Invert, FallbackValue=Collapsed}"/>
+      <DockPanel Margin="0,8,0,0">
+       <Button DockPanel.Dock="Right" Content="Comment" Style="{StaticResource AccentButton}" Command="{Binding AddCommentCommand}" Margin="8,0,0,0" VerticalAlignment="Bottom"/>
+       <TextBox Text="{Binding NewComment, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="58" MaxHeight="200" VerticalScrollBarVisibility="Auto"
+                c:Ui.Placeholder="Add a comment" AutomationProperties.Name="New comment"/>
+      </DockPanel>
+     </StackPanel>
+    </ScrollViewer>
+   </DockPanel>
+   <TextBlock Text="Loading…" Foreground="{DynamicResource AccentBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,12,0"
+              Visibility="{Binding IsDetailLoading, Converter={StaticResource BooleanToVisibility}}"/>
+
+   <!-- Create a work item: in place of the details while it is open. -->
+   <Border Background="{DynamicResource SurfaceBrush}" Visibility="{Binding IsCreating, Converter={StaticResource BooleanToVisibility}}">
+    <StackPanel Margin="22,16,22,22" MaxWidth="760" HorizontalAlignment="Left">
+     <DockPanel>
+      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CancelCreateCommand}" ToolTip="Close without creating" AutomationProperties.Name="Close the form"/>
+      <TextBlock Style="{StaticResource PaneHeading}"><Run Text="New "/><Run Text="{Binding ItemName, Mode=OneWay}"/></TextBlock>
+     </DockPanel>
+     <StackPanel Visibility="{Binding HasTypes, Converter={StaticResource BooleanToVisibility}}">
+      <TextBlock Text="TYPE" Style="{StaticResource Heading}"/>
+      <ComboBox ItemsSource="{Binding Types}" SelectedItem="{Binding NewType}" MinWidth="200" HorizontalAlignment="Left" AutomationProperties.Name="Type"/>
+     </StackPanel>
+     <TextBlock Text="TITLE" Style="{StaticResource Heading}"/>
+     <TextBox Text="{Binding NewTitle, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Title"/>
+     <TextBlock Text="DESCRIPTION" Style="{StaticResource Heading}"/>
+     <TextBox Text="{Binding NewDescription, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="120" MaxHeight="320" VerticalScrollBarVisibility="Auto"
+              VerticalContentAlignment="Top" AutomationProperties.Name="Description"/>
+     <CheckBox Content="Assign it to me" IsChecked="{Binding AssignNewToMe}" Margin="0,14,0,0"/>
+     <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+      <Button Style="{StaticResource AccentButton}" Content="Create" c:Ui.Icon="Plus" Command="{Binding CreateCommand}"/>
+      <Button Content="Cancel" Command="{Binding CancelCreateCommand}" Margin="8,0,0,0"/>
+     </StackPanel>
+    </StackPanel>
+   </Border>
+  </Grid>
+ </Grid>
+</UserControl>

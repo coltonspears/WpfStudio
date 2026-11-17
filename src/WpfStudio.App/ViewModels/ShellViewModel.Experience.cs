@@ -177,6 +177,9 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Debugger", ShowToolCommand, Workbenches.Debugger, icon: "Bug");
         yield return Command("View", "SQL Server", ShowToolCommand, Workbenches.Database, icon: "Database");
         yield return Command("Tools", "Memory profiler", ShowToolCommand, Workbenches.Profiler, icon: "Layers", detail: "Dumps, live snapshots, GC roots and reference-removal estimates");
+        yield return Command("Tools", "API client", OpenApiClientCommand, icon: "Request", detail: "Send HTTP requests, import OpenAPI or Postman collections, generate C# models");
+        yield return Command("Tools", "Generate C# models from JSON or OpenAPI", OpenModelGeneratorCommand, icon: "Braces", detail: "System.Text.Json or Newtonsoft.Json classes, with quicktype's options");
+        yield return Command("Tools", "Network and proxy settings", OpenSettingsCommand, NetworkPage, icon: "Globe", detail: "The proxy for the API client, ColtonGPT and downloads");
         yield return MemoryCommand("Capture memory snapshot", MemoryProfiler.CaptureCommand, icon: "Camera", detail: "Snapshot the selected process's managed heap");
         yield return MemoryCommand("Open memory dump…", MemoryProfiler.OpenDumpCommand, icon: "FolderOpen");
         yield return MemoryCommand("Compare memory snapshots", MemoryProfiler.ShowViewCommand, "4", icon: "Timeline", detail: "Live memory, snapshot history and type growth");
@@ -199,6 +202,13 @@ public sealed partial class ShellViewModel
             yield return Command("Tools", git.PullRequestText, git.CreatePullRequestCommand, icon: "Link", detail: "Opens " + git.Remote.HostName + " for the current branch");
         }
         yield return Command("Tools", "Git changes", OpenGitCommand, icon: "Git", detail: "Stage, commit, branches and history");
+        var devOps = Features.DevOps;
+        yield return Command("Tools", "DevOps: Pull requests", OpenDevOpsTabCommand, "0", icon: "PullRequest", detail: "Review, vote, comment, complete and check out pull requests on Azure DevOps or GitHub");
+        yield return Command("Tools", "DevOps: " + devOps.WorkItemsTitle, OpenDevOpsTabCommand, "1", icon: "WorkItem", detail: "Assigned to me, the current iteration, saved queries; change state, comment, create a branch");
+        yield return Command("Tools", "DevOps: " + devOps.PipelinesTitle, OpenDevOpsTabCommand, "2", icon: "Pipeline", detail: "Runs, stages, jobs and logs; run, cancel, retry and approve");
+        yield return Command("Tools", "DevOps: Access and settings", OpenDevOpsTabCommand, "3", icon: "Plug", detail: "What the signed-in token can do, and the workbench's preferences");
+        if (devOps.IsConnected)
+            yield return Command("Tools", "DevOps: Create pull request", devOps.CreatePullRequestCommand, icon: "PullRequest", detail: "From " + Features.Git.Branch);
         yield return Command("Tools", "Settings", OpenSettingsCommand, shortcut: "Ctrl+,", icon: "Settings", detail: "Appearance, text editor, code intelligence, files, ColtonGPT and shortcuts");
         yield return Command("Tools", "Text editor settings", OpenSettingsCommand, EditorPage, icon: "Text", detail: "Font, tabs and indentation, display and editing");
         yield return Command("Tools", "Keyboard shortcuts", OpenSettingsCommand, ShortcutsPage, icon: "Keyboard", detail: "Every command with a shortcut");

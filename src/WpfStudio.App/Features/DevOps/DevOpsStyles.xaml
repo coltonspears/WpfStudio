@@ -1,0 +1,168 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls" xmlns:git="clr-namespace:WpfStudio.App.Features.Git"
+ xmlns:core="clr-namespace:WpfStudio.Core.DevOps;assembly=WpfStudio.Core">
+ <git:GitAvatarBrushConverter x:Key="AvatarBrush"/>
+
+ <!-- One status vocabulary for runs, steps and checks (DevOpsText.StatusKind): a glyph and a colour for each. -->
+ <Style x:Key="StatusGlyph" TargetType="c:Glyph">
+  <Setter Property="Width" Value="14"/>
+  <Setter Property="Height" Value="14"/>
+  <Setter Property="VerticalAlignment" Value="Center"/>
+  <Setter Property="Kind" Value="Info"/>
+  <Setter Property="StrokeWeight" Value="1.8"/>
+  <Setter Property="Foreground" Value="{DynamicResource SubtleBrush}"/>
+  <Style.Triggers>
+   <DataTrigger Binding="{Binding StatusKind}" Value="Succeeded"><Setter Property="Kind" Value="Check"/><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusKind}" Value="Failed"><Setter Property="Kind" Value="Close"/><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusKind}" Value="Warning"><Setter Property="Kind" Value="Warning"/><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusKind}" Value="Running"><Setter Property="Kind" Value="Play"/><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusKind}" Value="Queued"><Setter Property="Kind" Value="Clock"/><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusKind}" Value="Canceled"><Setter Property="Kind" Value="Stop"/><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusKind}" Value="Skipped"><Setter Property="Kind" Value="Minus"/></DataTrigger>
+  </Style.Triggers>
+ </Style>
+
+ <!-- A pull request's state: active in the accent, drafts muted, completed or merged green, abandoned or closed red. -->
+ <Style x:Key="StateChip" TargetType="Border">
+  <Setter Property="CornerRadius" Value="4"/>
+  <Setter Property="Padding" Value="6,1"/>
+  <Setter Property="Margin" Value="0,0,6,0"/>
+  <Setter Property="VerticalAlignment" Value="Center"/>
+  <Setter Property="BorderThickness" Value="1"/>
+  <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+  <Setter Property="TextElement.Foreground" Value="{DynamicResource AccentBrush}"/>
+  <Style.Triggers>
+   <DataTrigger Binding="{Binding StatusText}" Value="Draft"><Setter Property="BorderBrush" Value="{DynamicResource StrongBorderBrush}"/><Setter Property="TextElement.Foreground" Value="{DynamicResource MutedBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusText}" Value="Completed"><Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}"/><Setter Property="TextElement.Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusText}" Value="Merged"><Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}"/><Setter Property="TextElement.Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusText}" Value="Abandoned"><Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}"/><Setter Property="TextElement.Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding StatusText}" Value="Closed"><Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}"/><Setter Property="TextElement.Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+  </Style.Triggers>
+ </Style>
+ <Style x:Key="Chip" TargetType="Border">
+  <Setter Property="CornerRadius" Value="4"/>
+  <Setter Property="Padding" Value="6,1"/>
+  <Setter Property="Margin" Value="0,0,6,0"/>
+  <Setter Property="VerticalAlignment" Value="Center"/>
+  <Setter Property="BorderThickness" Value="1"/>
+  <Setter Property="BorderBrush" Value="{DynamicResource StrongBorderBrush}"/>
+  <Setter Property="TextElement.Foreground" Value="{DynamicResource MutedBrush}"/>
+ </Style>
+ <Style x:Key="ChipText" TargetType="TextBlock">
+  <Setter Property="FontSize" Value="10.5"/>
+  <Setter Property="VerticalAlignment" Value="Center"/>
+ </Style>
+
+ <!-- A reviewer's vote: approvals green, requests for changes amber, rejections red. -->
+ <Style x:Key="VoteText" TargetType="TextBlock">
+  <Setter Property="FontSize" Value="11"/>
+  <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+  <Style.Triggers>
+   <DataTrigger Binding="{Binding Vote}" Value="Approved"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding Vote}" Value="ApprovedWithSuggestions"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding Vote}" Value="WaitingForAuthor"><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding Vote}" Value="ChangesRequested"><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+   <DataTrigger Binding="{Binding Vote}" Value="Rejected"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+  </Style.Triggers>
+ </Style>
+
+ <Style x:Key="EmptyHint" TargetType="TextBlock">
+  <Setter Property="Foreground" Value="{DynamicResource SubtleBrush}"/>
+  <Setter Property="FontSize" Value="11.5"/>
+  <Setter Property="TextWrapping" Value="Wrap"/>
+  <Setter Property="HorizontalAlignment" Value="Center"/>
+  <Setter Property="VerticalAlignment" Value="Top"/>
+  <Setter Property="TextAlignment" Value="Center"/>
+  <Setter Property="Margin" Value="12,24,12,8"/>
+ </Style>
+ <Style x:Key="Meta" TargetType="TextBlock">
+  <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+  <Setter Property="FontSize" Value="11"/>
+  <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+  <Setter Property="VerticalAlignment" Value="Center"/>
+ </Style>
+ <Style x:Key="Body" TargetType="TextBlock">
+  <Setter Property="TextWrapping" Value="Wrap"/>
+  <Setter Property="FontSize" Value="12.5"/>
+  <Setter Property="LineHeight" Value="18"/>
+ </Style>
+ <Style x:Key="Heading" TargetType="TextBlock" BasedOn="{StaticResource SectionLabel}">
+  <Setter Property="Margin" Value="0,16,0,8"/>
+ </Style>
+ <Style x:Key="ActionButton" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
+  <Setter Property="Margin" Value="0,0,4,4"/>
+ </Style>
+
+ <DataTemplate x:Key="Avatar" DataType="{x:Type core:DevOpsIdentity}">
+  <Border Width="22" Height="22" CornerRadius="11" Background="{Binding AvatarIndex, Converter={StaticResource AvatarBrush}}" ToolTip="{Binding DisplayName}">
+   <TextBlock Text="{Binding Initials}" Foreground="White" FontSize="9.5" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+  </Border>
+ </DataTemplate>
+
+ <DataTemplate x:Key="CommentTemplate" DataType="{x:Type core:DevOpsComment}">
+  <Grid Margin="0,6,0,2">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <ContentPresenter Content="{Binding Author}" ContentTemplate="{StaticResource Avatar}" VerticalAlignment="Top" Margin="0,1,8,0"/>
+   <StackPanel Grid.Column="1">
+    <TextBlock Style="{StaticResource Meta}"><Run Text="{Binding Author.DisplayName, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/><Run Text=" · "/><Run Text="{Binding CreatedText, Mode=OneWay}"/></TextBlock>
+    <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0" Margin="0,2,0,0" AutomationProperties.Name="Comment"/>
+   </StackPanel>
+  </Grid>
+ </DataTemplate>
+
+ <DataTemplate x:Key="PullRequestTemplate" DataType="{x:Type core:DevOpsPullRequest}">
+  <Grid Margin="0,4" ToolTip="{Binding BranchText}">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <ContentPresenter Content="{Binding Author}" ContentTemplate="{StaticResource Avatar}" VerticalAlignment="Top" Margin="0,1,10,0"/>
+   <StackPanel Grid.Column="1">
+    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+    <TextBlock Style="{StaticResource Meta}" Text="{Binding Summary}" Margin="0,2,0,0"/>
+    <WrapPanel Margin="0,4,0,0">
+     <Border Style="{StaticResource StateChip}"><TextBlock Style="{StaticResource ChipText}" Text="{Binding StatusText}"/></Border>
+     <TextBlock Text="{Binding ReviewText}" Margin="0,0,8,0">
+      <TextBlock.Style>
+       <Style TargetType="TextBlock" BasedOn="{StaticResource Meta}">
+        <Style.Triggers>
+         <DataTrigger Binding="{Binding HasRejection}" Value="True"><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+        </Style.Triggers>
+       </Style>
+      </TextBlock.Style>
+     </TextBlock>
+     <TextBlock Style="{StaticResource Meta}" Text="{Binding SourceBranch}" FontFamily="{StaticResource CodeFont}" MaxWidth="200"/>
+    </WrapPanel>
+   </StackPanel>
+  </Grid>
+ </DataTemplate>
+
+ <DataTemplate x:Key="WorkItemTemplate" DataType="{x:Type core:DevOpsWorkItem}">
+  <Grid Margin="0,4" ToolTip="{Binding Title}">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <Border Width="22" Height="22" CornerRadius="5" Background="{DynamicResource AccentSoftBrush}" VerticalAlignment="Top" Margin="0,1,10,0" ToolTip="{Binding Type}">
+    <TextBlock Text="{Binding TypeLetter}" FontWeight="SemiBold" FontSize="11" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+   </Border>
+   <StackPanel Grid.Column="1">
+    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+    <TextBlock Style="{StaticResource Meta}" Margin="0,2,0,0"><Run Text="{Binding Type, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding Summary, Mode=OneWay}"/></TextBlock>
+   </StackPanel>
+  </Grid>
+ </DataTemplate>
+
+ <DataTemplate x:Key="RunTemplate" DataType="{x:Type core:DevOpsRun}">
+  <Grid Margin="0,4" ToolTip="{Binding StatusText}">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <c:Glyph Style="{StaticResource StatusGlyph}" VerticalAlignment="Top" Margin="2,2,10,0"/>
+   <StackPanel Grid.Column="1">
+    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+    <TextBlock Style="{StaticResource Meta}" Text="{Binding Summary}" Margin="0,2,0,0"/>
+   </StackPanel>
+  </Grid>
+ </DataTemplate>
+
+ <DataTemplate x:Key="CheckTemplate" DataType="{x:Type core:DevOpsCheck}">
+  <DockPanel Margin="0,3" ToolTip="{Binding StateText}" Background="Transparent">
+   <c:Glyph DockPanel.Dock="Left" Style="{StaticResource StatusGlyph}" Margin="0,0,8,0"/>
+   <TextBlock DockPanel.Dock="Right" Text="required" Style="{StaticResource Meta}" Margin="8,0,0,0" Visibility="{Binding IsRequired, Converter={StaticResource BooleanToVisibility}}"/>
+   <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center"><Run Text="{Binding Name, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding Description, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}" FontSize="11"/></TextBlock>
+  </DockPanel>
+ </DataTemplate>
+</ResourceDictionary>

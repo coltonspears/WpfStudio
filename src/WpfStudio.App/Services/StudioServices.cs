@@ -1,7 +1,10 @@
 using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using WpfStudio.Api.Storage;
+using WpfStudio.App.Features.Api;
 using WpfStudio.App.Features.ColtonGpt;
+using WpfStudio.App.Features.DevOps;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Git;
 using WpfStudio.App.Features.Packages;
@@ -14,6 +17,7 @@ using WpfStudio.Contracts.Profiling;
 using WpfStudio.Core;
 using WpfStudio.Core.Debugging;
 using WpfStudio.Core.Documents;
+using WpfStudio.Core.Net;
 using WpfStudio.Core.Wpf;
 using WpfStudio.Database;
 using WpfStudio.Runtime.Debugging;
@@ -31,7 +35,7 @@ public static class StudioServices
     private static string DataDirectory(IServiceProvider services) => services.GetRequiredService<IOptions<StudioPaths>>().Value.DataDirectory;
 
     public static IServiceCollection AddWpfStudio(this IServiceCollection services, IUiDispatcher dispatcher) => services
-        .AddStudioCore(dispatcher).AddWorkspaceServices().AddCodeAssist().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddPackages().AddAssistant().AddProfiling().AddShell();
+        .AddStudioCore(dispatcher).AddNetwork().AddWorkspaceServices().AddCodeAssist().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddDevOps().AddPackages().AddAssistant().AddApiClient().AddProfiling().AddShell();
 
     public static IServiceCollection AddStudioCore(this IServiceCollection services, IUiDispatcher dispatcher)
     {
@@ -52,6 +56,27 @@ public static class StudioServices
         // One monitor for the process: the language, preview and Code Assist clients take it as an optional constructor argument.
         services.AddSingleton(_ => new PerfMonitor());
         services.AddSingleton(sp => new PerfLog(sp.GetRequiredService<PerfMonitor>(), DataDirectory(sp)));
+        return services;
+    }
+
+    /// <summary>
+    /// The proxy in Settings › Network, as one live object. Handlers built from it follow later changes, so the HTTP
+    /// clients below use it without being rebuilt.
+    /// </summary>
+    public static IServiceCollection AddNetwork(this IServiceCollection services)
+    {
+        services.AddSingleton<StudioWebProxy>();
+        services.AddSingleton<NetworkPreferences>();
+        return services;
+    }
+
+    private static System.Net.Http.HttpMessageHandler ProxiedHandler(IServiceProvider services) =>
+        new System.Net.Http.SocketsHttpHandler { Proxy = services.GetRequiredService<StudioWebProxy>(), UseProxy = true };
+
+    public static IServiceCollection AddApiClient(this IServiceCollection services)
+    {
+        services.AddSingleton(sp => new ApiStore(System.IO.Path.Combine(DataDirectory(sp), "api"), new WindowsSecretProtector("WpfStudio.ApiClient.v1")));
+        services.AddSingleton<ApiClientViewModel>();
         return services;
     }
 
@@ -93,12 +118,39 @@ public static class StudioServices
 
     public static IServiceCollection AddGit(this IServiceCollection services) => services.AddSingleton<GitService>();
 
+    /// <summary>
+    /// The DevOps workbench's HTTP client goes through the proxy in Settings › Network and follows no redirect by itself:
+    /// <see cref="WpfStudio.Core.DevOps.DevOpsRestClient"/> follows them, and sends the token only while the address stays on the service.
+    /// </summary>
+    public static IServiceCollection AddDevOps(this IServiceCollection services)
+    {
+        services.AddHttpClient(DevOpsClientName, client => client.Timeout = TimeSpan.FromSeconds(100))
+            .ConfigurePrimaryHttpMessageHandler(sp => new System.Net.Http.SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                AutomaticDecompression = System.Net.DecompressionMethods.All,
+                Proxy = sp.GetRequiredService<StudioWebProxy>(),
+                UseProxy = true,
+            });
+        services.AddSingleton<IDevOpsCredentials>(sp => new DevOpsCredentials(DataDirectory(sp), sp.GetRequiredService<GitService>()));
+        services.AddSingleton<DevOpsProviderFactory>(sp =>
+        {
+            var factory = sp.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+            return (target, token, settings) => target.Kind == WpfStudio.Core.DevOps.DevOpsProviderKind.AzureDevOps
+                ? new WpfStudio.Core.DevOps.AzureDevOps.AzureDevOpsProvider(factory.CreateClient(DevOpsClientName), target, token) { HiddenStates = settings.HiddenStateList }
+                : new WpfStudio.Core.DevOps.GitHub.GitHubProvider(factory.CreateClient(DevOpsClientName), target, token);
+        });
+        return services;
+    }
+
+    private const string DevOpsClientName = "devops";
+
     public static IServiceCollection AddPackages(this IServiceCollection services) => services.AddSingleton<INuGetPackageService, NuGetPackageService>();
 
     public static IServiceCollection AddAssistant(this IServiceCollection services)
     {
         services.AddSingleton(sp => new AssistantSettingsStore(DataDirectory(sp)));
-        services.AddHttpClient<OpenRouterClient>(client => client.Timeout = TimeSpan.FromMinutes(5));
+        services.AddHttpClient<OpenRouterClient>(client => client.Timeout = TimeSpan.FromMinutes(5)).ConfigurePrimaryHttpMessageHandler(ProxiedHandler);
         services.AddSingleton<AssistantSettingsViewModel>();
         services.AddSingleton<AssistantViewModel>();
         return services;
@@ -124,7 +176,7 @@ public static class StudioServices
         // The runtime check: what is installed, Microsoft's release metadata, and the installers it lists.
         services.AddSingleton<WpfStudio.Workspace.Runtimes.IDotNetInventorySource, WpfStudio.Workspace.Runtimes.DotNetInventorySource>();
         services.AddSingleton<WpfStudio.Workspace.Runtimes.IInstallerLauncher, ShellInstallerLauncher>();
-        services.AddHttpClient("dotnet-releases", client => client.Timeout = TimeSpan.FromMinutes(30));
+        services.AddHttpClient("dotnet-releases", client => client.Timeout = TimeSpan.FromMinutes(30)).ConfigurePrimaryHttpMessageHandler(ProxiedHandler);
         services.AddSingleton(sp => new WpfStudio.Workspace.Runtimes.DotNetReleases(sp.GetRequiredService<System.Net.Http.IHttpClientFactory>().CreateClient("dotnet-releases")));
         services.AddSingleton(sp => new WpfStudio.Workspace.Runtimes.RuntimeInstaller(sp.GetRequiredService<System.Net.Http.IHttpClientFactory>().CreateClient("dotnet-releases"),
             sp.GetRequiredService<WpfStudio.Workspace.Runtimes.IInstallerLauncher>(), System.IO.Path.Combine(DataDirectory(sp), "downloads")));
