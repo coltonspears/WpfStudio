@@ -32,6 +32,26 @@ public sealed class DesignerOverlayTests
     }
 
     [Fact]
+    public async Task TheBreakpointSettingsAndTheGroupPickerSuppressTheNativePreviewUntilTheyClose()
+    {
+        await using var context = new ShellTestContext();
+        var shell = context.Shell;
+        var path = await context.CreateFileAsync("Program.cs", "class Program { }\n");
+        await shell.OpenDocumentAsync(path);
+
+        shell.Breakpoints.EditSettingsCommand.Execute(null);
+        Assert.True(shell.Breakpoints.Settings.IsOpen);
+        Assert.True(shell.Designer.IsOverlayOpen);
+        shell.Breakpoints.Settings.CancelCommand.Execute(null);
+        Assert.False(shell.Designer.IsOverlayOpen);
+
+        shell.FileGroups.Picker.Open("Add to a file group", [path], [], null);
+        Assert.True(shell.Designer.IsOverlayOpen);
+        shell.FileGroups.Picker.CancelCommand.Execute(null);
+        Assert.False(shell.Designer.IsOverlayOpen);
+    }
+
+    [Fact]
     public async Task AChangeReviewSuppressesTheNativePreviewUntilItCloses()
     {
         await using var context = new ShellTestContext();

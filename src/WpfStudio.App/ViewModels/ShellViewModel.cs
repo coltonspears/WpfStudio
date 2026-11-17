@@ -68,6 +68,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
         _performance = tools.Performance;
         Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
+        // The group picker and the breakpoint settings are overlays as well, which the designer's native preview must not cover.
+        FileGroups.Picker.PropertyChanged += OverlayFormChanged; Breakpoints.Settings.PropertyChanged += OverlayFormChanged;
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
         LiveInspection = new(dispatcher);
         LiveInspection.AttachHost(this);
@@ -119,7 +121,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial string SearchQuery { get; set; } = "";
     [ObservableProperty] public partial bool IsScaffoldOpen { get; set; }
     partial void OnIsScaffoldOpenChanged(bool value) => UpdateDesignerOverlay();
-    private void UpdateDesignerOverlay() => Designer.IsOverlayOpen = Palette.IsOpen || IsScaffoldOpen || IsPreviewOpen || IsSettingsOpen;
+    private void UpdateDesignerOverlay() => Designer.IsOverlayOpen = Palette.IsOpen || IsScaffoldOpen || IsPreviewOpen || IsSettingsOpen || FileGroups.Picker.IsOpen || Breakpoints.Settings.IsOpen;
+    private void OverlayFormChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName == nameof(FileGroupPickerViewModel.IsOpen)) UpdateDesignerOverlay(); }
     [ObservableProperty] public partial ScaffoldKind SelectedScaffoldKind { get; set; } = ScaffoldKind.ViewAndViewModel;
     [ObservableProperty] public partial string ScaffoldName { get; set; } = "CustomerView";
     [ObservableProperty] public partial bool AddDataTemplate { get; set; }
@@ -968,6 +971,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Messenger.UnregisterAll(this); _workspace.WorkerExited -= WorkerExited;
         XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Tasks.Dispose(); Palette.Dispose();
         _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
+        FileGroups.Picker.PropertyChanged -= OverlayFormChanged; Breakpoints.Settings.PropertyChanged -= OverlayFormChanged;
         Breakpoints.Dispose();
         Features.Dispose();
         _operations.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
