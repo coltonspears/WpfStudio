@@ -105,9 +105,9 @@
   <Border Grid.Row="2" Background="{DynamicResource RaisedBrush}" CornerRadius="6" Padding="12,10" Margin="10,8,10,0" Visibility="{Binding ShowOptions, Converter={StaticResource BooleanToVisibility}}">
    <StackPanel IsEnabled="{Binding IsIdle}">
     <WrapPanel>
-     <TextBlock Text="Runtime index" VerticalAlignment="Center" Margin="0,0,6,0"/><TextBox Text="{Binding RuntimeIndex}" Width="55" Margin="0,0,14,0" AutomationProperties.Name="CLR runtime index"/>
-     <TextBlock Text="Object budget" VerticalAlignment="Center" Margin="0,0,6,0"/><TextBox Text="{Binding MaxObjects}" Width="105" Margin="0,0,14,0" AutomationProperties.Name="Heap object budget"/>
-     <TextBlock Text="Reference budget" VerticalAlignment="Center" Margin="0,0,6,0"/><TextBox Text="{Binding MaxReferences}" Width="105" AutomationProperties.Name="Heap reference budget"/>
+     <TextBlock Text="Runtime index" VerticalAlignment="Center" Margin="0,0,6,0"/><c:NumberBox Value="{Binding RuntimeIndex}" Minimum="0" Maximum="15" Width="64" Margin="0,0,14,0" AutomationProperties.Name="CLR runtime index" ToolTip="Which runtime to read when the process hosts more than one; 0 is the first"/>
+     <TextBlock Text="Object budget" VerticalAlignment="Center" Margin="0,0,6,0"/><c:NumberBox Value="{Binding MaxObjects}" Minimum="1000" Maximum="5000000" Step="100000" Width="124" Margin="0,0,14,0" AutomationProperties.Name="Heap object budget" ToolTip="1,000 to 5,000,000; Up and Down change it by 100,000"/>
+     <TextBlock Text="Reference budget" VerticalAlignment="Center" Margin="0,0,6,0"/><c:NumberBox Value="{Binding MaxReferences}" Minimum="1000" Maximum="30000000" Step="500000" Width="124" AutomationProperties.Name="Heap reference budget" ToolTip="1,000 to 30,000,000; Up and Down change it by 500,000"/>
     </WrapPanel>
     <DockPanel Margin="0,8,0,0"><Button DockPanel.Dock="Right" Content="Choose DAC…" Command="{Binding ChooseDacCommand}"/><TextBox Text="{Binding DacPath, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Matching mscordacwks.dll or mscordaccore.dll (optional)" ToolTip="Leave empty for automatic resolution" AutomationProperties.Name="Optional matching runtime DAC"/></DockPanel>
     <TextBlock Text="Defaults allow 1 million objects and 6 million references. Larger budgets use more worker memory. The matching runtime DAC is resolved locally or from Microsoft's symbol server." Style="{StaticResource Note}" Margin="0,6,0,0"/>

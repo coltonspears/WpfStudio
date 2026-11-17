@@ -265,7 +265,7 @@
               <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" IsEnabled="{Binding Editor.ShowColumnRuler}">
                   <TextBlock Text="at column" Style="{StaticResource Caption}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0" />
-                  <TextBox Text="{Binding Editor.ColumnRulerPosition, UpdateSourceTrigger=LostFocus}" Width="64" AutomationProperties.Name="Column guide position" />
+                  <c:NumberBox Value="{Binding Editor.ColumnRulerPosition}" Minimum="1" Maximum="400" Width="84" AutomationProperties.Name="Column guide position" />
                 </StackPanel>
                 <CheckBox Style="{StaticResource Toggle}" IsChecked="{Binding Editor.ShowColumnRuler}">
                   <StackPanel><TextBlock Text="Column guide" Style="{StaticResource RowName}" /><TextBlock Text="A vertical line marking a preferred line length." Style="{StaticResource RowNote}" /></StackPanel>
