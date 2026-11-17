@@ -2,6 +2,21 @@
 
 Validation was performed on this Windows 11 x64 workstation on 2026-09-26–28. The machine has a Ryzen 9 5900X, approximately 96 GiB of RAM, .NET SDKs 9 and 10, Desktop runtimes 8–10, WebView2, and SQL Server LocalDB. An isolated SDK 8.0.425 installation was also used for compatibility verification without changing the system toolchain. Full Visual Studio is installed on this workstation; this is not a clean-machine certification.
 
+## Structured inputs in place of free-text prompts (2026-11-17)
+
+Several settings were typed into one-line prompts or plain text boxes whose syntax lived in the prompt's message. Breakpoint conditions, hit counts (`5`, `>=5`, `%5`) and tracepoint messages were three separate prompts; adding files to a file group asked for a name with the existing groups listed in the message; a task's environment was a multi-line `NAME=value` box; numbers were text boxes; attaching the debugger asked for a process ID. They are now a breakpoint settings form (a comparison list and a number for the hit count, insert buttons and a preview for the message, a sentence saying what the breakpoint will do), a file group picker that lists the groups, name and value rows, a number box with spin buttons that keeps a value inside its range, and a process list.
+
+**This entry was not produced on the Windows workstation the rest of this record describes.** The change was written and checked in a Linux container with no Windows machine and no Wine. The solution was compiled there with .NET SDK 10.0.404 and `EnableWindowsTargeting`. No WPF code ran: not the application, not the new views, and not the Shell or Runtime suites.
+
+| Check | Result |
+| --- | --- |
+| Whole solution, every project and target framework including net48 | 0 warnings, 0 errors. The new views compile to BAML, which checks their types, members and bindable properties but not their resource keys |
+| Core suite, natively on Linux | 460 of 480 passed. The 4 new cases write each kind of hit count back in the form it is read in. The 20 others are the scaffolding, task file and XAML build lease cases that need Windows, as in the previous entries |
+| The settings form, the group picker and the process list, compiled from their own source files with CommunityToolkit.Mvvm and the contracts, and run on Linux | 52 checks passed: the form's sentence for each combination, a part turning on when it is edited and not when the form is filled, what is saved for a part that is off, refusal of an empty condition or message, an unreadable stored hit count named, the message preview for keywords, expressions, `{{ }}`, an unclosed brace and a lone `$`; the picker's rows and their counts, the group used last chosen again, typing a name choosing a new group without moving the caret, refusal of a new group with no name; and the real process list sorted by name, without this process, holding a process started for the check |
+| New and changed Shell and Runtime cases | Compiled, not run: the form through the shell from the editor commands and from the debugger's list, the picker through the workbench host, environment rows into a task draft, the designer's native preview hidden while either new form is open, and the process list on Windows |
+
+Not validated, and to be checked on Windows before this is relied on: every new view as drawn (the settings form, the group picker, the environment rows, the debugger's process list and breakpoint columns), the number box (typing, spin buttons, arrow keys, the wheel, commit on Enter and on leaving it, clamping), focus moving into each form when it opens and Enter and Esc there, the insert buttons placing text at the caret, both themes, and the Shell and Runtime suites.
+
 ## DevOps workbench for Azure DevOps and GitHub (2026-11-17)
 
 **Tools > DevOps** works with the pull requests, work items and pipelines of the Git pane's repository on Azure DevOps (Services and Server) and GitHub (and Enterprise Server), where it is Issues and Actions. It signs in with what Git Credential Manager already keeps for the remote, or with a personal access token saved encrypted for the Windows account, and builds on the Git pane for checkout, publishing and branches. See [DevOps workbench](docs/devops.md).

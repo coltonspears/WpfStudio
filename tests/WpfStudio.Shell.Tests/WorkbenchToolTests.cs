@@ -103,13 +103,19 @@ public sealed class WorkbenchToolTests
             var model = Path.Combine(root, "InvoiceViewModel.cs"); await File.WriteAllTextAsync(model, "class InvoiceViewModel { }");
             var other = Path.Combine(root, "Other.cs"); await File.WriteAllTextAsync(other, "class Other { }");
             var host = new FakeHost(root) { OpenPaths = [view, model] };
-            host.Dialogs.Prompts.Enqueue("Invoices");
             var messenger = new WeakReferenceMessenger();
             string? shownTool = null;
             messenger.Register<ShowToolMessage>(this, (_, message) => shownTool = message.ToolId);
             var groups = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root), messenger);
 
-            await groups.AddOpenTabsCommand.ExecuteAsync(null);
+            groups.AddOpenTabsCommand.Execute(null);
+            Assert.True(groups.Picker.IsOpen);
+            Assert.Equal(["InvoiceView.xaml", "InvoiceViewModel.cs"], groups.Picker.Files.Select(f => f.Name));
+            Assert.True(Assert.Single(groups.Picker.Choices).IsNew);
+            Assert.Empty(groups.Groups);
+            groups.Picker.NewGroupName = "Invoices";
+            await groups.Picker.AddCommand.ExecuteAsync(null);
+            Assert.False(groups.Picker.IsOpen);
             var group = Assert.Single(groups.Groups);
             Assert.Equal("Invoices", group.Name);
             Assert.Equal("2 files", group.Summary);
@@ -124,6 +130,59 @@ public sealed class WorkbenchToolTests
             var reloaded = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root), messenger);
             await reloaded.LoadAsync();
             Assert.Equal(["InvoiceView.xaml", "InvoiceViewModel.cs"], Assert.Single(reloaded.Groups).Files.Select(f => f.Name));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ThePickerListsTheGroupsAndAddsToTheChosenOneOrANewOne()
+    {
+        var root = NewDirectory();
+        try
+        {
+            var a = Path.Combine(root, "A.cs");
+            var b = Path.Combine(root, "B.cs");
+            var host = new FakeHost(root) { OpenPaths = [a, b], Active = (b, 1) };
+            var groups = new FileGroupsViewModel(host, new WorkspaceStateStore<FileGroup>("file-groups", root), new WeakReferenceMessenger());
+            groups.Groups.Add(new("Orders", [a]));
+            groups.Groups.Add(new("Billing", []));
+            var picker = groups.Picker;
+
+            groups.AddOpenTabsCommand.Execute(null);
+            Assert.Equal(["Orders", "Billing", "New group"], picker.Choices.Select(c => c.Name));
+            Assert.Equal(["1 file · has 1 of these", "0 files", "Name it below"], picker.Choices.Select(c => c.Detail));
+            Assert.True(picker.IsNewGroup);
+            Assert.True(picker.FocusNewName);
+            await picker.AddCommand.ExecuteAsync(null);
+            Assert.Equal("Name the new group.", picker.Error);
+            Assert.True(picker.IsOpen);
+
+            picker.Selected = picker.Choices[0];
+            Assert.Equal("", picker.Error);
+            Assert.Equal("Add to Orders", picker.AddLabel);
+            await picker.AddCommand.ExecuteAsync(null);
+            Assert.False(picker.IsOpen);
+            Assert.Equal(["A.cs", "B.cs"], groups.Groups[0].Files.Select(f => f.Name));
+            Assert.Equal("Orders: 2 files", host.Status);
+
+            // The group used last is chosen the next time; typing a name chooses a new group instead.
+            groups.AddActiveCommand.Execute(null);
+            Assert.Same(groups.Groups[0], picker.Selected?.Group);
+            Assert.Equal(("1 file", "2 files · has all of these"), (picker.FilesSummary, picker.Choices[0].Detail));
+            picker.NewGroupName = "Reports";
+            Assert.True(picker.IsNewGroup);
+            Assert.Equal("Create group", picker.AddLabel);
+            picker.CancelCommand.Execute(null);
+            Assert.False(picker.IsOpen);
+            Assert.Equal(["Orders", "Billing"], groups.Groups.Select(g => g.Name));
+
+            // A new name that matches a group adds to that group instead of making a second one.
+            groups.AddActiveCommand.Execute(null);
+            Assert.Equal("", picker.NewGroupName);
+            picker.NewGroupName = "billing";
+            await picker.AddCommand.ExecuteAsync(null);
+            Assert.Equal(["Orders", "Billing"], groups.Groups.Select(g => g.Name));
+            Assert.Equal(["B.cs"], groups.Groups[1].Files.Select(f => f.Name));
         }
         finally { Directory.Delete(root, true); }
     }

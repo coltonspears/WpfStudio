@@ -37,8 +37,13 @@ public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisp
     public BreakpointEditingViewModel(IBreakpointEditingHost host, DebuggerViewModel debugger, IMessenger messenger)
     {
         _host = host; _debugger = debugger; _messenger = messenger;
+        Settings = new(SaveSettingsAsync);
         _debugger.Breakpoints.CollectionChanged += BreakpointsChanged;
+        _messenger.Register<BreakpointEditingViewModel, EditBreakpointMessage>(this, static (editing, message) => editing.Settings.Open(message.Breakpoint.Path, message.Breakpoint.Line, message.Breakpoint));
     }
+
+    /// <summary>The settings form of one breakpoint: its condition, hit count and tracepoint message.</summary>
+    public BreakpointSettingsViewModel Settings { get; }
 
     private void BreakpointsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => Observe();
     private void Observe()
@@ -68,43 +73,33 @@ public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisp
     [RelayCommand] private Task ToggleAsync() => _host.ActiveDocument is not { State.Extension: ".cs" } doc ? Task.CompletedTask
         : _host.GuardAsync(() => _debugger.ToggleBreakpointAsync(doc.State.Path, doc.State.CaretLine));
 
-    [RelayCommand] private Task ConditionAsync() => _host.GuardAsync(async () =>
-    {
-        if (_host.ActiveDocument is not { State.Extension: ".cs" } doc) return;
-        var breakpoint = AtCaret(doc);
-        var condition = await _host.Dialogs.PromptAsync("Breakpoint condition", "Break when this C# expression is true (leave empty for every hit):", breakpoint?.Condition ?? "");
-        if (condition == null) return;
-        breakpoint ??= await AddAtCaretAsync(doc);
-        if (breakpoint == null) return;
-        breakpoint.Condition = condition; _debugger.SelectedBreakpoint = breakpoint;
-        await _debugger.ApplyBreakpointsCommand.ExecuteAsync(null); Show();
-    });
+    // Each opens the same settings form at the caret line, with its own part turned on and focused.
+    [RelayCommand] private void EditSettings() => OpenSettingsAtCaret(null);
+    [RelayCommand] private void Condition() => OpenSettingsAtCaret(BreakpointSettingsFocus.Condition);
+    [RelayCommand] private void HitCount() => OpenSettingsAtCaret(BreakpointSettingsFocus.HitCount);
+    [RelayCommand] private void LogMessage() => OpenSettingsAtCaret(BreakpointSettingsFocus.LogMessage);
 
-    [RelayCommand] private Task HitCountAsync() => _host.GuardAsync(async () =>
+    private void OpenSettingsAtCaret(BreakpointSettingsFocus? focus)
     {
-        if (_host.ActiveDocument is not { State.Extension: ".cs" } doc) return;
-        var breakpoint = AtCaret(doc);
-        var text = await _host.Dialogs.PromptAsync("Breakpoint hit count", "Break on hit 5, >=5 from the fifth hit, or %5 on every fifth hit (leave empty for every hit):", breakpoint?.HitCondition ?? "");
-        if (text == null) return;
-        if (!HitCondition.TryParse(text, out _, out var error)) { await _host.Dialogs.ShowErrorAsync("Breakpoint hit count", error!); return; }
-        breakpoint ??= await AddAtCaretAsync(doc);
-        if (breakpoint == null) return;
-        breakpoint.HitCondition = text.Trim(); _debugger.SelectedBreakpoint = breakpoint;
-        await _debugger.ApplyBreakpointsCommand.ExecuteAsync(null);
-        _host.ReportStatus("Breakpoint " + breakpoint.Summary.ToLowerInvariant());
-    });
+        if (_host.ActiveDocument is not { State.Extension: ".cs" } doc) { _host.ReportStatus("Place the caret on a line of C# code to edit its breakpoint"); return; }
+        Settings.Open(doc.State.Path, doc.State.CaretLine, AtCaret(doc), focus);
+    }
 
-    [RelayCommand] private Task LogMessageAsync() => _host.GuardAsync(async () =>
+    private Task SaveSettingsAsync(BreakpointSettingsViewModel form) => _host.GuardAsync(async () =>
     {
-        if (_host.ActiveDocument is not { State.Extension: ".cs" } doc) return;
-        var breakpoint = AtCaret(doc);
-        var text = await _host.Dialogs.PromptAsync("Tracepoint", "Write this message to Output and continue. Use {expression} for values and $FUNCTION, $TID, $FILEPOS or $HITCOUNT (leave empty to break instead):", breakpoint?.LogMessage ?? "");
-        if (text == null) return;
-        breakpoint ??= await AddAtCaretAsync(doc);
+        var breakpoint = At(form.Path, form.Line);
+        if (breakpoint == null)
+        {
+            await _debugger.ToggleBreakpointAsync(form.Path, form.Line);
+            breakpoint = At(form.Path, form.Line);
+        }
         if (breakpoint == null) return;
-        breakpoint.LogMessage = text.Trim(); _debugger.SelectedBreakpoint = breakpoint;
+        breakpoint.Condition = form.ConditionValue;
+        breakpoint.HitCondition = form.HitConditionValue;
+        breakpoint.LogMessage = form.LogMessageValue;
+        _debugger.SelectedBreakpoint = breakpoint;
         await _debugger.ApplyBreakpointsCommand.ExecuteAsync(null);
-        _host.ReportStatus(breakpoint.IsTracepoint ? "Tracepoint set; its messages appear in Debugger > Output" : "Breakpoint breaks again instead of logging");
+        _host.ReportStatus(breakpoint.IsTracepoint ? $"Tracepoint at {form.Location}; its messages appear in Debugger > Output" : $"Breakpoint at {form.Location}: {form.Summary}");
     });
 
     [RelayCommand] private Task AddWatchAsync() => _host.GuardAsync(async () =>
@@ -123,18 +118,15 @@ public sealed partial class BreakpointEditingViewModel : ObservableObject, IDisp
         breakpoint.Enabled = !breakpoint.Enabled; await _debugger.ApplyBreakpointsCommand.ExecuteAsync(null);
     });
 
-    private BreakpointViewModel? AtCaret(EditorViewModel doc) =>
-        _debugger.Breakpoints.FirstOrDefault(b => b.Path.Equals(doc.State.Path, StringComparison.OrdinalIgnoreCase) && b.Line == doc.State.CaretLine);
-    private async Task<BreakpointViewModel?> AddAtCaretAsync(EditorViewModel doc)
-    {
-        await _debugger.ToggleBreakpointAsync(doc.State.Path, doc.State.CaretLine);
-        return AtCaret(doc);
-    }
+    private BreakpointViewModel? AtCaret(EditorViewModel doc) => At(doc.State.Path, doc.State.CaretLine);
+    private BreakpointViewModel? At(string path, int line) =>
+        _debugger.Breakpoints.FirstOrDefault(b => b.Path.Equals(path, StringComparison.OrdinalIgnoreCase) && b.Line == line);
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        _messenger.UnregisterAll(this);
         _debugger.Breakpoints.CollectionChanged -= BreakpointsChanged;
         foreach (var breakpoint in _observed) breakpoint.PropertyChanged -= BreakpointChanged;
         _observed.Clear();

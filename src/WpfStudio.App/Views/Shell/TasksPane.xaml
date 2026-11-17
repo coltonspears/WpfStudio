@@ -139,8 +139,33 @@
             <TextBox Text="{Binding Arguments, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource CodeFont}" c:Ui.Placeholder="Quote an argument that has spaces" AutomationProperties.Name="Arguments" />
             <TextBlock Text="Working folder" Style="{StaticResource FieldLabel}" />
             <TextBox Text="{Binding WorkingDirectory, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource CodeFont}" c:Ui.Placeholder="${workspaceFolder}" AutomationProperties.Name="Working folder" />
-            <TextBlock Text="Environment variables, one NAME=value per line" Style="{StaticResource FieldLabel}" />
-            <TextBox Text="{Binding EnvironmentText, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource CodeFont}" AcceptsReturn="True" MinHeight="54" MaxHeight="120" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Environment variables" />
+            <DockPanel Margin="0,8,0,3">
+              <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" c:Ui.Icon="Plus" Content="Add" Command="{Binding AddVariableCommand}" MinHeight="22" Padding="6,0" Margin="0"
+                      ToolTip="Add an environment variable for this task" AutomationProperties.Name="Add environment variable" />
+              <TextBlock Text="Environment variables" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+            </DockPanel>
+            <ItemsControl ItemsSource="{Binding EnvironmentVariables}" Focusable="False" AutomationProperties.Name="Environment variables">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type tasks:EnvironmentVariableRow}">
+                  <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="2*" />
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="3*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource CodeFont}" c:Ui.Placeholder="NAME"
+                             b:Interaction.FocusWhenTrue="{Binding FocusName}" AutomationProperties.Name="Variable name" />
+                    <TextBlock Grid.Column="1" Text="=" Margin="5,0" VerticalAlignment="Center" Foreground="{DynamicResource SubtleBrush}" />
+                    <TextBox Grid.Column="2" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource CodeFont}" c:Ui.Placeholder="value" AutomationProperties.Name="Variable value" />
+                    <Button Grid.Column="3" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Width="24" Height="24" Margin="4,0,0,0" ToolTip="Remove this variable" AutomationProperties.Name="Remove variable"
+                            Command="{Binding DataContext.RemoveVariableCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="None; the task inherits WpfStudio's environment." Style="{StaticResource Caption}" FontStyle="Italic"
+                       Visibility="{Binding EnvironmentVariables.Count, Converter={StaticResource Presence}, ConverterParameter=Invert}" />
             <TextBlock Text="Group" Style="{StaticResource FieldLabel}" />
             <DockPanel>
               <ComboBox ItemsSource="{Binding Groups}" SelectedItem="{Binding Group}" Width="110" AutomationProperties.Name="Group" />

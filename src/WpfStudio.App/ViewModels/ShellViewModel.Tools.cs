@@ -132,9 +132,10 @@ public sealed partial class ShellViewModel
             case EditorAction.Format: await FormatCommand.ExecuteAsync(null); break;
             case EditorAction.OrganizeUsings: case EditorAction.UseVar: case EditorAction.UseExplicitType: await RefactorCommand.ExecuteAsync(action.ToString()); break;
             case EditorAction.ToggleBreakpoint: await Breakpoints.ToggleCommand.ExecuteAsync(null); break;
-            case EditorAction.BreakpointCondition: await Breakpoints.ConditionCommand.ExecuteAsync(null); break;
-            case EditorAction.BreakpointHitCount: await Breakpoints.HitCountCommand.ExecuteAsync(null); break;
-            case EditorAction.BreakpointLogMessage: await Breakpoints.LogMessageCommand.ExecuteAsync(null); break;
+            case EditorAction.BreakpointSettings: Breakpoints.EditSettingsCommand.Execute(null); break;
+            case EditorAction.BreakpointCondition: Breakpoints.ConditionCommand.Execute(null); break;
+            case EditorAction.BreakpointHitCount: Breakpoints.HitCountCommand.Execute(null); break;
+            case EditorAction.BreakpointLogMessage: Breakpoints.LogMessageCommand.Execute(null); break;
             case EditorAction.AddWatch: await Breakpoints.AddWatchCommand.ExecuteAsync(null); break;
             case EditorAction.DisableBreakpoint: await Breakpoints.DisableCommand.ExecuteAsync(null); break;
             case EditorAction.ShowBreakpoints: Breakpoints.ShowCommand.Execute(null); break;

@@ -212,7 +212,8 @@ public sealed class WorkbenchTests
         await using var test = new ShellTestContext();
         string path = await test.CreateFileAsync("A.cs", "class A { }");
         await test.Shell.OpenDocumentAsync(path);
-        await test.Shell.FileGroups.AddOpenTabsCommand.ExecuteAsync(null);
+        test.Shell.FileGroups.AddOpenTabsCommand.Execute(null);
+        Assert.False(test.Shell.FileGroups.Picker.IsOpen);
         Assert.Empty(test.Shell.FileGroups.Groups);
         Assert.Equal("Open a solution to pin file groups for it", test.Shell.Status);
     }

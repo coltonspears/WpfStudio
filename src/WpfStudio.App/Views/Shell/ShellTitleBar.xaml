@@ -230,6 +230,7 @@
           <MenuItem Header="Step out" c:Ui.Icon="StepOut" Command="{Binding Debugger.StepOutCommand}" InputGestureText="Shift+F11" />
           <Separator />
           <MenuItem Header="Toggle breakpoint" Command="{Binding Breakpoints.ToggleCommand}" InputGestureText="F9" />
+          <MenuItem Header="Breakpoint settings…" c:Ui.Icon="Bug" Command="{Binding Breakpoints.EditSettingsCommand}" />
           <MenuItem Header="Breakpoint condition…" Command="{Binding Breakpoints.ConditionCommand}" />
           <MenuItem Header="Breakpoint hit count…" Command="{Binding Breakpoints.HitCountCommand}" />
           <MenuItem Header="Tracepoint log message…" Command="{Binding Breakpoints.LogMessageCommand}" />

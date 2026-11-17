@@ -2,6 +2,7 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:local="clr-namespace:WpfStudio.App.Features.ColtonGpt"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls"
  MinWidth="320" MaxWidth="640">
  <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
   <TextBlock Text="COLTONGPT" Style="{DynamicResource SectionLabel}" Margin="0,0,0,6"/>
@@ -14,8 +15,8 @@
   <ComboBox ItemsSource="{Binding Models}" IsEditable="True" IsTextSearchEnabled="True" TextSearch.TextPath="Id" Text="{Binding ModelId, UpdateSourceTrigger=PropertyChanged}" DisplayMemberPath="Id" AutomationProperties.Name="OpenRouter model ID" ToolTip="Choose a model or enter its exact OpenRouter model ID"/>
   <TextBlock Text="Paste your key above, then load models. You can also paste a model ID from openrouter.ai/models." TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource MutedBrush}" Margin="2,5,0,16"/>
   <Grid Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-   <StackPanel Margin="0,0,12,0"><TextBlock Text="MAXIMUM OUTPUT TOKENS" Style="{DynamicResource SectionLabel}"/><TextBox Text="{Binding MaxOutputTokens, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" AutomationProperties.Name="Maximum output tokens"/><TextBlock Text="256–16,384" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
-   <StackPanel Grid.Column="1"><CheckBox Content="Custom temperature" IsChecked="{Binding UseTemperature}" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,8"/><TextBox Text="{Binding Temperature, UpdateSourceTrigger=PropertyChanged, ValidatesOnExceptions=True}" IsEnabled="{Binding UseTemperature}" AutomationProperties.Name="Model temperature"/><TextBlock Text="0–2 · off uses model default" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
+   <StackPanel Margin="0,0,12,0"><TextBlock Text="MAXIMUM OUTPUT TOKENS" Style="{DynamicResource SectionLabel}"/><c:NumberBox Value="{Binding MaxOutputTokens}" Minimum="256" Maximum="16384" Step="256" AutomationProperties.Name="Maximum output tokens" ToolTip="Up and Down change it by 256"/><TextBlock Text="256–16,384" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
+   <StackPanel Grid.Column="1"><CheckBox Content="Custom temperature" IsChecked="{Binding UseTemperature}" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,8"/><c:NumberBox Value="{Binding Temperature}" Minimum="0" Maximum="2" Step="0.1" Decimals="2" IsEnabled="{Binding UseTemperature}" AutomationProperties.Name="Model temperature" ToolTip="Up and Down change it by 0.1"/><TextBlock Text="0–2 · off uses model default" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
   </Grid>
   <TextBlock Text="Saved keys use Windows user-scoped protection. Conversation history is kept in memory and cleared when WpfStudio closes." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,0,0,14"/>
   <DockPanel><Button DockPanel.Dock="Right" Content="Save ColtonGPT settings" Command="{Binding SaveCommand}" Style="{DynamicResource AccentButton}"/><TextBlock Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,10,0" AutomationProperties.LiveSetting="Polite"/></DockPanel>

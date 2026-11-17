@@ -44,9 +44,12 @@ public sealed partial class FileGroupsViewModel : ObservableObject
         _host = host;
         _store = store;
         _messenger = messenger;
+        Picker = new(AddFromPickerAsync);
     }
 
     public ObservableCollection<FileGroupViewModel> Groups { get; } = [];
+    /// <summary>Chooses the group that files are added to.</summary>
+    public FileGroupPickerViewModel Picker { get; }
 
     /// <summary>Replaces the groups with the ones saved for the current workspace.</summary>
     public async Task LoadAsync()
@@ -57,31 +60,31 @@ public sealed partial class FileGroupsViewModel : ObservableObject
     }
     private Task SaveAsync() => _host.WorkspacePath is { } workspace ? _store.SaveAsync(workspace, Groups.Select(g => g.ToModel()), _host.Lifetime) : Task.CompletedTask;
 
-    /// <summary>The named group, created when no group has that name. Null when the prompt was cancelled.</summary>
-    private async Task<FileGroupViewModel?> AskForGroupAsync(string title)
-    {
-        if (_host.WorkspacePath is null) { _host.ReportStatus("Open a solution to pin file groups for it"); return null; }
-        var existing = Groups.Count == 0 ? "" : " Existing: " + string.Join(", ", Groups.Select(g => g.Name)) + ".";
-        var name = (await _host.Dialogs.PromptAsync(title, "Group name; a new name creates the group." + existing, _lastGroupName.Length > 0 ? _lastGroupName : "New feature"))?.Trim();
-        if (string.IsNullOrEmpty(name)) return null;
-        _lastGroupName = name;
-        var group = Groups.FirstOrDefault(g => g.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (group == null) { group = new(name, []); Groups.Add(group); }
-        group.IsExpanded = true;
-        return group;
-    }
-    private async Task AddToGroupAsync(string title, IReadOnlyList<string> paths)
+    /// <summary>Shows the group picker for <paramref name="paths"/>; the files are added once a group is chosen.</summary>
+    private void PickGroup(string title, IReadOnlyList<string> paths)
     {
         if (paths.Count == 0) { _host.ReportStatus("Nothing to add to a file group"); return; }
-        if (await AskForGroupAsync(title) is not { } group) return;
-        foreach (var path in paths) group.Add(path);
+        if (_host.WorkspacePath is null) { _host.ReportStatus("Open a solution to pin file groups for it"); return; }
+        Picker.Open(title, paths, Groups, _lastGroupName);
+    }
+    /// <summary>Adds the picker's files to the chosen group, creating it when it is new; a new name that matches a group adds to that group.</summary>
+    private Task AddFromPickerAsync(FileGroupPickerViewModel picker) => _host.GuardAsync(async () =>
+    {
+        var name = picker.GroupName;
+        if (name.Length == 0) return;
+        _lastGroupName = name;
+        var group = picker.Selected?.Group is { } chosen && Groups.Contains(chosen) ? chosen
+            : Groups.FirstOrDefault(g => g.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (group == null) { group = new(name, []); Groups.Add(group); }
+        group.IsExpanded = true;
+        foreach (var file in picker.Files) group.Add(file.Path);
         await SaveAsync();
         _host.ReportStatus($"{group.Name}: {group.Summary}");
         _messenger.Send(new ShowToolMessage(Workbenches.FileGroups));
-    }
-    [RelayCommand] private Task AddActiveAsync() => _host.GuardAsync(() => AddToGroupAsync("Add file to group", _host.ActiveLocation is { } active ? [active.Path] : []));
-    [RelayCommand] private Task AddOpenTabsAsync() => _host.GuardAsync(() => AddToGroupAsync("Pin open tabs as a group", _host.OpenDocumentPaths));
-    [RelayCommand] private Task AddSelectedAsync() => _host.GuardAsync(() => AddToGroupAsync("Add to file group", _host.SelectedExplorerFile is { Length: > 0 } path ? [path] : []));
+    });
+    [RelayCommand] private void AddActive() => PickGroup("Add file to a group", _host.ActiveLocation is { } active ? [active.Path] : []);
+    [RelayCommand] private void AddOpenTabs() => PickGroup("Pin open tabs as a group", _host.OpenDocumentPaths);
+    [RelayCommand] private void AddSelected() => PickGroup("Add to a file group", _host.SelectedExplorerFile is { Length: > 0 } path ? [path] : []);
 
     /// <summary>Opens every file of the group that still exists, leaving other tabs open.</summary>
     [RelayCommand] private Task OpenGroupAsync(FileGroupViewModel? group) => group == null ? Task.CompletedTask : _host.GuardAsync(async () =>

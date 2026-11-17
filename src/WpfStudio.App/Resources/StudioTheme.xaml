@@ -376,6 +376,83 @@
    </Setter.Value>
   </Setter>
  </Style>
+ <!-- Half-height arrow of a number box. It never takes focus, so the typed text stays where it is. -->
+ <Style x:Key="SpinButton" TargetType="RepeatButton">
+  <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+  <Setter Property="Background" Value="Transparent"/>
+  <Setter Property="Focusable" Value="False"/>
+  <Setter Property="IsTabStop" Value="False"/>
+  <Setter Property="Delay" Value="400"/>
+  <Setter Property="Interval" Value="60"/>
+  <Setter Property="Template">
+   <Setter.Value>
+    <ControlTemplate TargetType="RepeatButton">
+     <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="3">
+      <c:Glyph Kind="{Binding (c:Ui.Icon), RelativeSource={RelativeSource TemplatedParent}}" Width="10" Height="10" HorizontalAlignment="Center" VerticalAlignment="Center" StrokeWeight="1.8"/>
+     </Border>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource HoverBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
+      <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource PressedBrush}"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.38"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate>
+   </Setter.Value>
+  </Setter>
+ </Style>
+ <!-- A text box for a number (Controls/NumberBox.cs): the text box chrome with spin buttons at its right edge. -->
+ <Style TargetType="c:NumberBox" BasedOn="{StaticResource {x:Type TextBox}}">
+  <Setter Property="Padding" Value="7,4,2,4"/>
+  <Setter Property="Template">
+   <Setter.Value>
+    <ControlTemplate TargetType="c:NumberBox">
+     <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" SnapsToDevicePixels="True">
+      <Grid>
+       <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+       </Grid.ColumnDefinitions>
+       <TextBlock x:Name="Hint" Text="{Binding (c:Ui.Placeholder), RelativeSource={RelativeSource TemplatedParent}}" Foreground="{DynamicResource SubtleBrush}" Margin="{TemplateBinding Padding}" Padding="2,0,0,0"
+                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}" IsHitTestVisible="False" Visibility="Collapsed" TextTrimming="CharacterEllipsis"/>
+       <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Focusable="False" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+       <Grid x:Name="Spinner" Grid.Column="1" Width="16" Margin="0,2,3,2">
+        <Grid.RowDefinitions>
+         <RowDefinition Height="*"/>
+         <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <RepeatButton Style="{StaticResource SpinButton}" c:Ui.Icon="ChevronUp" Command="{x:Static c:NumberBox.IncreaseCommand}" CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" ToolTip="Increase (Up)"/>
+        <RepeatButton Grid.Row="1" Style="{StaticResource SpinButton}" c:Ui.Icon="ChevronDown" Command="{x:Static c:NumberBox.DecreaseCommand}" CommandTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}" ToolTip="Decrease (Down)"/>
+       </Grid>
+      </Grid>
+     </Border>
+     <ControlTemplate.Triggers>
+      <MultiTrigger>
+       <MultiTrigger.Conditions>
+        <Condition Property="Text" Value=""/>
+        <Condition Property="IsKeyboardFocused" Value="False"/>
+       </MultiTrigger.Conditions>
+       <Setter TargetName="Hint" Property="Visibility" Value="Visible"/>
+      </MultiTrigger>
+      <MultiTrigger>
+       <MultiTrigger.Conditions>
+        <Condition Property="IsMouseOver" Value="True"/>
+        <Condition Property="IsReadOnly" Value="False"/>
+       </MultiTrigger.Conditions>
+       <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource SubtleBrush}"/>
+      </MultiTrigger>
+      <MultiTrigger>
+       <MultiTrigger.Conditions>
+        <Condition Property="IsKeyboardFocused" Value="True"/>
+        <Condition Property="IsReadOnly" Value="False"/>
+       </MultiTrigger.Conditions>
+       <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+      </MultiTrigger>
+      <Trigger Property="IsReadOnly" Value="True"><Setter TargetName="Spinner" Property="Visibility" Value="Collapsed"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate>
+   </Setter.Value>
+  </Setter>
+ </Style>
  <Style TargetType="PasswordBox">
   <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
   <Setter Property="Background" Value="{DynamicResource EditorBrush}"/>

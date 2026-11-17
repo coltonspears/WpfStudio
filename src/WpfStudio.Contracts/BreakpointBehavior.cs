@@ -42,6 +42,15 @@ public readonly record struct HitCondition(HitConditionKind Kind, int Count)
         _ => true
     };
 
+    /// <summary>The condition as <see cref="TryParse"/> reads it: <c>5</c>, <c>&gt;=5</c> or <c>%5</c>, and empty for every hit.</summary>
+    public string Format() => Kind switch
+    {
+        HitConditionKind.Equal => Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        HitConditionKind.AtLeast => ">=" + Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        HitConditionKind.Multiple => "%" + Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        _ => ""
+    };
+
     public string Describe() => Kind switch
     {
         HitConditionKind.Equal => $"when hit count is {Count}",
