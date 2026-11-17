@@ -112,6 +112,12 @@ public sealed class Glyph : FrameworkElement
         ["InlineView"] = new(Parse("M3,2.75 H13 C13.7,2.75 14.25,3.3 14.25,4 V12 C14.25,12.7 13.7,13.25 13,13.25 H3 C2.3,13.25 1.75,12.7 1.75,12 V4 C1.75,3.3 2.3,2.75 3,2.75 Z M4.5,6 H11.5 M4.5,8 H11.5 M4.5,10 H9"), null),
         ["Expand"] = new(Parse("M5,5.5 L8,2.5 L11,5.5 M5,10.5 L8,13.5 L11,10.5 M8,2.5 V13.5"), null),
         ["Diff"] = new(Parse("M5,2.5 V8.5 M2,5.5 H8 M8,11.5 H14 M3.5,13.5 L12.5,2.5"), null),
+        // Two branch tips and the arrow that brings one into the other.
+        ["PullRequest"] = new(Parse("M2.5,3.75 A1.5,1.5 0 1 0 5.5,3.75 A1.5,1.5 0 1 0 2.5,3.75 Z M2.5,12.25 A1.5,1.5 0 1 0 5.5,12.25 A1.5,1.5 0 1 0 2.5,12.25 Z M10.5,12.25 A1.5,1.5 0 1 0 13.5,12.25 A1.5,1.5 0 1 0 10.5,12.25 Z M4,5.25 V10.75 M12,10.75 V6.25 C12,4.9 11.1,3.75 9.75,3.75 H7.75 M9.25,2.25 L7.75,3.75 L9.25,5.25"), null),
+        // A card with a tick and a line of text, for work items and issues.
+        ["WorkItem"] = new(Parse("M3,2.5 H13 C13.3,2.5 13.5,2.7 13.5,3 V13 C13.5,13.3 13.3,13.5 13,13.5 H3 C2.7,13.5 2.5,13.3 2.5,13 V3 C2.5,2.7 2.7,2.5 3,2.5 Z M5,6.25 L6.25,7.5 L8.5,5 M10,6.25 H11.5 M5,10.5 H11.5"), null),
+        // Three stages joined in a row, for pipelines and workflow runs.
+        ["Pipeline"] = new(Parse("M1.75,6.25 H5 V9.75 H1.75 Z M6.5,6.25 H9.75 V9.75 H6.5 Z M11.25,6.25 H14.5 V9.75 H11.25 Z M5,8 H6.5 M9.75,8 H11.25"), null),
         ["Commit"] = new(Parse("M5.25,8 A2.75,2.75 0 1 0 10.75,8 A2.75,2.75 0 1 0 5.25,8 Z M1.5,8 H5.25 M10.75,8 H14.5"), null),
         ["Copy"] = new(Parse("M5.5,5.5 H12 C12.55,5.5 13,5.95 13,6.5 V13 C13,13.55 12.55,14 12,14 H5.5 C4.95,14 4.5,13.55 4.5,13 V6.5 C4.5,5.95 4.95,5.5 5.5,5.5 Z M11.5,5.5 V3.5 C11.5,2.95 11.05,2.5 10.5,2.5 H4 C3.45,2.5 3,2.95 3,3.5 V10 C3,10.55 3.45,11 4,11 H4.5"), null),
         ["Close"] = new(Parse("M4.5,4.5 L11.5,11.5 M11.5,4.5 L4.5,11.5"), null),

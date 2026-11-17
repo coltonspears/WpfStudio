@@ -32,7 +32,7 @@ public sealed class WindowsSecretProtector(string purpose) : ISecretProtector
 
 /// <summary>
 /// Settings › Network: the proxy WpfStudio's own HTTP requests use. Every change applies at once to the shared
-/// <see cref="StudioWebProxy"/>, so the API client, ColtonGPT and runtime downloads follow it without a restart.
+/// <see cref="StudioWebProxy"/>, so the API client, the DevOps workbench, ColtonGPT and runtime downloads follow it without a restart.
 /// </summary>
 public sealed partial class NetworkPreferences : ObservableObject
 {

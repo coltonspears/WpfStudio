@@ -17,7 +17,7 @@ public sealed partial class ShellViewModel
 
     public EditorPreferences Editor { get; }
     public CodeAssistPreferences CodeAssist { get; }
-    /// <summary>The proxy for the API client, ColtonGPT and runtime downloads.</summary>
+    /// <summary>The proxy for the API client, the DevOps workbench, ColtonGPT and runtime downloads.</summary>
     public NetworkPreferences Network { get; }
     [ObservableProperty] public partial string SettingsPage { get; set; } = AppearancePage;
     [ObservableProperty] public partial bool ShowQuickInfo { get; set; } = true;

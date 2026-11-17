@@ -7,6 +7,7 @@
                     xmlns:b="clr-namespace:WpfStudio.App.Behaviors"
                     xmlns:packages="clr-namespace:WpfStudio.App.Features.Packages"
                     xmlns:git="clr-namespace:WpfStudio.App.Features.Git"
+                    xmlns:devops="clr-namespace:WpfStudio.App.Features.DevOps"
                     xmlns:profiling="clr-namespace:WpfStudio.App.Features.Profiling"
                     xmlns:designer="clr-namespace:WpfStudio.App.Features.Designer"
                     xmlns:inspection="clr-namespace:WpfStudio.App.Features.Inspection"
@@ -67,6 +68,7 @@
   <!-- Retained panes: DockingBehavior instantiates each once and keeps the view across layout changes. -->
   <DataTemplate DataType="{x:Type packages:PackagesViewModel}"><packages:PackagesPane /></DataTemplate>
   <DataTemplate DataType="{x:Type git:GitViewModel}"><git:GitPane /></DataTemplate>
+  <DataTemplate DataType="{x:Type devops:DevOpsViewModel}"><devops:DevOpsPane /></DataTemplate>
   <DataTemplate DataType="{x:Type profiling:MemoryProfilerViewModel}"><profiling:MemoryProfilerPane /></DataTemplate>
   <DataTemplate DataType="{x:Type designer:DesignerViewModel}"><designer:DesignerPane /></DataTemplate>
   <DataTemplate DataType="{x:Type inspection:InspectionViewModel}"><inspection:InspectionPane /></DataTemplate>

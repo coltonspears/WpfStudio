@@ -19,7 +19,7 @@ public sealed record StudioSettings
     public EditorSettings Editor { get; init; } = new();
     public CodeAssistSettings CodeAssist { get; init; } = new();
     public DebuggingSettings Debugging { get; init; } = new();
-    /// <summary>The proxy for outgoing HTTP requests: the API client, ColtonGPT and .NET runtime downloads.</summary>
+    /// <summary>The proxy for outgoing HTTP requests: the API client, the DevOps workbench, ColtonGPT and .NET runtime downloads.</summary>
     public Net.NetworkSettings Network { get; init; } = new();
 }
 

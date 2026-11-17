@@ -454,7 +454,7 @@
       <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding SettingsPage, Converter={StaticResource EqualsVisibility}, ConverterParameter=Network}">
         <StackPanel Margin="28,22,28,24" DataContext="{Binding Network}">
           <TextBlock Text="Network" Style="{StaticResource PageTitle}" />
-          <TextBlock Text="Where WpfStudio's own HTTP requests go: the API client, ColtonGPT and .NET runtime downloads. NuGet restores and Git keep their own proxy settings, in NuGet.Config and git config." Style="{StaticResource PageIntro}" TextWrapping="Wrap" />
+          <TextBlock Text="Where WpfStudio's own HTTP requests go: the API client, the DevOps workbench, ColtonGPT and .NET runtime downloads. NuGet restores and Git keep their own proxy settings, in NuGet.Config and git config." Style="{StaticResource PageIntro}" TextWrapping="Wrap" />
           <TextBlock Text="PROXY" Style="{StaticResource GroupLabel}" />
           <Border Style="{StaticResource Group}" Padding="16,14">
             <StackPanel>

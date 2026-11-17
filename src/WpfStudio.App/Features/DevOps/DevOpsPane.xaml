@@ -1,0 +1,109 @@
+<UserControl x:Class="WpfStudio.App.Features.DevOps.DevOpsPane"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:WpfStudio.App.Features.DevOps" xmlns:c="clr-namespace:WpfStudio.App.Controls" MinWidth="520">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="DevOpsStyles.xaml"/></ResourceDictionary.MergedDictionaries>
+  </ResourceDictionary>
+ </UserControl.Resources>
+
+ <DockPanel Background="{DynamicResource SurfaceBrush}">
+  <!-- The repository and who is signed in, with what works on every tab. -->
+  <Border DockPanel.Dock="Top" Padding="14,10,12,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+   <DockPanel>
+    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+     <Button Style="{StaticResource ToolbarButton}" Content="New pull request" c:Ui.Icon="PullRequest" Command="{Binding CreatePullRequestCommand}"
+             Visibility="{Binding IsConnected, Converter={StaticResource BooleanToVisibility}}" ToolTip="Create a pull request from the Git pane's current branch"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="Link" Command="{Binding OpenRepositoryCommand}" ToolTip="Open the repository on the web" AutomationProperties.Name="Open the repository on the web"
+             Visibility="{Binding Target, Converter={StaticResource Presence}}" Margin="0,0,4,0"/>
+     <Border Width="1" Height="18" Background="{DynamicResource BorderBrush}" Margin="6,0"/>
+     <Button Style="{StaticResource IconButton}" c:Ui.Icon="Restart" Command="{Binding RefreshCommand}" ToolTip="Refresh" AutomationProperties.Name="Refresh"/>
+     <Button Content="Cancel" Command="{Binding CancelCommand}" Margin="6,0,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}"/>
+    </StackPanel>
+    <c:Glyph DockPanel.Dock="Left" Kind="PullRequest" Width="20" Height="20" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+    <StackPanel VerticalAlignment="Center">
+     <StackPanel Orientation="Horizontal">
+      <TextBlock Text="{Binding ServiceName}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+      <TextBlock Text="{Binding Title}" Foreground="{DynamicResource MutedBrush}" Margin="10,1,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="520" ToolTip="{Binding Target.RepositoryWebUrl}"/>
+     </StackPanel>
+     <TextBlock Text="{Binding SignInText}" Style="{StaticResource Meta}" Margin="0,3,0,0" Visibility="{Binding SignInText, Converter={StaticResource Presence}}"/>
+    </StackPanel>
+   </DockPanel>
+  </Border>
+
+  <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="14,6">
+   <DockPanel>
+    <TextBlock DockPanel.Dock="Right" Text="Working…" Foreground="{DynamicResource AccentBrush}" FontSize="11" Margin="12,0,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}"/>
+    <StackPanel>
+     <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource MutedBrush}" FontSize="11" ToolTip="{Binding Status}"/>
+     <TextBlock Text="{Binding Error}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibility}}"/>
+    </StackPanel>
+   </DockPanel>
+  </Border>
+
+  <Grid>
+   <!-- Not connected: why, and what to do about it. -->
+   <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsConnected, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+    <Border Style="{StaticResource Card}" Margin="24" Padding="24,20" HorizontalAlignment="Center" VerticalAlignment="Top" MaxWidth="640">
+     <StackPanel>
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+       <c:Glyph Kind="Plug" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+       <TextBlock Text="{Binding StateMessage}" Style="{StaticResource PaneHeading}" TextWrapping="Wrap" MaxWidth="560"/>
+      </StackPanel>
+      <TextBlock Style="{StaticResource Caption}" Visibility="{Binding ShowsMessage, Converter={StaticResource BooleanToVisibility}}" Margin="28,0,0,0"
+                 Text="Pull requests, work items (issues on GitHub) and pipelines (Actions on GitHub) follow the repository and branch open in the Git pane."/>
+      <StackPanel Visibility="{Binding NeedsSignIn, Converter={StaticResource BooleanToVisibility}}" Margin="0,8,0,0">
+       <local:DevOpsSignInView/>
+      </StackPanel>
+      <StackPanel Visibility="{Binding HasFailed, Converter={StaticResource BooleanToVisibility}}" Orientation="Horizontal" Margin="28,8,0,0">
+       <Button Content="Try again" c:Ui.Icon="Restart" Style="{StaticResource AccentButton}" Command="{Binding RefreshCommand}"/>
+       <Button Content="Sign in again" Margin="8,0,0,0" Command="{Binding SignInWithGitCommand}"/>
+      </StackPanel>
+     </StackPanel>
+    </Border>
+   </ScrollViewer>
+
+   <TabControl SelectedIndex="{Binding SelectedTab}" Visibility="{Binding IsConnected, Converter={StaticResource BooleanToVisibility}}">
+    <TabItem AutomationProperties.Name="Pull requests">
+     <TabItem.Header>
+      <StackPanel Orientation="Horizontal">
+       <c:Glyph Kind="PullRequest" Width="13" Height="13" Margin="0,0,6,0" VerticalAlignment="Center"/>
+       <TextBlock Text="Pull requests" VerticalAlignment="Center"/>
+       <Border Style="{StaticResource Badge}" Margin="6,0,0,0" Padding="5,0" Visibility="{Binding PullRequests.Items.Count, Converter={StaticResource Presence}}">
+        <TextBlock Text="{Binding PullRequests.Items.Count}" FontSize="10.5" Foreground="{DynamicResource AccentBrush}"/>
+       </Border>
+      </StackPanel>
+     </TabItem.Header>
+     <local:PullRequestsView/>
+    </TabItem>
+    <TabItem AutomationProperties.Name="Work items">
+     <TabItem.Header>
+      <StackPanel Orientation="Horizontal">
+       <c:Glyph Kind="WorkItem" Width="13" Height="13" Margin="0,0,6,0" VerticalAlignment="Center"/>
+       <TextBlock Text="{Binding WorkItemsTitle}" VerticalAlignment="Center"/>
+      </StackPanel>
+     </TabItem.Header>
+     <local:WorkItemsView DataContext="{Binding WorkItems}"/>
+    </TabItem>
+    <TabItem AutomationProperties.Name="Pipelines">
+     <TabItem.Header>
+      <StackPanel Orientation="Horizontal">
+       <c:Glyph Kind="Pipeline" Width="13" Height="13" Margin="0,0,6,0" VerticalAlignment="Center"/>
+       <TextBlock Text="{Binding PipelinesTitle}" VerticalAlignment="Center"/>
+      </StackPanel>
+     </TabItem.Header>
+     <local:PipelinesView DataContext="{Binding Pipelines}"/>
+    </TabItem>
+    <TabItem AutomationProperties.Name="Access and settings">
+     <TabItem.Header>
+      <StackPanel Orientation="Horizontal">
+       <c:Glyph Kind="Plug" Width="13" Height="13" Margin="0,0,6,0" VerticalAlignment="Center"/>
+       <TextBlock Text="Access and settings" VerticalAlignment="Center"/>
+      </StackPanel>
+     </TabItem.Header>
+     <local:DevOpsAccessView/>
+    </TabItem>
+   </TabControl>
+  </Grid>
+ </DockPanel>
+</UserControl>

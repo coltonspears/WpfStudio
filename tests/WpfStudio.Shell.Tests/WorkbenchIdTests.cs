@@ -46,14 +46,15 @@ public sealed class WorkbenchIdTests
     [InlineData(Workbenches.LiveInspection, "LiveInspection")]
     [InlineData(Workbenches.Packages, "Packages")]
     [InlineData(Workbenches.Git, "Git")]
+    [InlineData(Workbenches.DevOps, "DevOps")]
     [InlineData(Workbenches.Profiler, "Profiler")]
     [InlineData(Workbenches.ApiClient, "ApiClient")]
     [InlineData(Workbenches.Welcome, "Welcome")]
     public void ValuesStayCompatibleWithSavedLayouts(string id, string saved) => Assert.Equal(saved, id);
 
     [Fact]
-    public void OnlyPackagesGitProfilerAndTheApiClientAreDocumentTabs() =>
-        Assert.Equal([Workbenches.Packages, Workbenches.Git, Workbenches.Profiler, Workbenches.ApiClient], Workbenches.All.Where(id => Workbenches.IsDocument(id)));
+    public void OnlyPackagesGitDevOpsProfilerAndTheApiClientAreDocumentTabs() =>
+        Assert.Equal([Workbenches.Packages, Workbenches.Git, Workbenches.DevOps, Workbenches.Profiler, Workbenches.ApiClient], Workbenches.All.Where(id => Workbenches.IsDocument(id)));
 
     [Theory]
     [InlineData("WPF", Workbenches.WpfTools)]
@@ -68,6 +69,7 @@ public sealed class WorkbenchIdTests
     {
         Assert.Equal("Bug", ContentGlyphConverter.KindFor(Workbenches.Debugger));
         Assert.Equal("Chat", ContentGlyphConverter.KindFor(Workbenches.Assistant));
+        Assert.Equal("PullRequest", ContentGlyphConverter.KindFor(Workbenches.DevOps));
         Assert.Equal("Request", ContentGlyphConverter.KindFor(Workbenches.ApiClient));
     }
 }

@@ -239,6 +239,14 @@
         <MenuItem Header="_Tools">
           <MenuItem Header="NuGet packages…" c:Ui.Icon="Package" Command="{Binding OpenPackagesCommand}" />
           <MenuItem Header="Git changes…" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" />
+          <MenuItem Header="_DevOps" c:Ui.Icon="PullRequest">
+            <MenuItem Header="Pull requests…" c:Ui.Icon="PullRequest" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="0" />
+            <MenuItem Header="{Binding Features.DevOps.WorkItemsTitle}" HeaderStringFormat="{}{0}…" c:Ui.Icon="WorkItem" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="1" />
+            <MenuItem Header="{Binding Features.DevOps.PipelinesTitle}" HeaderStringFormat="{}{0}…" c:Ui.Icon="Pipeline" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="2" />
+            <Separator />
+            <MenuItem Header="Create pull request…" c:Ui.Icon="Plus" Command="{Binding Features.DevOps.CreatePullRequestCommand}" />
+            <MenuItem Header="Access and settings…" c:Ui.Icon="Plug" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="3" />
+          </MenuItem>
           <MenuItem Header="Memory profiler…" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="Profiler" />
           <MenuItem Header="API client…" c:Ui.Icon="Request" Command="{Binding OpenApiClientCommand}" ToolTip="Send HTTP requests, import OpenAPI or Postman collections and generate C# models" />
           <MenuItem Header="Generate C# models…" c:Ui.Icon="Braces" Command="{Binding OpenModelGeneratorCommand}" ToolTip="System.Text.Json or Newtonsoft.Json classes from a JSON sample, a JSON Schema or OpenAPI schemas" />
