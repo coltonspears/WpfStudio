@@ -383,6 +383,10 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
     {
         if ((pipeline ?? SelectedDefinition) is not { } target) return;
         PipelineFilter = target;
+        // The previous run's reads and live refresh stop with it; left running, they would bring it back under this pipeline's heading.
+        StopPolling();
+        _run.Cancel();
+        _log.Cancel();
         Quietly(() => SelectedRun = null);
         ClearRun();
         LoadList();

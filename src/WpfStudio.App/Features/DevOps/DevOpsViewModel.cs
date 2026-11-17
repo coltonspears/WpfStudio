@@ -165,6 +165,9 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
     private Task ConnectAsync(DevOpsTarget? target, DevOpsSignIn? signIn = null)
     {
         var version = ++Version;
+        // An earlier connection still signing in must not finish into this one, whichever way this one ends.
+        _connection.Cancel();
+        _branchPullRequest.Cancel();
         _operations.Cancel();
         ResetTabs();
         Provider = null;

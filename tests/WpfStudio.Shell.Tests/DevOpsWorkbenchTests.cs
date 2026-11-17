@@ -269,6 +269,87 @@ public sealed class DevOpsWorkbenchTests
         Assert.Equal(30, context.Credentials.Settings.RefreshSeconds);
     });
 
+    [Fact]
+    public Task AConnectionStillSigningInDoesNotFinishIntoAnotherWorkspace() => OnDispatcherAsync(async () =>
+    {
+        await using var context = await Context.CreateAsync(AzureRemote);
+        context.Credentials.Found = new("token", DevOpsSignInSource.PersonalAccessToken);
+        var gate = context.Credentials.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var activating = context.DevOps.ActivateAsync();
+        Assert.Equal(DevOpsConnectionState.Connecting, context.DevOps.State);
+
+        // The solution is closed while the sign-in is still being looked up.
+        await context.Git.SetWorkspaceAsync(null);
+        Assert.Equal(DevOpsConnectionState.NoRepository, context.DevOps.State);
+        gate.SetResult();
+        await activating;
+        await context.DevOps.WhenIdleAsync();
+        Assert.Equal(DevOpsConnectionState.NoRepository, context.DevOps.State);
+        Assert.Null(context.DevOps.Provider);
+        Assert.Equal(0, context.ProvidersCreated);
+    });
+
+    [Fact]
+    public Task RefreshingWorkItemsReadsTheSelectedItemAgain() => OnDispatcherAsync(async () =>
+    {
+        await using var context = await Context.ConnectedAsync(AzureRemote);
+        context.DevOps.SelectedTab = DevOpsViewModel.WorkItemsTab;
+        await context.DevOps.WhenIdleAsync();
+        Assert.Equal(("Active", 3), (context.DevOps.WorkItems.Details?.Item.State, context.DevOps.WorkItems.Details?.Revision));
+
+        // Someone else resolves it; a refresh shows that, and the next change tests the new revision.
+        context.Provider.WorkItemState = "Resolved";
+        context.Provider.WorkItemRevision = 4;
+        await context.DevOps.RefreshCommand.ExecuteAsync(null);
+        await context.DevOps.WhenIdleAsync();
+        Assert.Equal(("Resolved", 4), (context.DevOps.WorkItems.Details?.Item.State, context.DevOps.WorkItems.Details?.Revision));
+        context.DevOps.WorkItems.NewState = "Closed";
+        await context.DevOps.WorkItems.ApplyStateCommand.ExecuteAsync(null);
+        await context.DevOps.WhenIdleAsync();
+        Assert.Contains("state 7 Closed rev 4", context.Provider.Calls);
+    });
+
+    [Fact]
+    public Task WorkItemTypesAreReadAgainForAnotherService() => OnDispatcherAsync(async () =>
+    {
+        await using var context = await Context.ConnectedAsync(GitHubRemote);
+        var items = context.DevOps.WorkItems;
+        await items.StartCreateCommand.ExecuteAsync(null);
+        Assert.Equal(["Issue"], items.Types);
+        Assert.Equal("Issue", items.NewType);
+
+        await context.Fixture.RunAsync("remote", "set-url", "origin", AzureRemote);
+        await context.Git.RefreshCommand.ExecuteAsync(null);
+        await context.DevOps.WhenIdleAsync();
+        Assert.Equal(DevOpsConnectionState.Connected, context.DevOps.State);
+        Assert.Empty(items.Types);
+        Assert.Null(items.NewType);
+        await items.StartCreateCommand.ExecuteAsync(null);
+        Assert.Equal(["Bug", "Task"], items.Types);
+    });
+
+    [Fact]
+    public Task OpeningAnotherPipelinesRunsLeavesThePreviousRunBehind() => OnDispatcherAsync(async () =>
+    {
+        await using var context = await Context.ConnectedAsync(AzureRemote);
+        context.DevOps.SelectedTab = DevOpsViewModel.PipelinesTab;
+        await context.DevOps.WhenIdleAsync();
+        var pipelines = context.DevOps.Pipelines;
+        Assert.Equal("3", pipelines.SelectedRun?.Id);
+
+        // Another run is chosen, and before its timeline arrives, another pipeline's runs are opened.
+        var gate = context.Provider.TimelineGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        pipelines.SelectedRun = pipelines.SelectedRun! with { Id = "2", Number = "2" };
+        pipelines.ShowRunsCommand.Execute(new DevOpsPipeline("empty", "Nightly", "https://x"));
+        gate.SetResult();
+        await context.DevOps.WhenIdleAsync();
+        Assert.Equal("Runs of Nightly", pipelines.ListHeading);
+        Assert.Empty(pipelines.Runs);
+        Assert.Null(pipelines.SelectedRun);
+        Assert.Empty(pipelines.Timeline);
+        Assert.Equal("", pipelines.Log);
+    });
+
     // ------------------------------------------------------------------ Harness
 
     private static Task OnDispatcherAsync(Func<Task> test)
@@ -347,6 +428,8 @@ public sealed class DevOpsWorkbenchTests
     internal sealed class FakeCredentials : IDevOpsCredentials
     {
         public DevOpsSignIn? Found { get; set; }
+        /// <summary>When set, looking up a sign-in waits for it, as Git Credential Manager can.</summary>
+        public TaskCompletionSource? Gate { get; set; }
         public List<string> Saved { get; } = [];
         public int SignOuts { get; private set; }
         public DevOpsSettings Settings { get; private set; } = new() { RefreshSeconds = 0 };
@@ -357,7 +440,11 @@ public sealed class DevOpsWorkbenchTests
             Settings = change(Settings);
             return Task.CompletedTask;
         }
-        public Task<DevOpsSignIn?> FindAsync(DevOpsTarget target, string repositoryRoot, CancellationToken cancellationToken = default) => Task.FromResult(Found);
+        public async Task<DevOpsSignIn?> FindAsync(DevOpsTarget target, string repositoryRoot, CancellationToken cancellationToken = default)
+        {
+            if (Gate is { } gate) await gate.Task;
+            return Found;
+        }
         public Task<DevOpsSignIn?> SignInWithGitAsync(DevOpsTarget target, string repositoryRoot, CancellationToken cancellationToken = default) => Task.FromResult(Found);
         public Task SaveTokenAsync(DevOpsTarget target, string token, CancellationToken cancellationToken = default)
         {
@@ -441,29 +528,39 @@ public sealed class DevOpsWorkbenchTests
         public Task<IReadOnlyList<string>> ListBranchesAsync(CancellationToken cancellationToken) => Answer<IReadOnlyList<string>>("branches", ["develop", "feature/7-login", "main"]);
         public Task<string?> GetDefaultBranchAsync(CancellationToken cancellationToken) => Answer<string?>("default branch", "main");
 
-        private static DevOpsWorkItem Item => new(7, "Login fails", "Bug", "Active", "Ada Lovelace", "https://x/7", "Web\\Sprint 1");
+        public string WorkItemState { get; set; } = "Active";
+        public int WorkItemRevision { get; set; } = 3;
+        private DevOpsWorkItem Item => new(7, "Login fails", "Bug", WorkItemState, "Ada Lovelace", "https://x/7", "Web\\Sprint 1");
         public Task<IReadOnlyList<DevOpsWorkItemQuery>> GetSavedQueriesAsync(CancellationToken cancellationToken) =>
             Answer<IReadOnlyList<DevOpsWorkItemQuery>>("queries", [new("q1", "Bugs", "Shared Queries", IsBuiltIn: false)]);
         public Task<IReadOnlyList<DevOpsWorkItem>> RunQueryAsync(DevOpsWorkItemQuery query, int top, CancellationToken cancellationToken) =>
             Answer<IReadOnlyList<DevOpsWorkItem>>("query " + query.Id, [Item]);
         public Task<IReadOnlyList<DevOpsWorkItem>> SearchWorkItemsAsync(string text, int top, CancellationToken cancellationToken) => Answer<IReadOnlyList<DevOpsWorkItem>>("search " + text, []);
         public Task<DevOpsWorkItemDetails> GetWorkItemAsync(int id, CancellationToken cancellationToken) =>
-            Answer("work item " + id, new DevOpsWorkItemDetails(Item, "Steps", [], [], ["New", "Active", "Resolved"], Revision: 3));
+            Answer("work item " + id, new DevOpsWorkItemDetails(Item, "Steps", [], [], ["New", "Active", "Resolved", "Closed"], Revision: WorkItemRevision));
         public Task<DevOpsWorkItem> SetWorkItemStateAsync(DevOpsWorkItemDetails item, string state, CancellationToken cancellationToken) =>
             Answer($"state {item.Item.Id} {state} rev {item.Revision}", item.Item with { State = state });
         public Task<DevOpsWorkItem> AssignWorkItemAsync(DevOpsWorkItemDetails item, DevOpsIdentity? assignee, CancellationToken cancellationToken) =>
             Answer("assign " + assignee?.DisplayName, item.Item with { AssignedTo = assignee?.DisplayName });
         public Task AddWorkItemCommentAsync(DevOpsWorkItem item, string text, CancellationToken cancellationToken) => Answer("work item comment " + text, 0);
-        public Task<IReadOnlyList<string>> GetWorkItemTypesAsync(CancellationToken cancellationToken) => Answer<IReadOnlyList<string>>("types", ["Bug", "Task"]);
+        public Task<IReadOnlyList<string>> GetWorkItemTypesAsync(CancellationToken cancellationToken) =>
+            Answer<IReadOnlyList<string>>("types", Target.Kind == DevOpsProviderKind.GitHub ? ["Issue"] : ["Bug", "Task"]);
         public Task<DevOpsWorkItem> CreateWorkItemAsync(string type, string title, string description, DevOpsIdentity? assignee, CancellationToken cancellationToken) =>
             Answer($"create {type} {title}", Item with { Id = 8, Title = title, Type = type });
 
         private static DevOpsRun Run => new("3", "9", "CI", "3", RunStatus.Completed, RunResult.Failed, "https://x/run/3", Branch: "main");
         public Task<IReadOnlyList<DevOpsPipeline>> ListPipelinesAsync(CancellationToken cancellationToken) => Answer<IReadOnlyList<DevOpsPipeline>>("pipelines", [new("9", "CI", "https://x", LatestRun: Run)]);
         public Task<IReadOnlyList<DevOpsRun>> ListRunsAsync(RunList list, DevOpsIdentity me, string? branch, string? pipelineId, int top, CancellationToken cancellationToken) =>
-            Answer<IReadOnlyList<DevOpsRun>>($"runs {list}", [Run]);
+            Answer<IReadOnlyList<DevOpsRun>>($"runs {list}", pipelineId == "empty" ? [] : [Run]);
         public Task<DevOpsRun> GetRunAsync(DevOpsRun run, CancellationToken cancellationToken) => Answer("run " + run.Id, Run);
-        public Task<IReadOnlyList<DevOpsTimelineRecord>> GetTimelineAsync(DevOpsRun run, CancellationToken cancellationToken) => Answer<IReadOnlyList<DevOpsTimelineRecord>>("timeline " + run.Id,
+        /// <summary>When set, a timeline read waits for it, as a slow service would.</summary>
+        public TaskCompletionSource? TimelineGate { get; set; }
+        public async Task<IReadOnlyList<DevOpsTimelineRecord>> GetTimelineAsync(DevOpsRun run, CancellationToken cancellationToken)
+        {
+            if (TimelineGate is { } gate) await gate.Task;
+            return await Timeline(run);
+        }
+        private Task<IReadOnlyList<DevOpsTimelineRecord>> Timeline(DevOpsRun run) => Answer<IReadOnlyList<DevOpsTimelineRecord>>("timeline " + run.Id,
             [new("j", null, "Job", "Build", 1, RunStatus.Completed, RunResult.Failed, LogId: "1"),
              new("t1", "j", "Task", "Restore", 1, RunStatus.Completed, RunResult.Succeeded, LogId: "2"),
              new("t2", "j", "Task", "Test", 2, RunStatus.Completed, RunResult.Failed, LogId: "3", Errors: 1)]);

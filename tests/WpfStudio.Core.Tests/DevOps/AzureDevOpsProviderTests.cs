@@ -45,7 +45,9 @@ public sealed class AzureDevOpsProviderTests
         Assert.Equal("Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(":pat-123")), request.Authorization);
         Assert.Null(request.Query("api-version"));
 
-        var jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl";
+        // A made-up token in the shape of a Microsoft Entra one, assembled here so no token-shaped text is committed.
+        static string Part(string text) => Convert.ToBase64String(Encoding.UTF8.GetBytes(text)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var jwt = string.Join('.', Part("""{"alg":"none"}"""), Part("""{"sub":"test"}"""), Part("not a signature"));
         var (bearer, bearerHttp) = Create(jwt);
         bearerHttp.Json("/pullrequests", """{ "value": [] }""");
         await bearer.ListPullRequestsAsync(PullRequestList.Active, Me, 50, CancellationToken.None);

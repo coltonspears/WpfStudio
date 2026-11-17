@@ -105,6 +105,9 @@ public sealed partial class WorkItemsViewModel(IDevOpsHost host) : ObservableObj
         Details = null;
         IsCreating = false;
         ListHeading = "";
+        // Types belong to one project's process (or to GitHub); another connection reads its own.
+        Types.Clear();
+        NewType = null;
     }
 
     internal IEnumerable<Task> Loads => [_queries.Task, _list.Task, _details.Task];
@@ -157,8 +160,11 @@ public sealed partial class WorkItemsViewModel(IDevOpsHost host) : ObservableObj
                 Selected = selected is null ? null : Items.FirstOrDefault(item => item.Id == selected.Id);
             });
             ListHeading = $"{heading} · {items.Count}{(items.Count >= ListSize ? "+" : "")}";
+            // The item still selected is read again too: its state, discussion and revision may have changed, and a change refused
+            // for an old revision succeeds only once the new one is read.
+            if (Selected is not null) LoadDetails();
             // A new list opens on its first item; an item opened from a link stays shown until another is chosen.
-            if (Selected is null && _pendingId is null && Items.Count > 0 && (Details is null || Items.Any(item => item.Id == Details.Item.Id) || heading != _lastHeading)) Selected = Items[0];
+            else if (_pendingId is null && Items.Count > 0 && (Details is null || Items.Any(item => item.Id == Details.Item.Id) || heading != _lastHeading)) Selected = Items[0];
             _lastHeading = heading;
         }, host.ReportError, loading => IsLoading = loading);
     }
@@ -291,9 +297,11 @@ public sealed partial class WorkItemsViewModel(IDevOpsHost host) : ObservableObj
         NewDescription = "";
         IsCreating = true;
         if (Types.Count > 0) return;
+        var version = host.Version;
         try
         {
             var types = await provider.GetWorkItemTypesAsync(CancellationToken.None);
+            if (version != host.Version) return;
             GitViewModel.Replace(Types, types);
             NewType = Types.FirstOrDefault(type => type is "Task" or "Bug" or "Issue") ?? Types.FirstOrDefault();
         }
