@@ -48,17 +48,19 @@ public sealed class WorkbenchIdTests
     [InlineData(Workbenches.Git, "Git")]
     [InlineData(Workbenches.DevOps, "DevOps")]
     [InlineData(Workbenches.Profiler, "Profiler")]
+    [InlineData(Workbenches.ApiClient, "ApiClient")]
     [InlineData(Workbenches.Welcome, "Welcome")]
     public void ValuesStayCompatibleWithSavedLayouts(string id, string saved) => Assert.Equal(saved, id);
 
     [Fact]
-    public void OnlyPackagesGitDevOpsAndProfilerAreDocumentTabs() =>
-        Assert.Equal([Workbenches.Packages, Workbenches.Git, Workbenches.DevOps, Workbenches.Profiler], Workbenches.All.Where(id => Workbenches.IsDocument(id)));
+    public void OnlyPackagesGitDevOpsProfilerAndTheApiClientAreDocumentTabs() =>
+        Assert.Equal([Workbenches.Packages, Workbenches.Git, Workbenches.DevOps, Workbenches.Profiler, Workbenches.ApiClient], Workbenches.All.Where(id => Workbenches.IsDocument(id)));
 
     [Theory]
     [InlineData("WPF", Workbenches.WpfTools)]
     [InlineData("Resources", Workbenches.WpfTools)]
     [InlineData("SQL Server", Workbenches.Database)]
+    [InlineData("API client", Workbenches.ApiClient)]
     [InlineData(Workbenches.Output, Workbenches.Output)]
     public void OlderToolNamesResolve(string name, string id) => Assert.Equal(id, Workbenches.Canonical(name));
 
@@ -68,5 +70,6 @@ public sealed class WorkbenchIdTests
         Assert.Equal("Bug", ContentGlyphConverter.KindFor(Workbenches.Debugger));
         Assert.Equal("Chat", ContentGlyphConverter.KindFor(Workbenches.Assistant));
         Assert.Equal("PullRequest", ContentGlyphConverter.KindFor(Workbenches.DevOps));
+        Assert.Equal("Request", ContentGlyphConverter.KindFor(Workbenches.ApiClient));
     }
 }

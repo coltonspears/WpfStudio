@@ -55,6 +55,7 @@ public sealed class ContentGlyphConverter : IValueConverter
         Workbenches.Packages => "Package",
         Workbenches.Git => "Git",
         Workbenches.DevOps => "PullRequest",
+        Workbenches.ApiClient => "Request",
         Workbenches.Welcome => "Window",
         _ => ""
     };

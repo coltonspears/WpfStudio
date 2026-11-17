@@ -42,6 +42,8 @@ When neither is there, the workbench offers both ways to sign in:
 
 Requests carry the token only to the service's own hosts: for Azure DevOps the organization's paths on `dev.azure.com` and its `vsrm`, `vssps` and `feeds` hosts (or `*.visualstudio.com`, or the Server collection), and for GitHub the API host. A redirect to any other origin is followed without the token; GitHub answers log requests that way, with a pre-signed storage address. Azure DevOps requests ask not to be redirected to an interactive sign-in page. Tokens are never written to a log, the Output pane or an error message.
 
+Requests go through the proxy chosen in **Settings > Network**, as the API client's and ColtonGPT's do. Git Credential Manager, which signs in through Git, uses Git's own proxy setting.
+
 ## Pull requests
 
 **Pull requests** lists the repository's active requests, the ones you created, the ones assigned to you for review (*Review requested* on GitHub), and completed (*Merged*) and abandoned (*Closed*) ones. Each shows its author, age, state, review state and source branch.

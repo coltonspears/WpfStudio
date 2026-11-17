@@ -248,6 +248,8 @@
             <MenuItem Header="Access and settings…" c:Ui.Icon="Plug" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="3" />
           </MenuItem>
           <MenuItem Header="Memory profiler…" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="Profiler" />
+          <MenuItem Header="API client…" c:Ui.Icon="Request" Command="{Binding OpenApiClientCommand}" ToolTip="Send HTTP requests, import OpenAPI or Postman collections and generate C# models" />
+          <MenuItem Header="Generate C# models…" c:Ui.Icon="Braces" Command="{Binding OpenModelGeneratorCommand}" ToolTip="System.Text.Json or Newtonsoft.Json classes from a JSON sample, a JSON Schema or OpenAPI schemas" />
           <Separator />
           <MenuItem Header="Run task…" c:Ui.Icon="Play" Command="{Binding RunTaskPaletteCommand}" />
           <MenuItem Header="New task…" Command="{Binding Tasks.NewTaskCommand}" />
