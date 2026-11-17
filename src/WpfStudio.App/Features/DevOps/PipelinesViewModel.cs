@@ -61,7 +61,11 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
         LoadList();
     }
 
-    partial void OnSelectedRunChanged(DevOpsRun? value) { if (!_quiet) LoadRun(); }
+    partial void OnSelectedRunChanged(DevOpsRun? value)
+    {
+        NotifyCommands();
+        if (!_quiet) LoadRun();
+    }
     partial void OnKeepTimestampsChanged(bool value) => Log = _rawLog.Length == 0 ? Log : Displayed(DevOpsText.FormatLog(_rawLog, value));
 
     /// <summary>The characters of a log the text view shows: its end, where a failure is, for a log too long to show whole.</summary>
@@ -128,7 +132,7 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
         ListHeading = "";
     }
 
-    internal Task WhenLoadedAsync() => Task.WhenAll(_list.Task, _run.Task, _log.Task);
+    internal IEnumerable<Task> Loads => [_list.Task, _run.Task, _log.Task];
 
     /// <summary>The Git pane switched branches: this branch's runs are another branch's now.</summary>
     internal void BranchChanged()
@@ -314,12 +318,16 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
     private bool CanUseRun() => host.CanAct && SelectedRun is not null;
     private bool CanCancelRun() => CanUseRun() && SelectedRun!.IsActive;
     private bool CanRetryRun() => CanUseRun() && CanRetryFailedJobs && SelectedRun!.Status == RunStatus.Completed && SelectedRun.Result is RunResult.Failed or RunResult.PartiallySucceeded or RunResult.Canceled;
-    private bool CanRunPipeline(DevOpsPipeline? pipeline) => host.CanAct && (pipeline ?? SelectedDefinition ?? PipelineFilter) is not null;
+    private bool CanRunPipeline(DevOpsPipeline? pipeline) => host.CanAct && PipelineToRun(pipeline) is not null;
+
+    /// <summary>The pipeline asked for, else the one selected or filtered on, else the selected run's.</summary>
+    private DevOpsPipeline? PipelineToRun(DevOpsPipeline? pipeline) => pipeline ?? (ShowsDefinitions ? SelectedDefinition : null) ?? PipelineFilter
+        ?? (SelectedRun is { } run ? new DevOpsPipeline(run.PipelineId, run.PipelineName, run.WebUrl) : null);
 
     [RelayCommand(CanExecute = nameof(CanRunPipeline))]
     private async Task RunPipelineAsync(DevOpsPipeline? pipeline)
     {
-        if ((pipeline ?? SelectedDefinition ?? PipelineFilter) is not { } target) return;
+        if (PipelineToRun(pipeline) is not { } target) return;
         var branch = await host.PromptAsync($"Run {target.Name}", $"The branch to run {target.Name} on.", DevOpsViewModel.IsBranchName(host.Git.Branch) ? host.Git.Branch : "main");
         if (string.IsNullOrWhiteSpace(branch)) return;
         await QueueAsync(target.Id, target.Name, branch.Trim());
@@ -429,6 +437,7 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
     }
 
     partial void OnSelectedDefinitionChanged(DevOpsPipeline? value) => RunPipelineCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedViewChanging(PipelineViewChoice? value) => RunPipelineCommand.NotifyCanExecuteChanged();
     partial void OnPipelineFilterChanged(DevOpsPipeline? value) => RunPipelineCommand.NotifyCanExecuteChanged();
 
     private void Quietly(Action action)

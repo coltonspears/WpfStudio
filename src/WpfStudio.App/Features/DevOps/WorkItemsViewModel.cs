@@ -107,7 +107,7 @@ public sealed partial class WorkItemsViewModel(IDevOpsHost host) : ObservableObj
         ListHeading = "";
     }
 
-    internal Task WhenLoadedAsync() => Task.WhenAll(_queries.Task, _list.Task, _details.Task);
+    internal IEnumerable<Task> Loads => [_queries.Task, _list.Task, _details.Task];
 
     /// <summary>Selects a work item by number, reading it when no loaded list holds it.</summary>
     internal void Show(int id)

@@ -440,18 +440,22 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
         finally { lease.Dispose(); }
     }
 
-    /// <summary>Waits for the running action and the loads every tab started.</summary>
+    /// <summary>
+    /// Waits for the running action and every load the tabs started, including loads those loads start (a list selects its
+    /// first entry, whose details then load), until nothing new has begun.
+    /// </summary>
     public async Task WhenIdleAsync()
     {
-        await _connection.Task;
-        await _activeTask;
-        await PullRequests.WhenLoadedAsync();
-        await WorkItems.WhenLoadedAsync();
-        await Pipelines.WhenLoadedAsync();
-        await Access.WhenLoadedAsync();
-        await NewPullRequest.WhenLoadedAsync();
-        await _branchPullRequest.Task;
+        for (var round = 0; round < 50; round++)
+        {
+            var pending = Pending();
+            await Task.WhenAll(pending);
+            if (Pending().SequenceEqual(pending)) return;
+        }
     }
+
+    private Task[] Pending() =>
+        [_connection.Task, _activeTask, _branchPullRequest.Task, .. PullRequests.Loads, .. WorkItems.Loads, .. Pipelines.Loads, .. Access.Loads, .. NewPullRequest.Loads];
 
     public void ReportError(Exception exception)
     {

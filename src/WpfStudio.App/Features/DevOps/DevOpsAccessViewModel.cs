@@ -55,7 +55,7 @@ public sealed partial class DevOpsAccessViewModel(IDevOpsHost host) : Observable
         Summary = "";
     }
 
-    internal Task WhenLoadedAsync() => _check.Task;
+    internal IEnumerable<Task> Loads => [_check.Task];
 
     private void LoadSettings()
     {

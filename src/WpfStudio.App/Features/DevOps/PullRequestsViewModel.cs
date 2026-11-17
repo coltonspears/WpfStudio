@@ -151,7 +151,7 @@ public sealed partial class PullRequestsViewModel(IDevOpsHost host) : Observable
         }, host.ReportError, loading => IsDetailLoading = loading);
     }
 
-    internal Task WhenLoadedAsync() => Task.WhenAll(_list.Task, _details.Task, _file.Task);
+    internal IEnumerable<Task> Loads => [_list.Task, _details.Task, _file.Task];
 
     private void LoadList()
     {
@@ -511,6 +511,8 @@ public sealed partial class PullRequestThreadViewModel(DevOpsThread thread, Pull
     public bool HasReplies => Thread.Comments.Count > 1;
     public bool HasLocation => Thread.Location.Length > 0;
     public bool CanResolveHere => owner.CanResolveThreads && Thread.CanResolve;
+    public bool ShowsResolve => CanResolveHere && !Thread.IsResolved;
+    public bool ShowsReactivate => CanResolveHere && Thread.IsResolved;
 
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(ReplyCommand))] public partial string ReplyText { get; set; } = "";
     [ObservableProperty] public partial bool IsReplying { get; set; }

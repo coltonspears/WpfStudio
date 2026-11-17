@@ -119,10 +119,15 @@
     <TextBlock Style="{StaticResource Meta}" Text="{Binding Summary}" Margin="0,2,0,0"/>
     <WrapPanel Margin="0,4,0,0">
      <Border Style="{StaticResource StateChip}"><TextBlock Style="{StaticResource ChipText}" Text="{Binding StatusText}"/></Border>
-     <Border Style="{StaticResource Chip}" Visibility="{Binding HasRejection, Converter={StaticResource BooleanToVisibility}}" BorderBrush="{DynamicResource WarningBrush}" TextElement.Foreground="{DynamicResource WarningBrush}">
-      <TextBlock Style="{StaticResource ChipText}" Text="changes requested"/>
-     </Border>
-     <TextBlock Style="{StaticResource Meta}" Text="{Binding ReviewText}" Margin="0,0,8,0"/>
+     <TextBlock Text="{Binding ReviewText}" Margin="0,0,8,0">
+      <TextBlock.Style>
+       <Style TargetType="TextBlock" BasedOn="{StaticResource Meta}">
+        <Style.Triggers>
+         <DataTrigger Binding="{Binding HasRejection}" Value="True"><Setter Property="Foreground" Value="{DynamicResource WarningBrush}"/></DataTrigger>
+        </Style.Triggers>
+       </Style>
+      </TextBlock.Style>
+     </TextBlock>
      <TextBlock Style="{StaticResource Meta}" Text="{Binding SourceBranch}" FontFamily="{StaticResource CodeFont}" MaxWidth="200"/>
     </WrapPanel>
    </StackPanel>

@@ -26,7 +26,7 @@ public sealed partial class CreatePullRequestViewModel(IDevOpsHost host) : Obser
     [ObservableProperty] public partial bool IsDraft { get; set; }
     [ObservableProperty] public partial bool AutoComplete { get; set; }
     [ObservableProperty] public partial string WorkItems { get; set; } = "";
-    [ObservableProperty] public partial bool IsLoading { get; private set; }
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CreateCommand))] public partial bool IsLoading { get; private set; }
     /// <summary>An active request from this branch already exists; creating another would fail.</summary>
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasExisting)), NotifyCanExecuteChangedFor(nameof(CreateCommand))] public partial DevOpsPullRequest? Existing { get; private set; }
 
@@ -119,7 +119,7 @@ public sealed partial class CreatePullRequestViewModel(IDevOpsHost host) : Obser
         Existing = null;
     }
 
-    internal Task WhenLoadedAsync() => _prefill.Task;
+    internal IEnumerable<Task> Loads => [_prefill.Task];
 
     /// <summary>The work item numbers typed in the form; anything that is not a number is reported, not dropped silently.</summary>
     internal IReadOnlyList<int> ParseWorkItems()
