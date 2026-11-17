@@ -9,7 +9,8 @@
                     xmlns:git="clr-namespace:WpfStudio.App.Features.Git"
                     xmlns:profiling="clr-namespace:WpfStudio.App.Features.Profiling"
                     xmlns:designer="clr-namespace:WpfStudio.App.Features.Designer"
-                    xmlns:inspection="clr-namespace:WpfStudio.App.Features.Inspection">
+                    xmlns:inspection="clr-namespace:WpfStudio.App.Features.Inspection"
+                    xmlns:api="clr-namespace:WpfStudio.App.Features.Api">
   <!-- Editor documents: context bar with breadcrumb, related files and MVVM actions. -->
   <Style x:Key="ContextChip" TargetType="Button" BasedOn="{StaticResource ToolbarButton}">
     <Setter Property="Height" Value="22" />
@@ -69,6 +70,7 @@
   <DataTemplate DataType="{x:Type profiling:MemoryProfilerViewModel}"><profiling:MemoryProfilerPane /></DataTemplate>
   <DataTemplate DataType="{x:Type designer:DesignerViewModel}"><designer:DesignerPane /></DataTemplate>
   <DataTemplate DataType="{x:Type inspection:InspectionViewModel}"><inspection:InspectionPane /></DataTemplate>
+  <DataTemplate DataType="{x:Type api:ApiClientViewModel}"><api:ApiClientPane /></DataTemplate>
   <Style x:Key="DocumentContainer" TargetType="dc:LayoutDocumentItem">
     <Setter Property="Title" Value="{Binding Model.Title, RelativeSource={RelativeSource Self}}" />
     <Setter Property="ContentId" Value="{Binding Model.ContentId, RelativeSource={RelativeSource Self}}" />

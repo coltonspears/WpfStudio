@@ -6,6 +6,7 @@
     <ProjectReference Include="..\WpfStudio.Core\WpfStudio.Core.csproj" />
     <ProjectReference Include="..\WpfStudio.Workspace\WpfStudio.Workspace.csproj" />
     <ProjectReference Include="..\WpfStudio.Database\WpfStudio.Database.csproj" />
+    <ProjectReference Include="..\WpfStudio.Api\WpfStudio.Api.csproj" />
     <ProjectReference Include="..\WpfStudio.Runtime\WpfStudio.Runtime.csproj" />
     <ProjectReference Include="..\WpfStudio.WorkspaceHost\WpfStudio.WorkspaceHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfStudio.PreviewHost\WpfStudio.PreviewHost.csproj" ReferenceOutputAssembly="false" />

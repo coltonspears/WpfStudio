@@ -18,6 +18,7 @@ WpfStudio combines the following packages. Their licenses remain with their resp
 | Microsoft.Data.SqlClient | 7.1.0 | [dotnet/SqlClient](https://github.com/dotnet/SqlClient), MIT |
 | Microsoft.Web.WebView2 SDK | 1.0.4191.47 | [Microsoft WebView2](https://developer.microsoft.com/microsoft-edge/webview2/), Microsoft software license terms included in the SDK package |
 | ONNX Runtime | 1.30.0 | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime), MIT; runs the experimental Code Assist models. Its package's third-party notices ship in `licenses/` |
+| YamlDotNet | 16.3.0 | [aaubry/YamlDotNet](https://github.com/aaubry/YamlDotNet), MIT; reads OpenAPI documents written in YAML |
 | System.IO.Hashing | 10.0.12 | [dotnet/runtime](https://github.com/dotnet/runtime), MIT |
 | netcoredbg | 3.2.0-1092 | [Samsung/netcoredbg](https://github.com/Samsung/netcoredbg), MIT; see [debugger notices](tools/DEBUGGER-NOTICES.md) |
 | xterm.js | 6.0.0 | [xtermjs/xterm.js](https://github.com/xtermjs/xterm.js), MIT |

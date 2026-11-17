@@ -15,6 +15,7 @@ public sealed partial class ShellViewModel
         new(Workbenches.Packages, "NuGet packages", Features.Packages),
         new(Workbenches.Git, "Git changes", Features.Git),
         new(Workbenches.Profiler, "Memory profiler", MemoryProfiler),
+        new(Workbenches.ApiClient, "API client", Features.ApiClient),
         new(Workbenches.Designer, "XAML Designer", Designer),
         new(Workbenches.LiveInspection, "Live XAML", LiveInspection),
     ];
@@ -52,6 +53,8 @@ public sealed partial class ShellViewModel
             Features.Packages.SetWorkspace(Workspace);
             _ = GuardAsync(() => Features.Packages.ActivateAsync());
         }
+        // Loads collections, environments and the tabs left open last time; later calls return at once.
+        else if (name == Workbenches.ApiClient) _ = GuardAsync(Features.ApiClient.InitializeAsync);
     }
     [RelayCommand] private Task OpenSettingsAsync(string? page) => GuardAsync(async () =>
     {
@@ -75,6 +78,9 @@ public sealed partial class ShellViewModel
             Features.Packages.SelectedProject = selected;
         await Features.Packages.ActivateAsync();
     });
+    /// <summary>The model generator on its own, for a JSON sample or schema that did not come from a request.</summary>
+    [RelayCommand] private Task OpenModelGeneratorAsync() => GuardAsync(async () => { ToolRequested?.Invoke(Workbenches.ApiClient); await Features.ApiClient.InitializeAsync(); await Features.ApiClient.OpenModelGeneratorAsync(); });
+    [RelayCommand] private Task OpenApiClientAsync() => GuardAsync(async () => { ToolRequested?.Invoke(Workbenches.ApiClient); await Features.ApiClient.InitializeAsync(); });
     [RelayCommand] private Task OpenGitAsync() => GuardAsync(async () => { _gitToolOpened = true; ToolRequested?.Invoke(Workbenches.Git); await Features.Git.SetWorkspaceAsync(Workspace?.Path); });
     [RelayCommand] private Task OpenAssistantAsync() => GuardAsync(async () => { UpdateAssistantContext(); ToolRequested?.Invoke(Workbenches.Assistant); await Features.Assistant.InitializeAsync(); });
     [RelayCommand] private Task RefactorAsync(string? action) => GuardAsync(async () =>

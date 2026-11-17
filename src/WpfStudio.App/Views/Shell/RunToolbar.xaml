@@ -19,6 +19,7 @@
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" ToolTip="Git changes" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Package" Command="{Binding OpenPackagesCommand}" ToolTip="NuGet packages" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Database" Command="{Binding ShowToolCommand}" CommandParameter="Database" ToolTip="SQL Server" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Request" Command="{Binding OpenApiClientCommand}" ToolTip="API client" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Terminal" Command="{Binding ShowToolCommand}" CommandParameter="Terminal" ToolTip="Terminal (Ctrl+`)" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Chat" Command="{Binding OpenAssistantCommand}" ToolTip="ColtonGPT" />
       </StackPanel>

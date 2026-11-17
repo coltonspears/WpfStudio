@@ -14,6 +14,8 @@ public sealed class WorkbenchTests
         Assert.Same(test.Shell.MemoryProfiler, panes["Profiler"].Model);
         Assert.Same(test.Shell.Designer, panes["Designer"].Model);
         Assert.Same(test.Shell.LiveInspection, panes["LiveInspection"].Model);
+        Assert.Same(test.Shell.Features.ApiClient, panes["ApiClient"].Model);
+        Assert.Equal("API client", panes["ApiClient"].Title);
         Assert.Equal(("Memory profiler", "XAML Designer", "Live XAML"), (panes["Profiler"].Title, panes["Designer"].Title, panes["LiveInspection"].Title));
     }
 

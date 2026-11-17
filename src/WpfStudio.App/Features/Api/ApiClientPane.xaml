@@ -1,0 +1,469 @@
+<UserControl x:Class="WpfStudio.App.Features.Api.ApiClientPane"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:b="clr-namespace:WpfStudio.App.Behaviors"
+             xmlns:api="clr-namespace:WpfStudio.App.Features.Api"
+             xmlns:editor="http://icsharpcode.net/sharpdevelop/avalonedit"
+             MinWidth="720" MinHeight="420">
+  <!-- The API client: collections and history on the left, request tabs on the right, and overlays for saving, environments, collection settings and C# models. DataContext is ApiClientViewModel. -->
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="ApiStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+
+      <!-- A request: name and location, the address bar, its sections, and the response below. -->
+      <DataTemplate x:Key="RequestEditor" DataType="{x:Type api:ApiRequestTabViewModel}">
+        <DockPanel>
+          <DockPanel.InputBindings>
+            <KeyBinding Key="Return" Modifiers="Control" Command="{Binding SendCommand}" />
+            <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
+            <KeyBinding Key="S" Modifiers="Control+Shift" Command="{Binding SaveAsCommand}" />
+          </DockPanel.InputBindings>
+          <!-- Name, where it is saved, and what can be done with it. -->
+          <DockPanel DockPanel.Dock="Top" Margin="16,12,12,6">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+              <Button Content="Save" c:Ui.Icon="Save" Command="{Binding SaveCommand}" ToolTip="Save to its collection (Ctrl+S)" />
+              <Button Style="{StaticResource ToolbarButton}" Content="Save as…" Command="{Binding SaveAsCommand}" ToolTip="Save a copy to a collection or folder (Ctrl+Shift+S)" />
+              <Button Style="{StaticResource ToolbarButton}" c:Ui.Icon="Braces" Content="Generate C#" Command="{Binding GenerateModelsCommand}" ToolTip="Generate C# models from the response, the body or the request's OpenAPI schemas" />
+              <Button Style="{StaticResource IconButton}" c:Ui.Icon="Terminal" Command="{Binding CopyCurlCommand}" ToolTip="Copy as a curl command, with variables filled in" />
+            </StackPanel>
+            <StackPanel>
+              <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TitleBox}" AutomationProperties.Name="Request name" />
+              <TextBlock Style="{StaticResource Caption}" Margin="4,1,0,0">
+                <Run Text="{Binding CollectionName, Mode=OneWay}" /><Run Text="{Binding Location, Mode=OneWay, StringFormat='  ·  {0}'}" />
+              </TextBlock>
+            </StackPanel>
+          </DockPanel>
+
+          <!-- Method, address and Send. -->
+          <Border DockPanel.Dock="Top" Margin="16,2,12,8" CornerRadius="7" BorderThickness="1" BorderBrush="{DynamicResource StrongBorderBrush}" Background="{DynamicResource EditorBrush}">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" Content="Send" c:Ui.Icon="Play" Margin="4" MinWidth="88" Command="{Binding SendCommand}" ToolTip="Send (Ctrl+Enter)"
+                      Visibility="{Binding SendCommand.IsRunning, Converter={StaticResource Hidden}}" />
+              <Button DockPanel.Dock="Right" Content="Cancel" c:Ui.Icon="Stop" Margin="4" MinWidth="88" Command="{Binding SendCancelCommand}"
+                      Visibility="{Binding SendCommand.IsRunning, Converter={StaticResource BooleanToVisibility}}" />
+              <ComboBox DockPanel.Dock="Left" Width="104" IsEditable="True" ItemsSource="{Binding Methods}" Text="{Binding Method, UpdateSourceTrigger=PropertyChanged}"
+                        Foreground="{Binding Method, Converter={StaticResource MethodBrush}}" FontWeight="SemiBold" BorderThickness="0" Background="Transparent" Margin="4,4,0,4" AutomationProperties.Name="HTTP method" />
+              <Border DockPanel.Dock="Left" Width="1" Margin="6,8" Background="{DynamicResource BorderBrush}" />
+              <TextBox Text="{Binding UrlText, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" FontFamily="{StaticResource CodeFont}"
+                       c:Ui.Placeholder="https://api.example.com/items or {{baseUrl}}/items/{id}" AutomationProperties.Name="Request URL">
+                <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding SendCommand}" /></TextBox.InputBindings>
+              </TextBox>
+            </DockPanel>
+          </Border>
+
+          <!-- Request sections. -->
+          <Border DockPanel.Dock="Top" Margin="16,0,12,0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" HorizontalAlignment="Left">
+            <StackPanel Orientation="Horizontal">
+              <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Params}" Tag="{Binding Query.CountLabel}" Content="Params" />
+              <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Headers}" Tag="{Binding Headers.CountLabel}" Content="Headers" />
+              <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Body}" Tag="{Binding BodyLabel}" Content="Body" />
+              <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Auth}" Content="Auth" />
+              <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Proxy}" Content="Proxy" />
+              <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Settings}" Content="Settings" />
+              <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Docs}" Content="Docs" />
+            </StackPanel>
+          </Border>
+
+          <Grid Margin="16,8,12,10">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="*" MinHeight="120" />
+              <RowDefinition Height="6" />
+              <RowDefinition Height="1.3*" MinHeight="140" />
+            </Grid.RowDefinitions>
+
+            <!-- Params: query rows in step with the address bar, and the path parameters it contains. -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Params}">
+              <StackPanel>
+                <TextBlock Text="QUERY PARAMETERS" Style="{StaticResource SectionLabel}" />
+                <ContentControl Content="{Binding Query}" ContentTemplate="{StaticResource KeyValueTable}" Focusable="False" />
+                <StackPanel Visibility="{Binding PathParameters.Count, Converter={StaticResource Presence}}" Margin="0,14,0,0">
+                  <TextBlock Text="PATH PARAMETERS" Style="{StaticResource SectionLabel}" />
+                  <TextBlock Text="Filled into the {name} and :name parts of the address." Style="{StaticResource Caption}" Margin="0,-4,0,6" />
+                  <ContentControl Content="{Binding PathParameters}" ContentTemplate="{StaticResource KeyValueTable}" Focusable="False" />
+                </StackPanel>
+              </StackPanel>
+            </ScrollViewer>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Headers}">
+              <StackPanel>
+                <TextBlock Text="HEADERS" Style="{StaticResource SectionLabel}" />
+                <ContentControl Content="{Binding Headers}" ContentTemplate="{StaticResource KeyValueTable}" Focusable="False" />
+                <TextBlock Text="User-Agent and Accept are added when not set here. Authorization comes from the Auth section unless you type it here." Style="{StaticResource Caption}" Margin="2,8,0,0" />
+              </StackPanel>
+            </ScrollViewer>
+
+            <DockPanel Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Body}">
+              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                <Button DockPanel.Dock="Right" Style="{StaticResource ToolbarButton}" Content="Format JSON" c:Ui.Icon="Braces" Command="{Binding FormatBodyCommand}"
+                        Visibility="{Binding BodyMode, Converter={StaticResource EqualsVisibility}, ConverterParameter=Json}" />
+                <ComboBox ItemsSource="{Binding BodyModes}" SelectedValuePath="Value" DisplayMemberPath="Label" SelectedValue="{Binding BodyMode}" Width="220" HorizontalAlignment="Left" AutomationProperties.Name="Body type" />
+              </DockPanel>
+              <Grid>
+                <Border Style="{StaticResource EditorFrame}" Visibility="{Binding HasTextBody, Converter={StaticResource BooleanToVisibility}}">
+                  <editor:TextEditor api:ApiEditor.Text="{Binding Body}" api:ApiEditor.Language="{Binding BodyLanguage}" Style="{StaticResource CodeEditor}" AutomationProperties.Name="Request body" />
+                </Border>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding HasFormBody, Converter={StaticResource BooleanToVisibility}}">
+                  <ContentControl Content="{Binding Form}" ContentTemplate="{StaticResource KeyValueTable}" Focusable="False" />
+                </ScrollViewer>
+                <StackPanel Visibility="{Binding HasFileBody, Converter={StaticResource BooleanToVisibility}}">
+                  <TextBlock Text="The file's bytes are sent as the body." Style="{StaticResource Caption}" Margin="0,0,0,6" />
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Browse…" c:Ui.Icon="FolderOpen" Command="{Binding BrowseBodyFileCommand}" />
+                    <TextBox Text="{Binding BodyFilePath, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Path of the file to send" AutomationProperties.Name="Body file" />
+                  </DockPanel>
+                </StackPanel>
+                <TextBlock Text="This request has no body. Choose JSON, text, XML, a form or a file above." Style="{StaticResource Caption}" Margin="2,4,0,0"
+                           Visibility="{Binding BodyMode, Converter={StaticResource EqualsVisibility}, ConverterParameter=None}" />
+              </Grid>
+            </DockPanel>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Auth}">
+              <ContentControl Content="{Binding Auth}" ContentTemplate="{StaticResource AuthEditor}" Focusable="False" HorizontalAlignment="Left" Width="560" />
+            </ScrollViewer>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Proxy}">
+              <ContentControl Content="{Binding Proxy}" ContentTemplate="{StaticResource ProxyEditor}" Focusable="False" HorizontalAlignment="Left" Width="560" />
+            </ScrollViewer>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Settings}">
+              <StackPanel Width="560" HorizontalAlignment="Left">
+                <DockPanel Margin="0,4">
+                  <TextBox DockPanel.Dock="Right" Width="80" Text="{Binding TimeoutSeconds, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Timeout in seconds" />
+                  <StackPanel><TextBlock Text="Timeout in seconds" Style="{StaticResource RowName}" /><TextBlock Text="How long to wait for the whole response. 0 waits as long as it takes." Style="{StaticResource Caption}" /></StackPanel>
+                </DockPanel>
+                <CheckBox IsChecked="{Binding FollowRedirects}" Margin="0,8">
+                  <StackPanel><TextBlock Text="Follow redirects" Style="{StaticResource RowName}" /><TextBlock Text="Follows up to ten 3xx responses and shows the last. Turn off to see the redirect itself." Style="{StaticResource Caption}" /></StackPanel>
+                </CheckBox>
+                <CheckBox IsChecked="{Binding UseCookies}" Margin="0,8">
+                  <StackPanel><TextBlock Text="Keep cookies" Style="{StaticResource RowName}" /><TextBlock Text="Cookies a server sets are sent back to it, as a browser would, until you clear them." Style="{StaticResource Caption}" /></StackPanel>
+                </CheckBox>
+                <Button Content="Clear cookies" Command="{Binding DataContext.ClearCookiesCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" HorizontalAlignment="Left" Margin="24,0,0,8" />
+                <CheckBox IsChecked="{Binding VerifyCertificates}" Margin="0,8">
+                  <StackPanel><TextBlock Text="Verify server certificates" Style="{StaticResource RowName}" /><TextBlock Text="Turn off only for a server you trust whose certificate is self-signed, such as a local development server. Anyone between you and the server could then read and change the traffic." Style="{StaticResource Caption}" /></StackPanel>
+                </CheckBox>
+              </StackPanel>
+            </ScrollViewer>
+
+            <DockPanel Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Docs}">
+              <TextBlock DockPanel.Dock="Top" Text="Notes about this request, such as what it is for. OpenAPI descriptions are imported here." Style="{StaticResource Caption}" Margin="0,0,0,6" />
+              <TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" AutomationProperties.Name="Request notes" />
+            </DockPanel>
+
+            <GridSplitter Grid.Row="1" Height="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <!-- The response. -->
+            <Border Grid.Row="2" Style="{StaticResource Card}" Padding="0">
+              <Grid>
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding HasResponse, Converter={StaticResource Hidden}}">
+                  <c:Glyph Kind="Play" Width="28" Height="28" Foreground="{DynamicResource SubtleBrush}" HorizontalAlignment="Center" />
+                  <TextBlock Text="Send the request to see the response here." Foreground="{DynamicResource MutedBrush}" Margin="0,10,0,0" HorizontalAlignment="Center" />
+                  <TextBlock Text="Ctrl+Enter sends from anywhere in the request." Style="{StaticResource Caption}" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                </StackPanel>
+                <DockPanel Visibility="{Binding HasResponse, Converter={StaticResource BooleanToVisibility}}" DataContext="{Binding}">
+                  <Border DockPanel.Dock="Top" Padding="12,8" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                    <DockPanel>
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <ToggleButton Style="{StaticResource ToolbarToggle}" Content="Raw" IsChecked="{Binding Response.ShowRaw}" ToolTip="Show the body as received instead of indented" Visibility="{Binding Response.HasResponse, Converter={StaticResource BooleanToVisibility}}" />
+                        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Copy" Command="{Binding DataContext.CopyResponseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" ToolTip="Copy the body" />
+                        <Button Style="{StaticResource IconButton}" c:Ui.Icon="Save" Command="{Binding DataContext.SaveResponseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" ToolTip="Save the body to a file" />
+                        <Button Style="{StaticResource ToolbarButton}" c:Ui.Icon="Braces" Content="Generate C#" Command="{Binding GenerateModelsCommand}" ToolTip="Generate C# models from this response" Visibility="{Binding Response.IsJson, Converter={StaticResource BooleanToVisibility}}" />
+                      </StackPanel>
+                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border CornerRadius="4" Padding="8,2" Background="{Binding Response.Tone, Converter={StaticResource ToneBrush}}">
+                          <TextBlock Text="{Binding Response.StatusText}" Foreground="{DynamicResource OnAccentBrush}" FontWeight="SemiBold" />
+                        </Border>
+                        <TextBlock Text="{Binding Response.TimeText}" ToolTip="{Binding Response.TimeDetail}" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" />
+                        <TextBlock Text="{Binding Response.SizeText}" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" />
+                        <Border Width="1" Margin="12,2" Background="{DynamicResource BorderBrush}" />
+                        <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding ResponseSection, Converter={StaticResource Choice}, ConverterParameter=Body}" Content="Body" />
+                        <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding ResponseSection, Converter={StaticResource Choice}, ConverterParameter=Headers}" Tag="{Binding Response.HeadersLabel}" Content="Headers" />
+                        <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding ResponseSection, Converter={StaticResource Choice}, ConverterParameter=Cookies}" Tag="{Binding Response.CookiesLabel}" Content="Cookies" />
+                        <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding ResponseSection, Converter={StaticResource Choice}, ConverterParameter=Details}" Content="Details" />
+                      </StackPanel>
+                    </DockPanel>
+                  </Border>
+                  <Border DockPanel.Dock="Top" Background="{DynamicResource WarningSoftBrush}" Padding="12,6" Visibility="{Binding Response.HasWarnings, Converter={StaticResource BooleanToVisibility}}">
+                    <TextBlock Text="{Binding Response.Warnings}" TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}" />
+                  </Border>
+                  <Grid>
+                    <Border Background="{DynamicResource DangerSoftBrush}" Padding="14,12" VerticalAlignment="Top" Visibility="{Binding Response.HasError, Converter={StaticResource BooleanToVisibility}}">
+                      <DockPanel>
+                        <c:Glyph DockPanel.Dock="Left" Kind="Error" Width="16" Height="16" Foreground="{DynamicResource DangerBrush}" Margin="0,1,10,0" VerticalAlignment="Top" />
+                        <TextBox Text="{Binding Response.Error, Mode=OneWay}" Style="{StaticResource SelectableText}" />
+                      </DockPanel>
+                    </Border>
+                    <Grid Visibility="{Binding Response.HasResponse, Converter={StaticResource BooleanToVisibility}}">
+                      <editor:TextEditor IsReadOnly="True" api:ApiEditor.Text="{Binding Response.Body, Mode=OneWay}" api:ApiEditor.Language="{Binding Response.Language}" Style="{StaticResource CodeEditor}"
+                                         Visibility="{Binding ResponseSection, Converter={StaticResource EqualsVisibility}, ConverterParameter=Body}" AutomationProperties.Name="Response body" />
+                      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding ResponseSection, Converter={StaticResource EqualsVisibility}, ConverterParameter=Headers}">
+                        <ItemsControl ItemsSource="{Binding Response.Headers}" ItemTemplate="{StaticResource ReadOnlyPair}" Margin="12,8" />
+                      </ScrollViewer>
+                      <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding ResponseSection, Converter={StaticResource EqualsVisibility}, ConverterParameter=Cookies}">
+                        <StackPanel Margin="12,8">
+                          <ItemsControl ItemsSource="{Binding Response.Cookies}" ItemTemplate="{StaticResource ReadOnlyPair}" />
+                          <TextBlock Text="No cookies for this address." Style="{StaticResource Caption}" Visibility="{Binding Response.Cookies.Count, Converter={StaticResource EqualsVisibility}, ConverterParameter=0}" />
+                        </StackPanel>
+                      </ScrollViewer>
+                      <TextBox Text="{Binding Response.Details, Mode=OneWay}" Style="{StaticResource SelectableText}" Margin="12,8" Visibility="{Binding ResponseSection, Converter={StaticResource EqualsVisibility}, ConverterParameter=Details}" />
+                    </Grid>
+                  </Grid>
+                </DockPanel>
+              </Grid>
+            </Border>
+          </Grid>
+        </DockPanel>
+      </DataTemplate>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Background="{DynamicResource SurfaceBrush}">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="290" MinWidth="200" MaxWidth="520" />
+      <ColumnDefinition Width="5" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+
+    <!-- ============================================================ Sidebar -->
+    <DockPanel Background="{DynamicResource WindowBrush}">
+      <DockPanel DockPanel.Dock="Top" Margin="14,12,8,6">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button Style="{StaticResource IconButton}" c:Ui.Icon="Plus" Command="{Binding NewRequestCommand}" ToolTip="New request" />
+          <Button Style="{StaticResource IconButton}" c:Ui.Icon="Folder" Command="{Binding NewCollectionCommand}" ToolTip="New collection" />
+          <Button Style="{StaticResource IconButton}" c:Ui.Icon="ArrowDown" Command="{Binding ImportFileCommand}" ToolTip="Import an OpenAPI or Swagger file (JSON or YAML), a Postman collection or environment, or an exported collection" />
+          <Button Style="{StaticResource IconButton}" c:Ui.Icon="Link" Command="{Binding ImportUrlCommand}" ToolTip="Import an OpenAPI document from a URL" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <c:Glyph Kind="Request" Width="16" Height="16" Foreground="{DynamicResource AccentBrush}" Margin="0,0,8,0" />
+          <TextBlock Text="API client" FontWeight="SemiBold" FontSize="13" />
+        </StackPanel>
+      </DockPanel>
+      <Border DockPanel.Dock="Top" Margin="12,0,12,8" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+        <UniformGrid Columns="2">
+          <RadioButton Style="{StaticResource Segment}" Content="Collections" IsChecked="{Binding SidebarView, Converter={StaticResource Choice}, ConverterParameter=Collections}" />
+          <RadioButton Style="{StaticResource Segment}" Content="History" IsChecked="{Binding SidebarView, Converter={StaticResource Choice}, ConverterParameter=History}" />
+        </UniformGrid>
+      </Border>
+
+      <!-- Collections -->
+      <DockPanel Visibility="{Binding SidebarView, Converter={StaticResource EqualsVisibility}, ConverterParameter=Collections}">
+        <TextBox DockPanel.Dock="Top" Margin="12,0,12,8" Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Filter requests" AutomationProperties.Name="Filter collections" />
+        <Grid>
+          <TreeView ItemsSource="{Binding Tree}" BorderThickness="0" Background="Transparent" Margin="6,0,4,8" AutomationProperties.Name="Collections"
+                    b:Interaction.ActivateCommand="{Binding OpenNodeCommand}" b:Interaction.TrackSelection="True" b:Interaction.SelectionSource="{Binding SelectedNode}" b:Interaction.SelectOnRightClick="True">
+            <TreeView.ItemContainerStyle>
+              <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BooleanToVisibility}}" />
+                <Setter Property="ToolTip" Value="{Binding ToolTip}" />
+                <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=TreeView}}" />
+                <Setter Property="ContextMenu" Value="{StaticResource NodeMenu}" />
+              </Style>
+            </TreeView.ItemContainerStyle>
+            <TreeView.ItemTemplate>
+              <HierarchicalDataTemplate DataType="{x:Type api:ApiTreeNode}" ItemsSource="{Binding Children}">
+                <StackPanel Orientation="Horizontal" Margin="0,2">
+                  <TextBlock Text="{Binding Method}" Width="46" FontSize="10.5" FontWeight="Bold" Foreground="{Binding Method, Converter={StaticResource MethodBrush}}" VerticalAlignment="Center"
+                             Visibility="{Binding IsRequest, Converter={StaticResource BooleanToVisibility}}" />
+                  <c:Glyph Kind="Folder" Width="14" Height="14" Margin="0,0,6,0" Foreground="{DynamicResource MutedBrush}" Visibility="{Binding IsFolder, Converter={StaticResource BooleanToVisibility}}" />
+                  <c:Glyph Kind="Layers" Width="14" Height="14" Margin="0,0,6,0" Foreground="{DynamicResource AccentBrush}" Visibility="{Binding IsCollection, Converter={StaticResource BooleanToVisibility}}" />
+                  <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="190" />
+                </StackPanel>
+              </HierarchicalDataTemplate>
+            </TreeView.ItemTemplate>
+          </TreeView>
+          <StackPanel Margin="18,12" Visibility="{Binding HasCollections, Converter={StaticResource Hidden}}">
+            <TextBlock Text="No collections yet" FontWeight="SemiBold" />
+            <TextBlock Text="Import an OpenAPI or Swagger document to get a request for every operation, or a Postman collection to bring your saved requests across." Style="{StaticResource Caption}" Margin="0,4,0,10" />
+            <Button Content="Import a file…" c:Ui.Icon="ArrowDown" Command="{Binding ImportFileCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />
+            <Button Content="Import from a URL…" c:Ui.Icon="Link" Command="{Binding ImportUrlCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />
+            <Button Content="New collection…" c:Ui.Icon="Folder" Command="{Binding NewCollectionCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />
+          </StackPanel>
+        </Grid>
+      </DockPanel>
+
+      <!-- History -->
+      <DockPanel Visibility="{Binding SidebarView, Converter={StaticResource EqualsVisibility}, ConverterParameter=History}">
+        <Button DockPanel.Dock="Bottom" Style="{StaticResource ToolbarButton}" Content="Clear history" c:Ui.Icon="Trash" Command="{Binding ClearHistoryCommand}" HorizontalAlignment="Left" Margin="10,4,10,10" />
+        <Grid>
+          <ListBox ItemsSource="{Binding History}" BorderThickness="0" Background="Transparent" Margin="6,0,4,0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                   b:Interaction.ActivateCommand="{Binding OpenHistoryCommand}" AutomationProperties.Name="Sent requests">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <DockPanel Margin="2,3" ToolTip="Double-click to open a copy">
+                  <TextBlock DockPanel.Dock="Right" Text="{Binding StatusCode}" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" Margin="6,0,0,0" />
+                  <TextBlock DockPanel.Dock="Left" Text="{Binding Request.Method}" Width="46" FontSize="10.5" FontWeight="Bold" Foreground="{Binding Request.Method, Converter={StaticResource MethodBrush}}" VerticalAlignment="Center" />
+                  <StackPanel>
+                    <TextBlock Text="{Binding Request.Name}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding SentAt, StringFormat='{}{0:g}'}" Style="{StaticResource Caption}" />
+                  </StackPanel>
+                </DockPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Text="Requests you send are listed here. Double-click one to open a copy." Style="{StaticResource Caption}" Margin="18,12" Visibility="{Binding History.Count, Converter={StaticResource EqualsVisibility}, ConverterParameter=0}" />
+        </Grid>
+      </DockPanel>
+    </DockPanel>
+
+    <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}" BorderThickness="2,0" BorderBrush="{DynamicResource WindowBrush}" />
+
+    <!-- ============================================================ Requests -->
+    <DockPanel Grid.Column="2">
+      <!-- Environment, proxy and model generation for the whole client. -->
+      <Border DockPanel.Dock="Top" Style="{StaticResource PaneToolbar}" Padding="10,6">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+            <c:Glyph Kind="Globe" Width="14" Height="14" Foreground="{DynamicResource MutedBrush}" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding ProxySummary}" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="0,0,14,0" MaxWidth="320" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding ProxySummary}" />
+            <ComboBox ItemsSource="{Binding Environments}" SelectedItem="{Binding ActiveEnvironment}" DisplayMemberPath="Name" Width="180" AutomationProperties.Name="Environment" ToolTip="The environment whose variables fill in {{placeholders}}" />
+            <Button Style="{StaticResource IconButton}" c:Ui.Icon="Settings" Command="{Binding ManageEnvironmentsCommand}" ToolTip="Edit environments" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal">
+            <Button Style="{StaticResource ToolbarButton}" c:Ui.Icon="Braces" Content="Generate C# models" Command="{Binding GenerateFromCollectionCommand}" CommandParameter="{x:Null}" ToolTip="Generate C# classes for System.Text.Json or Newtonsoft.Json from OpenAPI schemas, a JSON sample or a JSON Schema" />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <!-- Tabs -->
+      <DockPanel DockPanel.Dock="Top" Background="{DynamicResource WindowBrush}" Visibility="{Binding HasTabs, Converter={StaticResource BooleanToVisibility}}">
+        <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Plus" Command="{Binding NewRequestCommand}" ToolTip="New request" Margin="4,0,8,0" />
+        <ListBox ItemsSource="{Binding Tabs}" SelectedItem="{Binding SelectedTab}" Style="{StaticResource RequestTabs}" AutomationProperties.Name="Open requests" />
+      </DockPanel>
+
+      <Grid>
+        <ContentControl Content="{Binding SelectedTab}" ContentTemplate="{StaticResource RequestEditor}" Focusable="False" Visibility="{Binding HasTabs, Converter={StaticResource BooleanToVisibility}}" />
+        <!-- Nothing open yet. -->
+        <Border Style="{StaticResource Card}" Width="460" VerticalAlignment="Center" HorizontalAlignment="Center" Padding="24,20" Visibility="{Binding HasTabs, Converter={StaticResource Hidden}}">
+          <StackPanel>
+            <c:Glyph Kind="Request" Width="30" Height="30" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Left" />
+            <TextBlock Text="Send a request" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,4" />
+            <TextBlock Text="Call any HTTP API through the proxy in Settings › Network. Save requests in collections, switch environments, and turn responses or OpenAPI schemas into C# models." Style="{StaticResource Caption}" FontSize="12" Margin="0,0,0,14" />
+            <Button Style="{StaticResource AccentButton}" Content="New request" c:Ui.Icon="Plus" Command="{Binding NewRequestCommand}" HorizontalAlignment="Left" />
+            <WrapPanel Margin="0,6,0,0">
+              <Button Content="Import OpenAPI or Postman…" c:Ui.Icon="ArrowDown" Command="{Binding ImportFileCommand}" />
+              <Button Content="Import from a URL…" c:Ui.Icon="Link" Command="{Binding ImportUrlCommand}" />
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </DockPanel>
+
+    <!-- Status line -->
+    <Border Grid.ColumnSpan="3" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,16,4" Padding="8,2" CornerRadius="4" Background="{DynamicResource RaisedBrush}" Opacity="0.95" IsHitTestVisible="False"
+            Visibility="{Binding Status, Converter={StaticResource Presence}}">
+      <TextBlock Text="{Binding Status}" Style="{StaticResource Caption}" MaxWidth="720" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" AutomationProperties.LiveSetting="Polite" />
+    </Border>
+
+    <!-- ============================================================ Overlays -->
+    <Grid Grid.ColumnSpan="3" Background="{DynamicResource OverlayBrush}" Visibility="{Binding SaveDialog, Converter={StaticResource Presence}}">
+      <Border Style="{StaticResource OverlayCard}" Width="480" VerticalAlignment="Center" HorizontalAlignment="Center" DataContext="{Binding SaveDialog}">
+        <StackPanel>
+          <StackPanel.InputBindings><KeyBinding Key="Escape" Command="{Binding CancelCommand}" /></StackPanel.InputBindings>
+          <TextBlock Text="Save request" Style="{StaticResource DialogTitle}" />
+          <TextBlock Text="Name" Style="{StaticResource FieldLabel}" />
+          <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" b:Interaction.FocusWhenVisible="True" AutomationProperties.Name="Request name">
+            <TextBox.InputBindings><KeyBinding Key="Return" Command="{Binding SaveCommand}" /></TextBox.InputBindings>
+          </TextBox>
+          <TextBlock Text="Save to" Style="{StaticResource FieldLabel}" />
+          <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding SelectedTarget}" DisplayMemberPath="Label" AutomationProperties.Name="Collection or folder" />
+          <StackPanel Visibility="{Binding IsNewCollection, Converter={StaticResource BooleanToVisibility}}">
+            <TextBlock Text="New collection's name" Style="{StaticResource FieldLabel}" />
+            <TextBox Text="{Binding NewCollectionName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="New collection name" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button Style="{StaticResource AccentButton}" Content="Save" Command="{Binding SaveCommand}" MinWidth="88" />
+            <Button Content="Cancel" Command="{Binding CancelCommand}" MinWidth="80" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.ColumnSpan="3" Background="{DynamicResource OverlayBrush}" Visibility="{Binding EnvironmentsEditor, Converter={StaticResource Presence}}">
+      <Border Style="{StaticResource OverlayCard}" Width="860" Height="560" Margin="24" MaxHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Grid}}" DataContext="{Binding EnvironmentsEditor}" Padding="0">
+        <DockPanel>
+          <DockPanel.InputBindings><KeyBinding Key="Escape" Command="{Binding CancelCommand}" /></DockPanel.InputBindings>
+          <Border DockPanel.Dock="Top" Padding="20,14" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel>
+              <TextBlock Text="Environments" Style="{StaticResource DialogTitle}" Margin="0" />
+              <TextBlock Text="Sets of variables, such as Development and Production. The active environment's values replace the collection's for {{name}} placeholders." Style="{StaticResource Caption}" Margin="0,4,0,0" />
+            </StackPanel>
+          </Border>
+          <Border DockPanel.Dock="Bottom" Padding="20,12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button Style="{StaticResource AccentButton}" Content="Save" Command="{Binding SaveCommand}" MinWidth="88" />
+              <Button Content="Cancel" Command="{Binding CancelCommand}" MinWidth="80" />
+            </StackPanel>
+          </Border>
+          <DockPanel DockPanel.Dock="Left" Width="220" Margin="12">
+            <WrapPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+              <Button Content="Add" c:Ui.Icon="Plus" Command="{Binding AddCommand}" />
+              <Button Style="{StaticResource IconButton}" c:Ui.Icon="Copy" Command="{Binding DuplicateCommand}" ToolTip="Duplicate" />
+              <Button Style="{StaticResource IconButton}" c:Ui.Icon="Trash" Command="{Binding RemoveCommand}" ToolTip="Delete" />
+            </WrapPanel>
+            <ListBox ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" DisplayMemberPath="Name" AutomationProperties.Name="Environments" />
+          </DockPanel>
+          <DockPanel Margin="4,12,16,12" Visibility="{Binding HasSelection, Converter={StaticResource BooleanToVisibility}}">
+            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+              <TextBlock Text="Name" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+              <TextBox Text="{Binding SelectedName, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Environment name" />
+            </StackPanel>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <ContentControl Content="{Binding Variables}" ContentTemplate="{StaticResource KeyValueTable}" Focusable="False" />
+            </ScrollViewer>
+          </DockPanel>
+        </DockPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.ColumnSpan="3" Background="{DynamicResource OverlayBrush}" Visibility="{Binding CollectionSettings, Converter={StaticResource Presence}}">
+      <Border Style="{StaticResource OverlayCard}" Width="860" Height="600" Margin="24" MaxHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=Grid}}" DataContext="{Binding CollectionSettings}" Padding="0">
+        <DockPanel>
+          <DockPanel.InputBindings><KeyBinding Key="Escape" Command="{Binding CancelCommand}" /></DockPanel.InputBindings>
+          <Border DockPanel.Dock="Top" Padding="20,14,20,10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+            <StackPanel>
+              <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TitleBox}" AutomationProperties.Name="Collection name" />
+              <TextBlock Text="{Binding Source}" Style="{StaticResource Caption}" Margin="4,2,0,8" />
+              <StackPanel Orientation="Horizontal">
+                <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Variables}" Tag="{Binding Variables.CountLabel}" Content="Variables" />
+                <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Auth}" Content="Auth" />
+                <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Proxy}" Content="Proxy" />
+                <RadioButton Style="{StaticResource SectionTab}" IsChecked="{Binding Section, Converter={StaticResource Choice}, ConverterParameter=Docs}" Content="Description" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <Border DockPanel.Dock="Bottom" Padding="20,12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button Style="{StaticResource AccentButton}" Content="Save" Command="{Binding SaveCommand}" MinWidth="88" />
+              <Button Content="Cancel" Command="{Binding CancelCommand}" MinWidth="80" />
+            </StackPanel>
+          </Border>
+          <Grid Margin="20,12">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Variables}">
+              <StackPanel>
+                <TextBlock Text="Used as {{name}} anywhere in this collection's requests. An environment's variable of the same name wins." Style="{StaticResource Caption}" Margin="0,0,0,8" />
+                <ContentControl Content="{Binding Variables}" ContentTemplate="{StaticResource KeyValueTable}" Focusable="False" />
+              </StackPanel>
+            </ScrollViewer>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Auth}">
+              <StackPanel Width="560" HorizontalAlignment="Left">
+                <TextBlock Text="Requests set to 'Inherit from collection' sign in this way." Style="{StaticResource Caption}" Margin="0,0,0,8" />
+                <ContentControl Content="{Binding Auth}" ContentTemplate="{StaticResource AuthEditor}" Focusable="False" />
+              </StackPanel>
+            </ScrollViewer>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Proxy}">
+              <ContentControl Content="{Binding Proxy}" ContentTemplate="{StaticResource ProxyEditor}" Focusable="False" HorizontalAlignment="Left" Width="560" />
+            </ScrollViewer>
+            <TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"
+                     Visibility="{Binding Section, Converter={StaticResource EqualsVisibility}, ConverterParameter=Docs}" AutomationProperties.Name="Collection description" />
+          </Grid>
+        </DockPanel>
+      </Border>
+    </Grid>
+
+    <api:ApiCodeGeneratorView Grid.ColumnSpan="3" DataContext="{Binding CodeGenerator}" Visibility="{Binding IsOpen, Converter={StaticResource BooleanToVisibility}}" />
+  </Grid>
+</UserControl>

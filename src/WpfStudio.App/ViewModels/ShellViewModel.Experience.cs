@@ -175,6 +175,9 @@ public sealed partial class ShellViewModel
         yield return Command("View", "Debugger", ShowToolCommand, Workbenches.Debugger, icon: "Bug");
         yield return Command("View", "SQL Server", ShowToolCommand, Workbenches.Database, icon: "Database");
         yield return Command("Tools", "Memory profiler", ShowToolCommand, Workbenches.Profiler, icon: "Layers", detail: "Dumps, live snapshots, GC roots and reference-removal estimates");
+        yield return Command("Tools", "API client", OpenApiClientCommand, icon: "Request", detail: "Send HTTP requests, import OpenAPI or Postman collections, generate C# models");
+        yield return Command("Tools", "Generate C# models from JSON or OpenAPI", OpenModelGeneratorCommand, icon: "Braces", detail: "System.Text.Json or Newtonsoft.Json classes, with quicktype's options");
+        yield return Command("Tools", "Network and proxy settings", OpenSettingsCommand, NetworkPage, icon: "Globe", detail: "The proxy for the API client, ColtonGPT and downloads");
         yield return MemoryCommand("Capture memory snapshot", MemoryProfiler.CaptureCommand, icon: "Camera", detail: "Snapshot the selected process's managed heap");
         yield return MemoryCommand("Open memory dump…", MemoryProfiler.OpenDumpCommand, icon: "FolderOpen");
         yield return MemoryCommand("Compare memory snapshots", MemoryProfiler.ShowViewCommand, "4", icon: "Timeline", detail: "Live memory, snapshot history and type growth");
