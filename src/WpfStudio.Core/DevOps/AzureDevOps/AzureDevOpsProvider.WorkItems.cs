@@ -111,12 +111,14 @@ public sealed partial class AzureDevOpsProvider
             }
             else if (rel == "ArtifactLink")
             {
-                var artifact = Uri.UnescapeDataString(url).Split('/')[^1];
+                // vstfs:///Git/{Kind}/{project}%2F{repository}%2F{id}: the id is the last part, and a branch's own slashes are escaped too.
+                var parts = url[(url.LastIndexOf('/') + 1)..].Split("%2F", 3, StringSplitOptions.None);
+                var artifact = Uri.UnescapeDataString(parts[^1]);
                 var title = name switch
                 {
-                    "Pull Request" => "Pull request !" + artifact.Split('/')[^1],
-                    "Branch" => "Branch " + (artifact.Split('/')[^1] is { } reference && reference.StartsWith("GB", StringComparison.Ordinal) ? reference[2..] : artifact),
-                    "Fixed in Commit" or "Commit" => "Commit " + artifact.Split('/')[^1][..Math.Min(8, artifact.Split('/')[^1].Length)],
+                    "Pull Request" => "Pull request !" + artifact,
+                    "Branch" => "Branch " + (artifact.StartsWith("GB", StringComparison.Ordinal) ? artifact[2..] : artifact),
+                    "Fixed in Commit" or "Commit" => "Commit " + artifact[..Math.Min(8, artifact.Length)],
                     _ => name ?? "Artifact"
                 };
                 links.Add(new(name ?? "Artifact", title));

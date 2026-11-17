@@ -44,8 +44,8 @@ public static partial class DevOpsText
             .Replace("{title}", slug, StringComparison.OrdinalIgnoreCase)
             .Replace("{type}", Slug(type, 20), StringComparison.OrdinalIgnoreCase);
         result = BranchUnsafe().Replace(result, "-");
-        result = Regex.Replace(result, "-{2,}", "-");
-        result = Regex.Replace(result, "/{2,}", "/");
+        result = RepeatedDash().Replace(result, "-");
+        result = RepeatedSlash().Replace(result, "/");
         result = string.Join('/', result.Split('/').Select(part => part.Trim('-', '.')).Where(part => part.Length > 0));
         return result.EndsWith(".lock", StringComparison.OrdinalIgnoreCase) ? result[..^5] : result;
     }
@@ -147,7 +147,7 @@ public static partial class DevOpsText
     private static partial Regex Breaks();
     [GeneratedRegex(@"<li\b[^>]*>", RegexOptions.IgnoreCase)]
     private static partial Regex ListItem();
-    [GeneratedRegex(@"</(p|div|li|ul|ol|h[1-6]|tr|table|blockquote|pre)\s*>|<(p|div|h[1-6]|tr|blockquote|pre)\b[^>]*>", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"</(p|div|ul|ol|h[1-6]|tr|table|blockquote|pre)\s*>|<(p|div|h[1-6]|tr|blockquote|pre)\b[^>]*>", RegexOptions.IgnoreCase)]
     private static partial Regex BlockEnd();
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex Tags();
@@ -157,6 +157,10 @@ public static partial class DevOpsText
     private static partial Regex ManyBreaks();
     [GeneratedRegex(@"[^A-Za-z0-9/_.\-]")]
     private static partial Regex BranchUnsafe();
+    [GeneratedRegex("-{2,}")]
+    private static partial Regex RepeatedDash();
+    [GeneratedRegex("/{2,}")]
+    private static partial Regex RepeatedSlash();
     [GeneratedRegex(@"(?<![\w&])(?:AB)?#(?<id>\d{1,9})\b", RegexOptions.IgnoreCase)]
     private static partial Regex HashReference();
     [GeneratedRegex(@"(?:^|/)(?<id>\d{1,9})(?=[-_]|$)")]

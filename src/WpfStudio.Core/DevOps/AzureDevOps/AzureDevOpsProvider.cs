@@ -92,7 +92,8 @@ public sealed partial class AzureDevOpsProvider : IDevOpsProvider
     private string BuildUrl(string root, string path, bool versioned, int? preview, (string Name, object? Value)[] query)
     {
         var parts = query.Where(pair => pair.Value is not null && pair.Value is not "")
-            .Select(pair => $"{Uri.EscapeDataString(pair.Name)}={Uri.EscapeDataString(Convert.ToString(pair.Value, CultureInfo.InvariantCulture)!)}").ToList();
+            // Names are this class's own constants, some starting with '$' ($top, $expand), which Azure DevOps expects as written.
+            .Select(pair => $"{pair.Name}={Uri.EscapeDataString(Convert.ToString(pair.Value, CultureInfo.InvariantCulture)!)}").ToList();
         if (versioned) parts.Add("api-version=" + (preview is { } number ? $"{_apiVersion}-preview.{number}" : _apiVersion));
         return $"{root}/{path.TrimStart('/')}" + (parts.Count == 0 ? "" : "?" + string.Join('&', parts));
     }
