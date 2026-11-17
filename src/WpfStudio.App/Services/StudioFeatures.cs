@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.Messaging;
+using WpfStudio.App.Features.Api;
 using WpfStudio.App.Features.ColtonGpt;
 using WpfStudio.App.Features.Git;
 using WpfStudio.App.Features.Packages;
@@ -36,10 +37,11 @@ public sealed class StudioFeatures : IDisposable
     private readonly IMessenger _messenger;
     private IStudioToolsHost? _host;
     private bool _disposed;
-    public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs, IDesktopService desktop, IMessenger messenger)
+    public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, ApiClientViewModel apiClient, IUserDialogService dialogs, IDesktopService desktop, IMessenger messenger)
     {
         _messenger = messenger;
         Assistant = assistant;
+        ApiClient = apiClient;
         GitService = git;
         Packages = new(packages, dialogs, () => Git?.IsBusy == true ? Task.FromException<bool>(new InvalidOperationException("Wait for the Git operation to finish.")) : Host.SaveBeforeMutationAsync(), () => Host.WorkspaceChangedAsync());
         Git = new(git, desktop, _ => Packages.IsBusy ? Task.FromException<bool>(new InvalidOperationException("Wait for the package operation to finish.")) : Host.SaveBeforeMutationAsync()) { AutoSelect = true };
@@ -48,7 +50,12 @@ public sealed class StudioFeatures : IDisposable
         Git.WorkspaceFilesChanged += () => _host?.GitWorkspaceFilesChanged();
         assistant.SettingsRequested += () => _host?.OpenAssistantSettings();
         assistant.RefreshContextRequested += () => _host?.RefreshAssistantContext();
-        messenger.Register<StudioFeatures, WorkspaceChangedMessage>(this, static (features, message) => features.Packages.SetWorkspace(message.Workspace));
+        apiClient.Attach(path => _host?.OpenFile(path));
+        messenger.Register<StudioFeatures, WorkspaceChangedMessage>(this, static (features, message) =>
+        {
+            features.Packages.SetWorkspace(message.Workspace);
+            features.ApiClient.SetWorkspace(message.Workspace);
+        });
     }
     private IStudioToolsHost Host => _host ?? throw new InvalidOperationException("The shell has not attached to the workspace tools yet.");
     /// <summary>Connects the tools to the shell that owns the documents and the project model; the shell calls this once.</summary>
@@ -58,6 +65,8 @@ public sealed class StudioFeatures : IDisposable
     /// <summary>The Git CLI boundary shared by the Git pane and editors (change margin and blame).</summary>
     public GitService GitService { get; }
     public AssistantViewModel Assistant { get; }
+    /// <summary>The API client and model generator. The container disposes it, saving its open tabs.</summary>
+    public ApiClientViewModel ApiClient { get; }
     public void Dispose()
     {
         if (_disposed) return;

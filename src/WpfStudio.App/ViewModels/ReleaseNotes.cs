@@ -8,6 +8,14 @@ public static class ReleaseNoteCatalog
 {
     public static IReadOnlyList<ReleaseNote> All { get; } =
     [
+        new("Unreleased", "API client and C# model generation",
+        [
+            "Tools > API client sends HTTP requests: an address bar kept in step with the Params table, headers, JSON, text, XML, form and file bodies, bearer, basic and API-key sign-in, and a response viewer with timing, headers, cookies and Copy as curl.",
+            "Save requests in collections and folders, switch between environments of {{variables}}, and find every request you sent in History. Open tabs come back with their unsaved edits.",
+            "Import OpenAPI 3.0, 3.1 and Swagger 2.0 documents in JSON or YAML, from a file or a URL, into a collection with a request per operation. Postman collections and environments import too.",
+            "Generate C# for System.Text.Json or Newtonsoft.Json from OpenAPI schemas, a response or any JSON sample, or a JSON Schema, with quicktype's options and a live preview. Save one file or one per type into your project.",
+            "Settings > Network chooses the proxy for the API client, ColtonGPT and runtime downloads, with hosts that skip it and sign-in. A collection or a single request can use its own proxy, or none.",
+        ]),
         new("Unreleased", "Performance report",
         [
             "Help > Performance report shows where the time went since the last report: how long the UI thread kept input waiting, each input event and dispatcher operation under the name of the code that ran, each language worker request as the IDE and as the worker saw it, preview requests and Code Assist runs.",

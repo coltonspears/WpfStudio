@@ -1,0 +1,287 @@
+<UserControl x:Class="WpfStudio.App.Features.Api.ApiCodeGeneratorView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:WpfStudio.App.Controls"
+             xmlns:api="clr-namespace:WpfStudio.App.Features.Api"
+             xmlns:editor="http://icsharpcode.net/sharpdevelop/avalonedit">
+  <!-- Generate C# models: where they come from and how they are written on the left, the code on the right, where it is saved below. DataContext is ApiCodeGeneratorViewModel. -->
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="ApiStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+      <Style x:Key="Option" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+        <Setter Property="Margin" Value="0,5" />
+        <Setter Property="VerticalContentAlignment" Value="Top" />
+      </Style>
+      <Style x:Key="OptionGroup" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Setter Property="Padding" Value="12,6,12,10" />
+      </Style>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Background="{DynamicResource OverlayBrush}">
+    <Border Style="{StaticResource OverlayCard}" Margin="20" Padding="0">
+      <DockPanel>
+        <DockPanel.InputBindings>
+          <KeyBinding Key="Escape" Command="{Binding CloseCommand}" />
+          <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
+        </DockPanel.InputBindings>
+
+        <!-- Header -->
+        <Border DockPanel.Dock="Top" Padding="20,14,14,12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" c:Ui.Icon="Close" Command="{Binding CloseCommand}" ToolTip="Close (Esc)" />
+            <c:Glyph DockPanel.Dock="Left" Kind="Braces" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" />
+            <TextBlock Text="Generate C# models" Style="{StaticResource DialogTitle}" Margin="0" VerticalAlignment="Center" />
+            <TextBlock Text="Classes for System.Text.Json or Newtonsoft.Json, from OpenAPI schemas, a JSON sample or a JSON Schema. The preview follows every option." Style="{StaticResource Caption}" FontSize="12" VerticalAlignment="Center" Margin="14,2,0,0" />
+          </DockPanel>
+        </Border>
+
+        <!-- Saving -->
+        <Border DockPanel.Dock="Bottom" Padding="20,10,20,12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Background="{DynamicResource WindowBrush}" CornerRadius="0,0,10,10">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="2*" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            <TextBlock Text="SAVE AS" Style="{StaticResource SectionLabel}" Margin="0,0,0,4" />
+            <TextBlock Grid.Column="1" Text="Folder" Style="{StaticResource SectionLabel}" Margin="12,0,0,4" />
+            <TextBlock Grid.Column="2" Text="{Binding FileNameLabel}" Style="{StaticResource SectionLabel}" Margin="12,0,0,4" />
+            <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal">
+                <RadioButton Style="{StaticResource Segment}" Content="One file" IsChecked="{Binding Layout, Converter={StaticResource Choice}, ConverterParameter=SingleFile}" ToolTip="Every type in one file" />
+                <RadioButton Style="{StaticResource Segment}" Content="File per type" IsChecked="{Binding Layout, Converter={StaticResource Choice}, ConverterParameter=FilePerType}" ToolTip="Pet.cs, Category.cs and so on, with shared helpers in the file named on the right" />
+              </StackPanel>
+            </Border>
+            <DockPanel Grid.Row="1" Grid.Column="1" Margin="12,0,0,0">
+              <Button DockPanel.Dock="Right" Content="Browse…" c:Ui.Icon="FolderOpen" Command="{Binding BrowseFolderCommand}" />
+              <TextBox Text="{Binding OutputDirectory, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Choose a folder, such as your project's Models folder" VerticalContentAlignment="Center" AutomationProperties.Name="Output folder" />
+            </DockPanel>
+            <TextBox Grid.Row="1" Grid.Column="2" Margin="12,0,0,0" Text="{Binding FileName, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" AutomationProperties.Name="File name" />
+            <StackPanel Grid.Row="1" Grid.Column="3" Orientation="Horizontal" Margin="12,0,0,0">
+              <Button Content="Copy" c:Ui.Icon="Copy" Command="{Binding CopyCommand}" ToolTip="Copy the generated code" />
+              <Button Style="{StaticResource AccentButton}" Content="Save" c:Ui.Icon="Save" Command="{Binding SaveCommand}" MinWidth="96" ToolTip="Write the files (Ctrl+S)" />
+            </StackPanel>
+            <DockPanel Grid.Row="2" Grid.ColumnSpan="4" Margin="0,8,0,0">
+              <CheckBox DockPanel.Dock="Right" Content="Open in the editor after saving" IsChecked="{Binding OpenAfterSaving}" />
+              <TextBlock Text="{Binding SaveSummary}" Style="{StaticResource Caption}" FontSize="11.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding SaveSummary}" />
+            </DockPanel>
+          </Grid>
+        </Border>
+
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="400" MinWidth="320" />
+            <ColumnDefinition Width="5" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
+          <!-- Source and options -->
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="20,14,14,18">
+              <TextBlock Text="SOURCE" Style="{StaticResource SectionLabel}" />
+              <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6">
+                <UniformGrid Columns="3">
+                  <RadioButton Style="{StaticResource Segment}" Content="OpenAPI schemas" IsChecked="{Binding Source, Converter={StaticResource Choice}, ConverterParameter=Schemas}" />
+                  <RadioButton Style="{StaticResource Segment}" Content="JSON sample" IsChecked="{Binding Source, Converter={StaticResource Choice}, ConverterParameter=Sample}" />
+                  <RadioButton Style="{StaticResource Segment}" Content="JSON Schema" IsChecked="{Binding Source, Converter={StaticResource Choice}, ConverterParameter=JsonSchema}" />
+                </UniformGrid>
+              </Border>
+
+              <!-- OpenAPI schemas -->
+              <StackPanel Visibility="{Binding IsSchemaSource, Converter={StaticResource BooleanToVisibility}}" Margin="0,10,0,0">
+                <StackPanel Visibility="{Binding HasSpecification, Converter={StaticResource BooleanToVisibility}}">
+                  <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                      <Button Style="{StaticResource ToolbarButton}" Content="All" Command="{Binding SelectAllSchemasCommand}" />
+                      <Button Style="{StaticResource ToolbarButton}" Content="None" Command="{Binding SelectNoSchemasCommand}" />
+                    </StackPanel>
+                    <TextBlock VerticalAlignment="Center" Style="{StaticResource Caption}"><Run Text="{Binding SpecificationName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="  ·  " /><Run Text="{Binding SchemaSummary, Mode=OneWay}" /></TextBlock>
+                  </DockPanel>
+                  <TextBox Text="{Binding SchemaFilter, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Filter schemas" Margin="0,6,0,4" AutomationProperties.Name="Filter schemas" />
+                  <Border Style="{StaticResource EditorFrame}" Height="220">
+                    <ListBox ItemsSource="{Binding Schemas}" BorderThickness="0" Background="Transparent" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Schemas">
+                      <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                          <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BooleanToVisibility}}" />
+                          <Setter Property="Padding" Value="6,3" />
+                        </Style>
+                      </ListBox.ItemContainerStyle>
+                      <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type api:SchemaChoice}">
+                          <CheckBox IsChecked="{Binding IsSelected}" ToolTip="{Binding Description}">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                              <TextBlock Text="{Binding Kind}" Style="{StaticResource Caption}" Margin="8,1,0,0" />
+                            </StackPanel>
+                          </CheckBox>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </Border>
+                  <TextBlock Text="Schemas the ticked ones use are generated too." Style="{StaticResource Caption}" Margin="0,4,0,0" />
+                </StackPanel>
+                <TextBlock Style="{StaticResource Caption}" FontSize="12" Visibility="{Binding HasSpecification, Converter={StaticResource Hidden}}"
+                           Text="Schemas come from a collection imported from an OpenAPI or Swagger document. Open this from such a collection's menu, or from one of its requests, or use a JSON sample or JSON Schema instead." />
+              </StackPanel>
+
+              <!-- JSON sample -->
+              <StackPanel Visibility="{Binding IsSampleSource, Converter={StaticResource BooleanToVisibility}}" Margin="0,10,0,0">
+                <TextBlock Text="Paste example JSON, such as a response. The objects in an array are merged, so a property missing from some of them becomes optional." Style="{StaticResource Caption}" Margin="0,0,0,6" />
+                <Border Style="{StaticResource EditorFrame}" Height="220">
+                  <editor:TextEditor api:ApiEditor.Text="{Binding SampleText}" api:ApiEditor.Language="json" Style="{StaticResource CodeEditor}" ShowLineNumbers="False" AutomationProperties.Name="JSON sample" />
+                </Border>
+              </StackPanel>
+
+              <!-- JSON Schema -->
+              <StackPanel Visibility="{Binding IsJsonSchemaSource, Converter={StaticResource BooleanToVisibility}}" Margin="0,10,0,0">
+                <TextBlock Text="Paste a JSON Schema, in JSON or YAML. Its $defs or definitions become types of their own." Style="{StaticResource Caption}" Margin="0,0,0,6" />
+                <Border Style="{StaticResource EditorFrame}" Height="220">
+                  <editor:TextEditor api:ApiEditor.Text="{Binding JsonSchemaText}" api:ApiEditor.Language="json" Style="{StaticResource CodeEditor}" ShowLineNumbers="False" AutomationProperties.Name="JSON Schema" />
+                </Border>
+              </StackPanel>
+
+              <StackPanel Visibility="{Binding UsesTopLevelName, Converter={StaticResource BooleanToVisibility}}">
+                <TextBlock Text="Top-level type name" Style="{StaticResource FieldLabel}" />
+                <TextBox Text="{Binding TopLevelName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Top-level type name" />
+              </StackPanel>
+
+              <!-- Language -->
+              <TextBlock Text="LANGUAGE" Style="{StaticResource GroupHeading}" />
+              <Border Style="{StaticResource OptionGroup}">
+                <StackPanel>
+                  <TextBlock Text="Namespace" Style="{StaticResource FieldLabel}" Margin="0,4,0,4" />
+                  <TextBox Text="{Binding Namespace, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource CodeFont}" AutomationProperties.Name="Namespace" />
+                  <TextBlock Text="Serialization framework" Style="{StaticResource FieldLabel}" />
+                  <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal">
+                      <RadioButton Style="{StaticResource Segment}" Content="System.Text.Json" IsChecked="{Binding Framework, Converter={StaticResource Choice}, ConverterParameter=SystemTextJson}" ToolTip="Built into .NET. Attributes from System.Text.Json.Serialization." />
+                      <RadioButton Style="{StaticResource Segment}" Content="Newtonsoft.Json" IsChecked="{Binding Framework, Converter={StaticResource Choice}, ConverterParameter=NewtonsoftJson}" ToolTip="Json.NET. Needs the Newtonsoft.Json package." />
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Text="C# version" Style="{StaticResource FieldLabel}" />
+                  <ComboBox ItemsSource="{Binding Versions}" SelectedValuePath="Value" DisplayMemberPath="Label" SelectedValue="{Binding Version}" x:Name="VersionBox" AutomationProperties.Name="C# version" />
+                  <TextBlock Text="{Binding SelectedItem.Description, ElementName=VersionBox}" Style="{StaticResource Caption}" Margin="0,4,0,0" />
+                </StackPanel>
+              </Border>
+
+              <!-- Types -->
+              <TextBlock Text="TYPES" Style="{StaticResource GroupHeading}" />
+              <Border Style="{StaticResource OptionGroup}">
+                <StackPanel>
+                  <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
+                    <StackPanel>
+                      <TextBlock Text="Arrays" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                      <ComboBox ItemsSource="{Binding ArrayStyles}" SelectedValuePath="Value" DisplayMemberPath="Label" SelectedValue="{Binding Arrays}" AutomationProperties.Name="Array type" ToolTip="Use T[], List&lt;T&gt; or IReadOnlyList&lt;T&gt; for arrays" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                      <TextBlock Text="Numbers" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                      <ComboBox ItemsSource="{Binding NumberStyles}" SelectedValuePath="Value" DisplayMemberPath="Label" SelectedValue="{Binding Numbers}" AutomationProperties.Name="Number type" ToolTip="The type for numbers that are not whole" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1">
+                      <TextBlock Text="Any value" Style="{StaticResource FieldLabel}" />
+                      <ComboBox ItemsSource="{Binding AnyStyles}" SelectedValuePath="Value" DisplayMemberPath="Label" SelectedValue="{Binding Any}" AutomationProperties.Name="Type for any" ToolTip="The type for values whose shape varies or is not described" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="2">
+                      <TextBlock Text="Dates and times" Style="{StaticResource FieldLabel}" />
+                      <ComboBox ItemsSource="{Binding DateStyles}" SelectedValuePath="Value" DisplayMemberPath="Label" SelectedValue="{Binding Dates}" AutomationProperties.Name="Date type" />
+                    </StackPanel>
+                  </Grid>
+                  <CheckBox Style="{StaticResource Option}" IsChecked="{Binding UseDateOnlyTimeOnly}" Margin="0,10,0,5">
+                    <StackPanel><TextBlock Text="DateOnly and TimeOnly for dates and times of day" /><TextBlock Text=".NET 6 and later; System.Text.Json reads them from .NET 7." Style="{StaticResource Caption}" /></StackPanel>
+                  </CheckBox>
+                  <CheckBox Style="{StaticResource Option}" IsChecked="{Binding GenerateEnums}">
+                    <StackPanel><TextBlock Text="Enums for string enumerations" /><TextBlock Text="With converters that keep each value's JSON spelling. Off leaves them strings." Style="{StaticResource Caption}" /></StackPanel>
+                  </CheckBox>
+                </StackPanel>
+              </Border>
+
+              <!-- Output -->
+              <TextBlock Text="OUTPUT" Style="{StaticResource GroupHeading}" />
+              <Border Style="{StaticResource OptionGroup}">
+                <StackPanel>
+                  <TextBlock Text="Features" Style="{StaticResource FieldLabel}" Margin="0,4,0,4" />
+                  <ComboBox ItemsSource="{Binding FeatureChoices}" SelectedValuePath="Value" DisplayMemberPath="Label" SelectedValue="{Binding Features}" AutomationProperties.Name="Output features" />
+                  <TextBlock Text="{Binding FeaturesExplanation}" Style="{StaticResource Caption}" Margin="0,4,0,0" />
+                  <TextBlock Text="Property density" Style="{StaticResource FieldLabel}" />
+                  <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal">
+                      <RadioButton Style="{StaticResource Segment}" Content="Normal" IsChecked="{Binding Density, Converter={StaticResource Choice}, ConverterParameter=Normal}" ToolTip="Attributes on their own lines, a blank line between properties" />
+                      <RadioButton Style="{StaticResource Segment}" Content="Dense" IsChecked="{Binding Density, Converter={StaticResource Choice}, ConverterParameter=Dense}" ToolTip="Each property and its attributes on one line" />
+                    </StackPanel>
+                  </Border>
+                  <CheckBox Style="{StaticResource Option}" IsChecked="{Binding UseRecords}" IsEnabled="{Binding CanUseRecords}" Margin="0,10,0,5">
+                    <StackPanel><TextBlock Text="Records instead of classes" /><TextBlock Text="C# 9 and later: value equality and with-expressions." Style="{StaticResource Caption}" /></StackPanel>
+                  </CheckBox>
+                  <CheckBox Style="{StaticResource Option}" IsChecked="{Binding InitOnlyProperties}" IsEnabled="{Binding CanUseRecords}">
+                    <StackPanel><TextBlock Text="Init-only properties" /><TextBlock Text="{}{ get; init; } so values are set when the object is made." Style="{StaticResource Caption}" /></StackPanel>
+                  </CheckBox>
+                  <CheckBox Style="{StaticResource Option}" IsChecked="{Binding RequiredMembers}" IsEnabled="{Binding CanUseRequired}">
+                    <StackPanel><TextBlock Text="'required' on required properties" /><TextBlock Text="C# 11 and later. System.Text.Json also fails when one is missing." Style="{StaticResource Caption}" /></StackPanel>
+                  </CheckBox>
+                  <CheckBox Style="{StaticResource Option}" IsChecked="{Binding CheckRequired}">
+                    <StackPanel><TextBlock Text="Fail if required properties are missing" /><TextBlock Text="[JsonRequired] or Required.Always, so a document without them is rejected." Style="{StaticResource Caption}" /></StackPanel>
+                  </CheckBox>
+                  <CheckBox Style="{StaticResource Option}" IsChecked="{Binding InitializeCollections}">
+                    <StackPanel><TextBlock Text="Start lists and dictionaries empty" /><TextBlock Text="Instead of null, so code can add to them straight away." Style="{StaticResource Caption}" /></StackPanel>
+                  </CheckBox>
+                  <CheckBox Style="{StaticResource Option}" Content="Virtual properties" IsChecked="{Binding VirtualProperties}" ToolTip="For proxies such as Entity Framework's lazy loading" />
+                  <CheckBox Style="{StaticResource Option}" Content="Keep the JSON property names" IsChecked="{Binding KeepPropertyNames}" ToolTip="Use first_name rather than FirstName" />
+                  <CheckBox Style="{StaticResource Option}" Content="XML documentation comments from descriptions" IsChecked="{Binding DocumentationComments}" />
+                  <TextBlock Text="Base class" Style="{StaticResource FieldLabel}" />
+                  <TextBox Text="{Binding BaseClass, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource CodeFont}" c:Ui.Placeholder="None, or such as ObservableObject" AutomationProperties.Name="Base class" />
+                </StackPanel>
+              </Border>
+
+              <!-- Inference -->
+              <StackPanel Visibility="{Binding IsSampleSource, Converter={StaticResource BooleanToVisibility}}">
+                <TextBlock Text="READING THE SAMPLE" Style="{StaticResource GroupHeading}" />
+                <Border Style="{StaticResource OptionGroup}">
+                  <StackPanel>
+                    <CheckBox Style="{StaticResource Option}" IsChecked="{Binding MergeSimilarClasses}">
+                      <StackPanel><TextBlock Text="Merge similar classes" /><TextBlock Text="billingAddress and shippingAddress share one Address class." Style="{StaticResource Caption}" /></StackPanel>
+                    </CheckBox>
+                    <CheckBox Style="{StaticResource Option}" IsChecked="{Binding DetectMaps}">
+                      <StackPanel><TextBlock Text="Detect dictionaries" /><TextBlock Text="Objects keyed by ids or numbers become Dictionary&lt;string, T&gt;." Style="{StaticResource Caption}" /></StackPanel>
+                    </CheckBox>
+                    <CheckBox Style="{StaticResource Option}" IsChecked="{Binding DetectEnums}">
+                      <StackPanel><TextBlock Text="Detect enums" /><TextBlock Text="A few words repeated across the sample become an enum." Style="{StaticResource Caption}" /></StackPanel>
+                    </CheckBox>
+                    <CheckBox Style="{StaticResource Option}" Content="Detect GUIDs" IsChecked="{Binding DetectUuids}" />
+                    <CheckBox Style="{StaticResource Option}" Content="Detect dates and times" IsChecked="{Binding DetectDateTimes}" />
+                    <CheckBox Style="{StaticResource Option}" Content="Detect whole numbers in strings, such as &quot;42&quot;" IsChecked="{Binding DetectIntegerStrings}" />
+                    <CheckBox Style="{StaticResource Option}" Content="Detect booleans in strings, such as &quot;true&quot;" IsChecked="{Binding DetectBooleanStrings}" />
+                    <CheckBox Style="{StaticResource Option}" Content="Make every property optional" IsChecked="{Binding AllPropertiesOptional}" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+              <Button Style="{StaticResource ToolbarButton}" Content="Reset options to defaults" Command="{Binding ResetOptionsCommand}" HorizontalAlignment="Left" Margin="0,12,0,0" />
+            </StackPanel>
+          </ScrollViewer>
+
+          <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}" BorderThickness="2,0" BorderBrush="{DynamicResource SurfaceBrush}" />
+
+          <!-- Preview -->
+          <DockPanel Grid.Column="2" Margin="14,14,20,12">
+            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+              <TextBlock DockPanel.Dock="Right" Text="Generating…" Style="{StaticResource Caption}" Visibility="{Binding IsGenerating, Converter={StaticResource BooleanToVisibility}}" />
+              <TextBlock Text="PREVIEW" Style="{StaticResource SectionLabel}" Margin="0" />
+            </DockPanel>
+            <Border DockPanel.Dock="Top" Background="{DynamicResource WarningSoftBrush}" CornerRadius="6" Padding="10,6" Margin="0,0,0,6" Visibility="{Binding Problems, Converter={StaticResource Presence}}">
+              <TextBlock Text="{Binding Problems}" TextWrapping="Wrap" />
+            </Border>
+            <Border Style="{StaticResource EditorFrame}">
+              <editor:TextEditor IsReadOnly="True" api:ApiEditor.Text="{Binding Preview, Mode=OneWay}" api:ApiEditor.Language="csharp" Style="{StaticResource CodeEditor}" AutomationProperties.Name="Generated code" />
+            </Border>
+          </DockPanel>
+        </Grid>
+      </DockPanel>
+    </Border>
+  </Grid>
+</UserControl>

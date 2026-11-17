@@ -67,6 +67,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Tasks = new(this, Terminal, dispatcher, messenger); Runtimes = new(this, tools.Runtimes);
         XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
         _performance = tools.Performance;
+        Network = tools.Network;
         Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
         LiveInspection = new(dispatcher);
@@ -182,6 +183,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         Editor.Load(settings.Editor);
         CodeAssist.Load(settings.CodeAssist);
         LoadDebuggingSettings(settings.Debugging);
+        Network.Load(settings.Network ?? new());
         Configuration = settings.Configuration;
         foreach (var recent in settings.RecentWorkspaces.Where(File.Exists)) RecentWorkspaces.Add(recent);
         _initialized = true; AutoSave.IsEnabled = true;
@@ -915,6 +917,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (name == Workbenches.Packages) OpenPackagesCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name == Workbenches.Git) OpenGitCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
+        else if (name == Workbenches.ApiClient) OpenApiClientCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name == Workbenches.Assistant) OpenAssistantCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name == Workbenches.Designer) OpenDesignerCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name != null) ToolRequested?.Invoke(name);
@@ -948,7 +951,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         foreach (var doc in Documents) await _store.DeleteRecoveryAsync(doc.State.Path);
         return true;
     }
-    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings(), CodeAssist = CodeAssist.ToSettings(), Debugging = DebuggingSettings() });
+    private Task SaveSettingsAsync() => _settings.SaveAsync(new StudioSettings { RecentWorkspaces = RecentWorkspaces.ToList(), OpenDocuments = Documents.Select(d => d.State.Path).ToList(), WorkspacePath = Workspace?.Path, Configuration = Configuration, StartupProject = StartupProject?.ProjectPath, Theme = ThemeName, ShowInlayHints = ShowInlayHints, ShowInlineBlame = ShowInlineBlame, ShowCodeLens = ShowCodeLens, AutoReloadUnchangedFiles = ExternalChanges.AutoReloadUnchangedFiles, ShowQuickInfo = ShowQuickInfo, NestRelatedFiles = Explorer.NestRelatedFiles, Editor = Editor.ToSettings(), CodeAssist = CodeAssist.ToSettings(), Debugging = DebuggingSettings(), Network = Network.ToSettings() });
     private async Task GuardAsync(Func<Task> action)
     {
         try { await action(); }

@@ -185,5 +185,9 @@ public sealed class Glyph : FrameworkElement
         ["Timeline"] = new(Parse("M2.5,13.5 H13.5 M2.5,11 L5.75,7.25 L8.75,9.5 L13.5,4 M13.5,4 V6.5 M13.5,4 H11"), null),
         ["Sunburst"] = new(Parse("M5.75,8 A2.25,2.25 0 1 0 10.25,8 A2.25,2.25 0 1 0 5.75,8 Z M8,2.5 A5.5,5.5 0 0 1 13.5,8 M13.1,10.1 A5.5,5.5 0 0 1 6.3,13.25 M4.4,12.2 A5.5,5.5 0 0 1 4,4.25"), null),
         ["Group"] = new(Parse("M3,2.5 H8 C8.3,2.5 8.5,2.7 8.5,3 V6 C8.5,6.3 8.3,6.5 8,6.5 H3 C2.7,6.5 2.5,6.3 2.5,6 V3 C2.5,2.7 2.7,2.5 3,2.5 Z M10.5,4.5 H13.5 M3,9.5 H8 C8.3,9.5 8.5,9.7 8.5,10 V13 C8.5,13.3 8.3,13.5 8,13.5 H3 C2.7,13.5 2.5,13.3 2.5,13 V10 C2.5,9.7 2.7,9.5 3,9.5 Z M10.5,11.5 H13.5"), null),
+        // A request going out and its response coming back: the API client.
+        ["Request"] = new(Parse("M2.5,5.25 H12.5 M10,2.75 L12.5,5.25 L10,7.75 M13.5,10.75 H3.5 M6,8.25 L3.5,10.75 L6,13.25"), null),
+        // The network: where outgoing requests go, and the proxy they pass.
+        ["Globe"] = new(Parse("M8,1.75 A6.25,6.25 0 1 0 8,14.25 A6.25,6.25 0 1 0 8,1.75 Z M1.75,8 H14.25 M8,1.75 C5.6,4.4 5.6,11.6 8,14.25 M8,1.75 C10.4,4.4 10.4,11.6 8,14.25"), null),
     };
 }

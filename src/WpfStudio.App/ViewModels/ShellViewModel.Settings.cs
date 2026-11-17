@@ -12,11 +12,13 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class ShellViewModel
 {
     public const string AppearancePage = "Appearance", EditorPage = "Editor", IntelligencePage = "Intelligence",
-        FilesPage = "Files", DebuggingPage = "Debugging", AssistantPage = "Assistant", ExperimentalPage = "Experimental", ShortcutsPage = "Shortcuts";
+        FilesPage = "Files", DebuggingPage = "Debugging", NetworkPage = "Network", AssistantPage = "Assistant", ExperimentalPage = "Experimental", ShortcutsPage = "Shortcuts";
     private CancellationTokenSource? _settingsSave;
 
     public EditorPreferences Editor { get; }
     public CodeAssistPreferences CodeAssist { get; }
+    /// <summary>The proxy for the API client, ColtonGPT and runtime downloads.</summary>
+    public NetworkPreferences Network { get; }
     [ObservableProperty] public partial string SettingsPage { get; set; } = AppearancePage;
     [ObservableProperty] public partial bool ShowQuickInfo { get; set; } = true;
     partial void OnShowQuickInfoChanged(bool value) { foreach (var document in Documents) document.ShowQuickInfo = value; ScheduleSettingsSave(); }
@@ -65,6 +67,7 @@ public sealed partial class ShellViewModel
     {
         Editor.PropertyChanged += EditorPreferenceChanged;
         CodeAssist.PropertyChanged += (_, args) => { if (args.PropertyName != nameof(CodeAssistPreferences.Status)) ScheduleSettingsSave(); };
+        Network.Changed += ScheduleSettingsSave;
         Debugger.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName is nameof(Debugger.JustMyCode) or nameof(Debugger.StepFiltering) or nameof(Debugger.StopAtEntry)) ScheduleSettingsSave();

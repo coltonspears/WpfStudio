@@ -19,6 +19,8 @@ public sealed record StudioSettings
     public EditorSettings Editor { get; init; } = new();
     public CodeAssistSettings CodeAssist { get; init; } = new();
     public DebuggingSettings Debugging { get; init; } = new();
+    /// <summary>The proxy for outgoing HTTP requests: the API client, ColtonGPT and .NET runtime downloads.</summary>
+    public Net.NetworkSettings Network { get; init; } = new();
 }
 
 /// <summary>How the debugger treats programs WpfStudio launches. The defaults are the adapter's own.</summary>
