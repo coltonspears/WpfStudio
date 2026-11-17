@@ -38,13 +38,21 @@ public sealed class DevOpsTextTests
     }
 
     [Fact]
-    public void WorkItemReferencesAreFoundInMessagesAndBranchNames()
+    public void WorkItemMentionsAreFoundInMessages()
     {
-        Assert.Equal([12, 34, 56], DevOpsText.WorkItemReferences("AB#12 fixes #34", "feature/56-thing"));
-        Assert.Equal([7], DevOpsText.WorkItemReferences("users/ada/7_login", "Merge #7 again"));
-        Assert.Empty(DevOpsText.WorkItemReferences("it&#39;s C#9 and issue#3", "release/2026.11", null));
-        Assert.Equal([88], DevOpsText.WorkItemReferences("88"));
+        Assert.Equal([12, 34], DevOpsText.WorkItemReferences("AB#12 fixes #34", "feature/56-thing"));
+        Assert.Equal([7], DevOpsText.WorkItemReferences("Fixes #7", "Merge #7 again"));
+        Assert.Empty(DevOpsText.WorkItemReferences("it&#39;s C#9 and issue#3", "2-step login", null));
     }
+
+    [Theory]
+    [InlineData("feature/56-thing", 56)]
+    [InlineData("users/ada/7_login", 7)]
+    [InlineData("88", 88)]
+    [InlineData("release/2026.11", null)]
+    [InlineData("feature/login-2", null)]
+    [InlineData(null, null)]
+    public void ABranchNamesTheWorkItemItsSegmentStartsWith(string? branch, int? id) => Assert.Equal(id, DevOpsText.BranchWorkItem(branch));
 
     [Theory]
     [InlineData("feature/123-fix-login", "Fix login")]

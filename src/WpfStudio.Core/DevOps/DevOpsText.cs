@@ -65,8 +65,8 @@ public static partial class DevOpsText
     }
 
     /// <summary>
-    /// Work item numbers mentioned in text: <c>AB#123</c> (Azure Boards), <c>#123</c>, and a number that starts a branch name
-    /// segment (<c>feature/123-login</c>, <c>bugfix/123_login</c>). Each number once, in the order found.
+    /// Work item numbers mentioned in text: <c>AB#123</c> (Azure Boards) and <c>#123</c>, each once, in the order found. Character
+    /// references (<c>&amp;#39;</c>) and names such as <c>C#9</c> are not mentions.
     /// </summary>
     public static IReadOnlyList<int> WorkItemReferences(params string?[] texts)
     {
@@ -74,14 +74,18 @@ public static partial class DevOpsText
         foreach (var text in texts)
         {
             if (string.IsNullOrEmpty(text)) continue;
-            foreach (Match match in HashReference().Matches(text)) Add(match.Groups["id"].Value);
-            foreach (Match match in BranchReference().Matches(text)) Add(match.Groups["id"].Value);
+            foreach (Match match in HashReference().Matches(text))
+                if (int.TryParse(match.Groups["id"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0 && !found.Contains(id)) found.Add(id);
         }
         return found;
-        void Add(string value)
-        {
-            if (int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0 && !found.Contains(id)) found.Add(id);
-        }
+    }
+
+    /// <summary>The work item a branch is named for: a number that starts one of its segments (<c>feature/123-login</c>, <c>users/ada/123_login</c>).</summary>
+    public static int? BranchWorkItem(string? branch)
+    {
+        if (string.IsNullOrEmpty(branch)) return null;
+        var match = BranchReference().Match(branch);
+        return match.Success && int.TryParse(match.Groups["id"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0 ? id : null;
     }
 
     /// <summary>A pull request title from a branch name: <c>feature/123-fix-login</c> reads <c>Fix login</c>.</summary>
