@@ -17,6 +17,7 @@
         <Border Style="{StaticResource ToolbarDivider}" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="WpfTools" ToolTip="WPF Explorer" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" ToolTip="Git changes" />
+        <Button Style="{StaticResource IconButton}" c:Ui.Icon="PullRequest" Command="{Binding OpenDevOpsCommand}" ToolTip="DevOps: pull requests, work items and pipelines" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Package" Command="{Binding OpenPackagesCommand}" ToolTip="NuGet packages" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Database" Command="{Binding ShowToolCommand}" CommandParameter="Database" ToolTip="SQL Server" />
         <Button Style="{StaticResource IconButton}" c:Ui.Icon="Terminal" Command="{Binding ShowToolCommand}" CommandParameter="Terminal" ToolTip="Terminal (Ctrl+`)" />

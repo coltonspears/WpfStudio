@@ -154,6 +154,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
     // Commits, checkouts and merges change what each editor's change margin and blame compare with.
     void IStudioToolsHost.GitRepositoryChanged() => RefreshEditorGit();
     void IStudioToolsHost.GitWorkspaceFilesChanged() => GuardAsync(WorkspaceMutatedAsync).Forget(ReportBackgroundFault);
+    void IStudioToolsHost.ShowDevOps() => OpenDevOpsCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
     void IStudioToolsHost.OpenAssistantSettings() => OpenSettingsCommand.ExecuteAsync(AssistantPage).Forget(ReportBackgroundFault);
     void IStudioToolsHost.RefreshAssistantContext() => UpdateAssistantContext();
     private void RefreshEditorGit()

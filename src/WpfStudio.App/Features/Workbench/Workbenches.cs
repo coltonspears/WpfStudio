@@ -22,14 +22,15 @@ public static class Workbenches
     public const string LiveInspection = "LiveInspection";
     public const string Packages = "Packages";
     public const string Git = "Git";
+    public const string DevOps = "DevOps";
     public const string Profiler = "Profiler";
     public const string Welcome = "Welcome";
 
     public static IReadOnlyList<string> All { get; } =
-        [Explorer, FileGroups, WpfTools, Assistant, Output, Problems, TaskList, Tasks, Search, Terminal, Debugger, Database, Designer, LiveInspection, Packages, Git, Profiler, Welcome];
+        [Explorer, FileGroups, WpfTools, Assistant, Output, Problems, TaskList, Tasks, Search, Terminal, Debugger, Database, Designer, LiveInspection, Packages, Git, DevOps, Profiler, Welcome];
 
     /// <summary>Workbenches that open as closable document tabs rather than tool panes.</summary>
-    public static bool IsDocument(string? id) => id is Packages or Git or Profiler;
+    public static bool IsDocument(string? id) => id is Packages or Git or DevOps or Profiler;
 
     /// <summary>Resolves the older names a tool can be requested by.</summary>
     public static string Canonical(string id) => id switch

@@ -1,0 +1,25 @@
+<UserControl x:Class="WpfStudio.App.Features.DevOps.DevOpsSignInView"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:c="clr-namespace:WpfStudio.App.Controls">
+ <!-- DataContext: DevOpsViewModel. The token box is read and cleared by the code-behind; the view model never holds it. -->
+ <StackPanel MaxWidth="560">
+  <TextBlock Text="SIGN IN WITH GIT CREDENTIAL MANAGER" Style="{StaticResource SectionLabel}"/>
+  <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,8">
+   <Run Text="Uses the sign-in Git already has for this remote, so nothing new is stored. If there is none, Git Credential Manager opens its window ("/><Run Text="Microsoft Entra for Azure DevOps, the browser for GitHub"/><Run Text=")."/>
+  </TextBlock>
+  <Button Content="Sign in with Git Credential Manager" c:Ui.Icon="Git" Style="{StaticResource AccentButton}" HorizontalAlignment="Left" Command="{Binding SignInWithGitCommand}"/>
+
+  <TextBlock Text="OR USE A PERSONAL ACCESS TOKEN" Style="{StaticResource SectionLabel}" Margin="0,20,0,8"/>
+  <TextBlock Text="{Binding TokenHelp}" Style="{StaticResource Caption}" Margin="0,0,0,8"/>
+  <DockPanel>
+   <Button DockPanel.Dock="Right" Content="Sign in" c:Ui.Icon="Plug" Margin="8,0,0,0" Click="SignInWithToken"/>
+   <PasswordBox x:Name="TokenBox" AutomationProperties.Name="Personal access token" KeyDown="TokenKeyDown"/>
+  </DockPanel>
+  <WrapPanel Margin="0,6,0,0">
+   <Button Style="{StaticResource QuietButton}" Content="Create a token" c:Ui.Icon="Link" Command="{Binding OpenTokenPageCommand}" Padding="4,2"/>
+   <TextBlock Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="8,0,0,0">
+    <Run Text="The token is checked with"/><Run Text=" "/><Run Text="{Binding TokenHost, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=", sent only there, and saved encrypted for your Windows account."/>
+   </TextBlock>
+  </WrapPanel>
+ </StackPanel>
+</UserControl>

@@ -31,9 +31,11 @@ public sealed record GitDiff(string Title, string Path, string Text, string? Bef
     public bool HasVersions => Before is not null || After is not null;
 }
 
+/// <param name="RemoteName">The remote <paramref name="Remote"/> was read from: the upstream's, else origin, else the only one.</param>
+/// <param name="Ahead">Commits on the branch that its upstream does not have yet.</param>
 public sealed record GitSnapshot(string? Root, string Branch, string? Upstream, string Tracking,
     IReadOnlyList<GitChange> Changes, IReadOnlyList<string> Branches, IReadOnlyList<GitCommit> History, string Message,
-    WpfStudio.Core.Git.GitRemote? Remote = null, GitOperation Operation = GitOperation.None)
+    WpfStudio.Core.Git.GitRemote? Remote = null, GitOperation Operation = GitOperation.None, string? RemoteName = null, int Ahead = 0, int Behind = 0)
 {
     public static GitSnapshot Unavailable(string message) => new(null, "No repository", null, "", [], [], [], message);
 }

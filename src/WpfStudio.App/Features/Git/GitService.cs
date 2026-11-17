@@ -71,33 +71,122 @@ public sealed class GitService
                 countsTask = RunAsync(root, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], cancellationToken);
             }
         }
-        var remoteTask = ResolveRemoteAsync(root, await remoteNamesTask, upstream, cancellationToken);
+        var remoteName = PickRemote(await remoteNamesTask, upstream);
+        var remoteTask = ResolveRemoteAsync(root, remoteName, cancellationToken);
         await Task.WhenAll(countsTask ?? Task.CompletedTask, remoteTask);
+        int ahead = 0, behind = 0;
         if (countsTask is not null)
         {
             var parts = (await countsTask).Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             tracking = $"{upstream} · {parts[0]} ahead · {parts[1]} behind";
+            _ = int.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out ahead);
+            _ = int.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out behind);
         }
         var changes = GitOutput.ParseStatus((await statusTask).Output);
         return new(root, branch, upstream, tracking, changes, branches, history,
-            changes.Count == 0 ? "Working tree clean" : $"{changes.Count} changed file{(changes.Count == 1 ? "" : "s")}", await remoteTask, await operationTask);
+            changes.Count == 0 ? "Working tree clean" : $"{changes.Count} changed file{(changes.Count == 1 ? "" : "s")}", await remoteTask, await operationTask,
+            remoteName, ahead, behind);
     }
 
     /// <summary>The web location of the upstream's remote, else origin, else the only remote.</summary>
     public async Task<GitRemote?> GetRemoteAsync(string root, string? upstream, CancellationToken cancellationToken = default) =>
-        await ResolveRemoteAsync(root, await GetRemoteNamesAsync(root, cancellationToken), upstream, cancellationToken);
+        await ResolveRemoteAsync(root, PickRemote(await GetRemoteNamesAsync(root, cancellationToken), upstream), cancellationToken);
 
     private static async Task<string[]> GetRemoteNamesAsync(string root, CancellationToken cancellationToken) =>
         (await RunAsync(root, ["remote"], cancellationToken, allowFailure: true, readOnly: true)).Output
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-    private static async Task<GitRemote?> ResolveRemoteAsync(string root, string[] names, string? upstream, CancellationToken cancellationToken)
+    private static string? PickRemote(string[] names, string? upstream)
     {
         var preferred = upstream?.Split('/', 2)[0];
-        var name = names.FirstOrDefault(n => n == preferred) ?? names.FirstOrDefault(n => n == "origin") ?? (names.Length == 1 ? names[0] : null);
+        return names.FirstOrDefault(n => n == preferred) ?? names.FirstOrDefault(n => n == "origin") ?? (names.Length == 1 ? names[0] : null);
+    }
+
+    private static async Task<GitRemote?> ResolveRemoteAsync(string root, string? name, CancellationToken cancellationToken)
+    {
         if (name is null) return null;
         var url = await RunAsync(root, ["remote", "get-url", "--", name], cancellationToken, allowFailure: true, readOnly: true);
         return url.ExitCode == 0 ? GitRemote.Parse(url.Output.Trim()) : null;
+    }
+
+    // ------------------------------------------------------------------ DevOps
+
+    /// <summary>
+    /// The token Git uses for <paramref name="httpsUrl"/>, read with <c>git credential fill</c>: what Git Credential Manager stored when
+    /// the repository was cloned or last fetched (an Entra token for Azure Repos, an OAuth token for GitHub). Without
+    /// <paramref name="interactive"/> nothing is shown and null means none is stored; with it, Git Credential Manager may show its
+    /// sign-in window. The answer is never logged or shown.
+    /// </summary>
+    public async Task<string?> GetCredentialTokenAsync(string root, string httpsUrl, bool interactive, CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(httpsUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https") throw new ArgumentException("Credentials are read for HTTPS addresses only.", nameof(httpsUrl));
+        GitResult result;
+        try { result = await RunAsync(root, ["credential", "fill"], cancellationToken, allowFailure: true, input: $"url={uri.AbsoluteUri}\n\n", signIn: interactive); }
+        catch (Win32Exception) { return null; }
+        if (result.ExitCode != 0) return null;
+        foreach (var line in result.Output.Split('\n'))
+            if (line.StartsWith("password=", StringComparison.Ordinal) && line.Length > 9) return line[9..].TrimEnd('\r');
+        return null;
+    }
+
+    /// <summary>Pushes <paramref name="branch"/> to <paramref name="remote"/> and makes it the branch's upstream.</summary>
+    public async Task<string> PublishBranchAsync(string root, string remote, string branch, CancellationToken cancellationToken = default, bool signIn = false)
+    {
+        await RequireBranchNameAsync(root, branch, cancellationToken);
+        if (string.IsNullOrWhiteSpace(remote) || remote.StartsWith('-')) throw new InvalidOperationException("This repository has no remote to publish to.");
+        return (await RunAsync(root, ["push", "--set-upstream", remote, "refs/heads/" + branch + ":refs/heads/" + branch], cancellationToken, signIn: signIn)).Display;
+    }
+
+    /// <summary>
+    /// Switches to a pull request's source branch: fetches it from <paramref name="remote"/>, then switches to the local branch of
+    /// that name, creating it to track the remote one when there is none. A request from a fork is fetched from the pull request's
+    /// own ref (<paramref name="pullRef"/>) into <paramref name="localName"/>. Needs a clean working tree, like every switch.
+    /// </summary>
+    public async Task<string> CheckoutPullRequestAsync(string root, string remote, string branch, string? pullRef, string localName, CancellationToken cancellationToken = default, bool signIn = false)
+    {
+        await RequireBranchNameAsync(root, localName, cancellationToken);
+        if (string.IsNullOrWhiteSpace(remote) || remote.StartsWith('-')) throw new InvalidOperationException("This repository has no remote to fetch the pull request from.");
+        await RequireCleanAsync(root, cancellationToken);
+        var output = new StringBuilder();
+        string start;
+        if (pullRef is not null)
+        {
+            if (!pullRef.StartsWith("refs/pull/", StringComparison.Ordinal) || pullRef.Contains(':', StringComparison.Ordinal)) throw new InvalidOperationException("The pull request reference is not valid.");
+            // A fork's branch is not on this remote, so there is nothing to track: the local branch starts at what was fetched.
+            output.AppendLine((await RunAsync(root, ["fetch", remote, pullRef], cancellationToken, signIn: signIn)).Display);
+            start = "FETCH_HEAD";
+        }
+        else
+        {
+            await RequireBranchNameAsync(root, branch, cancellationToken);
+            output.AppendLine((await RunAsync(root, ["fetch", remote, $"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"], cancellationToken, signIn: signIn)).Display);
+            start = $"{remote}/{branch}";
+        }
+        var exists = (await RunAsync(root, ["rev-parse", "--verify", "--quiet", "refs/heads/" + localName], cancellationToken, allowFailure: true)).ExitCode == 0;
+        string[] arguments = exists ? ["switch", "--no-guess", "--", localName]
+            : pullRef is null ? ["switch", "--no-guess", "-c", localName, "--track", start] : ["switch", "--no-guess", "--no-track", "-c", localName, start];
+        output.Append((await RunAsync(root, arguments, cancellationToken)).Display);
+        if (exists) output.Append("\nThe local branch already existed and was not moved. Pull, or merge the fetched commits, to bring it up to date.");
+        return output.ToString().Trim();
+    }
+
+    /// <summary>Subjects of the commits on <paramref name="source"/> that <paramref name="target"/> (on the remote, else locally) lacks, oldest first.</summary>
+    public async Task<IReadOnlyList<string>> GetCommitSubjectsAsync(string root, string? remote, string target, string source, CancellationToken cancellationToken = default)
+    {
+        foreach (var baseRef in new[] { remote is null ? null : $"refs/remotes/{remote}/{target}", "refs/heads/" + target }.OfType<string>())
+        {
+            if ((await RunAsync(root, ["rev-parse", "--verify", "--quiet", baseRef], cancellationToken, allowFailure: true, readOnly: true)).ExitCode != 0) continue;
+            var log = await RunAsync(root, ["log", "--reverse", "-50", "--no-show-signature", "--format=%s%x00", $"{baseRef}..refs/heads/{source}", "--"], cancellationToken, allowFailure: true, readOnly: true);
+            return log.ExitCode != 0 ? [] : log.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+        return [];
+    }
+
+    private static async Task RequireBranchNameAsync(string root, string branch, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(branch) || branch.StartsWith('-')) throw new InvalidOperationException("Enter a valid branch name.");
+        var check = await RunAsync(root, ["check-ref-format", "--branch", branch], cancellationToken, allowFailure: true, readOnly: true);
+        if (check.ExitCode != 0) throw new InvalidOperationException($"\"{branch}\" is not a valid branch name.");
     }
 
     public async Task<GitOperation> GetOperationAsync(string root, CancellationToken cancellationToken = default)

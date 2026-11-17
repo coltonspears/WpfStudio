@@ -24,6 +24,11 @@ public sealed record DevOpsTarget(DevOpsProviderKind Kind, string Owner, string 
         ? $"{Owner} / {Project} / {Repository}"
         : $"{Owner} / {Repository}";
 
+    /// <summary>Where a person creates a token with the access the workbench uses.</summary>
+    public string TokenPageUrl => Kind == DevOpsProviderKind.AzureDevOps
+        ? AzureDevOpsUrls.TokenSettingsUrl(Organization!)
+        : $"{new Uri(RepositoryWebUrl).GetLeftPart(UriPartial.Authority)}/settings/tokens/new?scopes=repo,workflow,read:org&description=WpfStudio";
+
     /// <summary>The service's own host name, shown where the token will be sent.</summary>
     public string Host => new Uri(Kind == DevOpsProviderKind.AzureDevOps ? Organization!.Url : RepositoryWebUrl).Host;
 

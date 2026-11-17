@@ -101,6 +101,12 @@ public sealed record DevOpsCheck(string Name, CheckState State, string? Descript
         CheckState.Pending => "Pending", CheckState.Running => "Running", CheckState.Succeeded => "Succeeded",
         CheckState.Failed => "Failed", CheckState.Neutral => "Not applicable", _ => "Unknown"
     };
+    /// <summary>The state in the vocabulary of <see cref="DevOpsText.StatusKind"/>, for one status style across runs, steps and checks.</summary>
+    public string StatusKind => State switch
+    {
+        CheckState.Pending => "Queued", CheckState.Running => "Running", CheckState.Succeeded => "Succeeded", CheckState.Failed => "Failed",
+        CheckState.Neutral => "Skipped", _ => "Unknown"
+    };
 }
 
 public sealed record DevOpsCommit(string Id, string Message, string Author, DateTimeOffset? Date)
@@ -162,6 +168,7 @@ public sealed record DevOpsRun(string Id, string PipelineId, string PipelineName
 {
     public bool IsActive => Status is RunStatus.Queued or RunStatus.Running or RunStatus.Cancelling;
     public string StatusText => DevOpsText.RunStatusText(Status, Result);
+    public string StatusKind => DevOpsText.StatusKind(Status, Result);
     public string Title => $"{PipelineName} #{Number}";
     public string DurationText => DevOpsText.Duration(Started, Finished);
     public string WhenText => Finished is { } finished ? DevOpsText.Relative(finished) : Started is { } started ? "started " + DevOpsText.Relative(started) :
@@ -184,6 +191,7 @@ public sealed record DevOpsTimelineRecord(string Id, string? ParentId, string Ty
     public IReadOnlyList<DevOpsIssue> IssueList => Issues ?? [];
     public bool HasLog => LogId is not null;
     public string StatusText => DevOpsText.RunStatusText(State, Result);
+    public string StatusKind => DevOpsText.StatusKind(State, Result);
     public string Detail => string.Join(" · ", new[]
     {
         State == RunStatus.Queued ? "pending" : DevOpsText.Duration(Started, Finished),
@@ -242,6 +250,21 @@ public static partial class DevOpsText
         {
             RunResult.Succeeded => "Succeeded", RunResult.PartiallySucceeded => "Partially succeeded", RunResult.Failed => "Failed",
             RunResult.Canceled => "Canceled", RunResult.Skipped => "Skipped", _ => "Completed"
+        },
+        _ => "Unknown"
+    };
+
+    /// <summary>
+    /// One word for how a run, step or check stands, which the views style alike: Succeeded, Failed, Warning (partly succeeded),
+    /// Running, Queued, Canceled, Skipped or Unknown.
+    /// </summary>
+    public static string StatusKind(RunStatus status, RunResult result) => status switch
+    {
+        RunStatus.Queued => "Queued", RunStatus.Running or RunStatus.Cancelling => "Running",
+        RunStatus.Completed => result switch
+        {
+            RunResult.Succeeded => "Succeeded", RunResult.PartiallySucceeded => "Warning", RunResult.Failed => "Failed",
+            RunResult.Canceled => "Canceled", RunResult.Skipped => "Skipped", _ => "Unknown"
         },
         _ => "Unknown"
     };

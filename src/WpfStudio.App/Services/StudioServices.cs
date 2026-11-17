@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using WpfStudio.App.Features.ColtonGpt;
+using WpfStudio.App.Features.DevOps;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Git;
 using WpfStudio.App.Features.Packages;
@@ -31,7 +32,7 @@ public static class StudioServices
     private static string DataDirectory(IServiceProvider services) => services.GetRequiredService<IOptions<StudioPaths>>().Value.DataDirectory;
 
     public static IServiceCollection AddWpfStudio(this IServiceCollection services, IUiDispatcher dispatcher) => services
-        .AddStudioCore(dispatcher).AddWorkspaceServices().AddCodeAssist().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddPackages().AddAssistant().AddProfiling().AddShell();
+        .AddStudioCore(dispatcher).AddWorkspaceServices().AddCodeAssist().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddDevOps().AddPackages().AddAssistant().AddProfiling().AddShell();
 
     public static IServiceCollection AddStudioCore(this IServiceCollection services, IUiDispatcher dispatcher)
     {
@@ -92,6 +93,27 @@ public static class StudioServices
     public static IServiceCollection AddTerminal(this IServiceCollection services) => services.AddSingleton<TerminalViewModel>();
 
     public static IServiceCollection AddGit(this IServiceCollection services) => services.AddSingleton<GitService>();
+
+    /// <summary>
+    /// The DevOps workbench's HTTP client follows no redirect by itself: <see cref="WpfStudio.Core.DevOps.DevOpsRestClient"/> follows them,
+    /// and sends the token only while the address stays on the service.
+    /// </summary>
+    public static IServiceCollection AddDevOps(this IServiceCollection services)
+    {
+        services.AddHttpClient(DevOpsClientName, client => client.Timeout = TimeSpan.FromSeconds(100))
+            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler { AllowAutoRedirect = false, AutomaticDecompression = System.Net.DecompressionMethods.All });
+        services.AddSingleton<IDevOpsCredentials>(sp => new DevOpsCredentials(DataDirectory(sp), sp.GetRequiredService<GitService>()));
+        services.AddSingleton<DevOpsProviderFactory>(sp =>
+        {
+            var factory = sp.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+            return (target, token, settings) => target.Kind == WpfStudio.Core.DevOps.DevOpsProviderKind.AzureDevOps
+                ? new WpfStudio.Core.DevOps.AzureDevOps.AzureDevOpsProvider(factory.CreateClient(DevOpsClientName), target, token) { HiddenStates = settings.HiddenStateList }
+                : new WpfStudio.Core.DevOps.GitHub.GitHubProvider(factory.CreateClient(DevOpsClientName), target, token);
+        });
+        return services;
+    }
+
+    private const string DevOpsClientName = "devops";
 
     public static IServiceCollection AddPackages(this IServiceCollection services) => services.AddSingleton<INuGetPackageService, NuGetPackageService>();
 

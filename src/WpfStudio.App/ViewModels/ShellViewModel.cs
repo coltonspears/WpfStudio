@@ -915,6 +915,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (name == Workbenches.Packages) OpenPackagesCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name == Workbenches.Git) OpenGitCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
+        else if (name == Workbenches.DevOps) OpenDevOpsCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name == Workbenches.Assistant) OpenAssistantCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name == Workbenches.Designer) OpenDesignerCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
         else if (name != null) ToolRequested?.Invoke(name);

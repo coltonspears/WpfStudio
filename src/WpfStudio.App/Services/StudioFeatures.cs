@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.Messaging;
 using WpfStudio.App.Features.ColtonGpt;
+using WpfStudio.App.Features.DevOps;
 using WpfStudio.App.Features.Git;
 using WpfStudio.App.Features.Packages;
 using WpfStudio.Contracts;
@@ -26,6 +27,8 @@ public interface IStudioToolsHost : IWorkspaceMutationHost
     void GitRepositoryChanged();
     /// <summary>A Git operation rewrote working files.</summary>
     void GitWorkspaceFilesChanged();
+    /// <summary>Brings the DevOps workbench forward, loading the Git repository it follows if that has not happened yet.</summary>
+    void ShowDevOps();
     void OpenAssistantSettings();
     void RefreshAssistantContext();
 }
@@ -36,7 +39,8 @@ public sealed class StudioFeatures : IDisposable
     private readonly IMessenger _messenger;
     private IStudioToolsHost? _host;
     private bool _disposed;
-    public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs, IDesktopService desktop, IMessenger messenger)
+    public StudioFeatures(INuGetPackageService packages, GitService git, AssistantViewModel assistant, IUserDialogService dialogs, IDesktopService desktop, IMessenger messenger,
+        IDevOpsCredentials devOpsCredentials, DevOpsProviderFactory devOpsProviders, IClipboardService clipboard)
     {
         _messenger = messenger;
         Assistant = assistant;
@@ -46,6 +50,8 @@ public sealed class StudioFeatures : IDisposable
         Git.OpenFileRequested += path => _host?.OpenFile(path);
         Git.RepositoryChanged += () => _host?.GitRepositoryChanged();
         Git.WorkspaceFilesChanged += () => _host?.GitWorkspaceFilesChanged();
+        DevOps = new(Git, git, devOpsCredentials, devOpsProviders, desktop, dialogs, clipboard);
+        DevOps.ShowRequested += () => _host?.ShowDevOps();
         assistant.SettingsRequested += () => _host?.OpenAssistantSettings();
         assistant.RefreshContextRequested += () => _host?.RefreshAssistantContext();
         messenger.Register<StudioFeatures, WorkspaceChangedMessage>(this, static (features, message) => features.Packages.SetWorkspace(message.Workspace));
@@ -55,6 +61,8 @@ public sealed class StudioFeatures : IDisposable
     public void Attach(IStudioToolsHost host) => _host = host;
     public PackagesViewModel Packages { get; }
     public GitViewModel Git { get; }
+    /// <summary>Pull requests, work items and pipelines of the Git pane's repository on Azure DevOps or GitHub.</summary>
+    public DevOpsViewModel DevOps { get; }
     /// <summary>The Git CLI boundary shared by the Git pane and editors (change margin and blame).</summary>
     public GitService GitService { get; }
     public AssistantViewModel Assistant { get; }
@@ -64,6 +72,6 @@ public sealed class StudioFeatures : IDisposable
         _disposed = true;
         _messenger.UnregisterAll(this);
         _host = null;
-        Packages.Dispose(); Git.Dispose(); Assistant.Dispose();
+        DevOps.Dispose(); Packages.Dispose(); Git.Dispose(); Assistant.Dispose();
     }
 }

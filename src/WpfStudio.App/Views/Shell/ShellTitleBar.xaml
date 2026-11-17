@@ -239,6 +239,14 @@
         <MenuItem Header="_Tools">
           <MenuItem Header="NuGet packages…" c:Ui.Icon="Package" Command="{Binding OpenPackagesCommand}" />
           <MenuItem Header="Git changes…" c:Ui.Icon="Git" Command="{Binding OpenGitCommand}" />
+          <MenuItem Header="_DevOps" c:Ui.Icon="PullRequest">
+            <MenuItem Header="Pull requests…" c:Ui.Icon="PullRequest" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="0" />
+            <MenuItem Header="{Binding Features.DevOps.WorkItemsTitle}" HeaderStringFormat="{}{0}…" c:Ui.Icon="WorkItem" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="1" />
+            <MenuItem Header="{Binding Features.DevOps.PipelinesTitle}" HeaderStringFormat="{}{0}…" c:Ui.Icon="Pipeline" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="2" />
+            <Separator />
+            <MenuItem Header="Create pull request…" c:Ui.Icon="Plus" Command="{Binding Features.DevOps.CreatePullRequestCommand}" />
+            <MenuItem Header="Access and settings…" c:Ui.Icon="Plug" Command="{Binding OpenDevOpsTabCommand}" CommandParameter="3" />
+          </MenuItem>
           <MenuItem Header="Memory profiler…" c:Ui.Icon="Layers" Command="{Binding ShowToolCommand}" CommandParameter="Profiler" />
           <Separator />
           <MenuItem Header="Run task…" c:Ui.Icon="Play" Command="{Binding RunTaskPaletteCommand}" />

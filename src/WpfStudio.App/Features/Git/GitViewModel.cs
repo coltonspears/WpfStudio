@@ -50,6 +50,12 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasRepository))] public partial string? RepositoryRoot { get; set; }
     [ObservableProperty] public partial string Branch { get; set; } = "No repository";
     [ObservableProperty] public partial string Tracking { get; set; } = "";
+    /// <summary>The current branch's upstream, such as <c>origin/feature/x</c>; null when it has none or HEAD is detached.</summary>
+    [ObservableProperty] public partial string? Upstream { get; private set; }
+    /// <summary>The remote <see cref="GitViewModel.Remote"/> names: the upstream's, else origin, else the only one.</summary>
+    [ObservableProperty] public partial string? RemoteName { get; private set; }
+    /// <summary>Commits on the current branch its upstream does not have.</summary>
+    [ObservableProperty] public partial int AheadCount { get; private set; }
     [ObservableProperty] public partial string Status { get; set; } = "Open a solution or project to see its Git repository.";
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasError))] public partial string Error { get; set; } = "";
     [ObservableProperty] public partial string Output { get; set; } = "Git actions run only when you request them. Credentials use your existing Git configuration.\n";
@@ -116,6 +122,9 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
             RepositoryRoot = null;
             Branch = "Loading repository…";
             Tracking = "";
+            Upstream = null;
+            RemoteName = null;
+            AheadCount = 0;
             Quietly(() =>
             {
                 Staged.Clear();
@@ -349,6 +358,9 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
         RepositoryRoot = snapshot.Root;
         Branch = snapshot.Branch;
         Tracking = snapshot.Tracking;
+        Upstream = snapshot.Upstream;
+        RemoteName = snapshot.RemoteName;
+        AheadCount = snapshot.Ahead;
         Status = snapshot.Message;
         // Rebuilding the lists would clear their selection; keep the reader on the same file and commit instead.
         var selected = SelectedChange;

@@ -52,7 +52,47 @@ public sealed partial class GitViewModel
     private void OpenRemote() => Open(Remote!.BranchUrl(Branch));
     private bool CanCreatePullRequest() => HasRemote && HasRepository && Branch is not ("Detached HEAD" or "No repository" or "Loading repository…");
     [RelayCommand(CanExecute = nameof(CanCreatePullRequest))]
-    private void CreatePullRequest() => Open(Remote!.NewPullRequestUrl(Branch));
+    private void CreatePullRequest()
+    {
+        // The DevOps workbench creates it in WpfStudio when it serves this remote; the web page is the fallback.
+        if (CreatePullRequestInWorkbench?.Invoke() == true) return;
+        Open(Remote!.NewPullRequestUrl(Branch));
+    }
+
+    /// <summary>Set by the DevOps workbench: starts creating a pull request in WpfStudio, and returns false when it cannot for this remote.</summary>
+    public Func<bool>? CreatePullRequestInWorkbench { get; set; }
+
+    // ------------------------------------------------------------------ The current branch's pull request
+    /// <summary>The active pull request from the current branch as the DevOps workbench last found it, such as <c>!42 · 1 approval</c>.</summary>
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasBranchPullRequest))] public partial string? BranchPullRequestText { get; set; }
+    public bool HasBranchPullRequest => BranchPullRequestText is not null;
+    /// <summary>Raised to show the current branch's pull request in the DevOps workbench.</summary>
+    public event Action? BranchPullRequestRequested;
+    [RelayCommand]
+    private void OpenBranchPullRequest() => BranchPullRequestRequested?.Invoke();
+
+    /// <summary>
+    /// Runs a Git action another tool asked for (the DevOps workbench checks out a pull request or publishes a branch) as this pane's
+    /// one Git action: nothing happens while another runs, output and failures go to this pane, open documents are saved first when
+    /// files can change, and the repository is refreshed afterwards. A network action can offer Sign in and retry here. True when the
+    /// action completed.
+    /// </summary>
+    /// <param name="action">Receives the repository root and whether Git Credential Manager may show its sign-in window.</param>
+    public async Task<bool> RunToolActionAsync(string label, Func<string, bool, CancellationToken, Task<string>> action, bool changesWorkspaceFiles, bool network,
+        CancellationToken cancellationToken = default)
+    {
+        if (RepositoryRoot is not { } root || !CanOperate()) return false;
+        var completed = false;
+        async Task<string> Run(bool signIn, CancellationToken token)
+        {
+            var output = await action(root, signIn, token);
+            completed = true;
+            return output;
+        }
+        if (network) await NetworkAsync(label, Run, cancellationToken, save: changesWorkspaceFiles, changesWorkspaceFiles);
+        else await MutateAsync(label, token => Run(false, token), cancellationToken, save: changesWorkspaceFiles, changesWorkspaceFiles);
+        return completed;
+    }
     private void Open(string url)
     {
         try { _desktop.OpenUrl(url); AppendOutput("Opened " + url); }
