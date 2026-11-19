@@ -228,12 +228,19 @@ public sealed class GitService
         if (known is not null && known.HeadCommit == head && known.RelativePath == relative && string.Equals(known.Root, root, StringComparison.OrdinalIgnoreCase))
             return known.Remote == remote ? known : known with { Remote = remote };
         // Committed means present in HEAD. A newly staged file is in the index only, so all its lines are additions.
-        var tracked = head is not null && (await RunAsync(root, ["cat-file", "-e", $"HEAD:{relative}"], cancellationToken, allowFailure: true, readOnly: true)).ExitCode == 0;
+        // One read answers both questions: the blob fails to read exactly when HEAD has no such file, so no separate existence check.
+        var tracked = false;
         string? text = null;
-        if (tracked)
+        if (head is not null)
         {
-            try { text = await ReadBlobAsync(root, $"HEAD:{relative}", cancellationToken); }
-            catch (GitOutputLimitException) { text = null; }
+            try
+            {
+                var blob = await RunAsync(root, ["cat-file", "blob", $"HEAD:{relative}"], cancellationToken, allowFailure: true, readOnly: true, fileContent: true);
+                tracked = blob.ExitCode == 0;
+                text = tracked ? blob.Output : null;
+            }
+            // Only an existing blob can be too large to read.
+            catch (GitOutputLimitException) { tracked = true; text = null; }
             if (IsBinary(text)) text = null;
         }
         return new(root, relative, text, tracked, head, remote);
@@ -249,9 +256,11 @@ public sealed class GitService
 
     private async Task<(string? Head, GitRemote? Remote)> ReadRepositoryAsync(string root, CancellationToken cancellationToken)
     {
-        var head = await RunAsync(root, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken, allowFailure: true, readOnly: true);
+        // HEAD does not depend on the upstream or the remote, so it is read alongside them.
+        var headTask = RunAsync(root, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken, allowFailure: true, readOnly: true);
         var upstream = await RunAsync(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cancellationToken, allowFailure: true, readOnly: true);
         var remote = await GetRemoteAsync(root, upstream.ExitCode == 0 ? upstream.Output.Trim() : null, cancellationToken);
+        var head = await headTask;
         return (head.ExitCode == 0 ? head.Output.Trim() : null, remote);
     }
 

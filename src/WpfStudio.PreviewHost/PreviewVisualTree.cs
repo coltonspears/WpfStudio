@@ -22,6 +22,9 @@ internal sealed class PreviewVisualTree(PreviewScene scene, PreviewDiagnosticLog
     public string? IdOf(DependencyObject target) => _ids.GetValueOrDefault(target);
     public void Clear() { _objects.Clear(); _ids.Clear(); }
 
+    /// <summary>The most elements the outline lists. It virtualizes, so this bounds the render's own walk, not the view.</summary>
+    internal const int MaximumNodes = 50_000;
+
     public IReadOnlyList<PreviewNode> CollectNodes()
     {
         if (scene.Root is null) return [];
@@ -30,7 +33,7 @@ internal sealed class PreviewVisualTree(PreviewScene scene, PreviewDiagnosticLog
         var parents = new Dictionary<DependencyObject, DependencyObject?>(ReferenceEqualityComparer.Instance);
         var stack = new Stack<(DependencyObject Node, DependencyObject? Parent)>();
         stack.Push((scene.Root, null));
-        while (stack.Count > 0 && visited.Count < 10_000)
+        while (stack.Count > 0 && visited.Count < MaximumNodes)
         {
             var current = stack.Pop();
             if (!visited.Add(current.Node)) continue;
@@ -45,7 +48,7 @@ internal sealed class PreviewVisualTree(PreviewScene scene, PreviewDiagnosticLog
             for (int i = children.Count - 1; i >= 0; i--) stack.Push((children[i], current.Node));
         }
         if (stack.Count > 0)
-            log.Add(new PreviewDiagnostic("The inspector tree is limited to 10,000 elements. The preview image still renders the complete view.", "Warning"));
+            log.Add(new PreviewDiagnostic($"The inspector tree is limited to {MaximumNodes:N0} elements. The preview image still renders the complete view.", "Warning"));
         // Remove template instances and items no longer present after live edits.
         foreach (var stale in _ids.Keys.Where(o => !visited.Contains(o)).ToArray())
         {

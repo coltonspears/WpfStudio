@@ -186,10 +186,10 @@ public sealed partial class MemoryProfilerViewModel
         if (ComparisonSearch.Trim() is { Length: > 0 } search) rows = rows.Where(r => r.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
         // Steady growers first: they are the strongest leak candidates.
         var list = rows.OrderByDescending(r => r.GrowsEveryTime && r.BytesDelta > 0)
-            .ThenByDescending(r => r.GrowsEveryTime && r.BytesDelta > 0 && !MemoryLabels.IsFrameworkModule(r.Module)).Take(500).ToArray();
+            .ThenByDescending(r => r.GrowsEveryTime && r.BytesDelta > 0 && !MemoryLabels.IsFrameworkModule(r.Module)).ToArray();
         var maxDelta = list.Length == 0 ? 1 : Math.Max(1, list.Max(r => Math.Abs(r.BytesDelta)));
         ComparisonRows = list.Select(r => r with { DeltaRatio = (double)r.BytesDelta / maxDelta }).ToArray();
-        ComparisonCountText = list.Length == 0 ? "No matching types" : $"{list.Length:N0} type{(list.Length == 1 ? "" : "s")}" + (list.Length == 500 ? " (first 500)" : "");
+        ComparisonCountText = list.Length == 0 ? "No matching types" : $"{list.Length:N0} type{(list.Length == 1 ? "" : "s")}";
 
         var gap = current.CapturedAt - baseline.CapturedAt;
         ComparisonHeadline = $"#{CurrentSnapshot!.Number} compared with #{BaselineSnapshot!.Number}" + (gap > TimeSpan.Zero ? $", {Elapsed(gap)} later" : "") +

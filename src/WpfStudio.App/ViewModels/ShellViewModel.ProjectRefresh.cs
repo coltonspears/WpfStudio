@@ -13,6 +13,8 @@ public sealed partial class ShellViewModel
     private CancellationTokenSource? _projectRefreshDelay;
     private bool _projectRefreshRunning;
     private bool _projectRefreshAgain;
+    // A build finished while a refresh was already reading the projects, so that refresh may have missed what the build wrote.
+    private bool _projectRefreshAfterBuild;
 
     /// <summary>How long project files must stay quiet before the refresh starts, so a checkout or a restore is read once.</summary>
     internal TimeSpan ProjectRefreshPause { get; set; } = TimeSpan.FromSeconds(2);
@@ -36,17 +38,24 @@ public sealed partial class ShellViewModel
         }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default).Forget();
     }
 
-    private async Task RefreshChangedProjectModelAsync()
+    private Task RefreshChangedProjectModelAsync() => XamlAnalysis.ProjectReloadRequired
+        ? RefreshProjectModelAsync("Project files changed on disk. Refreshing the project model…") : Task.CompletedTask;
+
+    /// <param name="status">Shown while the refresh runs, or null to leave the status alone, as after a build, which reports its own result.</param>
+    private async Task RefreshProjectModelAsync(string? status)
     {
-        if (_projectRefreshRunning || !XamlAnalysis.ProjectReloadRequired || Workspace is not { } workspace || !_workspace.IsConnected) return;
-        // A build, a load or a reload holds the gate. It reloads the model itself when it succeeds; otherwise look again once it is done.
-        if (_loading || IsBusy) { ScheduleProjectModelRefresh(); return; }
+        var afterBuild = status is null;
+        if (_projectRefreshRunning) { if (afterBuild) _projectRefreshAfterBuild = true; return; }
+        if (Workspace is not { } workspace) return;
+        // Without a worker there is nothing to refresh in place. A build used to bring one back by reloading, and still does.
+        if (!_workspace.IsConnected) { if (afterBuild) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); return; }
+        // A load or a reload holds the gate and reads the projects itself; a change seen meanwhile is looked at again once it is done.
+        if (_loading || IsBusy) { if (!afterBuild) ScheduleProjectModelRefresh(); return; }
         _projectRefreshRunning = true;
         _projectRefreshAgain = false;
         var configuration = Configuration;
         var framework = Path.GetExtension(workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? TargetFramework : null;
-        Status = "Project files changed on disk. Refreshing the project model…";
-        _statusShowsModelRefresh = true;
+        if (status is not null) { Status = status; _statusShowsModelRefresh = true; }
         try
         {
             var snapshot = await _workspace.RefreshAsync(new(workspace.Path, configuration, framework), _lifetime.Token);
@@ -71,7 +80,8 @@ public sealed partial class ShellViewModel
         finally
         {
             _projectRefreshRunning = false;
-            if (_projectRefreshAgain) ScheduleProjectModelRefresh();
+            if (_projectRefreshAfterBuild) { _projectRefreshAfterBuild = false; RefreshProjectModelAsync(status: null).Forget(ReportBackgroundFault); }
+            else if (_projectRefreshAgain) ScheduleProjectModelRefresh();
         }
     }
 }

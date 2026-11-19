@@ -27,8 +27,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
     {
         token.ThrowIfCancellationRequested();
         if ((request.DumpPath is null) == (request.ProcessId is null)) throw new ArgumentException("Choose either a dump or a running process.");
-        if (request.MaxObjects is < 1_000 or > 5_000_000 || request.MaxReferences is < 1_000 or > 30_000_000)
-            throw new ArgumentOutOfRangeException(nameof(request), "Heap limits must be between 1,000 and 5,000,000 objects, and 1,000 and 30,000,000 references.");
+        var budget = HeapBudget.For(request);
         var options = new DataTargetOptions
         {
             // Mapping an entire dump consumes scarce x86 virtual address space.
@@ -111,7 +110,8 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                     if (segment?.GetGeneration(obj.Address) == Generation.Large) extras.LargeFreeBytes += (long)obj.Size;
                     continue;
                 }
-                if (objects.Count >= request.MaxObjects) { Incomplete($"Object limit reached ({request.MaxObjects:N0}). Increase the analysis budget to include the rest of the heap."); break; }
+                if (objects.Count >= budget.Objects) { Incomplete(budget.ObjectLimitNote()); break; }
+                if (budget.Exceeds(objects.Count, edges.Count)) { Incomplete(budget.MemoryLimitNote()); break; }
                 var type = obj.Type!;
                 if (!typeByMethodTable.TryGetValue(type.MethodTable, out var typeId))
                 {
@@ -148,7 +148,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
             {
                 token.ThrowIfCancellationRequested();
                 if (objects[i].Generation != HeapGeneration.Frozen) continue;
-                if (roots.Count >= Math.Min(request.MaxReferences, 1_000_000)) { Incomplete("The frozen-object root analysis budget was reached."); break; }
+                if (roots.Count >= budget.Roots) { Incomplete("The frozen-object root analysis budget was reached."); break; }
                 // Frozen segments are intrinsically alive; ClrMD's handle/stack root list excludes them.
                 roots.Add(new(i, $"Frozen segment @ 0x{objects[i].Address:X}", "Frozen segment", IsPermanent: true));
             }
@@ -156,7 +156,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
             foreach (var root in heap.EnumerateRoots())
             {
                 token.ThrowIfCancellationRequested();
-                if (roots.Count >= Math.Min(request.MaxReferences, 1_000_000)) { Incomplete("The GC-root analysis budget was reached."); break; }
+                if (roots.Count >= budget.Roots) { Incomplete("The GC-root analysis budget was reached."); break; }
                 if (root.Object.Address == 0) continue;
                 if (!addresses.TryGetValue(root.Object.Address, out var objectId)) { Incomplete("Some GC roots point outside the enumerated heap."); continue; }
                 var label = staticNames.TryGetValue(root.Address, out var name) ? name : root is ClrStackRoot stack
@@ -169,20 +169,24 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                 Incomplete("No runtime GC roots were available. This capture cannot establish collection eligibility for ordinary heap objects.");
             if (extras.StringsTruncated) notes.Add("Duplicate-string detection compared a bounded sample of strings.");
             Stage("Roots");
-            var graph = new HeapGraph(objects.ToArray(), types.ToArray(), edges.ToArray(), labels.ToArray(), roots.ToArray(), complete);
+            // Each list is released as soon as its array exists: on a whole-heap capture the two copies of the objects and
+            // references would otherwise coexist through the analysis, the most memory-hungry stage.
+            var objectArray = objects.ToArray(); objects.Clear(); objects.TrimExcess();
+            var edgeArray = edges.ToArray(); edges.Clear(); edges.TrimExcess();
+            var graph = new HeapGraph(objectArray, types.ToArray(), edgeArray, labels.ToArray(), roots.ToArray(), complete);
             Stage("Graph");
             var analysis = new HeapAnalysis(graph, token);
             timings.AddRange(analysis.Timings); clock.Restart();
             long reachableBytes = 0, unreachableBytes = 0;
-            for (var i = 0; i < objects.Count; i++)
-                if (analysis.Reachable[i]) reachableBytes = checked(reachableBytes + objects[i].Size);
-                else unreachableBytes = checked(unreachableBytes + objects[i].Size);
+            for (var i = 0; i < objectArray.Length; i++)
+                if (analysis.Reachable[i]) reachableBytes = checked(reachableBytes + objectArray[i].Size);
+                else unreachableBytes = checked(unreachableBytes + objectArray[i].Size);
             var insights = HeapInsights.Compute(graph, analysis, extras, token);
             Stage("Findings");
             var family = info.Flavor == ClrFlavor.Desktop ? ".NET Framework" : ".NET";
             var summary = new HeapSummary(source, $"{family} {info.Version}", target.DataReader.Architecture.ToString(),
-                DateTimeOffset.UtcNow, objects.Count, checked(reachableBytes + unreachableBytes), reachableBytes, unreachableBytes,
-                extras.FreeBytes, edges.Count, roots.Count, complete, notes.ToArray(), analysis.SummarizeTypes(),
+                DateTimeOffset.UtcNow, objectArray.Length, checked(reachableBytes + unreachableBytes), reachableBytes, unreachableBytes,
+                extras.FreeBytes, edgeArray.Length, roots.Count, complete, notes.ToArray(), analysis.SummarizeTypes(),
                 analysis.SummarizeGenerations(), analysis.SummarizeRootKinds(), insights, analysis.GetTopRetainers());
             Stage("Summaries");
             return new(target, runtime, addresses, analysis, summary) { LoadTimings = timings };
@@ -259,10 +263,10 @@ public sealed partial class ClrHeapSnapshot : IDisposable
 
             bool Add(int from, ulong to, int label, bool dependent)
             {
-                if (edges.Count >= request.MaxReferences)
+                if (edges.Count >= budget.References)
                 {
                     referencesFull = true;
-                    Incomplete($"Reference limit reached ({request.MaxReferences:N0}). Increase the analysis budget for full retention coverage.");
+                    Incomplete(budget.ReferenceLimitNote());
                     return false;
                 }
                 edges.Add(new(from, -1, label, dependent)); edgeTargets.Add(to);

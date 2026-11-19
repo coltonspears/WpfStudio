@@ -104,7 +104,9 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
     Task<bool> IExternalChangesHost.CloseDocumentAsync(EditorViewModel document, bool discardChanges) => CloseDocumentAsync(document, discardChanges);
     void IExternalChangesHost.DiskVersionsChecked()
     {
-        XamlAnalysis.Request();
+        // Runs on every activation of the window. Documents reloaded from disk request their own scan as their text changes,
+        // and the watcher reports the rest, so this only looks for what both missed.
+        XamlAnalysis.CheckDisk();
         // A commit or checkout in the terminal changes what change margins and blame compare with.
         RefreshEditorGit();
     }
@@ -129,7 +131,7 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
     bool IAutoSaveHost.IsReviewOpen => IsPreviewOpen;
     void IAutoSaveHost.ReportStatus(string status) => Status = status;
     void IAutoSaveHost.AppendOutput(string line) => AppendOutput(line);
-    void IAutoSaveHost.AutoSaveCompleted() => XamlAnalysis.Request();
+    void IAutoSaveHost.AutoSaveCompleted() => XamlAnalysis.RequestKeepingResults();
     void IAutoSaveHost.ExternalChangeDetected() => CheckExternalChangesAsync().Forget(ReportBackgroundFault);
 
     // ------------------------------------------------------------------ IBreakpointEditingHost

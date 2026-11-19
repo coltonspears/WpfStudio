@@ -91,7 +91,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public ObservableCollection<EditorViewModel> Documents { get; } = [];
     public ObservableCollection<WorkspaceProject> Projects { get; } = [];
     public ObservableCollection<string> RecentWorkspaces { get; } = [];
-    public ObservableCollection<NavigationResult> SearchResults { get; } = [];
+    /// <summary>Replaced in one notification: the Search pane groups by file, and grouping re-sorts on every single add.</summary>
+    public BulkObservableCollection<NavigationResult> SearchResults { get; } = [];
     public ObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
     public IReadOnlyList<ScaffoldKind> ScaffoldKinds { get; } = [ScaffoldKind.ViewAndViewModel, ScaffoldKind.UserControl, ScaffoldKind.ViewModel, ScaffoldKind.ResourceDictionary, ScaffoldKind.Converter];
     public ObservableCollection<string> Configurations { get; } = ["Debug", "Release"];
@@ -164,6 +165,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     }
     /// <summary>For internal callers: ExecuteAsync skips CanExecute, and on a running cancellable command it cancels that execution.</summary>
     private static Task ExecuteWhenAvailableAsync(IAsyncRelayCommand command) => command.CanExecute(null) ? command.ExecuteAsync(null) : Task.CompletedTask;
+    /// <summary>Takes down a progress status this operation set, unless something newer has replaced it already. An operation that
+    /// ends without a result of its own must not leave "…" in the status bar, where it reads as work still under way.</summary>
+    private void EndProgressStatus(string progress) { if (Status == progress) Status = "Ready"; }
     /// <summary>Frees the gate, then runs the reload that was requested while it was held.</summary>
     private void EndOperation(OperationGate.Lease lease)
     {
@@ -286,12 +290,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (Explorer.Nodes.Count == 0 && !Explorer.IsFiltered) Explorer.ShowFiles(directory, _allFiles);
             foreach (var issue in Workspace.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
             RecentWorkspaces.Remove(path); RecentWorkspaces.Insert(0, path); while (RecentWorkspaces.Count > 10) RecentWorkspaces.RemoveAt(10);
-            await Debugger.SetWorkspaceAsync(path);
-            if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(path);
-            await RefreshWpfAsync();
-            await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync();
-            TaskList.RefreshCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
+            // The language service is up: say so now rather than after the steps below, which the status used to wait for.
             ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
+            // Independent of one another, so they run together instead of one after another.
+            await Task.WhenAll(Debugger.SetWorkspaceAsync(path), _gitToolOpened ? Features.Git.SetWorkspaceAsync(path) : Task.CompletedTask,
+                RefreshWpfAsync(), TaskList.LoadUserTasksAsync(), FileGroups.LoadAsync());
+            TaskList.RefreshCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
             await SaveSettingsAsync();
         }
         catch when (!loaded)
@@ -555,7 +559,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             TidyBeforeSave(doc);
             await _store.SaveAsync(doc.State);
             Messenger.Send(new DocumentSavedMessage(doc.State));
-            XamlAnalysis.Request();
+            XamlAnalysis.RequestKeepingResults();
             Status = doc.State.IsDirty ? "The document changed while saving. Save again to include the latest edits." : "Saved " + doc.State.Name;
             return !doc.State.IsDirty;
         }
@@ -564,7 +568,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (!await _dialogs.ConfirmAsync("File changed outside WpfStudio", $"Overwrite the external changes to {doc.State.Name} with the editor content?")) return false;
             await _store.SaveAsync(doc.State, true);
             Messenger.Send(new DocumentSavedMessage(doc.State));
-            XamlAnalysis.Request();
+            XamlAnalysis.RequestKeepingResults();
             if (doc.State.IsDirty) Status = "The document changed while saving. Save again to include the latest edits.";
             return !doc.State.IsDirty;
         }
@@ -603,6 +607,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         if (Workspace == null || _operations.TryEnter(cancel) is not { } lease) return;
         ToolRequested?.Invoke(Workbenches.Output); Output = "";
+        var refreshModel = false;
         try
         {
             if (!await SaveAllDocumentsAsync()) return;
@@ -616,9 +621,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             var result = await _build.RunAsync(new(path, operation, Configuration, framework, LaunchProfile, SolutionPath: SolutionPathFor(path)), progress, lease.Token);
             progress.Flush();
             Status = result.Cancelled ? "Cancelled" : result.ExitCode == 0 ? label + " succeeded" : label + $" failed (exit {result.ExitCode})";
-            if (result.ExitCode == 0 && operation is BuildOperation.Build or BuildOperation.Rebuild or BuildOperation.Restore) await ReloadProjectModelAsync(lease.Token);
+            refreshModel = result.ExitCode == 0 && operation is BuildOperation.Build or BuildOperation.Rebuild or BuildOperation.Restore;
         }
         finally { EndOperation(lease); }
+        // Restore and build write the assets and generated sources the project model reads. The model refreshes in place, as for
+        // an edited project file: the language service keeps answering, the gate is free at once, and the build's result stays shown.
+        // Reloading inside the gate restarted the worker and kept the whole shell busy for a full MSBuild load after every build.
+        if (refreshModel) RefreshProjectModelAsync(status: null).Forget(ReportBackgroundFault);
     });
     // Continue is not a workspace operation, so F5 keeps working while, say, a build runs beside a paused session.
     private bool CanDebug() => !IsBusy || Debugger.IsStopped;

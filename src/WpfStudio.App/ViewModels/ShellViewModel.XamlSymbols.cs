@@ -91,7 +91,7 @@ public sealed partial class ShellViewModel
         // A file read from disk while the search ran outdates it. That settles by itself, so look again rather than hand the retry to the user.
         for (int attempt = 0; attempt < 3 && result is null; attempt++)
         {
-            if (!ReferenceEquals(ActiveDocument, editor)) return;
+            if (!ReferenceEquals(ActiveDocument, editor)) { EndProgressStatus("Finding references…"); return; }
             string? incomplete;
             try { incomplete = await SynchronizeSymbolBuffersAsync(editor, requireComplete: false); }
             // The project model was swapped, or a buffer changed, while the buffers were being synchronized.

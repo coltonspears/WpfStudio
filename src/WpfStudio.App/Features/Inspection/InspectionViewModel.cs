@@ -7,8 +7,9 @@ using WpfStudio.Runtime.Inspection;
 
 namespace WpfStudio.App.Features.Inspection;
 
-public sealed partial class RuntimeNodeViewModel(InspectionNode node) : ObservableObject
+public sealed partial class RuntimeNodeViewModel(InspectionNode node) : ObservableObject, Behaviors.ITreeRow
 {
+    System.Collections.IEnumerable Behaviors.ITreeRow.ChildRows => Children;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(Label))] public partial InspectionNode Node { get; set; } = node;
     [ObservableProperty] public partial bool IsSelected { get; set; }
     public ObservableCollection<RuntimeNodeViewModel> Children { get; } = [];
@@ -142,7 +143,7 @@ public sealed partial class InspectionViewModel(IUiDispatcher dispatcher) : Obse
             RebuildTree(tree.Nodes);
             UpdateDevToolsSnapshot(tree);
             Traces.Clear(); foreach (var trace in tree.Traces) Traces.Add(trace);
-            Status = tree.Status ?? (tree.Truncated ? "Tree snapshot reached its limit; some elements are omitted." : $"{tree.Nodes.Count} elements · {tree.Traces.Count} historical binding trace groups");
+            Status = tree.Status ?? (tree.Truncated ? $"Tree snapshot reached its limit ({InspectionTreeRequest.DefaultMaximumNodes:N0} elements, or half a second per window); some elements are omitted." : $"{tree.Nodes.Count} elements · {tree.Traces.Count} historical binding trace groups");
             await InspectAndHighlightSelectedAsync();
         }
         catch (OperationCanceledException) { }

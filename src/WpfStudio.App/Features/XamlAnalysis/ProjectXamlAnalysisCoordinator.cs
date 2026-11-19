@@ -150,7 +150,9 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
                 if (change.Path is { } changedPath && Path.GetExtension(changedPath).Equals(".cs", StringComparison.OrdinalIgnoreCase)) _dirtyModelPaths.Add(changedPath);
                 if (ProjectReloadRequired || ProjectTypesPending) _host.XamlContextsChanged();
                 if (change.RequiresReload) _host.ProjectFilesChanged();
-                Request();
+                // An open document's own save: its diagnostics are already checked against its text, so the rest can stay listed.
+                if (!change.RequiresReload && change.Path is { } saved && _store.Find(saved) is not null) RequestKeepingResults();
+                else Request();
             });
         }, reconcile: () => _dispatcher.Post(() =>
         {
@@ -199,14 +201,15 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
     {
         if (_trackedDocuments.Add(document)) document.ContentChanged += TrackedDocumentChanged;
         if (document.Extension == ".xaml") _host.OpenXamlDocumentsChanged();
-        Request();
+        // Opening or closing a tab changes which texts are overlays, not what they say, so the results listed so far stand.
+        RequestKeepingResults();
     }
 
     public void UntrackDocument(DocumentState document)
     {
         if (_trackedDocuments.Remove(document)) document.ContentChanged -= TrackedDocumentChanged;
         if (document.Extension == ".xaml") _host.OpenXamlDocumentsChanged();
-        Request();
+        RequestKeepingResults();
     }
 
     private void TrackedDocumentChanged(object? sender, EventArgs args)
@@ -214,7 +217,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
         if (sender is DocumentState { Extension: ".xaml" })
         {
             _host.OpenXamlDocumentsChanged();
-            Request();
+            RequestKeepingResults();
         }
         else if (sender is DocumentState { Extension: ".cs" })
         {
@@ -251,19 +254,33 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
     // ------------------------------------------------------------------ Scanning
 
     /// <summary>Discards the current results and queues a new scan.</summary>
-    public void Request()
+    public void Request() => Request(discardResults: true);
+
+    /// <summary>
+    /// Queues a new scan after an open document was edited or saved, leaving the current results listed until it finishes.
+    /// Diagnostics of a document whose text changed since are already withheld by version and text hash, and the rest are at
+    /// most one scan old, so typing no longer empties the Problems list and flips the status on every keystroke.
+    /// </summary>
+    public void RequestKeepingResults() => Request(discardResults: false);
+
+    /// <summary>Looks for changes the watcher missed, as the periodic check does. When nothing changed, nothing is redone.</summary>
+    public void CheckDisk() { if (!_disposed && !IsRunning) _ = _scheduler.Schedule(); }
+
+    private void Request(bool discardResults)
     {
         if (_disposed) return;
         Interlocked.Increment(ref _indexRevision);
         Interlocked.Increment(ref _sourceEpoch);
         _retries = 0;
         _scanDue = true;
-        _projectXamlFiles = [];
+        if (discardResults) _projectXamlFiles = [];
         _host.DiagnosticsChanged();
-        Status = ProjectReloadRequired ? "Project files changed. Reload the workspace to check XAML against the current project items."
+        var unavailable = ProjectReloadRequired ? "Project files changed. Reload the workspace to check XAML against the current project items."
             : _host.Workspace is null ? NoWorkspaceStatus
             : !_workspace.IsConnected ? "Project XAML analysis unavailable: the language worker is disconnected."
-            : "Project XAML analysis pending…";
+            : null;
+        // Results still listed keep their summary until the next scan replaces it.
+        if (unavailable is not null || _projectXamlFiles.Count == 0) Status = unavailable ?? "Project XAML analysis pending…";
         _ = _scheduler.Schedule();
     }
 
@@ -293,7 +310,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
                 && document.State.Version == document.Version && document.State.Content == document.Text);
         if (!Current()) return;
         IsRunning = true;
-        if (_scanDue) Status = "Analyzing project XAML…";
+        if (_scanDue && _projectXamlFiles.Count == 0) Status = "Analyzing project XAML…";
         try
         {
             RefreshDiskDocumentsResult disk;
@@ -314,8 +331,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
             if (!Current()) return;
             if (!disk.Accepted)
             {
-                Status = disk.Status ?? "Project source changed during synchronization; refreshing…";
-                if (++_retries <= 2) _ = _scheduler.Schedule();
+                Retry(disk.Status ?? "Project source changed during synchronization");
                 return;
             }
             foreach (var path in dirtyModels) _dirtyModelPaths.Remove(path);
@@ -337,8 +353,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
             if (!Current() || result.Generation != generation) return;
             if (!result.Accepted)
             {
-                Status = result.Status ?? "Project types changed during analysis; refreshing…";
-                if (++_retries <= 2) _ = _scheduler.Schedule();
+                Retry(result.Status ?? "Project types changed during analysis");
                 return;
             }
             _projectXamlFiles = result.Files;
@@ -365,6 +380,14 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
             // The scheduler is serial; clear busy before the next queued scan.
             if (!_disposed) IsRunning = false;
         }
+    }
+
+    // Two quick retries. After those the status must not keep promising a refresh that nothing has scheduled.
+    private void Retry(string reason)
+    {
+        reason = reason.TrimEnd('.', '…', ' ');
+        if (++_retries <= 2) { Status = reason + "; refreshing…"; _ = _scheduler.Schedule(); }
+        else Status = reason + ". Project XAML is checked again after the next change.";
     }
 
     // ------------------------------------------------------------------ Which diagnostics still apply

@@ -26,12 +26,12 @@ public sealed partial class DesignerViewModel
     /// <summary>A previous frame is shown for a source revision that is not rendered yet.</summary>
     public bool IsStale => DisplayImage is not null && !IsCurrent;
     public bool ShowCanvasNotice => IsStale && !HasRenderError;
-    public string CanvasNotice => IsBusy ? "Updating preview…"
+    public string CanvasNotice => IsBusy || _renderQueued ? "Updating preview…"
         : IsCompiledPreview ? "Out of date · rebuild, then Refresh"
         : "Out of date · Refresh to update";
-    public string EmptyCanvasTitle => _document is null ? "No XAML preview" : IsBusy ? "Rendering preview…" : HasRenderError ? "The preview could not render" : "Preview not rendered";
+    public string EmptyCanvasTitle => _document is null ? "No XAML preview" : IsBusy || _renderQueued ? "Rendering preview…" : HasRenderError ? "The preview could not render" : "Preview not rendered";
     public string EmptyCanvasText => _document is null ? "Open a .xaml file and choose Preview in the editor's context bar, or use View > XAML Designer."
-        : IsBusy ? "The isolated WPF host is creating the view."
+        : IsBusy || _renderQueued ? "The isolated WPF host is creating the view."
         : Status;
     /// <summary>Snapshot nodes for canvas hover hints. Only a current frame can be hit tested.</summary>
     public IReadOnlyList<PreviewNode>? CanvasNodes => IsCurrent ? _snapshot?.Nodes : null;

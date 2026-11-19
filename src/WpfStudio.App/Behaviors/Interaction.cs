@@ -50,8 +50,19 @@ public static class Interaction
         if (GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(target)) command.Execute(target);
     }
     private static void KeyActivate(object sender, KeyEventArgs args) { if (args.Key == Key.Enter && GetActivateCommand((DependencyObject)sender) is { } command && command.CanExecute(Selected(sender))) { command.Execute(Selected(sender)); args.Handled = true; } }
-    /// <summary>Where a tree publishes its selection. It only ever pushes: a tree cannot select an item it has not generated, so selecting from a view model goes through each item's IsSelected.</summary>
-    public static readonly DependencyProperty SelectionSourceProperty = DependencyProperty.RegisterAttached("SelectionSource", typeof(object), typeof(Interaction), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+    /// <summary>Where a tree publishes its selection. A tree cannot select an item it has not generated, so selecting from a view model
+    /// goes through each item's IsSelected. In a virtualized tree the row may have no container yet; with
+    /// <see cref="FollowSelectionProperty"/> on, a selection pushed from the view model generates the rows down to it, so its IsSelected
+    /// reaches a container and the tree scrolls to it.</summary>
+    public static readonly DependencyProperty SelectionSourceProperty = DependencyProperty.RegisterAttached("SelectionSource", typeof(object), typeof(Interaction), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, SelectionSourceChanged));
+    private static void SelectionSourceChanged(DependencyObject owner, DependencyPropertyChangedEventArgs args)
+    {
+        if (owner is not TreeView tree || args.NewValue is not ITreeRow target || ReferenceEquals(tree.SelectedItem, target) || !GetFollowSelection(tree)) return;
+        _ = tree.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            if (ReferenceEquals(GetSelectionSource(tree), target) && !ReferenceEquals(tree.SelectedItem, target)) TreeRows.Reveal(tree, target);
+        });
+    }
     public static void SetSelectionSource(DependencyObject target, object? value) => target.SetValue(SelectionSourceProperty, value);
     public static object? GetSelectionSource(DependencyObject target) => target.GetValue(SelectionSourceProperty);
     /// <summary>Turns on <see cref="SelectionSourceProperty"/>. A separate switch because that property's change callback never runs while its source is null, which would leave the tree unobserved.</summary>

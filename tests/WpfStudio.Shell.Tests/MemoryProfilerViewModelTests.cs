@@ -111,11 +111,24 @@ public sealed class MemoryProfilerViewModelTests
         var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
         await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
         await model.RefreshProcessesCommand.ExecuteAsync(null);
-        model.MaxObjects = 250_000; model.MaxReferences = 2_000_000; model.RuntimeIndex = 1; model.DacPath = "C:\\runtime\\mscordacwks.dll";
+        model.LimitAnalysis = true; model.MaxObjects = 250_000; model.MaxReferences = 2_000_000; model.RuntimeIndex = 1; model.DacPath = "C:\\runtime\\mscordacwks.dll";
         await model.CaptureCommand.ExecuteAsync(null);
         Assert.Equal(125, profiler.LastCapture!.ProcessId); Assert.Equal(55, profiler.LastCapture.ProcessStartTimeUtcTicks);
-        Assert.Equal(250_000, profiler.LastCapture.MaxObjects); Assert.Equal(1, profiler.LastCapture.RuntimeIndex);
+        Assert.Equal(250_000, profiler.LastCapture.MaxObjects); Assert.Equal(2_000_000, profiler.LastCapture.MaxReferences);
+        Assert.Equal(1, profiler.LastCapture.RuntimeIndex);
         Assert.Equal(model.DacPath, profiler.LastCapture.DacPath);
+    }
+
+    [Fact]
+    public async Task CaptureReadsTheWholeHeapUnlessTheUserLimitsIt()
+    {
+        var session = new Session(Summary([Type("Page", 1, 10)]));
+        var profiler = new Profiler(); profiler.Sessions.Enqueue(session);
+        await using var model = new MemoryProfilerViewModel(profiler, new Files(), new FakeDesktop(), new ProcessMemorySampler());
+        await model.RefreshProcessesCommand.ExecuteAsync(null);
+        Assert.False(model.LimitAnalysis);
+        await model.CaptureCommand.ExecuteAsync(null);
+        Assert.Equal(0, profiler.LastCapture!.MaxObjects); Assert.Equal(0, profiler.LastCapture.MaxReferences);
     }
 
     [Fact]

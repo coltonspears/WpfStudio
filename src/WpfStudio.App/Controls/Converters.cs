@@ -104,6 +104,14 @@ public sealed class PresenceVisibilityConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => Binding.DoNothing;
 }
 
+/// <summary>Joins a list into one line per item, for long read-only lists: one text element lays out far faster than an element per row.</summary>
+public sealed class LinesConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is IEnumerable items and not string ? string.Join(Environment.NewLine, items.Cast<object?>()) : value?.ToString() ?? "";
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => Binding.DoNothing;
+}
+
 /// <summary>True when the bound value equals the parameter (string comparison).</summary>
 public sealed class EqualsConverter : IValueConverter
 {
