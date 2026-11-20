@@ -81,6 +81,32 @@ public sealed class ClrHeapSnapshotTests
     }
 
     [Fact]
+    public async Task AHeapLargerThanTheWorkersMemoryStopsWithinItsBudget()
+    {
+        using var lease = await StartFixture("net10.0");
+        var fixture = lease.Process;
+        try
+        {
+            var request = new HeapCaptureRequest(ProcessId: fixture.Id, ProcessStartTimeUtcTicks: fixture.StartTime.ToUniversalTime().Ticks);
+            var budget = HeapBudget.For(request);
+            long whole;
+            using (var full = ClrHeapSnapshot.Open(request, budget))
+                whole = full.Summary.ObjectCount * HeapBudget.BytesPerObject + full.ReferencesRead * HeapBudget.BytesPerReference;
+            // Several cuts, so some land inside one object's references rather than between objects.
+            foreach (var share in new[] { 0.1, 0.3, 0.5, 0.7, 0.9 })
+            {
+                var limited = budget.WithMemory((long)(whole * share));
+                using var partial = ClrHeapSnapshot.Open(request, limited);
+                Assert.False(partial.Summary.IsComplete);
+                Assert.Contains(limited.MemoryLimitNote(), partial.Summary.CoverageNotes);
+                Assert.False(limited.Exceeds(partial.Summary.ObjectCount, partial.ReferencesRead),
+                    $"A cut at {share:P0} held {partial.Summary.ObjectCount:N0} objects and {partial.ReferencesRead:N0} references, over {limited.MemoryBytes:N0} bytes.");
+            }
+        }
+        finally { if (!fixture.HasExited) fixture.Kill(); }
+    }
+
+    [Fact]
     public async Task StaleProcessIdentityCannotCaptureAReusedSelection()
     {
         using var lease = await StartFixture("net10.0");

@@ -18,16 +18,20 @@ public sealed partial class ClrHeapSnapshot : IDisposable
     public HeapSummary Summary { get; }
     /// <summary>Wall-clock milliseconds per load stage, in order, for diagnosing slow captures.</summary>
     public IReadOnlyList<KeyValuePair<string, double>> LoadTimings { get; private init; } = [];
+    /// <summary>References held during the walk, before those pointing outside the enumerated heap were dropped.</summary>
+    internal int ReferencesRead { get; private init; }
 
     private ClrHeapSnapshot(DataTarget target, ClrRuntime runtime, Dictionary<ulong, int> addresses,
         HeapAnalysis analysis, HeapSummary summary)
     { _target = target; _runtime = runtime; _addresses = addresses; Analysis = analysis; Summary = summary; }
 
-    public static ClrHeapSnapshot Open(HeapCaptureRequest request, CancellationToken token = default)
+    public static ClrHeapSnapshot Open(HeapCaptureRequest request, CancellationToken token = default) =>
+        Open(request, HeapBudget.For(request), token);
+
+    internal static ClrHeapSnapshot Open(HeapCaptureRequest request, HeapBudget budget, CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
         if ((request.DumpPath is null) == (request.ProcessId is null)) throw new ArgumentException("Choose either a dump or a running process.");
-        var budget = HeapBudget.For(request);
         var options = new DataTargetOptions
         {
             // Mapping an entire dump consumes scarce x86 virtual address space.
@@ -111,7 +115,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                     continue;
                 }
                 if (objects.Count >= budget.Objects) { Incomplete(budget.ObjectLimitNote()); break; }
-                if (budget.Exceeds(objects.Count, edges.Count)) { Incomplete(budget.MemoryLimitNote()); break; }
+                if (budget.Exceeds(objects.Count + 1L, edges.Count)) { Incomplete(budget.MemoryLimitNote()); break; }
                 var type = obj.Type!;
                 if (!typeByMethodTable.TryGetValue(type.MethodTable, out var typeId))
                 {
@@ -134,7 +138,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
             if (objects.Count == 0) notes.Add("No allocated managed objects were enumerated.");
             Stage("Objects and references");
             // Resolve and compact: references outside the enumerated heap are dropped.
-            var kept = 0;
+            var referencesRead = edges.Count; var kept = 0;
             for (var i = 0; i < edges.Count; i++)
             {
                 if (!addresses.TryGetValue(edgeTargets[i], out var to)) { Incomplete("Some referenced objects were outside the enumerated heap."); continue; }
@@ -189,7 +193,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                 extras.FreeBytes, edgeArray.Length, roots.Count, complete, notes.ToArray(), analysis.SummarizeTypes(),
                 analysis.SummarizeGenerations(), analysis.SummarizeRootKinds(), insights, analysis.GetTopRetainers());
             Stage("Summaries");
-            return new(target, runtime, addresses, analysis, summary) { LoadTimings = timings };
+            return new(target, runtime, addresses, analysis, summary) { LoadTimings = timings, ReferencesRead = referencesRead };
 
             void Incomplete(string note) { complete = false; notes.Add(note); }
 
@@ -263,14 +267,18 @@ public sealed partial class ClrHeapSnapshot : IDisposable
 
             bool Add(int from, ulong to, int label, bool dependent)
             {
-                if (edges.Count >= budget.References)
-                {
-                    referencesFull = true;
-                    Incomplete(budget.ReferenceLimitNote());
-                    return false;
-                }
+                if (edges.Count >= budget.References) return Full(budget.ReferenceLimitNote());
+                // Memory is checked per reference, not only per object: one reference array can hold millions of them.
+                if (budget.Exceeds(objects.Count, edges.Count + 1L)) return Full(budget.MemoryLimitNote());
                 edges.Add(new(from, -1, label, dependent)); edgeTargets.Add(to);
                 return true;
+            }
+
+            bool Full(string note)
+            {
+                referencesFull = true;
+                Incomplete(note);
+                return false;
             }
 
             // Labels match ReferenceLabel. GC-descriptor offsets include the method table; ClrMD reference offsets do not.

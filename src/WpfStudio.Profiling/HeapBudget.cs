@@ -44,6 +44,10 @@ internal sealed class HeapBudget
         return new(objects, references, roots, memory, request.MaxObjects != 0, request.MaxReferences != 0, is64Bit);
     }
 
+    /// <summary>The same limits with a different memory allowance, so tests can reach the memory limit on a small heap.</summary>
+    internal HeapBudget WithMemory(long memoryBytes) =>
+        new(Objects, References, Roots, memoryBytes, _explicitObjects, _explicitReferences, _is64Bit);
+
     public bool Exceeds(long objects, long references) => objects * BytesPerObject + references * BytesPerReference > MemoryBytes;
 
     public string ObjectLimitNote() => _explicitObjects
