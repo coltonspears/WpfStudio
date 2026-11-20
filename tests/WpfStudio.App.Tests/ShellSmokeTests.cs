@@ -534,8 +534,10 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
         var surface = Descendants<EditorSurface>(window).Single(item => ReferenceEquals(item.ViewModel, editor));
         surface.Select(unsaved.IndexOf("Save", StringComparison.Ordinal), 4);
         var before = System.Windows.Markup.XamlReader.Parse(unsaved);
-        var format = window.InputBindings.OfType<KeyBinding>().Single(binding => binding.Key == Key.F && binding.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift));
+        var format = window.InputBindings.OfType<KeyBinding>().Single(binding => binding.Key == Key.F && binding.Modifiers == (ModifierKeys.Shift | ModifierKeys.Alt));
         Assert.Same(shell.FormatCommand, format.Command);
+        // Ctrl+Shift+F, which formatted before, finds in files.
+        Assert.Same(shell.FindInFilesCommand, window.InputBindings.OfType<KeyBinding>().Single(binding => binding.Key == Key.F && binding.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift)).Command);
         var timer = Stopwatch.StartNew();
         await Assert.IsAssignableFrom<CommunityToolkit.Mvvm.Input.IAsyncRelayCommand>(format.Command).ExecuteAsync(null);
         long formatMs = timer.ElapsedMilliseconds;

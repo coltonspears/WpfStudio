@@ -20,6 +20,7 @@ Status for each item on the wants list, ordered roughly by how much it gives for
 | Help > What's New | ✅ Done | Help > What's new; entries in `ViewModels/ReleaseNotes.cs` |
 | Filterable/searchable Problems | ✅ Done | Problems toolbar: text, severity toggles, scope |
 | Filterable/searchable Solution Explorer | ✅ Done | Filter box above the tree |
+| Find in files with scopes and file filters | ✅ Done | Ctrl+Shift+F; Search pane; `Core/Text/FileSearch.cs`, `ShellViewModel.Search.cs` |
 | Grouped code-behind in Solution Explorer (can be turned off) | ✅ Done | Nesting toggle on the Solution Explorer toolbar; saved in settings |
 | Smarter auto-indent for braces | ✅ Done | `Services/CSharpTypingService.cs` |
 | Task List | ✅ Done | View > Task List: TODO-style comments plus your own items |
@@ -99,7 +100,7 @@ On every workspace load (and after a project-model refresh) the shell asks the `
 This was already in WpfStudio: the Build menu acts on the solution, and right-clicking a solution or project node offers Build, Rebuild, Clean and Restore. Small additions worth having: **Build startup project**, and a keyboard shortcut for building the project of the active file.
 
 ### Formatting
-Code > Format document (Ctrl+Shift+F) formats C# through Roslyn and XAML through the XAML formatter. Missing pieces, cheapest first:
+Code > Format document (Shift+Alt+F) formats C# through Roslyn and XAML through the XAML formatter. Missing pieces, cheapest first:
 1. **Format on save**, as an editor setting next to *trim trailing whitespace*.
 2. **Format selection**: Roslyn's `Formatter.FormatAsync(document, span)`.
 3. **Format on paste and on `;`/`}`**: Roslyn has `Formatter` with spans too. Keep the typing service for indentation and let Roslyn do spacing.

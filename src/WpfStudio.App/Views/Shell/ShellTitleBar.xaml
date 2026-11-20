@@ -124,7 +124,7 @@
           <MenuItem Header="Select all" Command="ApplicationCommands.SelectAll" InputGestureText="Ctrl+A" />
           <Separator />
           <MenuItem Header="Find in file…" c:Ui.Icon="Search" Command="ApplicationCommands.Find" InputGestureText="Ctrl+F" />
-          <MenuItem Header="Find in workspace…" Command="{Binding FindInWorkspaceCommand}" />
+          <MenuItem Header="Find in files…" Command="{Binding FindInFilesCommand}" InputGestureText="Ctrl+Shift+F" />
           <Separator />
           <MenuItem Header="Insert snippet…" c:Ui.Icon="Braces" Command="{Binding InsertSnippetCommand}" />
           <Separator />
@@ -185,7 +185,7 @@
           <MenuItem Header="Use var…" Command="{Binding RefactorCommand}" CommandParameter="UseVar" />
           <MenuItem Header="Use explicit type…" Command="{Binding RefactorCommand}" CommandParameter="UseExplicitType" />
           <Separator />
-          <MenuItem Header="Format document" c:Ui.Icon="Braces" Command="{Binding FormatCommand}" InputGestureText="Ctrl+Shift+F" />
+          <MenuItem Header="Format document" c:Ui.Icon="Braces" Command="{Binding FormatCommand}" InputGestureText="Shift+Alt+F" />
         </MenuItem>
         <MenuItem Header="_WPF">
           <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />

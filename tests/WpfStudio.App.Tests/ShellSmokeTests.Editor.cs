@@ -99,7 +99,7 @@ public sealed partial class ShellSmokeTests
         Assert.NotEmpty(Descendants<MatchTextBlock>(searchPane));
         Screenshot(searchPane, Path.Combine(root, "artifacts/screenshots/search-references.png"));
 
-        // --- Find in workspace with its switches: whole words only, whatever their case.
+        // --- Find in files with its switches: whole words only, whatever their case.
         shell.SearchQuery = "count";
         shell.SearchWholeWord = true;
         await shell.SearchCommand.ExecuteAsync(null);
@@ -109,7 +109,34 @@ public sealed partial class ShellSmokeTests
         Assert.StartsWith(shell.SearchResults.Count + " matches for “count” in ", shell.SearchResultsTitle);
         await Idle();
         Screenshot(searchPane, Path.Combine(root, "artifacts/screenshots/search-text.png"));
+
+        // --- Narrowed to one project and its C# files, then to one file type among the matches. Each change searches again by itself.
+        var searched = shell.SearchResults.Count;
+        shell.SearchScope = shell.SearchScopes.First(scope => scope.Kind == SearchScopeKind.Project);
+        shell.SearchInclude = "*.cs";
+        await shell.SearchCompletion;
+        Assert.NotEmpty(shell.SearchResults);
+        Assert.All(shell.SearchResults, result => Assert.EndsWith(".cs", result.FileName, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(" · project ", shell.SearchResultsTitle);
+        shell.SearchInclude = "";
+        await shell.SearchCompletion;
+        var xamlType = shell.SearchFileTypes.FirstOrDefault(type => type.Extension == ".xaml");
+        if (xamlType != null)
+        {
+            xamlType.IsSelected = true;
+            await shell.SearchCompletion;
+            Assert.All(shell.SearchResults, result => Assert.EndsWith(".xaml", result.FileName, StringComparison.OrdinalIgnoreCase));
+            Assert.EndsWith(" · only .xaml", shell.SearchResultsTitle);
+            Assert.Contains(shell.SearchFileTypes, type => type.Extension == ".cs" && !type.IsSelected && type.Matches > 0);
+        }
+        await Idle();
+        Screenshot(searchPane, Path.Combine(root, "artifacts/screenshots/search-filtered.png"));
+        if (shell.SearchFileTypes.FirstOrDefault(type => type.IsSelected) is { } chosen) chosen.IsSelected = false;
+        shell.SearchScope = SearchScope.Solution;
         shell.SearchWholeWord = false;
+        // The last change starts a search of its own; what follows must not find it still running.
+        await shell.SearchCompletion;
+        Assert.True(shell.SearchResults.Count >= searched);
 
         // --- Signature help: a card for the call the caret is in, following it from argument to argument and closing outside the call.
         Keyboard.Focus(editor.TextArea);

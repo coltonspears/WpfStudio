@@ -8,6 +8,14 @@ public static class ReleaseNoteCatalog
 {
     public static IReadOnlyList<ReleaseNote> All { get; } =
     [
+        new("Unreleased", "Find in files",
+        [
+            "Ctrl+Shift+F, or Edit > Find in files, searches for text as you type it. Text selected in the editor is what it starts with. Format document moved to Shift+Alt+F.",
+            "Look in chooses where: the entire solution, the current project, one project by name, the open documents or the current document. Right-click the solution, a project or a folder in Solution Explorer to search just there.",
+            "Include and Exclude name the files to search: an extension (*.cs), a folder or file name at any depth (Views), or a path (src/**/*.xaml).",
+            "A search lists the file types it matched in, with how many matches each has. Click one or several to list only those.",
+            "Every text file of the workspace is searched, not just source files, several at a time, and an open document is searched as it stands in its editor.",
+        ]),
         new("Unreleased", "DevOps workbench for Azure DevOps and GitHub",
         [
             "Tools > DevOps works with the pull requests, work items and pipelines of the Git pane's repository on Azure DevOps Services and Server, and on GitHub and GitHub Enterprise Server as pull requests, issues and Actions.",

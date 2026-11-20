@@ -119,7 +119,7 @@ public sealed partial class ShellSmokeTests
         Assert.Same(node, shell.Explorer.SelectedNode);
 
         var search = (TextBox)window.FindName("SearchBox");
-        shell.FindInWorkspaceCommand.Execute(null); await Idle();
+        shell.FindInFilesCommand.Execute(null); await shell.SearchCompletion; await Idle();
         Assert.True(search.IsVisible);
         Assert.Same(search, FocusManager.GetFocusedElement(FocusManager.GetFocusScope(search)));
         Assert.False(shell.IsSearchFocusRequested);

@@ -45,7 +45,8 @@
     <KeyBinding Key="OemMinus" Modifiers="Control" Command="{Binding NavigateBackCommand}" />
     <KeyBinding Key="OemMinus" Modifiers="Control+Shift" Command="{Binding NavigateForwardCommand}" />
     <KeyBinding Key="F2" Command="{Binding RenameSymbolCommand}" />
-    <KeyBinding Key="F" Modifiers="Control+Shift" Command="{Binding FormatCommand}" />
+    <KeyBinding Key="F" Modifiers="Control+Shift" Command="{Binding FindInFilesCommand}" />
+    <KeyBinding Key="F" Modifiers="Shift+Alt" Command="{Binding FormatCommand}" />
     <KeyBinding Key="N" Modifiers="Control+Shift" Command="{Binding NewWpfItemCommand}" />
     <KeyBinding Key="OemComma" Modifiers="Control" Command="{Binding OpenSettingsCommand}" />
     <KeyBinding Key="Oem3" Modifiers="Control" Command="{Binding ShowToolCommand}" CommandParameter="Terminal" />

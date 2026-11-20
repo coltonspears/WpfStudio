@@ -58,7 +58,6 @@ public sealed partial class ShellViewModel
         }
         return null;
     }
-    [RelayCommand] private void FindInWorkspace() { ToolRequested?.Invoke(Workbenches.Search); IsSearchFocusRequested = true; }
     [RelayCommand] private Task OpenDataFolderAsync() => GuardAsync(() => { Directory.CreateDirectory(DataFolder); _desktop.Reveal(DataFolder); return Task.CompletedTask; });
     /// <summary>Opens the command palette on the snippets for the active editor's language.</summary>
     [RelayCommand] private void InsertSnippet()
@@ -119,7 +118,7 @@ public sealed partial class ShellViewModel
         yield return Command("File", "Save all", SaveAllCommand, shortcut: "Ctrl+Shift+S");
         yield return Command("File", "Reload document from disk", ReloadDocumentCommand);
         yield return Command("File", "Close document", CloseActiveCommand, shortcut: "Ctrl+W");
-        yield return Command("Edit", "Find in workspace…", FindInWorkspaceCommand, icon: "Search");
+        yield return Command("Edit", "Find in files…", FindInFilesCommand, shortcut: "Ctrl+Shift+F", icon: "Search", detail: "Text across the solution, a project, a folder or the open documents, narrowed by file type");
         yield return Command("Edit", "Undo last workspace edit", UndoWorkspaceEditCommand);
         yield return Command("Code", "Go to definition", GoToDefinitionCommand, shortcut: "F12", icon: "Target");
         yield return Command("Code", "Go to implementation", GoToImplementationCommand, shortcut: "Ctrl+F12", icon: "Target", detail: "Implementations, overrides or derived types");
@@ -128,7 +127,7 @@ public sealed partial class ShellViewModel
         yield return Command("Code", "Navigate back", NavigateBackCommand, shortcut: "Ctrl+-", icon: "ArrowLeft");
         yield return Command("Code", "Navigate forward", NavigateForwardCommand, shortcut: "Ctrl+Shift+-", icon: "ArrowRight");
         yield return Command("Code", "Rename symbol…", RenameSymbolCommand, shortcut: "F2");
-        yield return Command("Code", "Format document", FormatCommand, icon: "Braces");
+        yield return Command("Code", "Format document", FormatCommand, shortcut: "Shift+Alt+F", icon: "Braces");
         yield return Command("Code", "Organize usings", RefactorCommand, "OrganizeUsings", detail: "Preview import changes");
         yield return Command("Code", "Use var", RefactorCommand, "UseVar");
         yield return Command("Code", "Use explicit type", RefactorCommand, "UseExplicitType");

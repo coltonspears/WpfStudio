@@ -27,6 +27,9 @@ public sealed partial class ExplorerNode : ObservableObject
     public bool IsFolder => Kind is not (ExplorerNodeKind.File or ExplorerNodeKind.Dependency);
     /// <summary>Solutions and projects can be built, rebuilt, cleaned and restored from their context menu.</summary>
     public bool CanBuild => Kind is ExplorerNodeKind.Solution or ExplorerNodeKind.Project;
+    /// <summary>The solution, a project or a folder of files: what find in files can be told to look in.</summary>
+    public bool CanSearch => Kind is ExplorerNodeKind.Solution or ExplorerNodeKind.Project || (Kind == ExplorerNodeKind.Folder && Path.Length > 0);
+    public string SearchLabel => Kind switch { ExplorerNodeKind.Solution => "Find in solution…", ExplorerNodeKind.Project => "Find in project…", _ => "Find in folder…" };
     public string ToolTip => Path.Length > 0 ? Path : Detail.Length > 0 ? $"{Name} {Detail}" : Name;
     public string IconKind => _iconKind ?? Kind switch
     {

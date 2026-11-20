@@ -1,16 +1,17 @@
 using System.Text.RegularExpressions;
 using WpfStudio.App.ViewModels;
+using WpfStudio.Core.Text;
 
 namespace WpfStudio.Shell.Tests;
 
-/// <summary>What find in workspace matches under its switches, and what a result row shows of the line it found.</summary>
+/// <summary>What find in files matches under its switches, and what a result row shows of the line it found.</summary>
 public sealed class SearchResultTests
 {
     private static List<NavigationResult> Find(string text, string query, bool matchCase = false, bool wholeWord = false, bool useRegex = false)
     {
-        var found = new List<NavigationResult>();
-        ShellViewModel.FindIn(@"C:\work\Order.cs", text, ShellViewModel.SearchPattern(query, matchCase, wholeWord, useRegex), found);
-        return found;
+        var found = new List<TextMatch>();
+        TextSearch.FindLines(@"C:\work\Order.cs", text, TextSearch.Pattern(query, matchCase, wholeWord, useRegex), found);
+        return found.Select(ShellViewModel.SearchRow).ToList();
     }
 
     [Fact]
@@ -46,7 +47,7 @@ public sealed class SearchResultTests
         Assert.Equal(2, Find("a.b\naxb\n", "a.b", useRegex: true).Count);
         var groups = Find("int a = 12;\nint b = x;\n", @"=\s*\d+", useRegex: true);
         Assert.Equal("= 12", Assert.Single(groups).Text.Substring(groups[0].MatchStart, groups[0].MatchLength));
-        Assert.ThrowsAny<ArgumentException>(() => ShellViewModel.SearchPattern("(", false, false, useRegex: true));
+        Assert.ThrowsAny<ArgumentException>(() => TextSearch.Pattern("(", false, false, useRegex: true));
         Assert.Single(Find("call(\n", "("));
 
         // An expression that matches nothing at all, such as an empty alternative, lists no line.
@@ -86,9 +87,10 @@ public sealed class SearchResultTests
     [Fact]
     public void ASearchIsCutOffAtItsLimit()
     {
-        var found = new List<NavigationResult>();
+        var found = new List<TextMatch>();
         var text = string.Concat(Enumerable.Repeat("x\n", ShellViewModel.SearchResultLimit + 50));
-        ShellViewModel.FindIn("a.cs", text, new Regex("x"), found);
+        // The lines past the limit are counted, so that the list can say it is not all of them.
+        Assert.Equal(ShellViewModel.SearchResultLimit + 50, TextSearch.FindLines("a.cs", text, new Regex("x"), found, ShellViewModel.SearchResultLimit));
         Assert.Equal(ShellViewModel.SearchResultLimit, found.Count);
     }
 }

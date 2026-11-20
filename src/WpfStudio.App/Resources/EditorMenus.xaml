@@ -31,7 +31,7 @@
    <MenuItem Header="Organize usings…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.OrganizeUsings}"/>
    <MenuItem Header="Use var…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.UseVar}"/>
    <MenuItem Header="Use explicit type…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.UseExplicitType}"/>
-   <Separator/><MenuItem Header="Format document" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Format}" InputGestureText="Ctrl+Shift+F"/>
+   <Separator/><MenuItem Header="Format document" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.Format}" InputGestureText="Shift+Alt+F"/>
   </MenuItem>
   <MenuItem Header="MVVM" c:Ui.Icon="Layers">
    <MenuItem Header="Insert observable property…" Command="{Binding ActionCommand}" CommandParameter="{x:Static vm:EditorAction.InsertProperty}"/>

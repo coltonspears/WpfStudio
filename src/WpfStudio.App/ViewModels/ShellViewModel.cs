@@ -284,6 +284,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             Workspace = await loading; loaded = true;
             RefreshConfigurations();
             Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
+            RefreshSearchScopes();
             StartupProject = Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
             _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             Explorer.Rebuild(keepState: false);
@@ -302,6 +303,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             // The previous workspace's tabs are closed and its worker is stopped by now, so it must not stay the target of Build, Run and the title.
             Projects.Clear(); StartupProject = null; Workspace = null;
+            RefreshSearchScopes();
             throw;
         }
         finally { _loading = false; lease.Dispose(); XamlAnalysis.Request(); if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); CheckRuntimes(path); }
@@ -380,6 +382,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (Workspace is null) return;
         RefreshConfigurations();
         Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
+        RefreshSearchScopes();
         StartupProject = Projects.FirstOrDefault(p => p.ProjectPath == startupPath) ?? Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
         _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         Explorer.Rebuild(keepState: true);

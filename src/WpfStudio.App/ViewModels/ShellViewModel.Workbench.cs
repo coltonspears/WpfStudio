@@ -30,12 +30,13 @@ public sealed partial class ShellViewModel
         var name = Workspace == null ? "" : Path.GetFileName(Workspace.Path);
         _history.Clear();
         _allFiles = [];
-        Explorer.Clear(); Projects.Clear(); SearchResults.Clear(); SearchResultsTitle = ""; WpfExplorer.Items.Clear();
+        Explorer.Clear(); Projects.Clear(); ClearSearchResults(); WpfExplorer.Items.Clear();
         _updatingChoices = true;
         TargetFrameworks.Clear(); LaunchProfiles.Clear(); TargetFramework = null; LaunchProfile = null;
         _updatingChoices = false;
         StartupProject = null;
         Workspace = null;
+        RefreshSearchScopes();
         await Runtimes.CheckAsync(null, []);
         RefreshEditorDiagnostics();
         await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync(); await TaskList.RefreshCommand.ExecuteAsync(null);

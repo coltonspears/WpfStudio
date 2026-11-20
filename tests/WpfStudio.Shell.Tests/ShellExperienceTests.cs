@@ -13,6 +13,9 @@ public sealed class ShellExperienceTests
         Assert.True(test.Shell.Palette.IsCommandMode);
         Assert.Contains(test.Shell.Palette.Results, entry => entry.Label == "Build" && entry.Shortcut == "Ctrl+Shift+B" && entry.Category == "Build");
         Assert.Contains(test.Shell.Palette.Results, entry => entry.Label == "Switch view ⇄ view model" && entry.Shortcut == "F7");
+        // Ctrl+Shift+F finds in files, as it does in Visual Studio and VS Code; formatting took VS Code's Shift+Alt+F.
+        Assert.Contains(test.Shell.Palette.Results, entry => entry.Label == "Find in files…" && entry.Shortcut == "Ctrl+Shift+F" && entry.Category == "Edit");
+        Assert.Contains(test.Shell.Palette.Results, entry => entry.Label == "Format document" && entry.Shortcut == "Shift+Alt+F");
 
         test.Shell.Palette.Query = ">rbld";
         Assert.Equal("Rebuild", test.Shell.Palette.Results.First().Label);

@@ -10,13 +10,52 @@
         <PropertyGroupDescription PropertyName="Path" />
       </CollectionViewSource.GroupDescriptions>
     </CollectionViewSource>
+    <!-- A file type among the matches: a pill that stays lit while only its type is listed. -->
+    <Style x:Key="TypeChip" TargetType="ToggleButton">
+      <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+      <Setter Property="Background" Value="{DynamicResource RaisedBrush}" />
+      <Setter Property="Margin" Value="0,0,5,4" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="10" Padding="8,1,8,2" BorderThickness="1" BorderBrush="Transparent">
+              <ContentPresenter VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource HoverBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="FilterCaption" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource SubtleBrush}" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,6,0" />
+    </Style>
   </UserControl.Resources>
   <DockPanel Background="{DynamicResource SurfaceBrush}">
-    <DockPanel DockPanel.Dock="Top" Margin="10,4,8,6">
-      <Button DockPanel.Dock="Right" Style="{StaticResource QuietButton}" Content="Cancel" Command="{Binding SearchCancelCommand}" />
-      <Button DockPanel.Dock="Right" Style="{StaticResource AccentButton}" c:Ui.Icon="Search" Content="Search" Command="{Binding SearchCommand}" />
+    <DockPanel DockPanel.Dock="Top" Margin="10,4,8,4">
+      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" c:Ui.Icon="Stop" Command="{Binding SearchCancelCommand}" ToolTip="Stop searching (Esc)" AutomationProperties.Name="Stop searching"
+              Visibility="{Binding IsSearching, Converter={StaticResource BooleanToVisibility}}" />
+      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" c:Ui.Icon="Filter" IsChecked="{Binding ShowSearchFilters}" ToolTip="Show where to look and which files to search" AutomationProperties.Name="Show where to look and which files to search" />
+      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" Margin="6,0,0,0" c:Ui.Icon="Refresh" Command="{Binding SearchCommand}" ToolTip="Search again (Enter)" AutomationProperties.Name="Search again" />
       <!-- The same three switches, with the same marks, as Find in the editor. -->
-      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" Margin="0,0,6,0" IsChecked="{Binding SearchUseRegex}" ToolTip="Use a regular expression" AutomationProperties.Name="Use a regular expression">
+      <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" IsChecked="{Binding SearchUseRegex}" ToolTip="Use a regular expression" AutomationProperties.Name="Use a regular expression">
         <TextBlock Text=".*" FontSize="12" FontWeight="SemiBold" FontFamily="{StaticResource CodeFont}" />
       </ToggleButton>
       <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" IsChecked="{Binding SearchWholeWord}" ToolTip="Match whole words only" AutomationProperties.Name="Match whole words only">
@@ -25,15 +64,73 @@
       <ToggleButton DockPanel.Dock="Right" Style="{StaticResource IconButton}" Width="26" Height="26" Margin="4,0,0,0" IsChecked="{Binding SearchMatchCase}" ToolTip="Match case" AutomationProperties.Name="Match case">
         <TextBlock Text="Aa" FontSize="11.5" FontWeight="SemiBold" />
       </ToggleButton>
-      <TextBox x:Name="SearchBox" b:Interaction.FocusWhenTrue="{Binding IsSearchFocusRequested}" Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Find text in workspace files" ToolTip="Find text across source files (Enter)">
+      <TextBox x:Name="SearchBox" b:Interaction.FocusWhenTrue="{Binding IsSearchFocusRequested}" Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="Find in files" ToolTip="Find text in files. The search runs as you type; Enter runs it at once." AutomationProperties.Name="Find in files">
         <TextBox.InputBindings>
           <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
+          <KeyBinding Key="Escape" Command="{Binding SearchCancelCommand}" />
         </TextBox.InputBindings>
       </TextBox>
     </DockPanel>
-    <!-- What the list below is: a search's matches, a symbol's references, a type's implementations. -->
-    <TextBlock DockPanel.Dock="Top" Text="{Binding SearchResultsTitle}" Margin="12,0,10,6" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"
-               ToolTip="{Binding SearchResultsTitle}" Visibility="{Binding SearchResultsTitle, Converter={StaticResource Presence}}" />
+    <!-- Where to look and which files. The parts wrap under one another when the pane is docked at a side. -->
+    <WrapPanel DockPanel.Dock="Top" Margin="12,0,8,2" Visibility="{Binding ShowSearchFilters, Converter={StaticResource BooleanToVisibility}}">
+      <StackPanel Orientation="Horizontal" Margin="0,0,14,4">
+        <TextBlock Text="Look in" Style="{StaticResource FilterCaption}" />
+        <ComboBox Width="210" Margin="0" ItemsSource="{Binding SearchScopes}" SelectedItem="{Binding SearchScope}" ToolTip="Where to look: the solution, a project, a folder chosen in Solution Explorer, or the open documents" AutomationProperties.Name="Look in">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <StackPanel Orientation="Horizontal" ToolTip="{Binding ToolTip}">
+                <c:StudioIcon Kind="{Binding IconKind}" Width="14" Height="14" Margin="0,0,7,0" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </StackPanel>
+      <StackPanel Orientation="Horizontal" Margin="0,0,14,4">
+        <TextBlock Text="Include" Style="{StaticResource FilterCaption}" />
+        <TextBox Width="220" Text="{Binding SearchInclude, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="*.cs, Views, src/**/*.xaml" AutomationProperties.Name="Files to include"
+                 ToolTip="Files to search, separated by commas. *.cs or .cs is an extension, Views a folder or file name at any depth, src/Views a path and ./src a path from the workspace folder. * stands for part of a name and ** for any folders. Empty searches every text file.">
+          <TextBox.InputBindings>
+            <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
+          </TextBox.InputBindings>
+        </TextBox>
+      </StackPanel>
+      <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+        <TextBlock Text="Exclude" Style="{StaticResource FilterCaption}" />
+        <TextBox Width="220" Text="{Binding SearchExclude, UpdateSourceTrigger=PropertyChanged}" c:Ui.Placeholder="*.Designer.cs, Migrations" AutomationProperties.Name="Files to exclude"
+                 ToolTip="Files to leave out, written the same way as the files to include. bin, obj, .git, .vs, node_modules and artifacts folders are never searched.">
+          <TextBox.InputBindings>
+            <KeyBinding Key="Enter" Command="{Binding SearchCommand}" />
+          </TextBox.InputBindings>
+        </TextBox>
+      </StackPanel>
+    </WrapPanel>
+    <!-- A slot of its own height, so that the list does not move when a search starts and ends. -->
+    <Border DockPanel.Dock="Top" Height="2">
+      <ProgressBar Style="{StaticResource ActivityBar}" Visibility="{Binding IsSearching, Converter={StaticResource BooleanToVisibility}}" />
+    </Border>
+    <!-- What the list below is: a search's matches, a symbol's references, a type's implementations. After a search, the file
+         types it matched in follow on the same line while there is room, and under it when there is not. -->
+    <WrapPanel DockPanel.Dock="Top" Margin="12,2,10,2">
+      <TextBlock Text="{Binding SearchResultsTitle}" Margin="0,0,12,4" VerticalAlignment="Center" FontSize="11.5" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis"
+                 ToolTip="{Binding SearchResultsTitle}" Visibility="{Binding SearchResultsTitle, Converter={StaticResource Presence}}" />
+      <ItemsControl ItemsSource="{Binding SearchFileTypes}" Focusable="False" VerticalAlignment="Center" AutomationProperties.Name="File types among the matches">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <WrapPanel />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <ToggleButton Style="{StaticResource TypeChip}" IsChecked="{Binding IsSelected}" ToolTip="{Binding ToolTip}" AutomationProperties.Name="{Binding Label}">
+              <TextBlock FontSize="11.5">
+                <Run Text="{Binding Label, Mode=OneWay}" FontFamily="{StaticResource CodeFont}" /><Run Text=" " /><Run Text="{Binding CountText, Mode=OneWay}" FontSize="10.5" />
+              </TextBlock>
+            </ToggleButton>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </WrapPanel>
     <ListBox ItemsSource="{Binding Source={StaticResource ResultsByFile}}" SelectedItem="{Binding SelectedSearchResult}" b:Interaction.ActivateCommand="{Binding NavigateSearchCommand}"
              HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.IsVirtualizingWhenGrouping="True" VirtualizingPanel.ScrollUnit="Pixel" AutomationProperties.Name="Search results">

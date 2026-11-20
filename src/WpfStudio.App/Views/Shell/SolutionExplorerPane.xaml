@@ -45,6 +45,7 @@
             <MenuItem Header="Open" c:Ui.Icon="File" Command="{Binding OpenNodeCommand}" CommandParameter="{Binding Explorer.SelectedNode}" />
             <MenuItem Header="New WPF item…" c:Ui.Icon="NewFile" Command="{Binding NewWpfItemCommand}" InputGestureText="Ctrl+Shift+N" />
             <MenuItem Header="Add to file group…" c:Ui.Icon="Pin" Command="{Binding FileGroups.AddSelectedCommand}" />
+            <MenuItem Header="{Binding Explorer.SelectedNode.SearchLabel}" c:Ui.Icon="Search" Command="{Binding FindInSelectedCommand}" Visibility="{Binding Explorer.SelectedNode.CanSearch, Converter={StaticResource Presence}, FallbackValue=Collapsed}" />
             <Separator />
             <MenuItem Header="Set as startup project" c:Ui.Icon="Target" Command="{Binding Explorer.SetStartupProjectCommand}" />
             <MenuItem Header="Edit project file" Command="{Binding Explorer.EditProjectCommand}" />
