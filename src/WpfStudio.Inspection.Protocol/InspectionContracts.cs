@@ -7,7 +7,8 @@ namespace WpfStudio.Inspection.Protocol;
 public static class InspectionProtocol
 {
     public const int Version = 1;
-    public const int MaximumFrameBytes = 8 * 1024 * 1024;
+    // A whole-window tree of 20,000 elements is several megabytes of JSON.
+    public const int MaximumFrameBytes = 64 * 1024 * 1024;
     public const string PipeVariable = "WPFSTUDIO_INSPECTION_PIPE";
     public const string TokenVariable = "WPFSTUDIO_INSPECTION_TOKEN";
     public const string OwnerVariable = "WPFSTUDIO_INSPECTION_OWNER_PID";
@@ -30,7 +31,11 @@ public sealed record InspectionMessage(string Kind, long Id, JsonElement Payload
 public sealed record InspectionHello(int ProtocolVersion, string Token, int ProcessId, string RuntimeVersion,
     string AgentVersion, IReadOnlyList<string> Capabilities);
 public sealed record InspectionWelcome(int ProtocolVersion, string SessionId);
-public sealed record InspectionTreeRequest(int MaximumNodes = 3000);
+public sealed record InspectionTreeRequest(int MaximumNodes = InspectionTreeRequest.DefaultMaximumNodes)
+{
+    /// <summary>The IDE's tree virtualizes, so this bounds the walk in the inspected application rather than the view.</summary>
+    public const int DefaultMaximumNodes = 20_000;
+}
 public sealed record InspectionNodeRequest(long Revision, string NodeId);
 public sealed record InspectionBounds(double X, double Y, double Width, double Height);
 // A BAML/source location is only a hint. It is not a verified current-buffer edit target.

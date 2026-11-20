@@ -1,7 +1,9 @@
 namespace WpfStudio.Contracts.Profiling;
 
+/// <param name="MaxObjects">Zero reads every object; the worker still stops before it would run out of memory.</param>
+/// <param name="MaxReferences">Zero reads every reference, with the same memory guard.</param>
 public sealed record HeapCaptureRequest(string? DumpPath = null, int? ProcessId = null,
-    long? ProcessStartTimeUtcTicks = null, int RuntimeIndex = 0, int MaxObjects = 1_000_000, int MaxReferences = 6_000_000,
+    long? ProcessStartTimeUtcTicks = null, int RuntimeIndex = 0, int MaxObjects = 0, int MaxReferences = 0,
     string? DacPath = null);
 
 /// <summary>Per-type totals. <see cref="RetainedBytes"/> counts what all instances of the type keep alive together,

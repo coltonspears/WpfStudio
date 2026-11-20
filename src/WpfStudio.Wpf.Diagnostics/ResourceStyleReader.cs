@@ -23,7 +23,9 @@ public static class ResourceStyleReader
 
     private sealed class CaptureState(DependencyObject target, DependencyProperty property, StaticResourceEvidenceCollector? evidence)
     {
-        private const int MaximumDeclarations = 256, MaximumScopes = 64, MaximumDictionaryKeys = 1024;
+        // A theme or App.xaml often holds thousands of keys. Keys copies the key list without loading a value, so even a large dictionary
+        // is cheap to list; the time budget below still bounds the whole capture.
+        private const int MaximumDeclarations = 256, MaximumScopes = 64, MaximumDictionaryKeys = 65_536;
         private readonly Stopwatch _watch = Stopwatch.StartNew();
         private readonly List<AppearanceFact> _facts = [];
         private readonly List<AppearanceDeclaration> _declarations = [];
@@ -32,7 +34,7 @@ public static class ResourceStyleReader
         private readonly List<(object Target, object Member)> _associations = [(target, property)];
         private readonly HashSet<ResourceDictionary> _dictionaries = new(ReferenceEqualityComparer.Instance);
         private readonly HashSet<Style> _styles = new(ReferenceEqualityComparer.Instance);
-        private int _keysRemaining = 2048, _textRemaining = 65_536;
+        private int _keysRemaining = 16_384, _textRemaining = 1_048_576;
         private bool _truncated;
 
         internal AppearanceSnapshot Read()
@@ -241,10 +243,11 @@ public static class ResourceStyleReader
             string id = "scope:" + _scopes.Count;
             var keys = new List<string>();
             bool omitted = false;
-            // Keys allocates a full copy, so reject oversized dictionaries BEFORE
+            // Keys allocates a full copy, so reject a pathological dictionary BEFORE
             // reading it. Reading entries/Values would instantiate deferred BAML.
+            // One beyond the remaining budget is listed as far as the budget goes.
             int count = dictionary.Count;
-            if (count > MaximumDictionaryKeys || count > _keysRemaining) omitted = true;
+            if (count > MaximumDictionaryKeys) omitted = true;
             else
             {
                 foreach (object key in dictionary.Keys)

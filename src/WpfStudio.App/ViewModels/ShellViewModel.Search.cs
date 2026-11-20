@@ -25,8 +25,7 @@ public sealed partial class ShellViewModel
     /// <summary>Replaces the results list. <paramref name="title"/> says what they are; the count of files is added to it.</summary>
     private void ShowResults(string title, IEnumerable<NavigationResult> results, bool reveal = true)
     {
-        SearchResults.Clear();
-        foreach (var result in results) SearchResults.Add(result.Folder.Length > 0 ? result : result with { Folder = RelativeDirectory(result.Path) });
+        SearchResults.ReplaceAll(results.Select(result => result.Folder.Length > 0 ? result : result with { Folder = RelativeDirectory(result.Path) }));
         int files = SearchResults.Select(result => result.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         SearchResultsTitle = SearchResults.Count == 0 ? title : title + (files == 1 ? " in 1 file" : $" in {files} files");
         if (reveal) ToolRequested?.Invoke(Workbenches.Search);

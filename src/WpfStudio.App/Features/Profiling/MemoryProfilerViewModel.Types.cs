@@ -75,7 +75,7 @@ public sealed partial class MemoryProfilerViewModel
             type ??= new(key, previous!.Name, previous.Module, 0, 0, 0, 0);
             return (Type: type, Previous: previous);
         }).ToArray();
-        // Taken before the list's filter, "My code" switch and row limit: the Overview reports growth over the whole capture.
+        // Taken before the list's filter and "My code" switch: the Overview reports growth over the whole capture.
         _grownTypes = baseline is null ? [] : all.Where(x => x.Type.Bytes > (x.Previous?.Bytes ?? 0))
             .Select(x => new MemoryTypeRow(x.Type, x.Previous?.Count ?? 0, x.Previous?.Bytes ?? 0)).ToArray();
         var summaries = all.Where(x => (x.Type.Name + " " + x.Type.Module).Contains(TypeFilter, StringComparison.OrdinalIgnoreCase))
@@ -101,7 +101,8 @@ public sealed partial class MemoryProfilerViewModel
         }
         var selectedKey = SelectedType?.Key;
         _updating = true;
-        try { Types.ReplaceAll(rows.Take(5000)); SelectedType = Types.FirstOrDefault(r => r.Key == selectedKey); }
+        // The list virtualizes, so every matching type is listed rather than the first few thousand.
+        try { Types.ReplaceAll(rows); SelectedType = Types.FirstOrDefault(r => r.Key == selectedKey); }
         finally { _updating = false; }
         if (selectedKey is not null && SelectedType is null) { _skip = 0; QueueQuery(); CancelFlow(); Flow = null; }
         OnPropertyChanged(nameof(SelectedTypeDetail)); OnPropertyChanged(nameof(HasSelectedType)); OnPropertyChanged(nameof(SelectedTypeTitle));

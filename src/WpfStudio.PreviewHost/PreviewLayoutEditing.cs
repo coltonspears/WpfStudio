@@ -186,7 +186,7 @@ internal sealed class PreviewLayoutEditing(PreviewScene scene, PreviewVisualTree
         if (scene.Viewport is null) return false;
         var pending = new Stack<DependencyObject>();
         pending.Push(scene.Viewport);
-        int remaining = 10_000, selectedCount = 0, parentCount = 0;
+        int remaining = PreviewVisualTree.MaximumNodes, selectedCount = 0, parentCount = 0;
         while (pending.TryPop(out var current))
         {
             if (--remaining < 0) return false;

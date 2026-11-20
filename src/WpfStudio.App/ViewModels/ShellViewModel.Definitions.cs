@@ -62,6 +62,7 @@ public sealed partial class ShellViewModel
         {
             Status = "Reading changed source files…";
             await XamlAnalysis.WaitForProjectTypesAsync(TimeSpan.FromSeconds(8), _lifetime.Token);
+            EndProgressStatus("Reading changed source files…");
             if (Moved()) return;
         }
         for (int attempt = 1; _workspace.IsConnected; attempt++)

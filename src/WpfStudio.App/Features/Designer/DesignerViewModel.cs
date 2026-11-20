@@ -10,8 +10,9 @@ using WpfStudio.Runtime.Design;
 
 namespace WpfStudio.App.Features.Designer;
 
-public sealed partial class DesignerNode(PreviewNode node) : ObservableObject
+public sealed partial class DesignerNode(PreviewNode node) : ObservableObject, Behaviors.ITreeRow
 {
+    System.Collections.IEnumerable Behaviors.ITreeRow.ChildRows => Children;
     public PreviewNode Node { get; } = node;
     public string Label => TypeName + (string.IsNullOrEmpty(Node.Name) ? "" : " #" + Node.Name);
     /// <summary>Unqualified CLR type name, without generic arity.</summary>
@@ -135,7 +136,7 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         _revision++; _selectionRevision++;
         ForgetInteraction();
         RememberSelection();
-        IsCurrent = false; IsBusy = false; SelectedNode = null; SelectedProperty = null; SelectionBounds = null;
+        IsCurrent = false; IsBusy = false; _renderQueued = false; SelectedNode = null; SelectedProperty = null; SelectionBounds = null;
         Properties.Clear(); Bindings.Clear(); Tree.Clear(); Diagnostics.Clear(); Image = null; _snapshot = null; _sourceHash = null;
         UpdateInteractionSnapshot();
         RefreshBindingDeclarations();
@@ -158,10 +159,17 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         _render?.Dispose(); _render = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         var token = _render.Token; var revision = _revision;
         var document = _document; var text = document.Content; var sourceVersion = document.Version;
-        IsBusy = true; Status = "Rendering preview…";
+        // The typing pause is not work: the busy sweep starts with the render, so it does not run for as long as someone types.
+        if (!debounce) { IsBusy = true; Status = "Rendering preview…"; }
+        else { _renderQueued = true; NotifyCanvasState(); }
         try
         {
-            if (debounce) await Task.Delay(650, token);
+            if (debounce)
+            {
+                await Task.Delay(TypingPause, token);
+                _renderQueued = false;
+                IsBusy = true; Status = "Rendering preview…";
+            }
             var previousConfiguration = Scenarios.Fingerprint;
             if (!await Scenarios.LoadAsync(revision, token) || !Current(revision)) return;
             if (debounce && previousConfiguration != Scenarios.Fingerprint)
@@ -197,7 +205,11 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
                 string.IsNullOrWhiteSpace(ViewTypeName) ? null : ViewTypeName,
                 string.IsNullOrWhiteSpace(ApplicationResourcePath) ? null : ApplicationResourcePath,
                 scenario, UseDesignTimeValues, Canvas.AutoSize, _projectAssetsPath, _references, InferDesignData), token);
-            if (!Current(revision) || document.Version != sourceVersion || snapshot.Version != revision) return;
+            if (!Current(revision) || document.Version != sourceVersion || snapshot.Version != revision)
+            {
+                if (Current(revision)) Status = "Source changed; updating preview…";
+                return;
+            }
             if (!await Scenarios.VerifyAsync(revision, token) || !Current(revision) || document.Version != sourceVersion) return;
             if (snapshot.Success && snapshot.Scenario?.Configuration != scenario)
                 throw new InvalidOperationException("The preview did not confirm the selected scenario. Refresh and try again.");
@@ -213,8 +225,12 @@ public sealed partial class DesignerViewModel : ObservableObject, IAsyncDisposab
         {
             if (Current(revision)) { Status = exception.Message; Diagnostics.Add(new(exception.Message)); SetRenderError(exception.Message, null); }
         }
-        finally { if (Current(revision)) IsBusy = false; }
+        finally { if (Current(revision)) { IsBusy = false; if (_renderQueued) { _renderQueued = false; NotifyCanvasState(); } } }
     }
+    /// <summary>How long typing must pause before live preview renders. A render that starts too early is superseded and drained, not killed.</summary>
+    private static readonly TimeSpan TypingPause = TimeSpan.FromMilliseconds(400);
+    // A live render waits out the typing pause. The canvas says it is updating, but nothing shows as busy yet.
+    private bool _renderQueued;
     private bool Current(long revision) => !_disposed && revision == _revision;
     private void SetSnapshot(PreviewSnapshot snapshot)
     {

@@ -141,6 +141,8 @@ public sealed partial class GitViewModel : ObservableObject, IDisposable, IGitOp
         // Only the newest switch may lift the guard; an older one returning early leaves it to that switch. A failure must not leave Git disabled.
         finally { if (version == _workspaceVersion) { _switchingWorkspace = false; NotifyCommands(); } }
         await RunAsync("Refresh", token => RefreshCoreAsync(token), cancellationToken);
+        // A refresh that failed or was cancelled never read a branch, so the label must stop saying it is loading.
+        if (version == _workspaceVersion && Branch == "Loading repository…") Branch = RepositoryRoot is null ? "No repository" : "Branch unknown; refresh to retry";
     }
 
     private bool CanRefresh() => !IsBusy && !_switchingWorkspace && !_disposed;

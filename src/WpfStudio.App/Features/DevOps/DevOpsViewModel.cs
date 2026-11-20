@@ -338,6 +338,8 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
         }
         // A failed sign-in leaves the current connection, if there is one, as it was.
         catch (Exception ex) when (ex is not OperationCanceledException) { Error = Describe(ex); Status = StateMessage; }
+        // Cancelled: "Waiting for Git Credential Manager…" must not stay up as if it still were.
+        catch (OperationCanceledException) when (!_disposed) { Status = StateMessage; }
         finally { lease.Dispose(); }
     }
 
@@ -362,6 +364,7 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
             Error = ex is DevOpsAuthenticationException ? $"{target.ServiceName} did not accept that token. Check that it was copied whole and has not expired." : Describe(ex);
             Status = IsConnected ? $"Still signed in as {User?.DisplayName}" : StateMessage;
         }
+        catch (OperationCanceledException) when (!_disposed) { Status = IsConnected ? $"Still signed in as {User?.DisplayName}" : StateMessage; }
         finally { lease.Dispose(); }
     }
 

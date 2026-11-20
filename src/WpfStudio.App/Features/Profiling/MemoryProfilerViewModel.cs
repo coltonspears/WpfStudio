@@ -36,6 +36,8 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     [ObservableProperty] public partial string ComparisonDescription { get; set; } = "Set a baseline, repeat a workload, then open or capture another snapshot to compare type growth.";
     [ObservableProperty] public partial string DacPath { get; set; } = "";
     [ObservableProperty] public partial int RuntimeIndex { get; set; }
+    /// <summary>Off by default: a capture reads the whole heap. On, the object and reference budgets below apply.</summary>
+    [ObservableProperty] public partial bool LimitAnalysis { get; set; }
     [ObservableProperty] public partial int MaxObjects { get; set; } = 1_000_000;
     [ObservableProperty] public partial int MaxReferences { get; set; } = 6_000_000;
     [ObservableProperty] public partial bool ShowOptions { get; set; }
@@ -83,16 +85,19 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
     private async Task OpenDumpAsync(CancellationToken token)
     {
         var path = await files.OpenFileAsync("Open managed memory dump", "Memory dumps|*.dmp;*.dump;*.core|All files|*.*");
-        if (path is not null) await LoadAsync(new(path, RuntimeIndex: RuntimeIndex, MaxObjects: MaxObjects, MaxReferences: MaxReferences, DacPath: NullDac()), token);
+        if (path is not null) await LoadAsync(new(path, RuntimeIndex: RuntimeIndex, MaxObjects: ObjectBudget, MaxReferences: ReferenceBudget, DacPath: NullDac()), token);
     }
     [RelayCommand(CanExecute = nameof(CanCapture), IncludeCancelCommand = true)]
     private Task CaptureAsync(CancellationToken token)
     {
         var process = SelectedProcess!;
         return LoadAsync(new(ProcessId: process.Id, ProcessStartTimeUtcTicks: process.StartTimeUtcTicks,
-            RuntimeIndex: RuntimeIndex, MaxObjects: MaxObjects, MaxReferences: MaxReferences, DacPath: NullDac()), token);
+            RuntimeIndex: RuntimeIndex, MaxObjects: ObjectBudget, MaxReferences: ReferenceBudget, DacPath: NullDac()), token);
     }
     private string? NullDac() => string.IsNullOrWhiteSpace(DacPath) ? null : DacPath.Trim();
+    // Zero asks the worker for the whole heap.
+    private int ObjectBudget => LimitAnalysis ? MaxObjects : 0;
+    private int ReferenceBudget => LimitAnalysis ? MaxReferences : 0;
 
     private async Task LoadAsync(HeapCaptureRequest request, CancellationToken token)
     {
@@ -115,7 +120,8 @@ public sealed partial class MemoryProfilerViewModel(IMemoryProfiler profiler, IF
                 Retention.Reset(); ResetGroups(); Summary = _session.Summary;
             }
             finally { _updating = false; }
-            if (old is not null) await old.DisposeAsync();
+            // The old capture's worker can take seconds to exit. The new snapshot is ready now, so it does not wait for that.
+            if (old is not null) old.DisposeAsync().AsTask().Forget(ReportFault);
             RecordSnapshot(Summary!);
             Status = Summary!.IsComplete ? $"{Summary.ObjectCount:N0} objects and {Summary.RootCount:N0} roots analyzed." +
                 (Summary.Insights is { Count: > 0 } found ? $" {found.Count} finding{(found.Count == 1 ? "" : "s")} to review." : " Select a type or explore what retains the most memory.")

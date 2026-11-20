@@ -26,14 +26,16 @@ internal sealed partial class RunningInspector(BindingTraceBuffer traces, Wpf.Di
 
     public async Task<InspectionTree> SnapshotAsync(InspectionTreeRequest request)
     {
-        int maximum = Math.Clamp(request.MaximumNodes, 1, 3000);
+        int maximum = Math.Clamp(request.MaximumNodes, 1, InspectionTreeRequest.DefaultMaximumNodes);
         // CurrentSources enumerates a thread-safe copy backed by weak references.
         // A source's root and all its descendants are read only on its dispatcher.
         var sources = PresentationSource.CurrentSources.Cast<PresentationSource>().Take(65).ToArray();
         bool truncated = sources.Length > 64;
         sources = sources.Take(64).ToArray();
         await UpdatePickingSourcesAsync(sources).ConfigureAwait(false);
-        int share = sources.Length == 0 ? maximum : Math.Max(1, maximum / sources.Length);
+        // Each window may use the whole budget: the merge below stops at the total. An even split left a main window with a
+        // fraction of it whenever a tooltip or popup was open, though those use only a handful of elements.
+        int share = maximum;
         int bindingShare = sources.Length == 0 ? MaximumBindingObservations : Math.Max(1, MaximumBindingObservations / sources.Length);
         var captured = await Task.WhenAll(sources.Select(source => ReadSourceAsync(source, share, bindingShare))).ConfigureAwait(false);
         var nodes = new List<InspectionNode>();
@@ -110,17 +112,19 @@ internal sealed partial class RunningInspector(BindingTraceBuffer traces, Wpf.Di
             nodes.Add(Node(target, parent, root));
             entries[id] = new(new(target), new(source), new(root));
             var children = new List<DependencyObject>();
+            // A list's Contains made a panel with thousands of children quadratic.
+            var listed = new HashSet<DependencyObject>(ReferenceEqualityComparer.Instance);
             if (target is Visual or Visual3D)
             {
                 int actualCount = VisualTreeHelper.GetChildrenCount(target);
                 int count = Math.Min(actualCount, maximum);
                 omitted |= actualCount > count;
-                for (int i = 0; i < count; i++) children.Add(VisualTreeHelper.GetChild(target, i));
+                for (int i = 0; i < count; i++) { var child = VisualTreeHelper.GetChild(target, i); if (listed.Add(child)) children.Add(child); }
             }
             foreach (object child in LogicalTreeHelper.GetChildren(target))
             {
                 token.ThrowIfCancellationRequested();
-                if (child is DependencyObject dependency && !children.Contains(dependency)) children.Add(dependency);
+                if (child is DependencyObject dependency && listed.Add(dependency)) children.Add(dependency);
                 if (children.Count >= maximum || watch.ElapsedMilliseconds >= 500) { omitted = true; break; }
             }
             for (int i = children.Count - 1; i >= 0; i--) stack.Push((children[i], target));

@@ -27,10 +27,24 @@ public sealed class ResourceStyleReaderTests(PreviewFixture fixture)
     });
 
     [Fact]
+    public void ADictionaryOfThousandsOfKeysIsListedInFull() => fixture.OnDispatcher(() =>
+    {
+        // Theme and App.xaml dictionaries commonly pass a thousand keys; those used to be omitted entirely.
+        var target = new Border();
+        for (int i = 0; i < 5000; i++) target.Resources.Add("Key" + i, "Value");
+        var snapshot = ResourceStyleReader.Capture(target, Border.BackgroundProperty);
+        Assert.True(snapshot.Available);
+        var scope = Assert.Single(snapshot.ResourceScopes, item => item.Label == "Selected element");
+        Assert.False(scope.KeysTruncated);
+        Assert.Equal(5000, scope.Keys.Count);
+        return true;
+    });
+
+    [Fact]
     public void OversizedDictionaryOmitsTheEntireKeyCopyAndReportsIncompleteCoverage() => fixture.OnDispatcher(() =>
     {
         var target = new Border();
-        for (int i = 0; i < 1025; i++) target.Resources.Add("Key" + i, "Value");
+        for (int i = 0; i < 65_537; i++) target.Resources.Add("Key" + i, "Value");
         var snapshot = ResourceStyleReader.Capture(target, Border.BackgroundProperty);
         Assert.True(snapshot.Available);
         Assert.True(snapshot.Truncated);

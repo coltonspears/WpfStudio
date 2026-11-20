@@ -118,6 +118,7 @@ public sealed partial class ShellViewModel
         Status = action.Title + "…";
         var result = await _workspace.ApplyCodeActionAsync(new(state.Path, state.Version, action.Id), _lifetime.Token);
         if (await ReviewAndApplyAsync(action.Title, result)) Status = "Applied: " + action.Title;
+        else EndProgressStatus(action.Title + "…");
     }
     private async Task HandleEditorActionAsync(EditorViewModel document, EditorAction action)
     {
