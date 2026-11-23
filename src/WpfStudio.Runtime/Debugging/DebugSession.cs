@@ -101,7 +101,11 @@ public sealed class DebugSession : IAsyncDisposable
     /// <summary>The adapter answers launch and attach only after configuration, so both run at once and neither may be abandoned.</summary>
     private async Task ConfigureWhileStartingAsync(Task start, IEnumerable<SourceBreakpoint> breakpoints, bool thrown, CancellationToken cancellationToken)
     {
-        try { await ConfigureAsync(breakpoints, thrown, cancellationToken).ConfigureAwait(false); }
+        // An adapter that refuses the start may never send initialized, so configuration stops waiting the moment it does.
+        using var configuring = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var configuration = ConfigureAsync(breakpoints, thrown, configuring.Token);
+        if (await Task.WhenAny(configuration, start).ConfigureAwait(false) == start && start.IsFaulted) await configuring.CancelAsync().ConfigureAwait(false);
+        try { await configuration.ConfigureAwait(false); }
         // A rejected start is why configuration never finished, and the reason worth showing.
         catch (Exception) when (start.IsFaulted) { await start.ConfigureAwait(false); throw; }
         catch (Exception) { start.Forget(); throw; } // Teardown ends the request, and nothing else would observe that.

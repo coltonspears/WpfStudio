@@ -47,8 +47,12 @@ public sealed class DebugSessionTests
         try
         {
             await using var run = new AdapterRun("reject-attach");
-            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => run.AttachAsync(seconds: 1));
+            // The deadline covers starting the adapter, which a cold runner can take more than a second to do. The rejection
+            // itself has to arrive long before the 20 seconds the session would wait for an initialized event that never comes.
+            var clock = Stopwatch.StartNew();
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => run.AttachAsync(seconds: 30));
             Assert.Equal("attach rejected", failure.Message);
+            Assert.InRange(clock.Elapsed.TotalSeconds, 0, 15);
             Assert.True(run.AdapterEnded(), "The adapter was left running.");
         }
         finally
