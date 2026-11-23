@@ -281,10 +281,7 @@ public sealed class XamlSchemaTests
     private static CSharpCompilation CreateCompilation()
     {
         // Read framework reference metadata, never load or instantiate WPF/project types.
-        var dotnetRoot = Path.GetFullPath(Path.Combine(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
-        var packRoot = Path.Combine(dotnetRoot, "packs", "Microsoft.WindowsDesktop.App.Ref");
-        var pack = Directory.GetDirectories(packRoot).OrderByDescending(path => Version.TryParse(Path.GetFileName(path), out var version) ? version : new Version()).First();
-        var referenceDirectory = Directory.GetDirectories(Path.Combine(pack, "ref")).OrderByDescending(path => path, StringComparer.Ordinal).First();
+        var referenceDirectory = WindowsDesktopReferences.Directory();
         var wpfPaths = Directory.GetFiles(referenceDirectory, "*.dll");
         var names = wpfPaths.Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var references = PlatformReferences().Where(reference => !names.Contains(Path.GetFileName(reference.Display)))

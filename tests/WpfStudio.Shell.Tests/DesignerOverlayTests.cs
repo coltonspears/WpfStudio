@@ -29,6 +29,12 @@ public sealed class DesignerOverlayTests
         Assert.True(shell.Designer.IsOverlayOpen);
         shell.IsScaffoldOpen = false;
         Assert.False(shell.Designer.IsOverlayOpen);
+
+        // About, What's new and Check for updates share one overlay.
+        shell.ShowAboutCommand.Execute(null);
+        Assert.True(shell.Designer.IsOverlayOpen);
+        shell.CloseAboutCommand.Execute(null);
+        Assert.False(shell.Designer.IsOverlayOpen);
     }
 
     [Fact]

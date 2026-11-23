@@ -1,0 +1,66 @@
+name: Version
+
+# Raises the version in Version.props each time a pull request is merged into main, and pushes that change to main.
+#   no label         0.4.2 -> 0.4.3
+#   version:minor    0.4.2 -> 0.5.0
+#   version:major    0.4.2 -> 1.0.0
+#   version:skip     unchanged, for a pull request that sets the version itself or should not count
+#
+# pull_request_target, so that pull requests from forks can raise the version too. It is safe here because nothing from the
+# pull request is checked out or run: the job checks out main as merged and runs only main's own scripts, and the pull
+# request's labels reach the script through an environment variable, never pasted into it.
+#
+# If main is protected, either let GitHub Actions push to it, or save a token that may (a fine-grained token with
+# Contents: write) as the repository secret VERSION_BUMP_TOKEN. See docs/releasing.md.
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+# One raise at a time, in the order the pull requests merged: each run starts from the version the previous one pushed.
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Raise the version
+    if: github.event.pull_request.merged == true && !contains(github.event.pull_request.labels.*.name, 'version:skip')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main as merged
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          token: ${{ secrets.VERSION_BUMP_TOKEN || github.token }}
+
+      - name: Raise the version and push it
+        shell: pwsh
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: |
+          $labels = @($env:LABELS | ConvertFrom-Json)
+          $part = if ($labels -contains 'version:major') { 'major' } elseif ($labels -contains 'version:minor') { 'minor' } else { 'patch' }
+          function Invoke-Git { git @args; if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') failed with exit code $LASTEXITCODE" } }
+          Invoke-Git config user.name 'github-actions[bot]'
+          Invoke-Git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Another pull request can merge between the checkout and the push. Then start again from the new main.
+          for ($attempt = 1; ; $attempt++) {
+            $previous = ./tools/Get-Version.ps1
+            $version = ./tools/Bump-Version.ps1 -Part $part
+            # [skip ci]: the change is one line in Version.props, already covered by the pull request's own checks.
+            Invoke-Git commit --quiet -m "Bump version to $version (#$env:PULL_REQUEST) [skip ci]" -- Version.props
+            git push origin "HEAD:refs/heads/$env:BRANCH"
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -ge 4) { throw "Could not push the version change to $env:BRANCH after $attempt attempts. If the branch is protected, see docs/releasing.md." }
+            Start-Sleep -Seconds (5 * $attempt)
+            Invoke-Git fetch --quiet origin $env:BRANCH
+            Invoke-Git reset --quiet --hard FETCH_HEAD
+          }
+          "Raised the version from **$previous** to **$version** ($part) for #$env:PULL_REQUEST." >> $env:GITHUB_STEP_SUMMARY

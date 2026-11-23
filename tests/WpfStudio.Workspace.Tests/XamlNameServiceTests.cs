@@ -437,10 +437,7 @@ public sealed partial class XamlNameServiceTests
     private static CSharpCompilation CreateCompilation()
     {
         // Metadata-only fixture: these controls and application accessors are never executed.
-        var dotnetRoot = Path.GetFullPath(Path.Combine(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
-        var packRoot = Path.Combine(dotnetRoot, "packs", "Microsoft.WindowsDesktop.App.Ref");
-        var pack = Directory.GetDirectories(packRoot).OrderByDescending(path => System.Version.TryParse(Path.GetFileName(path), out var version) ? version : new System.Version()).First();
-        var referenceDirectory = Directory.GetDirectories(Path.Combine(pack, "ref")).OrderByDescending(path => path, StringComparer.Ordinal).First();
+        var referenceDirectory = WindowsDesktopReferences.Directory();
         var wpfPaths = Directory.GetFiles(referenceDirectory, "*.dll");
         var names = wpfPaths.Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var references = PlatformReferences().Where(reference => !names.Contains(Path.GetFileName(reference.Display)))
