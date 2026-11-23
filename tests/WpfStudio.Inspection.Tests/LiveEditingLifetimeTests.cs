@@ -33,7 +33,14 @@ public sealed class LiveEditingLifetimeTests
         Assert.Equal("Retained until disconnect", (await target.StateAsync(timeout.Token))["EditLiteral"].Value);
 
         await target.Session.DisconnectAsync(timeout.Token);
+        // Disconnecting writes detach and closes the pipe without waiting for the agent's reply, so the agent restores the
+        // override on the application's dispatcher afterwards. On a busy CI runner this state was read before it had.
         var restored = (await target.StateAsync(timeout.Token))["EditLiteral"];
+        while (restored.Value != before.Value)
+        {
+            await Task.Delay(25, timeout.Token);
+            restored = (await target.StateAsync(timeout.Token))["EditLiteral"];
+        }
         Assert.Equal(before.Value, restored.Value);
         Assert.Equal(before.HasLocalValue, restored.HasLocalValue);
         Assert.Equal("ping", await target.App.SendAsync("ping", timeout.Token));
@@ -69,6 +76,8 @@ public sealed class LiveEditingLifetimeTests
         await using var target = await RuntimeEditingApplication.StartAsync("net10.0-windows", timeout.Token);
         var before = (await target.StateAsync(timeout.Token))["EditLiteral"];
         var request = await target.RequestAsync("EditLiteral", "Value", "Must never run", timeout.Token);
+        // The block below lasts until the agent unloads, which it does only after the disconnect has cancelled the queued edit.
+        await target.App.SendAsync("edit-observe-agent", timeout.Token);
         var blockId = await target.App.SubmitAsync("edit-block-main", timeout.Token);
         await WaitForFileAsync(target.App, "edit-block-started", timeout.Token);
         using var cancellation = new CancellationTokenSource();
