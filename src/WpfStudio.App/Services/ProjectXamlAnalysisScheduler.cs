@@ -11,6 +11,8 @@ public sealed class ProjectXamlAnalysisScheduler(Func<long, CancellationToken, T
     private int _runs;
     private bool _disposed;
     public Task Completion { get; private set; } = Task.CompletedTask;
+    /// <summary><see cref="Completion"/> and the generation it was scheduled for, read together.</summary>
+    public (Task Completion, long Generation) Latest { get { lock (_gate) return (Completion, _completionGeneration); } }
     public bool IsCurrent(long generation) { lock (_gate) return !_disposed && generation == _generation; }
     public long Invalidate()
     {
