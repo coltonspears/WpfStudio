@@ -150,8 +150,12 @@ public sealed class UpdateDownloader(HttpClient http, string updatesDirectory) :
         if (release.Assets.FirstOrDefault(asset => asset.Name.Equals(ChecksumFileName, StringComparison.OrdinalIgnoreCase)) is not { } sums) return null;
         if (sums.Size > MaximumChecksumFileBytes) return null;
         using var response = await SendAsync(sums.DownloadUrl, cancellationToken).ConfigureAwait(false);
-        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        return bytes.Length > MaximumChecksumFileBytes ? null : FindChecksum(Encoding.UTF8.GetString(bytes), fileName);
+        // Read no more than the limit allows, whatever size the release listed or the server sends.
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var buffer = new byte[MaximumChecksumFileBytes + 1];
+        int total = 0, read;
+        while (total < buffer.Length && (read = await stream.ReadAsync(buffer.AsMemory(total), cancellationToken).ConfigureAwait(false)) > 0) total += read;
+        return total > MaximumChecksumFileBytes ? null : FindChecksum(Encoding.UTF8.GetString(buffer, 0, total), fileName);
     }
 
     /// <summary>The hash for a file in <c>sha256sum</c> output: a hash, spaces (and <c>*</c> for binary mode), then the name.</summary>

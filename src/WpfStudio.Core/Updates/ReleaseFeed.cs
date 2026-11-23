@@ -66,7 +66,7 @@ public sealed class ReleaseFeed
             try
             {
                 using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-                return Read(document.RootElement);
+                return Read(document.RootElement, ReleasesPage);
             }
             catch (JsonException exception) { throw new UpdateException("GitHub's description of the newest release could not be read.", exception); }
         }
@@ -82,12 +82,13 @@ public sealed class ReleaseFeed
             : DateTimeOffset.Now.AddHours(1);
     }
 
-    internal static ReleaseInfo Read(JsonElement release)
+    /// <summary>A release from GitHub's JSON. A page that is not HTTPS is replaced by <paramref name="releasesPage"/>, since it is opened in the browser.</summary>
+    internal static ReleaseInfo Read(JsonElement release, Uri releasesPage)
     {
         var tag = Text(release, "tag_name");
         if (!ReleaseVersion.TryParse(tag, out var version))
             throw new UpdateException($"The newest release is tagged '{tag}', which is not a version such as v1.2.3.");
-        if (!Uri.TryCreate(Text(release, "html_url"), UriKind.Absolute, out var page)) throw new UpdateException("GitHub's description of the newest release has no address.");
+        var page = Uri.TryCreate(Text(release, "html_url"), UriKind.Absolute, out var listed) && listed.Scheme == Uri.UriSchemeHttps ? listed : releasesPage;
         var assets = new List<ReleaseAsset>();
         if (release.TryGetProperty("assets", out var list) && list.ValueKind == JsonValueKind.Array)
             foreach (var asset in list.EnumerateArray())

@@ -991,6 +991,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         FileGroups.Picker.PropertyChanged -= OverlayFormChanged; Breakpoints.Settings.PropertyChanged -= OverlayFormChanged;
         Breakpoints.Dispose();
         Features.Dispose();
+        Updates.Dispose();
         _operations.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
         foreach (var document in Documents) document.Dispose();
         // Dispose UI-bound commands while the shell still owns its dispatcher

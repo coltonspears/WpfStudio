@@ -211,6 +211,10 @@ public sealed class UpdateTests : IDisposable
         github.Latest = () => Json(ReleaseJson("nightly"));
         Assert.Contains("'nightly'", (await Assert.ThrowsAsync<UpdateException>(() => feed.GetLatestAsync(CancellationToken.None))).Message);
 
+        // The page is opened in the browser, so only an HTTPS one is kept.
+        github.Latest = () => Json(ReleaseJson("v0.2.0").Replace($"https://github.com/{Repository}/releases/tag/v0.2.0", "javascript:alert(1)", StringComparison.Ordinal));
+        Assert.Equal(feed.ReleasesPage, (await feed.GetLatestAsync(CancellationToken.None))!.Page);
+
         Assert.Throws<ArgumentException>(() => new ReleaseFeed(new HttpClient(github), "contoso/WpfStudio/extra"));
         Assert.Throws<ArgumentException>(() => new ReleaseFeed(new HttpClient(github), "../WpfStudio"));
     }
@@ -239,6 +243,11 @@ public sealed class UpdateTests : IDisposable
         Assert.Equal("WpfStudio-1.2.3-win-x64-self-contained.zip", package!.AssetName(ReleaseVersion.Parse("1.2.3")));
         Assert.True(package.CanWrite());
         Assert.Empty(Directory.GetFiles(folder, ".write-test-*"));
+
+        // As Windows PowerShell 5.1's Set-Content -Encoding utf8 writes it: with a byte order mark.
+        File.WriteAllText(Path.Combine(folder, InstalledPackage.MarkerFileName), $$"""{ "package": "win-x64", "repository": "{{Repository}}" }""", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        Assert.Equal("win-x64", InstalledPackage.TryRead(folder, out problem)?.Kind);
+        Assert.Null(problem);
 
         Assert.Null(InstalledPackage.TryRead(Installed(marker: false), out problem));
         Assert.Null(problem); // A build from source.
@@ -336,6 +345,11 @@ public sealed class UpdateTests : IDisposable
 
         var staged = await service.DownloadAsync(await service.CheckAsync(CancellationToken.None), null, CancellationToken.None);
         Assert.True(File.Exists(staged.Executable));
+
+        // A SHA256SUMS.txt far larger than the release lists is not read past the limit, and so gives no hash.
+        var padded = sums.Concat(Enumerable.Repeat((byte)'\n', 70 * 1024)).ToArray();
+        github.Files[Download("v0.2.0", UpdateDownloader.ChecksumFileName)] = padded;
+        Assert.Contains("lists no SHA-256", (await Assert.ThrowsAsync<UpdateException>(async () => await service.DownloadAsync(await service.CheckAsync(CancellationToken.None), null, CancellationToken.None))).Message);
 
         Assert.Null(UpdateDownloader.FindChecksum("not a hash  WpfStudio-0.2.0-win-x64.zip", "WpfStudio-0.2.0-win-x64.zip"));
         Assert.Null(UpdateDownloader.FindChecksum($"{Sha256(zip)}  other.zip", "WpfStudio-0.2.0-win-x64.zip"));

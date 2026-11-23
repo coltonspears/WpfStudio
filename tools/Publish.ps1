@@ -161,7 +161,7 @@ try {
     $documentationDirectory = Join-Path $staging 'docs'
     New-Item -ItemType Directory -Path $documentationDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'docs/xaml-devtools-design.md'), (Join-Path $repository 'docs/xaml-runtime-bootstrap.md'), (Join-Path $repository 'docs/xaml-preview-scenarios.md'), (Join-Path $repository 'docs/xaml-appearance.md'), (Join-Path $repository 'docs/xaml-binding-navigation.md'), (Join-Path $repository 'docs/xaml-binding-diagnostics.md'), (Join-Path $repository 'docs/xaml-named-elements.md'), (Join-Path $repository 'docs/xaml-preview-interaction.md'), (Join-Path $repository 'docs/xaml-resource-resolution-plan.md'), (Join-Path $repository 'docs/xaml-feature-tour.md'), (Join-Path $repository 'docs/xaml-language-performance.md') -Destination $documentationDirectory
-    Copy-Item -LiteralPath (Join-Path $repository 'docs/memory-profiler.md'), (Join-Path $repository 'docs/profiling-suite-design.md') -Destination $documentationDirectory
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/memory-profiler.md'), (Join-Path $repository 'docs/profiling-suite-design.md'), (Join-Path $repository 'docs/releasing.md') -Destination $documentationDirectory
     $imageDirectory = Join-Path $documentationDirectory 'images'
     New-Item -ItemType Directory -Path $imageDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'docs/images/xaml') -Destination $imageDirectory -Recurse
@@ -192,7 +192,8 @@ try {
         package = if ($SelfContained) { 'win-x64-self-contained' } else { 'win-x64' }
         repository = $ReleaseRepository
     }
-    $package | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staging 'WpfStudio.package.json') -Encoding utf8
+    # Without a byte order mark whichever PowerShell runs this: Windows PowerShell's -Encoding utf8 writes one.
+    [IO.File]::WriteAllText((Join-Path $staging 'WpfStudio.package.json'), ($package | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
     Assert-ArtifactPath $destination
     Assert-ArtifactPath $staging
     if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }

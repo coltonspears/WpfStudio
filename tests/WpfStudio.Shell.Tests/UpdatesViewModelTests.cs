@@ -263,6 +263,25 @@ public sealed class UpdatesViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ClosingWpfStudioStopsADownloadUnderWay()
+    {
+        var (page, host, github, service) = Create();
+        Serve(github, Package());
+        await page.CheckCommand.ExecuteAsync(null);
+        github.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var install = page.InstallCommand.ExecuteAsync(null);
+        await github.Downloading.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        page.Dispose();
+        await install.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.False(page.IsBusy);
+        Assert.Empty(host.Restarts);
+        Assert.False(Directory.Exists(Path.Combine(service.UpdatesDirectory, "0.2.0")));
+        page.Dispose(); // Once is enough; twice does no harm.
+    }
+
+    [Fact]
     public async Task StartingAfterAnUpdateSaysSoAndClearsWhatItLeft()
     {
         var (page, _, _, service) = Create(version: "0.2.0");

@@ -73,14 +73,16 @@ public sealed class UpdateApplier(TimeSpan? lockTimeout = null)
                     await RetryAsync(() => File.Move(destination, saved), cancellationToken).ConfigureAwait(false);
                     change.Saved = true;
                 }
-                File.Copy(Path.Combine(source, relative), destination, overwrite: false);
+                // Overwriting is safe: the original was moved away or there was none, so anything there is a copy of ours cut short.
+                var from = Path.Combine(source, relative);
+                await RetryAsync(() => File.Copy(from, destination, overwrite: true), cancellationToken).ConfigureAwait(false);
                 if (i % 25 == 0 || i == files.Length - 1) progress?.Report(new UpdateProgress($"Replacing files… {i + 1} of {files.Length}", (double)(i + 1) / files.Length));
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or OperationCanceledException)
         {
             progress?.Report(new UpdateProgress("Restoring the previous version…"));
-            var restored = Undo(target, backup, journal);
+            var restored = await UndoAsync(target, backup, journal).ConfigureAwait(false);
             throw new UpdateException(restored
                 ? $"WpfStudio could not be updated, so the previous version was kept: {exception.Message}"
                 : $"WpfStudio could not be updated, and some files could not be put back. The previous files are in {backup}. {exception.Message}", exception);
@@ -94,8 +96,11 @@ public sealed class UpdateApplier(TimeSpan? lockTimeout = null)
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
     }
 
-    /// <summary>Puts back what <see cref="ApplyAsync"/> changed, newest first. False when a file could not be restored.</summary>
-    private static bool Undo(string target, string backup, List<Change> journal)
+    /// <summary>
+    /// Puts back what <see cref="ApplyAsync"/> changed, newest first, waiting out a file held open as the changes did.
+    /// Not cancellable: half an undo is worse than a slow one. False when a file could not be restored.
+    /// </summary>
+    private async Task<bool> UndoAsync(string target, string backup, List<Change> journal)
     {
         var complete = true;
         for (var i = journal.Count - 1; i >= 0; i--)
@@ -106,8 +111,9 @@ public sealed class UpdateApplier(TimeSpan? lockTimeout = null)
             {
                 // The saved original replaces whatever was copied, even a copy cut short. With nothing there before,
                 // whatever is there now is the update's. A file whose move failed was never touched.
-                if (change.Saved) File.Move(Path.Combine(backup, change.Relative), destination, overwrite: true);
-                else if (!change.Existed && File.Exists(destination)) File.Delete(destination);
+                var saved = Path.Combine(backup, change.Relative);
+                if (change.Saved) await RetryAsync(() => File.Move(saved, destination, overwrite: true), CancellationToken.None).ConfigureAwait(false);
+                else if (!change.Existed && File.Exists(destination)) await RetryAsync(() => File.Delete(destination), CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { complete = false; }
         }
@@ -117,7 +123,8 @@ public sealed class UpdateApplier(TimeSpan? lockTimeout = null)
 
     /// <summary>
     /// Retries while another process still has the file open: a worker or a debugger can take a few seconds to exit
-    /// after WpfStudio has. A missing file or folder is not worth waiting for.
+    /// after WpfStudio has, and a virus scanner may be reading a file just written. Other failures, such as a full disk,
+    /// will not pass by waiting, so they are not retried.
     /// </summary>
     private async Task RetryAsync(Action action, CancellationToken cancellationToken)
     {
@@ -125,12 +132,16 @@ public sealed class UpdateApplier(TimeSpan? lockTimeout = null)
         for (var delay = 100; ; delay = Math.Min(delay * 2, 1000))
         {
             try { action(); return; }
-            catch (Exception exception) when (exception is (IOException or UnauthorizedAccessException) and not (FileNotFoundException or DirectoryNotFoundException) && waited.Elapsed < _lockTimeout)
+            catch (Exception exception) when (IsHeldOpen(exception) && waited.Elapsed < _lockTimeout)
             {
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
             }
         }
     }
+
+    /// <summary>A sharing or lock violation (Windows errors 32 and 33), or access refused, which an open file can also cause.</summary>
+    private static bool IsHeldOpen(Exception exception) =>
+        exception is UnauthorizedAccessException || exception is IOException { HResult: var result } and not (FileNotFoundException or DirectoryNotFoundException) && (result & 0xFFFF) is 32 or 33;
 
     /// <summary>
     /// How many other WpfStudio processes run from <paramref name="applicationDirectory"/>. Their files would be replaced

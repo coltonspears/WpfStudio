@@ -25,7 +25,7 @@ public interface IUpdateHost
 /// Help > Check for updates: asks GitHub for the newest release, shows its notes, and with <b>Update and restart</b>
 /// downloads and verifies it, then closes WpfStudio, which the staged package replaces and starts again.
 /// </summary>
-public sealed partial class UpdatesViewModel : ObservableObject
+public sealed partial class UpdatesViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(30);
     private readonly UpdateService _service;
@@ -173,6 +173,14 @@ public sealed partial class UpdatesViewModel : ObservableObject
 
     [RelayCommand(CanExecute = nameof(IsBusy))]
     private void Cancel() => _work?.Cancel();
+
+    /// <summary>WpfStudio is closing: a check or download under way stops, and its partial download is removed.</summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _work, null) is not { } work) return;
+        work.Cancel();
+        work.Dispose();
+    }
 
     [RelayCommand]
     private void OpenReleasePage() => _host.OpenUrl((LastCheck?.Release?.Page ?? _service.Feed.ReleasesPage).AbsoluteUri);

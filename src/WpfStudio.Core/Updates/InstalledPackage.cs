@@ -23,7 +23,8 @@ public sealed record InstalledPackage(string Directory, string Kind, string Repo
         if (!File.Exists(path)) return null;
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+            // As text, which drops a byte order mark: Windows PowerShell 5.1 writes one, and JsonDocument refuses it in bytes.
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
             var root = document.RootElement;
             var kind = Text(root, "package");
             var repository = Text(root, "repository");
