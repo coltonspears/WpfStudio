@@ -38,22 +38,25 @@ public static class DesktopSize
 }
 '@
 
+# PowerShell passes $null to a string parameter as "", which names no display, so the primary display is named outright.
+Add-Type -AssemblyName System.Windows.Forms
+$device = [System.Windows.Forms.Screen]::PrimaryScreen.DeviceName
 $CurrentSettings = -1
 $PelsWidthAndHeight = 0x00180000
 $UpdateRegistry = 0x00000001
 
 $mode = New-Object DesktopSize+DisplayMode
 $mode.Size = [System.Runtime.InteropServices.Marshal]::SizeOf($mode)
-if (-not [DesktopSize]::EnumDisplaySettings($null, $CurrentSettings, [ref] $mode)) { throw 'The current display mode could not be read.' }
-"Desktop was $($mode.PelsWidth)x$($mode.PelsHeight)"
+if (-not [DesktopSize]::EnumDisplaySettings($device, $CurrentSettings, [ref] $mode)) { throw "The current display mode of $device could not be read." }
+"Desktop of $device was $($mode.PelsWidth)x$($mode.PelsHeight)"
 if ($mode.PelsWidth -ne $Width -or $mode.PelsHeight -ne $Height) {
     $mode.PelsWidth = $Width
     $mode.PelsHeight = $Height
     $mode.Fields = $PelsWidthAndHeight
-    $result = [DesktopSize]::ChangeDisplaySettingsEx($null, [ref] $mode, [System.IntPtr]::Zero, $UpdateRegistry, [System.IntPtr]::Zero)
+    $result = [DesktopSize]::ChangeDisplaySettingsEx($device, [ref] $mode, [System.IntPtr]::Zero, $UpdateRegistry, [System.IntPtr]::Zero)
     # DISP_CHANGE_SUCCESSFUL is 0; 1 means it applies after a restart, which a CI run cannot wait for.
     if ($result -ne 0) { throw "The display refused ${Width}x${Height} (ChangeDisplaySettingsEx returned $result)." }
 }
-[void] [DesktopSize]::EnumDisplaySettings($null, $CurrentSettings, [ref] $mode)
+[void] [DesktopSize]::EnumDisplaySettings($device, $CurrentSettings, [ref] $mode)
 "Desktop is $($mode.PelsWidth)x$($mode.PelsHeight)"
 if ($mode.PelsWidth -ne $Width -or $mode.PelsHeight -ne $Height) { throw "The desktop is $($mode.PelsWidth)x$($mode.PelsHeight), not ${Width}x${Height}." }
