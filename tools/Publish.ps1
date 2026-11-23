@@ -4,7 +4,10 @@ param(
     [switch]$SelfContained,
     [switch]$SkipTests,
     [switch]$SkipDebuggerDownload,
-    [switch]$Zip
+    [switch]$Zip,
+    # Where Help > Check for updates looks for newer releases of this package, as owner/name on GitHub.
+    # Not -Repository: PowerShell names are case-insensitive, and $repository below is the source folder.
+    [ValidatePattern('^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$')][string]$ReleaseRepository = 'coltonspears/WpfStudio'
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -158,7 +161,7 @@ try {
     $documentationDirectory = Join-Path $staging 'docs'
     New-Item -ItemType Directory -Path $documentationDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'docs/xaml-devtools-design.md'), (Join-Path $repository 'docs/xaml-runtime-bootstrap.md'), (Join-Path $repository 'docs/xaml-preview-scenarios.md'), (Join-Path $repository 'docs/xaml-appearance.md'), (Join-Path $repository 'docs/xaml-binding-navigation.md'), (Join-Path $repository 'docs/xaml-binding-diagnostics.md'), (Join-Path $repository 'docs/xaml-named-elements.md'), (Join-Path $repository 'docs/xaml-preview-interaction.md'), (Join-Path $repository 'docs/xaml-resource-resolution-plan.md'), (Join-Path $repository 'docs/xaml-feature-tour.md'), (Join-Path $repository 'docs/xaml-language-performance.md') -Destination $documentationDirectory
-    Copy-Item -LiteralPath (Join-Path $repository 'docs/memory-profiler.md'), (Join-Path $repository 'docs/profiling-suite-design.md') -Destination $documentationDirectory
+    Copy-Item -LiteralPath (Join-Path $repository 'docs/memory-profiler.md'), (Join-Path $repository 'docs/profiling-suite-design.md'), (Join-Path $repository 'docs/releasing.md') -Destination $documentationDirectory
     $imageDirectory = Join-Path $documentationDirectory 'images'
     New-Item -ItemType Directory -Path $imageDirectory -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'docs/images/xaml') -Destination $imageDirectory -Recurse
@@ -182,6 +185,15 @@ try {
         Get-ChildItem -LiteralPath $measurements -Filter '*.json' -File | Copy-Item -Destination $validationDirectory
     }
     Export-PackageNotices
+    # Marks a published package, which Help > Check for updates may replace in place, and names the release asset that
+    # matches it. A build from source has no marker: the IDE then only links to the release.
+    $package = [ordered]@{
+        schema = 1
+        package = if ($SelfContained) { 'win-x64-self-contained' } else { 'win-x64' }
+        repository = $ReleaseRepository
+    }
+    # Without a byte order mark whichever PowerShell runs this: Windows PowerShell's -Encoding utf8 writes one.
+    [IO.File]::WriteAllText((Join-Path $staging 'WpfStudio.package.json'), ($package | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
     Assert-ArtifactPath $destination
     Assert-ArtifactPath $staging
     if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
