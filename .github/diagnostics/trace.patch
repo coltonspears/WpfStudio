@@ -337,6 +337,57 @@ index 72e5431..4b558cf 100644
              Assert.True(startup < TimeSpan.FromSeconds(5), "Shell render exceeded 5-second regression budget");
              // Windows caps a window at the desktop's size, and the checks below are about the default layout's.
              Assert.True(window.ActualWidth >= window.Width - 0.5 && window.ActualHeight >= window.Height - 0.5,
+diff --git a/tests/WpfStudio.CodeAssist.Tests/ScratchParityReport.cs b/tests/WpfStudio.CodeAssist.Tests/ScratchParityReport.cs
+new file mode 100644
+index 0000000..e6bd64a
+--- /dev/null
++++ b/tests/WpfStudio.CodeAssist.Tests/ScratchParityReport.cs
+@@ -0,0 +1,45 @@
++using System.Runtime.Intrinsics.X86;
++using System.Text.Json;
++using Xunit.Abstractions;
++
++namespace WpfStudio.CodeAssist.Tests;
++
++// CI diagnostics only: how far line model 4.0.0's output on this CPU is from golden.json, case by case.
++public sealed class ScratchParityReport(ITestOutputHelper output)
++{
++    [Fact]
++    public void Report()
++    {
++        var golden = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Golden", "golden.json"))).RootElement;
++        var catalog = new AssistModelCatalog(AssistModelCatalog.DefaultDirectory);
++        using var generator = TransformerLineGenerator.Load(catalog.Versions(AssistModelKind.Lines).Single(m => m.Manifest.Version == "4.0.0"));
++        output.WriteLine($"REPORT CPU AVX2 {Avx2.IsSupported} AVX512F {Avx512F.IsSupported} AVX-VNNI {AvxVnni.IsSupported}");
++        int index = 0, text = 0, finished = 0, nulls = 0;
++        var worst = new double[TransformerLineGenerator.GateFeatures.Count];
++        var dump = new List<object>();
++        foreach (var expected in golden.GetProperty("lines").GetProperty("4.0.0").EnumerateArray())
++        {
++            string code = expected.GetProperty("code").GetString()!;
++            var (actual, features) = generator.GenerateWithFeatures(code, CodeAssistEngine.MaxLineTokens);
++            dump.Add(new { index, text = actual.Text, finished = actual.Finished, features });
++            if (expected.GetProperty("text").GetString() != actual.Text) { text++; output.WriteLine($"REPORT text #{index}: [{expected.GetProperty("text").GetString()}] vs [{actual.Text}]"); }
++            if (actual.Text.Length > 0 && expected.GetProperty("finished").GetBoolean() != actual.Finished) finished++;
++            bool wantedNull = expected.GetProperty("features").ValueKind == JsonValueKind.Null;
++            if (wantedNull != (features is null)) nulls++;
++            else if (!wantedNull)
++            {
++                var wanted = expected.GetProperty("features").EnumerateArray().Select(v => v.GetDouble()).ToArray();
++                for (int i = 0; i < wanted.Length; i++)
++                {
++                    double delta = Math.Abs(wanted[i] - features![i]);
++                    if (delta > worst[i]) worst[i] = delta;
++                    if (delta > 1e-3) output.WriteLine($"REPORT feature #{index} {TransformerLineGenerator.GateFeatures[i]}: {wanted[i]} vs {features[i]}");
++                }
++            }
++            index++;
++        }
++        output.WriteLine($"REPORT {index} cases: text differs {text}, finished differs {finished}, features present differently {nulls}");
++        for (int i = 0; i < worst.Length; i++) output.WriteLine($"REPORT worst {TransformerLineGenerator.GateFeatures[i]}: {worst[i]}");
++        output.WriteLine("REPORT DUMP " + JsonSerializer.Serialize(dump));
++    }
++}
 diff --git a/tests/WpfStudio.Shell.Tests/ProjectXamlPartialCoverageTests.cs b/tests/WpfStudio.Shell.Tests/ProjectXamlPartialCoverageTests.cs
 index 4d7b69d..ea157e7 100644
 --- a/tests/WpfStudio.Shell.Tests/ProjectXamlPartialCoverageTests.cs

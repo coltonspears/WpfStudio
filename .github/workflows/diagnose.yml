@@ -19,6 +19,33 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # Line model 4.0.0 against golden.json on whichever CPU each runner has; three runners make an AVX2-only one likely.
+  codeassist:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Describe the CPU
+        shell: pwsh
+        run: |
+          $cpu = Get-CimInstance Win32_Processor
+          $leaf7 = [System.Runtime.Intrinsics.X86.X86Base]::CpuId(7, 0)
+          "CPU: $($cpu.Name); AVX512F $([System.Runtime.Intrinsics.X86.Avx512F]::IsSupported), AVX512-VNNI $(($leaf7.Item3 -band 0x800) -ne 0), AMX $(($leaf7.Item4 -band 0x1000000) -ne 0)"
+      - name: Report
+        shell: pwsh
+        run: |
+          git apply .github/diagnostics/trace.patch
+          if ($LASTEXITCODE -ne 0) { throw "The tracing patch no longer applies." }
+          dotnet build tests/WpfStudio.CodeAssist.Tests --configuration Release -p:TreatWarningsAsErrors=false
+          dotnet test tests/WpfStudio.CodeAssist.Tests --configuration Release --no-build --filter "FullyQualifiedName~ScratchParityReport" --logger "console;verbosity=detailed"
+
   diagnose:
     runs-on: windows-latest
     timeout-minutes: 90
@@ -97,6 +124,17 @@ jobs:
             $env:WPFSTUDIO_DIAG_TRACE = "$env:RUNNER_TEMP\trace-runtime-$run"
             New-Item -ItemType Directory -Force $env:WPFSTUDIO_DIAG_TRACE | Out-Null
             dotnet test tests/WpfStudio.Runtime.Tests --configuration Release --no-build --logger trx --results-directory "TestResults/runtime-$run"
+            if ($LASTEXITCODE -ne 0) { $failed++ }
+          }
+          if ($failed -gt 0) { exit 1 }
+
+      - name: Inspection suite, twice
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $failed = 0
+          foreach ($run in 1..2) {
+            dotnet test tests/WpfStudio.Inspection.Tests --configuration Release --no-build --logger trx --results-directory "TestResults/inspection-$run"
             if ($LASTEXITCODE -ne 0) { $failed++ }
           }
           if ($failed -gt 0) { exit 1 }
