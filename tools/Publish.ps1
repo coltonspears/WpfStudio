@@ -4,7 +4,10 @@ param(
     [switch]$SelfContained,
     [switch]$SkipTests,
     [switch]$SkipDebuggerDownload,
-    [switch]$Zip
+    [switch]$Zip,
+    # Where Help > Check for updates looks for newer releases of this package, as owner/name on GitHub.
+    # Not -Repository: PowerShell names are case-insensitive, and $repository below is the source folder.
+    [ValidatePattern('^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$')][string]$ReleaseRepository = 'coltonspears/WpfStudio'
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -182,6 +185,14 @@ try {
         Get-ChildItem -LiteralPath $measurements -Filter '*.json' -File | Copy-Item -Destination $validationDirectory
     }
     Export-PackageNotices
+    # Marks a published package, which Help > Check for updates may replace in place, and names the release asset that
+    # matches it. A build from source has no marker: the IDE then only links to the release.
+    $package = [ordered]@{
+        schema = 1
+        package = if ($SelfContained) { 'win-x64-self-contained' } else { 'win-x64' }
+        repository = $ReleaseRepository
+    }
+    $package | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staging 'WpfStudio.package.json') -Encoding utf8
     Assert-ArtifactPath $destination
     Assert-ArtifactPath $staging
     if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
