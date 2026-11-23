@@ -5,8 +5,10 @@ Run it with the sandbox's interpreter whenever a model version or feature versio
     <sandbox>/.venv/Scripts/python.exe -X utf8 generate_golden.py <sandbox> <WpfStudio.CodeAssist/Models>
 
 Line model 4.0.0 ships as the sandbox's model.int8.onnx with its weights stored as uint8 (tools/unsign_int8_weights.py), because
-the int8 file scores lines differently on CPUs with and without VNNI. Its entries were last written from the C# port's output on
-that file, when the sandbox could not be run; this script should reproduce them, and a difference means the port has drifted.
+the int8 file scores lines differently on CPUs with and without VNNI. Its float kernels still differ between AVX-512 CPUs and the
+rest, so golden.json keeps 4.0.0 twice: "lines" for AVX-512 and "lines_avx2" for AVX2. This script writes the one for the CPU it
+runs on and keeps the other. Both were last written from the C# port's output (AVX-512 on a Xeon, AVX2 on an AMD EPYC 7763), when
+the sandbox could not be run; this script should reproduce them, and a difference means the port has drifted.
 """
 import hashlib
 import json
@@ -127,15 +129,30 @@ def transformer_lines(folder, shipped):
     return [{"code": code, **suggest(generator, code, gate)} for code in LINE_CONTEXTS + replay]
 
 
+def avx512():
+    # ONNX Runtime picks its AVX-512 kernels when the CPU and OS support AVX-512F, as GoldenParityTests asks .NET.
+    if sys.platform == "win32":
+        import ctypes
+        return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(41))  # PF_AVX512F_INSTRUCTIONS_AVAILABLE
+    return "avx512f" in Path("/proc/cpuinfo").read_text(encoding="utf-8").split()
+
+
 v2 = sandbox / ".sandbox-cache" / "experiments" / "code-assist-lines-2.0.0"
 v3 = sandbox / ".sandbox-cache" / "experiments" / "code-assist-lines-3.0.0"
+out = Path(__file__).with_name("golden.json")
+previous = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
+transformer = transformer_lines(sandbox / ".sandbox-cache" / "experiments" / "lines-t384c", models / "lines" / "4.0.0")
+here, other = ("lines", "lines_avx2") if avx512() else ("lines_avx2", "lines")
+kept = previous.get(other, {}).get("4.0.0")
 golden = {
     "members": {version: member_cases(int(version[0]), models / "members" / version) for version in ("1.0.0", "2.0.0")},
     "tokens": {version: tokens(models / "lines" / version) for version in ("1.0.0", "2.0.0", "3.0.0", "4.0.0")},
-    "lines": {"1.0.0": lines_v1(), "2.0.0": gated_lines(v2, models / "lines" / "2.0.0"), "3.0.0": gated_lines(v3, models / "lines" / "3.0.0"),
-              "4.0.0": transformer_lines(sandbox / ".sandbox-cache" / "experiments" / "lines-t384c", models / "lines" / "4.0.0")},
+    "lines": {"1.0.0": lines_v1(), "2.0.0": gated_lines(v2, models / "lines" / "2.0.0"), "3.0.0": gated_lines(v3, models / "lines" / "3.0.0")},
+    "lines_avx2": {},
 }
+golden[here]["4.0.0"] = transformer
+if kept is not None: golden[other]["4.0.0"] = kept
+print(f"4.0.0 written to {here!r} for this CPU; {other!r} " + ("kept from the previous file" if kept is not None else "has no record yet: run this on such a CPU"))
 
-out = Path(__file__).with_name("golden.json")
 out.write_text(json.dumps(golden, ensure_ascii=False, separators=(",", ":")), encoding="utf-8", newline="\n")
 print(out, out.stat().st_size)
