@@ -23,9 +23,13 @@ $sampleLines = @(if (Test-Path $Samples) { Get-Content $Samples })
 $sessions = [ordered]@{}
 foreach ($file in Get-ChildItem tests -Recurse -Filter dap-trace.log -ErrorAction SilentlyContinue) {
     $project = ($file.FullName -split '[\\/]tests[\\/]')[1].Split([char[]]'\/')[0]
+    # Transport numbers start again in each test process, and every session starts with initialize.
+    $current = @{}
     foreach ($line in Get-Content $file.FullName) {
         if ($line -notmatch '^(\S+) #(\d+) (.*)$') { continue }
-        $id = "$project#$($Matches[2])"
+        $number = $Matches[2]
+        if (-not $current.ContainsKey($number) -or $line -match '-> .*"command":"initialize"') { $current[$number] = "$project#$number@$($line.Substring(0, 12))" }
+        $id = $current[$number]
         if (-not $sessions.Contains($id)) { $sessions[$id] = [Collections.Generic.List[string]]::new() }
         $sessions[$id].Add($line)
     }
@@ -53,8 +57,8 @@ foreach ($id in $sessions.Keys) {
     $failed = ($mark.ContainsKey('configurationDone<-') -and -not $mark['configurationDone ok']) -or ($mark.ContainsKey("$kind<-") -and -not $mark["$kind ok"]) -or $done -lt 0 -or $done -gt 2500
     if (-not $failed) { continue }
     "---- $id in full"
-    $lines | ForEach-Object { "  " + (Cut $_ 400) }
-    $last = Time $lines[$lines.Count - 1].Substring(0, 12)
+    $lines | Select-Object -First 40 | ForEach-Object { "  " + (Cut $_ 400) }
+    $last = if ($mark.ContainsKey('configurationDone<-')) { Time $mark['configurationDone<-'] } else { Time $lines[$lines.Count - 1].Substring(0, 12) }
     "---- busiest processes from 4 s before to 2 s after"
     foreach ($sample in $sampleLines) {
         try { $at = Time $sample.Substring(0, 12) } catch { continue }
