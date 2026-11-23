@@ -265,10 +265,7 @@ public sealed class XamlGeneratedNameBridgeTests
 
     private static MetadataReference[] CreateReferences()
     {
-        var dotnetRoot = Path.GetFullPath(Path.Combine(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
-        var packRoot = Path.Combine(dotnetRoot, "packs", "Microsoft.WindowsDesktop.App.Ref");
-        var pack = Directory.GetDirectories(packRoot).OrderByDescending(path => Version.TryParse(Path.GetFileName(path), out var version) ? version : new Version()).First();
-        var referenceDirectory = Directory.GetDirectories(Path.Combine(pack, "ref")).OrderByDescending(path => path, StringComparer.Ordinal).First();
+        var referenceDirectory = WindowsDesktopReferences.Directory();
         var paths = Directory.GetFiles(referenceDirectory, "*.dll");
         var names = paths.Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
