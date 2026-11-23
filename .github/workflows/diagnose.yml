@@ -53,6 +53,10 @@ jobs:
           Get-ChildItem 'C:\Program Files (x86)\Microsoft\EdgeWebView\Application' -ErrorAction SilentlyContinue | ForEach-Object { "EdgeWebView: $($_.Name)" }
           try { Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, AntivirusEnabled | Format-List | Out-String } catch { "Defender: $($_.Exception.Message)" }
 
+      - name: Give the desktop the size the shell smoke test lays out
+        shell: pwsh
+        run: ./tools/Set-DesktopSize.ps1 -Width 1920 -Height 1080
+
       - name: Restore
         run: dotnet restore WpfStudio.sln
 
@@ -84,31 +88,25 @@ jobs:
           New-Item -ItemType Directory -Force $env:WPFSTUDIO_DIAG_TRACE | Out-Null
           dotnet test tests/WpfStudio.App.Tests --configuration Release --no-build --logger "console;verbosity=detailed" --logger trx --results-directory TestResults/smoke
 
-      - name: Runtime suite, three times
+      - name: Runtime suite, twice
         continue-on-error: true
         shell: pwsh
         run: |
           $failed = 0
-          foreach ($run in 1..3) {
+          foreach ($run in 1..2) {
             $env:WPFSTUDIO_DIAG_TRACE = "$env:RUNNER_TEMP\trace-runtime-$run"
             New-Item -ItemType Directory -Force $env:WPFSTUDIO_DIAG_TRACE | Out-Null
             dotnet test tests/WpfStudio.Runtime.Tests --configuration Release --no-build --logger trx --results-directory "TestResults/runtime-$run"
             if ($LASTEXITCODE -ne 0) { $failed++ }
           }
-          foreach ($run in 1..2) {
-            $env:WPFSTUDIO_DIAG_TRACE = "$env:RUNNER_TEMP\trace-terminal-alone-$run"
-            New-Item -ItemType Directory -Force $env:WPFSTUDIO_DIAG_TRACE | Out-Null
-            dotnet test tests/WpfStudio.Runtime.Tests --configuration Release --no-build --filter "FullyQualifiedName~RendererInitializationFailure" --logger trx --results-directory "TestResults/terminal-alone-$run"
-            if ($LASTEXITCODE -ne 0) { $failed++ }
-          }
           if ($failed -gt 0) { exit 1 }
 
-      - name: Shell suite, three times
+      - name: Shell suite, four times
         continue-on-error: true
         shell: pwsh
         run: |
           $failed = 0
-          foreach ($run in 1..3) {
+          foreach ($run in 1..4) {
             $env:WPFSTUDIO_DIAG_TRACE = "$env:RUNNER_TEMP\trace-shell-$run"
             New-Item -ItemType Directory -Force $env:WPFSTUDIO_DIAG_TRACE | Out-Null
             dotnet test tests/WpfStudio.Shell.Tests --configuration Release --no-build --logger trx --results-directory "TestResults/shell-$run"

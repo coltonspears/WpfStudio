@@ -1,5 +1,5 @@
 diff --git a/src/WpfStudio.App/Features/XamlAnalysis/ProjectXamlAnalysisCoordinator.cs b/src/WpfStudio.App/Features/XamlAnalysis/ProjectXamlAnalysisCoordinator.cs
-index a7ed0c8..b31b46b 100644
+index 420c8c8..2f2377b 100644
 --- a/src/WpfStudio.App/Features/XamlAnalysis/ProjectXamlAnalysisCoordinator.cs
 +++ b/src/WpfStudio.App/Features/XamlAnalysis/ProjectXamlAnalysisCoordinator.cs
 @@ -132,6 +132,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
@@ -27,7 +27,15 @@ index a7ed0c8..b31b46b 100644
              if (!_disposed && ReferenceEquals(workspace, _host.Workspace) && !IsRunning) _ = _scheduler.Schedule();
          }), contextFiles: ProjectContextFiles(workspace), failed: exception =>
          {
-@@ -308,7 +310,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
+@@ -300,6 +302,7 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
+             if (_scheduler.IsCurrent(generation)) break;
+             // A watcher invalidates on its own thread and requests the next scan through the dispatcher, so the scan can end
+             // before that request is scheduled. One write often arrives as several notifications; scan for the later ones too.
++            DiagTrace.Write($"ws{_workspace.DiagId} refresh: scan {generation} was invalidated before a newer one was scheduled; scanning again");
+             await _scheduler.Schedule(immediate: true);
+         }
+     }
+@@ -312,7 +315,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
          bool Current() => !_disposed && _scheduler.IsCurrent(generation) && ReferenceEquals(workspace, _host.Workspace)
              && documents.All(document => _store.Find(document.State.Path) == document.State
                  && document.State.Version == document.Version && document.State.Content == document.Text);
@@ -37,7 +45,7 @@ index a7ed0c8..b31b46b 100644
          IsRunning = true;
          if (_scanDue && _projectXamlFiles.Count == 0) Status = "Analyzing project XAML…";
          try
-@@ -344,7 +347,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
+@@ -348,7 +352,8 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
              // Once the sweep is complete, the worker's project/dependency gates
              // own unavailable models. One locked project must not block healthy
              // editors elsewhere in the workspace indefinitely.
@@ -172,25 +180,11 @@ index 0000000..139662b
 +
 +    public static string Name(string? path) => path is null ? "(all)" : Path.GetFileName(path);
 +}
-diff --git a/src/WpfStudio.Runtime/Debugging/OutputBuffer.cs b/src/WpfStudio.Runtime/Debugging/OutputBuffer.cs
-index 4d72141..d36ed8a 100644
---- a/src/WpfStudio.Runtime/Debugging/OutputBuffer.cs
-+++ b/src/WpfStudio.Runtime/Debugging/OutputBuffer.cs
-@@ -44,7 +44,9 @@ public sealed class OutputBuffer(IUiDispatcher dispatcher, Action<string> publis
- 
-     private async Task ScheduleAsync()
-     {
-+        var diagClock = System.Diagnostics.Stopwatch.StartNew();
-         await Task.Delay(50).ConfigureAwait(false);
-+        WpfStudio.Contracts.DiagTrace.Write($"output buffer: posting {diagClock.Elapsed.TotalMilliseconds:F0} ms after scheduling");
-         lock (gate) { if (closed) return; }
-         dispatcher.Post(() =>
-         {
 diff --git a/src/WpfStudio.Runtime/Terminal/TerminalSurface.cs b/src/WpfStudio.Runtime/Terminal/TerminalSurface.cs
-index 6b34355..fc990ed 100644
+index 01e1bf5..7380035 100644
 --- a/src/WpfStudio.Runtime/Terminal/TerminalSurface.cs
 +++ b/src/WpfStudio.Runtime/Terminal/TerminalSurface.cs
-@@ -59,6 +59,7 @@ public sealed partial class TerminalSurface : ContentControl
+@@ -65,6 +65,7 @@ public sealed partial class TerminalSurface : ContentControl
          }
          catch (Exception ex)
          {
@@ -198,26 +192,16 @@ index 6b34355..fc990ed 100644
              // The renderer is only a view of the session. The shell keeps running and its output waits in the session's bounded channel for the next renderer.
              if (renderer is not null)
              {
-@@ -97,8 +98,11 @@ public sealed partial class TerminalSurface : ContentControl
+@@ -103,7 +104,9 @@ public sealed partial class TerminalSurface : ContentControl
          private async Task InitializeCoreAsync()
          {
              var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "WebView2");
-+            DiagTrace.Write($"terminal creating environment, WEBVIEW2_BROWSER_EXECUTABLE_FOLDER={Environment.GetEnvironmentVariable("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER") ?? "(unset)"}, available version {SafeVersion()}");
-             var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: profile);
++            DiagTrace.Write($"terminal creating environment, browser folder {BrowserExecutableFolder ?? "(installed)"}");
+             var environment = await CoreWebView2Environment.CreateAsync(browserExecutableFolder: BrowserExecutableFolder, userDataFolder: profile);
 +            DiagTrace.Write($"terminal environment created: browser {environment.BrowserVersionString}");
              await Browser.EnsureCoreWebView2Async(environment);
-+            DiagTrace.Write("terminal core created");
              var core = Browser.CoreWebView2;
              core.Settings.AreDevToolsEnabled = false; core.Settings.AreDefaultContextMenusEnabled = false; core.Settings.IsStatusBarEnabled = false;
-             core.Settings.AreHostObjectsAllowed = false; core.Settings.IsPasswordAutosaveEnabled = false;
-@@ -112,6 +116,7 @@ public sealed partial class TerminalSurface : ContentControl
-             await ready.Task.WaitAsync(TimeSpan.FromSeconds(20), lifetime.Token);
-             PumpAsync().Forget();
-         }
-+        private static string SafeVersion() { try { return CoreWebView2Environment.GetAvailableBrowserVersionString() ?? "(none)"; } catch (Exception ex) { return ex.GetType().Name + " 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + " " + ex.Message; } }
-         private void OnMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs args)
-         {
-             if (!args.Source.StartsWith("https://terminal.wpfstudio.local/", StringComparison.Ordinal)) return;
 diff --git a/src/WpfStudio.Workspace/WorkspaceClient.cs b/src/WpfStudio.Workspace/WorkspaceClient.cs
 index 5c4d05f..b18f30a 100644
 --- a/src/WpfStudio.Workspace/WorkspaceClient.cs
@@ -342,74 +326,17 @@ index de5f216..fb560da 100644
      }
  
 diff --git a/tests/WpfStudio.App.Tests/ShellSmokeTests.cs b/tests/WpfStudio.App.Tests/ShellSmokeTests.cs
-index d11473a..0ab53ed 100644
+index 72e5431..4b558cf 100644
 --- a/tests/WpfStudio.App.Tests/ShellSmokeTests.cs
 +++ b/tests/WpfStudio.App.Tests/ShellSmokeTests.cs
-@@ -93,6 +93,8 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
+@@ -93,6 +93,7 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
              window.Show(); await Idle();
              var startup = clock.Elapsed;
              output.WriteLine($"Shell construction to rendered idle: {startup.TotalMilliseconds:N0} ms");
-+            var diagDpi = VisualTreeHelper.GetDpi(window);
-+            output.WriteLine($"DIAG window {window.ActualWidth}x{window.ActualHeight} at {window.Left},{window.Top}, state {window.WindowState}; primary screen {SystemParameters.PrimaryScreenWidth}x{SystemParameters.PrimaryScreenHeight}, work area {SystemParameters.WorkArea}, virtual screen {SystemParameters.VirtualScreenWidth}x{SystemParameters.VirtualScreenHeight}, max track {SystemParameters.MaximumWindowTrackWidth}x{SystemParameters.MaximumWindowTrackHeight}, DPI scale {diagDpi.DpiScaleX}");
++            output.WriteLine($"DIAG window {window.ActualWidth}x{window.ActualHeight}; primary screen {SystemParameters.PrimaryScreenWidth}x{SystemParameters.PrimaryScreenHeight}, max track {SystemParameters.MaximumWindowTrackWidth}x{SystemParameters.MaximumWindowTrackHeight}, DPI scale {VisualTreeHelper.GetDpi(window).DpiScaleX}");
              Assert.True(startup < TimeSpan.FromSeconds(5), "Shell render exceeded 5-second regression budget");
-             Assert.Equal(12, manager.Layout.Descendents().OfType<LayoutAnchorable>().Count());
-             Assert.Contains(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Welcome");
-diff --git a/tests/WpfStudio.Runtime.Tests/DebugSessionTests.cs b/tests/WpfStudio.Runtime.Tests/DebugSessionTests.cs
-index 4f576dc..01dde1e 100644
---- a/tests/WpfStudio.Runtime.Tests/DebugSessionTests.cs
-+++ b/tests/WpfStudio.Runtime.Tests/DebugSessionTests.cs
-@@ -47,7 +47,11 @@ public sealed class DebugSessionTests
-         try
-         {
-             await using var run = new AdapterRun("reject-attach");
--            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => run.AttachAsync(seconds: 1));
-+            var diagClock = Stopwatch.StartNew();
-+            var diagAttach = run.AttachAsync(seconds: 1);
-+            WpfStudio.Contracts.DiagTrace.Write($"TEST ARejectedAttach: adapter started after {diagClock.Elapsed.TotalMilliseconds:F0} ms");
-+            try { await diagAttach; } catch (Exception diag) { WpfStudio.Contracts.DiagTrace.Write($"TEST ARejectedAttach: {diag.GetType().Name} after {diagClock.Elapsed.TotalMilliseconds:F0} ms"); }
-+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => diagAttach);
-             Assert.Equal("attach rejected", failure.Message);
-             Assert.True(run.AdapterEnded(), "The adapter was left running.");
-         }
-diff --git a/tests/WpfStudio.Runtime.Tests/DebuggerOutputTests.cs b/tests/WpfStudio.Runtime.Tests/DebuggerOutputTests.cs
-index c2302e8..b76b435 100644
---- a/tests/WpfStudio.Runtime.Tests/DebuggerOutputTests.cs
-+++ b/tests/WpfStudio.Runtime.Tests/DebuggerOutputTests.cs
-@@ -15,9 +15,12 @@ public sealed class DebuggerOutputTests
-         var dispatcher = new QueuedDispatcher();
-         var shown = "";
-         var output = new OutputBuffer(dispatcher, text => shown = text);
-+        var diagClock = System.Diagnostics.Stopwatch.StartNew();
-         for (var i = 0; i < 20_000; i++) output.Append(new string('x', 255) + "\n");
-         output.Append("LAST OUTPUT");
-+        var diagAppended = diagClock.Elapsed.TotalMilliseconds;
-         await Task.Delay(150);
-+        WpfStudio.Contracts.DiagTrace.Write($"TEST OutputFlood: appends took {diagAppended:F0} ms, pending {dispatcher.Pending.Count} after {diagClock.Elapsed.TotalMilliseconds:F0} ms; thread pool {ThreadPool.ThreadCount} threads, {ThreadPool.PendingWorkItemCount} queued");
-         Assert.Single(dispatcher.Pending);
-         dispatcher.Drain();
-         Assert.InRange(shown.Length, 1, 250_000);
-diff --git a/tests/WpfStudio.Runtime.Tests/TerminalRenderingTests.cs b/tests/WpfStudio.Runtime.Tests/TerminalRenderingTests.cs
-index 6ebf9d5..8390ae0 100644
---- a/tests/WpfStudio.Runtime.Tests/TerminalRenderingTests.cs
-+++ b/tests/WpfStudio.Runtime.Tests/TerminalRenderingTests.cs
-@@ -121,7 +121,16 @@ public sealed class TerminalRenderingTests
-                     using var shell = Process.GetProcessById(session.ProcessId);
-                     Environment.SetEnvironmentVariable(browserFolder, noBrowser.FullName);
-                     var surface = new TerminalSurface { Session = session }; window.Content = surface;
--                    while (surface.Content is not StackPanel) await Task.Delay(50, timeout.Token);
-+                    var diagClock = Stopwatch.StartNew();
-+                    try { while (surface.Content is not StackPanel) await Task.Delay(50, timeout.Token); }
-+                    catch (OperationCanceledException)
-+                    {
-+                        var shown = surface.Content;
-+                        var core = (shown as WebView2)?.CoreWebView2;
-+                        WpfStudio.Contracts.DiagTrace.Write($"TEST RendererInitializationFailure: after {diagClock.Elapsed.TotalSeconds:F1} s the surface shows {shown?.GetType().Name ?? "nothing"}, core {(core is null ? "null" : "created, browser " + core.Environment.BrowserVersionString + ", source " + core.Source)}");
-+                        throw;
-+                    }
-+                    WpfStudio.Contracts.DiagTrace.Write($"TEST RendererInitializationFailure: failure panel after {diagClock.Elapsed.TotalSeconds:F1} s");
-                     var failure = (StackPanel)surface.Content;
-                     Assert.Contains("still running", ((TextBlock)failure.Children[0]).Text);
-                     Assert.False(shell.HasExited);
+             // Windows caps a window at the desktop's size, and the checks below are about the default layout's.
+             Assert.True(window.ActualWidth >= window.Width - 0.5 && window.ActualHeight >= window.Height - 0.5,
 diff --git a/tests/WpfStudio.Shell.Tests/ProjectXamlPartialCoverageTests.cs b/tests/WpfStudio.Shell.Tests/ProjectXamlPartialCoverageTests.cs
 index 4d7b69d..ea157e7 100644
 --- a/tests/WpfStudio.Shell.Tests/ProjectXamlPartialCoverageTests.cs
@@ -475,7 +402,7 @@ index 734eb24..20d87ca 100644
  
          test.Dialogs.SaveDecisions.Enqueue(SaveDecision.Discard);
 diff --git a/tests/WpfStudio.Shell.Tests/XamlResourceEditorTests.cs b/tests/WpfStudio.Shell.Tests/XamlResourceEditorTests.cs
-index 5b60be9..d1ae7d3 100644
+index 4200f14..3209486 100644
 --- a/tests/WpfStudio.Shell.Tests/XamlResourceEditorTests.cs
 +++ b/tests/WpfStudio.Shell.Tests/XamlResourceEditorTests.cs
 @@ -129,6 +129,7 @@ public sealed class XamlResourceEditorTests
@@ -486,30 +413,13 @@ index 5b60be9..d1ae7d3 100644
          await test.Shell.OpenDocumentAsync(files.View);
          var consumer = test.Shell.ActiveDocument!;
          await consumer.RefreshAnalysisAsync();
-@@ -138,21 +139,26 @@ public sealed class XamlResourceEditorTests
-         string changed = Dictionary("Supplier");
-         Assert.Equal(Dictionary("Customer").Length, changed.Length);
- 
-+        WpfStudio.Contracts.DiagTrace.Write($"TEST ClosedDictionaryDiskChanges ws{test.Workspace.DiagId} writing Supplier");
-         await File.WriteAllTextAsync(files.Data, changed);
-         File.SetLastWriteTimeUtc(files.Data, timestamp);
- 
-         await UntilAsync(() => consumer.Diagnostics.Any(item => item.Id == "XAMLBIND001"));
-+        WpfStudio.Contracts.DiagTrace.Write($"TEST ClosedDictionaryDiskChanges ws{test.Workspace.DiagId} saw XAMLBIND001");
-         Assert.Equal(version, consumer.State.Version);
-         var completion = await consumer.CompleteAsync(Position(consumer.State.Content));
-         Assert.Contains(completion.Items, item => item.DisplayText == "Code");
-         Assert.DoesNotContain(completion.Items, item => item.DisplayText == "Name");
-         Assert.Null(test.Store.Find(files.Data));
-+        WpfStudio.Contracts.DiagTrace.Write($"TEST ClosedDictionaryDiskChanges ws{test.Workspace.DiagId} writing Customer");
-         await File.WriteAllTextAsync(files.Data, Dictionary("Customer"));
-         File.SetLastWriteTimeUtc(files.Data, timestamp);
-         await UntilAsync(() => consumer.Diagnostics.Count == 0);
-+        WpfStudio.Contracts.DiagTrace.Write($"TEST ClosedDictionaryDiskChanges ws{test.Workspace.DiagId} diagnostics empty, refreshing");
-         // Clearing is immediate; wait for the current semantic observation too.
-         await consumer.RefreshAnalysisAsync();
-         Assert.Empty(consumer.Diagnostics);
-+        WpfStudio.Contracts.DiagTrace.Write($"TEST ClosedDictionaryDiskChanges ws{test.Workspace.DiagId} refreshed, completing");
-         Assert.Contains((await consumer.CompleteAsync(Position(consumer.State.Content))).Items, item => item.DisplayText == "Name");
+@@ -172,7 +173,8 @@ public sealed class XamlResourceEditorTests
+             await editor.RefreshAnalysisAsync(timeout.Token);
+             var diagnostics = editor.Diagnostics.ToArray();
+             var completion = await editor.CompleteAsync(position, timeout.Token);
+-            if (editor.XamlContextRevision == revision) return (diagnostics, completion);
++            if (editor.XamlContextRevision == revision) { WpfStudio.Contracts.DiagTrace.Write($"TEST ClosedDictionaryDiskChanges settled: {diagnostics.Length} diagnostics, {completion.Items.Count} completions"); return (diagnostics, completion); }
++            WpfStudio.Contracts.DiagTrace.Write("TEST ClosedDictionaryDiskChanges observation overtaken, repeating");
+             await Task.Delay(30, timeout.Token);
+         }
      }
- 
