@@ -73,14 +73,18 @@ public sealed class ProjectXamlAnalysisLifecycleTests
         ProjectXamlAnalysisScheduler? scheduler = null;
         using (scheduler = new(async (generation, token) =>
         {
+            // The only callback on the token, and the scan ends after it: awaiting a delay on the same token would let the
+            // delay's callback, registered later and so run first, end the scan and dispose this one before it ran.
+            var observed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             using var registration = token.Register(() =>
             {
                 currentWhenCancelled = scheduler!.IsCurrent(generation);
                 var probe = Task.Run(() => scheduler.IsCurrent(generation));
                 lockFree = SpinWait.SpinUntil(() => probe.IsCompleted, TimeSpan.FromSeconds(2));
+                observed.SetResult();
             });
             entered.SetResult();
-            await Task.Delay(Timeout.Infinite, token);
+            await observed.Task;
         }, (_, error) => throw new Xunit.Sdk.XunitException(error.ToString()), TimeSpan.Zero))
         {
             var run = scheduler.Schedule(immediate: true);
