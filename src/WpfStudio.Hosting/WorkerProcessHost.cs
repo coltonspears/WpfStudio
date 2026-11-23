@@ -43,7 +43,7 @@ public sealed class WorkerProcessHost(WorkerProcessOptions options) : IDisposabl
     private int _errorCharacters;
     private Process? _process;
     private NamedPipeClientStream? _pipe;
-    private bool _disposed;
+    private int _disposed;
 
     /// <summary>Raised on a thread-pool thread when the process exits, or synchronously on a thread that is checking <see cref="HasExited"/>.</summary>
     public event Action? Exited;
@@ -77,7 +77,7 @@ public sealed class WorkerProcessHost(WorkerProcessOptions options) : IDisposabl
 
     public void Start()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (_process is not null) throw new InvalidOperationException("The worker has already started.");
         var start = ProcessLaunch.Create(options.HostPath, options.WorkingDirectory ?? Path.GetDirectoryName(options.HostPath)!,
             ["--pipe", options.PipeName, .. options.Arguments], options.DotNetPath);
@@ -163,8 +163,7 @@ public sealed class WorkerProcessHost(WorkerProcessOptions options) : IDisposabl
     /// <summary>Closes the pipe and kills the worker if it is still running, without waiting for its exit.</summary>
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _pipe?.Dispose();
         Kill();
         _process?.Dispose();

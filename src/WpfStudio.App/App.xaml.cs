@@ -33,6 +33,8 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) => args.Handled = faults.Report(args.Exception, "UI thread");
         TaskScheduler.UnobservedTaskException += (_, args) => { args.SetObserved(); faults.Report(args.Exception, "background task"); };
         AppDomain.CurrentDomain.UnhandledException += (_, args) => faults.Report(args.ExceptionObject as Exception ?? new InvalidOperationException(args.ExceptionObject?.ToString()), "process");
+        UiThreadMonitor? uiThread = null;
+        ResponsivenessProbe? threadPool = null;
         try
         {
             Directory.CreateDirectory(AppPaths.DataDirectory);
@@ -45,8 +47,8 @@ public partial class App : Application
             // Watching starts before the shell and the window exist, so what building them costs the UI thread is measured too.
             var perf = _host.Services.GetRequiredService<PerfMonitor>();
             var performance = _host.Services.GetRequiredService<PerfLog>();
-            var uiThread = new UiThreadMonitor(Dispatcher, perf);
-            var threadPool = ResponsivenessProbe.ForThreadPool(perf);
+            uiThread = new UiThreadMonitor(Dispatcher, perf);
+            threadPool = ResponsivenessProbe.ForThreadPool(perf);
             try { uiThread.Start(); threadPool.Start(); }
             catch (Exception ex) { _host.Services.GetService<ILogger<App>>()?.LogWarning(ex, "Performance monitoring could not start"); }
             var shell = _host.Services.GetRequiredService<ShellViewModel>();
@@ -57,7 +59,7 @@ public partial class App : Application
             window.Closed += async (_, _) =>
             {
                 // The session's measurements, written while the host that owns the log is still whole.
-                try { uiThread.Dispose(); threadPool.Dispose(); performance.WriteReport(); }
+                try { uiThread?.Dispose(); threadPool?.Dispose(); performance.WriteReport(); }
                 catch (Exception) { /* A report that cannot be written must not keep the application from closing. */ }
                 try { await _host.StopAsync(TimeSpan.FromSeconds(5)); if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync(); else _host.Dispose(); }
                 catch (Exception ex) { File.AppendAllText(Path.Combine(AppPaths.DataDirectory, "shutdown-error.log"), ex.ToString()); }
@@ -75,8 +77,21 @@ public partial class App : Application
             Directory.CreateDirectory(AppPaths.DataDirectory);
             File.AppendAllText(Path.Combine(AppPaths.DataDirectory, "startup-error.log"), ex.ToString() + Environment.NewLine);
             MessageBox.Show(ex.Message + "\n\nDetails: " + Path.Combine(AppPaths.DataDirectory, "startup-error.log"), "WpfStudio could not start", MessageBoxButton.OK, MessageBoxImage.Error);
-            if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync();
+            await DisposeStartupResourcesAsync(uiThread, threadPool, _host);
+            _host = null;
             Shutdown(1);
         }
+    }
+
+    internal static async Task DisposeStartupResourcesAsync(IDisposable? uiThread, IDisposable? threadPool, IHost? host)
+    {
+        try { uiThread?.Dispose(); } catch (Exception) { }
+        try { threadPool?.Dispose(); } catch (Exception) { }
+        try
+        {
+            if (host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync();
+            else host?.Dispose();
+        }
+        catch (Exception) { }
     }
 }

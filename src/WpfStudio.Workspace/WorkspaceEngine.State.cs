@@ -238,13 +238,31 @@ public sealed partial class WorkspaceEngine
         // A pass that finished stays valid for its compilation; one still running would only be discarded.
         public void CancelRunning()
         {
-            foreach (var pass in Passes.Values)
-                if (pass.Diagnostics is null) pass.Cancellation.Cancel();
+            List<ProjectId>? cancelled = null;
+            foreach (var (projectId, pass) in Passes)
+            {
+                if (pass.Diagnostics is not null) continue;
+                try { pass.Cancellation.Cancel(); }
+                catch (ObjectDisposedException) { }
+                pass.Cancellation.Dispose();
+                (cancelled ??= []).Add(projectId);
+            }
+            if (cancelled is not null)
+                foreach (var projectId in cancelled)
+                    Passes.Remove(projectId);
         }
 
         public void Reset()
         {
-            CancelRunning();
+            foreach (var pass in Passes.Values)
+            {
+                if (pass.Diagnostics is null)
+                {
+                    try { pass.Cancellation.Cancel(); }
+                    catch (ObjectDisposedException) { }
+                }
+                pass.Cancellation.Dispose();
+            }
             Passes.Clear();
             Reported.Clear();
         }

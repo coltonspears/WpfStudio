@@ -75,7 +75,7 @@ public sealed class SqlDatabaseService : IDatabaseService
         if (item.Kind is SchemaNodeKind.View or SchemaNodeKind.Procedure)
         {
             await using var command = new SqlCommand("SELECT OBJECT_DEFINITION(@id)", connection);
-            command.Parameters.AddWithValue("@id", item.ObjectId);
+            command.Parameters.AddWithValue("@id", (object?)item.ObjectId ?? DBNull.Value);
             object? value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             return value is string definition ? definition : "-- Definition unavailable: the module is encrypted or VIEW DEFINITION permission is required.";
         }
@@ -90,7 +90,7 @@ public sealed class SqlDatabaseService : IDatabaseService
             WHERE c.object_id=@id ORDER BY c.column_id
             """;
         await using var columnsCommand = new SqlCommand(sql, connection);
-        columnsCommand.Parameters.AddWithValue("@id", item.ObjectId);
+        columnsCommand.Parameters.AddWithValue("@id", (object?)item.ObjectId ?? DBNull.Value);
         await using var reader = await columnsCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var columns = new List<string>();
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -141,7 +141,11 @@ public sealed class SqlDatabaseService : IDatabaseService
                 try
                 {
                 await using var command = new SqlCommand(batch.Text, connection) { CommandTimeout = 0 };
-                using var registration = cancellationToken.Register(() => { try { command.Cancel(); } catch (ObjectDisposedException) { } });
+                using var registration = cancellationToken.Register(() =>
+                {
+                    try { command.Cancel(); }
+                    catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or SqlException) { }
+                });
                 await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
                 do
                 {

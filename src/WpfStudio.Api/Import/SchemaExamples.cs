@@ -78,7 +78,19 @@ public static class SchemaExamples
     {
         if (schema is not JsonObject obj) return null;
         if (obj["type"] is JsonValue single && single.TryGetValue<string>(out var name)) return name;
-        if (obj["type"] is JsonArray several) return several.Select(entry => entry?.GetValue<string>()).FirstOrDefault(entry => entry is not null and not "null") ?? "null";
+        if (obj["type"] is JsonArray several)
+        {
+            string? fallback = null;
+            foreach (var entry in several)
+            {
+                if (entry is JsonValue value && value.TryGetValue<string>(out var text))
+                {
+                    if (text != "null") return text;
+                    fallback = "null";
+                }
+            }
+            return fallback;
+        }
         if (obj.ContainsKey("properties") || obj.ContainsKey("additionalProperties")) return "object";
         if (obj.ContainsKey("items")) return "array";
         return null;

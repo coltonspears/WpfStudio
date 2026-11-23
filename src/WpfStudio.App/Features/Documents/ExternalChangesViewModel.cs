@@ -31,11 +31,14 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
         Changes.CollectionChanged += ChangesChanged;
         _report = fault => dispatcher.Post(() => _host.AppendOutput("Checking files changed outside WpfStudio: " + fault.Message));
         _watcher = watchDocuments(() => dispatcher.Post(() => CheckAsync().Forget(_report)));
-        host.DocumentsChanged += () =>
-        {
-            _watcher.Watch(host.Documents.Select(document => document.State.Path));
-            foreach (var closed in Changes.Where(change => !host.Documents.Contains(change.Document)).ToArray()) Changes.Remove(closed);
-        };
+        _host.DocumentsChanged += HostDocumentsChanged;
+    }
+
+    private void HostDocumentsChanged()
+    {
+        if (_disposed) return;
+        _watcher.Watch(_host.Documents.Select(document => document.State.Path));
+        foreach (var closed in Changes.Where(change => !_host.Documents.Contains(change.Document)).ToArray()) Changes.Remove(closed);
     }
 
     public ObservableCollection<ExternalChange> Changes { get; } = [];
@@ -118,6 +121,7 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
                     {
                         if (doc.IsReadOnly) continue;
                         var disk = await _store.ReadDiskAsync(doc.State, lifetime);
+                        if (_disposed) return;
                         var pending = Changes.FirstOrDefault(change => ReferenceEquals(change.Document, doc));
                         // The disk is back to what the editor last loaded or saved: nothing is left to decide.
                         if (disk?.Hash == doc.State.DiskHash) { if (pending is not null || doc.State.HasExternalChange) Forget(doc); continue; }
@@ -131,6 +135,7 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
                         if (disk is not null && !doc.State.IsDirty && (fromAppOperation || AutoReloadUnchangedFiles))
                         {
                             await _store.ReloadAsync(doc.State, lifetime);
+                            if (_disposed) return;
                             reloaded.Add(doc.State.Name);
                             if (pending is not null) Changes.Remove(pending);
                             continue;
@@ -142,7 +147,7 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException) { _host.AppendOutput($"Checking files changed outside WpfStudio: {doc.State.Name}: {ex.Message}"); }
                 }
-            } while (_recheckFiles);
+            } while (_recheckFiles && !_disposed);
         }
         catch (OperationCanceledException) { } // The shell is shutting down.
         catch (Exception ex) { _host.AppendOutput("Checking files changed outside WpfStudio: " + ex.Message); }
@@ -183,6 +188,14 @@ public sealed partial class ExternalChangesViewModel : ObservableObject, IDispos
     {
         if (_disposed) return;
         _disposed = true;
+        _host.DocumentsChanged -= HostDocumentsChanged;
+        Changes.CollectionChanged -= ChangesChanged;
+        foreach (var change in Changes)
+        {
+            change.PropertyChanged -= ChangeUpdated;
+            change.Detach();
+        }
+        Changes.Clear();
         _watcher.Dispose();
     }
 }

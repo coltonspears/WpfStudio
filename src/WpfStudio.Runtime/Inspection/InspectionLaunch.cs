@@ -2,6 +2,7 @@ using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using WpfStudio.Contracts;
 using WpfStudio.Hosting;
 using WpfStudio.Inspection.Protocol;
@@ -12,26 +13,46 @@ public static class InspectionLaunch
 {
     private const string StartupHooksVariable = "DOTNET_STARTUP_HOOKS";
     private const string HookFileName = "WpfStudio.Inspection.StartupHook.dll";
+    private static readonly string[] RequiredCompanions =
+    [
+        "WpfStudio.Inspection.Agent.dll",
+        "WpfStudio.Inspection.Protocol.dll",
+        "WpfStudio.Wpf.PropertyEditing.dll",
+        "WpfStudio.Wpf.Diagnostics.dll"
+    ];
 
-    public static string FindStartupHook()
+    internal static string CurrentConfiguration =>
+        typeof(InspectionLaunch).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
+
+    public static string FindStartupHook() =>
+        FindStartupHook(AppContext.BaseDirectory, [CurrentConfiguration, "Debug", "Release"]);
+
+    internal static string FindStartupHook(string baseDirectory, IEnumerable<string> configurations)
     {
-        var folders = new List<string> { Path.Combine(AppContext.BaseDirectory, "Inspection") };
+        var folders = new List<string> { Path.Combine(baseDirectory, "Inspection") };
+        var accepted = configurations
+            .Where(configuration => !string.IsNullOrWhiteSpace(configuration))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (accepted.Length == 0) accepted = [CurrentConfiguration, "Debug", "Release"];
+
         // Repository fallbacks are available only when the caller is actually inside this
         // checkout, never by probing unrelated installation parent directories for binaries.
-        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        for (var directory = new DirectoryInfo(baseDirectory); directory is not null; directory = directory.Parent)
         {
             if (!File.Exists(Path.Combine(directory.FullName, "src", "WpfStudio.Runtime", "WpfStudio.Runtime.csproj"))) continue;
-            folders.Add(Path.Combine(directory.FullName, "src", "WpfStudio.App", "bin", "Release", "net10.0-windows", "Inspection"));
-            folders.Add(Path.Combine(directory.FullName, "src", "WpfStudio.Inspection.StartupHook", "bin", "Release", "net8.0"));
+            foreach (var configuration in accepted)
+            {
+                folders.Add(Path.Combine(directory.FullName, "src", "WpfStudio.App", "bin", configuration, "net10.0-windows", "Inspection"));
+                folders.Add(Path.Combine(directory.FullName, "src", "WpfStudio.Inspection.StartupHook", "bin", configuration, "net8.0"));
+            }
             break;
         }
         foreach (var folder in folders)
         {
             var hook = Path.Combine(folder, HookFileName);
-            if (File.Exists(hook) && File.Exists(Path.Combine(folder, "WpfStudio.Inspection.Agent.dll"))
-                && File.Exists(Path.Combine(folder, "WpfStudio.Inspection.Protocol.dll"))
-                && File.Exists(Path.Combine(folder, "WpfStudio.Wpf.PropertyEditing.dll"))
-                && File.Exists(Path.Combine(folder, "WpfStudio.Wpf.Diagnostics.dll"))) return Path.GetFullPath(hook);
+            if (File.Exists(hook) && RequiredCompanions.All(companion => File.Exists(Path.Combine(folder, companion))))
+                return Path.GetFullPath(hook);
         }
         throw new FileNotFoundException("The runtime inspection startup hook and its companion assemblies are unavailable. Build or reinstall WpfStudio's Inspection components.", Path.Combine(folders[0], HookFileName));
     }

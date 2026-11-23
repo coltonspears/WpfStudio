@@ -59,8 +59,13 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
         var gate = spec.Gate ?? throw new InvalidDataException($"{model.Name} has no line gate.");
         if (!gate.Features.SequenceEqual(GateFeatures, StringComparer.Ordinal)) throw new InvalidDataException($"{model.Name} has a line gate over features this WpfStudio does not compute.");
         foreach (var part in (LogisticGate[])[gate.Long, gate.Short])
+        {
             if (part.Weights.Count != GateFeatures.Count || part.Mean.Count != GateFeatures.Count || part.Scale.Count != GateFeatures.Count)
                 throw new InvalidDataException($"{model.Name} has a line gate of the wrong size.");
+            if (part.Scale.Any(static s => !double.IsFinite(s) || s == 0))
+                throw new InvalidDataException($"{model.Name} has a line gate with a zero or non-finite scale.");
+        }
+        if (spec.VocabSize <= 0 || spec.VocabSize > 65536) throw new InvalidDataException($"{model.Name} has an unsupported vocabulary size {spec.VocabSize}.");
         if (spec.Heads <= 0 || spec.HiddenSize % spec.Heads != 0 || spec.CopyKeys <= 0) throw new InvalidDataException($"{model.Name} has an impossible network shape.");
         model.VerifyFiles();
         var tokenizer = ByteLevelBpeTokenizer.Load(model.PathOf("tokenizer.json"));
@@ -151,7 +156,10 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
                 var outputs = _session.Run(options, Inputs, [ids, memory?[1] ?? emptyPast, memory?[2] ?? emptyKeys, known], Outputs);
                 memory?.Dispose();
                 memory = outputs;
-                var (next, confidence, gap) = Choose(outputs[0].GetTensorDataAsSpan<float>());
+                var probs = outputs[0].GetTensorDataAsSpan<float>();
+                if (probs.Length != _spec.VocabSize)
+                    throw new InvalidDataException($"Model output has {probs.Length} probabilities; expected {_spec.VocabSize}.");
+                var (next, confidence, gap) = Choose(probs, _spec.BosId, _spec.PadId, _spec.EosId);
                 line.Tokens.Add(next); line.Confidence.Add(confidence); line.Gaps.Add(gap);
                 string decoded = _tokenizer.Decode(line.Tokens.Where(id => id != _spec.EosId));
                 int newline = decoded.IndexOf('\n');
@@ -169,19 +177,24 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
     }
 
     // The likeliest token that may be generated at all, how sure the network was, and how far it stood above the next likeliest.
-    private (int Token, double Confidence, double Gap) Choose(ReadOnlySpan<float> probabilities)
+    internal static (int Token, double Confidence, double Gap) Choose(ReadOnlySpan<float> probabilities, int bosId, int padId, int eosId)
     {
-        double total = 0, best = -1, second = -1;
-        int chosen = 0;
+        double total = 0, best = double.NegativeInfinity, second = double.NegativeInfinity;
+        int chosen = -1;
         for (int i = 0; i < probabilities.Length; i++)
         {
-            if (i == _spec.BosId || i == _spec.PadId) continue;
+            if (i == bosId || i == padId) continue;
             double value = probabilities[i];
+            if (!double.IsFinite(value) || value < 0) continue;
             total += value;
             if (value > best) { second = best; best = value; chosen = i; }
             else if (value > second) second = value;
         }
-        return (chosen, best / total, (best - second) / total);
+        if (chosen < 0 || !double.IsFinite(total) || total <= 0 || !double.IsFinite(best))
+            return (eosId, 0d, 0d);
+        double confidence = Math.Clamp(best / total, 0d, 1d);
+        double gap = second > double.NegativeInfinity ? Math.Clamp((best - second) / total, 0d, 1d) : confidence;
+        return (chosen, confidence, gap);
     }
 
     private bool Trusted(string whole, DecodedLine line, string code)
@@ -197,7 +210,7 @@ internal sealed partial class TransformerLineGenerator : ILineGenerator
         var names = Names(whole);
         var known = Names(searched).ToHashSet(StringComparer.Ordinal);
         int inFile = names.Count(known.Contains);
-        double logProbability = line.Confidence.Sum(Math.Log);
+        double logProbability = line.Confidence.Sum(static c => Math.Log(Math.Max(double.IsFinite(c) ? c : 0d, SmallestLogInput)));
         string stripped = whole.Trim();
         int depth = Depth(tail) + Depth(whole);
         return

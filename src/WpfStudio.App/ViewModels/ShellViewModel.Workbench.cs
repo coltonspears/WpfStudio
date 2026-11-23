@@ -1,4 +1,3 @@
-using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -18,32 +17,7 @@ public sealed partial class ShellViewModel
     // ------------------------------------------------------------------ Close solution
     [RelayCommand] private Task CloseSolutionAsync() => GuardAsync(async () => { await CloseWorkspaceAsync(); });
     /// <summary>Closes every tab and unloads the solution, returning to the start page. False when the user cancels a save prompt.</summary>
-    public async Task<bool> CloseWorkspaceAsync()
-    {
-        var onlyLooseFiles = Workspace == null && Explorer.Nodes.Count == 0;
-        if (onlyLooseFiles && Documents.Count == 0) { Status = "No solution is open"; return true; }
-        if (IsBusy) { Status = "Wait for the current workspace operation to finish"; return false; }
-        if (IsPreviewOpen) { Status = "Finish or cancel the change preview before closing the solution"; return false; }
-        if (!await CloseAllDocumentsForWorkspaceAsync()) return false;
-        if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
-        if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(null);
-        var name = Workspace == null ? "" : Path.GetFileName(Workspace.Path);
-        _history.Clear();
-        _allFiles = [];
-        Explorer.Clear(); Projects.Clear(); SearchResults.Clear(); SearchResultsTitle = ""; WpfExplorer.Items.Clear();
-        _updatingChoices = true;
-        TargetFrameworks.Clear(); LaunchProfiles.Clear(); TargetFramework = null; LaunchProfile = null;
-        _updatingChoices = false;
-        StartupProject = null;
-        Workspace = null;
-        await Runtimes.CheckAsync(null, []);
-        RefreshEditorDiagnostics();
-        await TaskList.LoadUserTasksAsync(); await FileGroups.LoadAsync(); await TaskList.RefreshCommand.ExecuteAsync(null);
-        try { await _workspace.UnloadAsync(_lifetime.Token); } catch (Exception ex) { AppendOutput("Language worker shutdown: " + ex.Message); }
-        await SaveSettingsAsync();
-        Status = onlyLooseFiles ? "Closed all tabs" : name.Length == 0 ? "Solution closed" : $"Closed {name}";
-        return true;
-    }
+    public Task<bool> CloseWorkspaceAsync() => WorkspaceLifecycle.CloseWorkspaceAsync();
 
     // ------------------------------------------------------------------ Window > close tabs
     [RelayCommand] private Task CloseAllDocumentsAsync() => GuardAsync(() => CloseDocumentsAsync(Documents.ToArray()));
@@ -56,17 +30,7 @@ public sealed partial class ShellViewModel
         return index < 0 ? Task.CompletedTask : CloseDocumentsAsync(Documents.Skip(index + 1).ToArray());
     });
     /// <summary>Closes tabs one at a time; Cancel on a save prompt keeps that tab and the ones after it open.</summary>
-    private async Task CloseDocumentsAsync(IReadOnlyList<EditorViewModel> documents)
-    {
-        var closed = 0;
-        foreach (var document in documents)
-        {
-            if (!Documents.Contains(document)) continue;
-            if (!await CloseDocumentAsync(document)) break;
-            closed++;
-        }
-        Status = closed == 1 ? "Closed 1 tab" : $"Closed {closed} tabs";
-    }
+    private Task CloseDocumentsAsync(IReadOnlyList<EditorViewModel> documents) => DocumentSessions.CloseDocumentsAsync(documents);
 
     // ------------------------------------------------------------------ Help > About / What's new
     [ObservableProperty] public partial bool IsAboutOpen { get; set; }

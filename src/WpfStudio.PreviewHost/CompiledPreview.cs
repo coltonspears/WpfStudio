@@ -62,6 +62,8 @@ internal static class CompiledPreview
             application.Resources = resources ?? new ResourceDictionary();
             return resources is not null;
         }
+        if (Application.Current is { } current)
+            current.Resources = new ResourceDictionary();
         return false;
     }
 

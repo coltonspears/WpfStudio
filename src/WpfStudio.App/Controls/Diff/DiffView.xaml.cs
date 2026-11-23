@@ -108,6 +108,7 @@ public partial class DiffView : UserControl
         _splitRuler.Navigate += fraction => ScrollToFraction(_right, fraction);
         _inlineRuler.Navigate += fraction => ScrollToFraction(_inline, fraction);
         Loaded += (_, _) => ApplyHighlighting();
+        Unloaded += (_, _) => CancelCompute();
         SetResourceReference(ThemePaletteProperty, Palette.ResourceKey);
         UpdateLabels();
         ModeChanged();
@@ -174,11 +175,17 @@ public partial class DiffView : UserControl
         });
     }
 
+    private void CancelCompute()
+    {
+        _computeVersion++;
+        _compute?.Cancel(); _compute?.Dispose(); _compute = null;
+    }
+
     /// <summary>Computes the diff; large inputs are diffed off the UI thread.</summary>
     private void Recompute()
     {
-        var version = ++_computeVersion;
-        _compute?.Cancel(); _compute?.Dispose(); _compute = null;
+        CancelCompute();
+        var version = _computeVersion;
         _expanded.Clear();
         _current = -1;
         if (!string.IsNullOrEmpty(Message)) { Clear(); ShowMessage(Message!, "Info"); return; }

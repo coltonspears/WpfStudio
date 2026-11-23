@@ -15,6 +15,8 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private Task? reader;
     private int sequence;
+    private int disposed;
+    private Exception? closedFailure;
     public event Action<string, JsonElement>? EventReceived;
     public event Action<Exception>? ConnectionClosed;
 
@@ -22,9 +24,16 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
 
     public async Task<JsonElement> RequestAsync(string command, object? arguments = null, CancellationToken cancellationToken = default)
     {
+        if (Volatile.Read(ref closedFailure) is { } closed) throw closed;
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
         var id = Interlocked.Increment(ref sequence);
         var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         pending[id] = completion;
+        if (Volatile.Read(ref closedFailure) is { } racedClose)
+        {
+            pending.TryRemove(id, out _);
+            throw racedClose;
+        }
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
         using var registration = timeout.Token.Register(() => completion.TrySetCanceled(timeout.Token));
@@ -33,7 +42,11 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
             var payload = JsonSerializer.SerializeToUtf8Bytes(new { seq = id, type = "request", command, arguments = arguments ?? new { } });
             await writer.WaitAsync(timeout.Token).ConfigureAwait(false);
             try { await WriteFrameAsync(output, payload, timeout.Token).ConfigureAwait(false); }
-            finally { writer.Release(); }
+            finally
+            {
+                try { writer.Release(); }
+                catch (ObjectDisposedException) { }
+            }
             return await completion.Task.ConfigureAwait(false);
         }
         finally { pending.TryRemove(id, out _); }
@@ -85,6 +98,7 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
         // Nothing observes this task until disposal, so whatever ended the loop becomes the reason and nothing escapes it.
         try { while (await ReadFrameAsync(input, lifetime.Token).ConfigureAwait(false) is { } message) Dispatch(message); }
         catch (Exception ex) { failure = ex; }
+        Interlocked.CompareExchange(ref closedFailure, failure, null);
         foreach (var item in pending.Values) item.TrySetException(failure);
         pending.Clear();
         if (lifetime.IsCancellationRequested) return;
@@ -105,7 +119,15 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
                 else completion.TrySetException(new InvalidOperationException(Text(message, "message") ?? "Debugger request failed."));
                 break;
             case "event" when Text(message, "event") is { } name:
-                EventReceived?.Invoke(name, message.TryGetProperty("body", out var eventBody) ? eventBody.Clone() : default);
+                if (EventReceived is { } handlers)
+                {
+                    var eventBody = message.TryGetProperty("body", out var rawBody) ? rawBody.Clone() : default;
+                    foreach (Action<string, JsonElement> handler in handlers.GetInvocationList())
+                    {
+                        try { handler(name, eventBody); }
+                        catch (Exception ex) when (ex is not OutOfMemoryException) { /* A failing event subscriber cannot terminate the DAP read loop. */ }
+                    }
+                }
                 break;
         }
     }
@@ -116,10 +138,19 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
     /// <summary>Never throws and never waits without limit: callers go on to end the adapter process, whatever these streams do.</summary>
     public async ValueTask DisposeAsync()
     {
-        await lifetime.CancelAsync();
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        Interlocked.CompareExchange(ref closedFailure, new ObjectDisposedException(nameof(DapTransport)), null);
+        await lifetime.CancelAsync().ConfigureAwait(false);
         var closing = Task.WhenAll(CloseAsync(input), CloseAsync(output), reader ?? Task.CompletedTask);
         try { await closing.WaitAsync(CloseGrace).ConfigureAwait(false); }
         catch (Exception) { closing.Forget(); }
+        try
+        {
+            if (await writer.WaitAsync(CloseGrace).ConfigureAwait(false))
+                writer.Release();
+        }
+        catch (ObjectDisposedException) { }
+        writer.Dispose();
         lifetime.Dispose();
     }
 

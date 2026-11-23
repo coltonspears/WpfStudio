@@ -231,7 +231,13 @@ public static class OpenApiImporter
         foreach (var (name, variable) in server.Object("variables") ?? [])
             url = url.Replace("{" + name + "}", variable.Text("default") ?? "", StringComparison.Ordinal);
         if (Uri.TryCreate(url, UriKind.Absolute, out var absolute) && absolute.Scheme is "http" or "https") return url.TrimEnd('/');
-        if (fromWeb) return new Uri(source!, url).AbsoluteUri.TrimEnd('/');
+        if (fromWeb)
+        {
+            if (Uri.TryCreate(source!, url, out var resolved) && resolved.Scheme is "http" or "https")
+                return resolved.AbsoluteUri.TrimEnd('/');
+            warnings.Add($"The server address '{url}' could not be resolved against '{source}'. Set baseUrl to the server's full address.");
+            return source!.GetLeftPart(UriPartial.Authority);
+        }
         warnings.Add($"The server address '{url}' is relative to where the document is published. Set baseUrl to the server's full address.");
         return ("http://localhost" + (url.StartsWith('/') ? url : "/" + url)).TrimEnd('/');
     }

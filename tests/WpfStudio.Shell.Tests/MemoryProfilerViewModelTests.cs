@@ -292,17 +292,27 @@ public sealed class MemoryProfilerViewModelTests
 
         await model.RefreshProcessesCommand.ExecuteAsync(null);
         var process = model.SelectedProcess!;
-        // The monitor samples as it starts, so the title names the process at once.
+        // The monitor takes its initial sample off the UI thread as it starts.
+        await WaitUntilAsync(() => timeline.LiveSamples.Count >= 1);
         Assert.Single(timeline.LiveSamples);
         Assert.Equal($"Process memory · {process.Name} (PID {process.Id})", timeline.Title);
         Assert.Empty(model.TimelineMarkers);
 
         timeline.IsMonitorActive = false;
         timeline.IsMonitorActive = true;
+        await WaitUntilAsync(() => timeline.LiveSamples.Count >= 2);
         Assert.Equal(2, timeline.LiveSamples.Count);
         timeline.MonitorMemory = false;
         timeline.MonitorMemory = true;
+        await WaitUntilAsync(() => timeline.LiveSamples.Count >= 3);
         Assert.Equal(3, timeline.LiveSamples.Count);
+
+        static async Task WaitUntilAsync(Func<bool> condition)
+        {
+            var deadline = Environment.TickCount64 + 5000;
+            while (!condition() && Environment.TickCount64 < deadline)
+                await Task.Delay(15);
+        }
 
         timeline.IsMonitorActive = false;
         model.SelectedProcess = process with { Id = process.Id + 1 };

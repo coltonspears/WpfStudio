@@ -149,27 +149,56 @@ internal sealed partial class PreviewNativeSurface(PreviewScene scene, Dispatche
         if (_bridgeHandle != 0 && (_bridgeHandle != (nint)request.ParentHandle || _bridgeToken != request.BridgeToken))
             throw new InvalidOperationException("Detach the previous native bridge before attaching another one.");
         ValidateBridge(request);
-        PreviewNativeMethods.ShowWindow(hwnd, 0);
-        RequireOwnedSurface(request.Surface);
-        PreviewNativeMethods.SetStyle(hwnd, (_detachedStyle & ~(PreviewNativeMethods.Popup | PreviewNativeMethods.Caption | PreviewNativeMethods.ThickFrame)) |
-            PreviewNativeMethods.Child | PreviewNativeMethods.ClipChildren | PreviewNativeMethods.ClipSiblings);
-        ValidateBridge(request);
-        RequireOwnedSurface(request.Surface);
-        PreviewNativeMethods.Reparent(hwnd, (nint)request.ParentHandle);
-        RequireOwnedSurface(request.Surface);
-        _bridgeHandle = (nint)request.ParentHandle;
-        _bridgeToken = request.BridgeToken;
-        _nativeNavigationToken = request.NavigationToken;
-        _attachment = request;
+        try
+        {
+            PreviewNativeMethods.ShowWindow(hwnd, 0);
+            RequireOwnedSurface(request.Surface);
+            PreviewNativeMethods.SetStyle(hwnd, (_detachedStyle & ~(PreviewNativeMethods.Popup | PreviewNativeMethods.Caption | PreviewNativeMethods.ThickFrame)) |
+                PreviewNativeMethods.Child | PreviewNativeMethods.ClipChildren | PreviewNativeMethods.ClipSiblings);
+            ValidateBridge(request);
+            RequireOwnedSurface(request.Surface);
+            PreviewNativeMethods.Reparent(hwnd, (nint)request.ParentHandle);
+            RequireOwnedSurface(request.Surface);
+            _bridgeHandle = (nint)request.ParentHandle;
+            _bridgeToken = request.BridgeToken;
+            _nativeNavigationToken = request.NavigationToken;
+            _attachment = request;
+            _nativeHandoff = null;
+            _navigationPendingSinceTick = 0;
+            if (PreviewNativeMethods.GetParent(hwnd) != _bridgeHandle) throw new InvalidOperationException("The native preview parent was not applied.");
+            InstallNativeInput();
+            StartFocusObservation();
+            PositionNativeSurface(request);
+            ValidateBridge(request);
+            PreviewNativeMethods.ShowWindow(RequireOwnedSurface(request.Surface), 4); // SW_SHOWNOACTIVATE; input activation stays with the user.
+            SetNavigation(PreviewSurfaceNavigation.None);
+        }
+        catch
+        {
+            RollbackAttach(request.Surface);
+            throw;
+        }
+    }
+
+    private void RollbackAttach(PreviewSurfaceIdentity identity)
+    {
+        RemoveNativeInput();
+        CloseNativePopups();
+        _bridgeHandle = 0;
+        _bridgeToken = null;
+        _nativeNavigationToken = null;
+        _attachment = null;
         _nativeHandoff = null;
         _navigationPendingSinceTick = 0;
-        if (PreviewNativeMethods.GetParent(hwnd) != _bridgeHandle) throw new InvalidOperationException("The native preview parent was not applied.");
-        InstallNativeInput();
-        StartFocusObservation();
-        PositionNativeSurface(request);
-        ValidateBridge(request);
-        PreviewNativeMethods.ShowWindow(RequireOwnedSurface(request.Surface), 4); // SW_SHOWNOACTIVATE; input activation stays with the user.
-        SetNavigation(PreviewSurfaceNavigation.None);
+        if (!CurrentSurface(identity)) return;
+        try
+        {
+            nint hwnd = RequireOwnedSurface(identity);
+            PreviewNativeMethods.ShowWindow(hwnd, 0);
+            PreviewNativeMethods.Reparent(hwnd, 0);
+            PreviewNativeMethods.SetStyle(hwnd, _detachedStyle & ~PreviewNativeMethods.Visible);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { }
     }
 
     private void PositionNativeSurface(PreviewSurfaceRequest request)

@@ -19,8 +19,11 @@ public sealed partial class ClrHeapSnapshot
         {
             if (type.IsString)
             {
-                var text = obj.AsString(4096) ?? "<unreadable>";
-                return new(request.ObjectId, "String", Quote(text, 4096), 0, 0, [new("Length", "System.Int32", text.Length.ToString(CultureInfo.InvariantCulture), "Field")]);
+                var text = obj.AsString(4096);
+                var actualLength = ReadStringLength(obj) ?? text?.Length;
+                var display = text ?? "<unreadable>";
+                var lengthText = actualLength?.ToString(CultureInfo.InvariantCulture) ?? "<unreadable>";
+                return new(request.ObjectId, "String", Quote(display, 4096), 0, 0, [new("Length", "System.Int32", lengthText, "Field")]);
             }
             if (obj.IsArray) return ArrayChildren(request.ObjectId, obj.AsArray(), skip, take, token);
             if (CollectionChildren(request.ObjectId, obj, type, skip, take, token) is { } collection) return collection;
@@ -45,6 +48,14 @@ public sealed partial class ClrHeapSnapshot
         }
         var preview = obj.IsDelegate ? "Delegate → " + (targets.FirstOrDefault()?.Value ?? MemoryLabels.ShortType(description.Type)) : "{" + MemoryLabels.ShortType(description.Type) + "}";
         return new(request.ObjectId, obj.IsDelegate ? "Delegate" : "Object", preview, total, skip, items);
+    }
+
+    private int? ReadStringLength(ClrObject obj)
+    {
+        Span<byte> lengthBytes = stackalloc byte[sizeof(int)];
+        if (_target.DataReader.Read(obj.Address + (ulong)_target.DataReader.PointerSize, lengthBytes) != sizeof(int)) return null;
+        var length = BitConverter.ToInt32(lengthBytes);
+        return length >= 0 ? length : null;
     }
 
     private MemoryObjectChildren ArrayChildren(int id, ClrArray array, int skip, int take, CancellationToken token)
@@ -122,7 +133,8 @@ public sealed partial class ClrHeapSnapshot
             var live = Math.Max(0, count - free);
             if (entries is not { IsArray: true } entryArray) return new(id, "Dictionary", $"Count = {live:N0}", live, skip, items);
             var array = entryArray.AsArray(); var seen = 0;
-            for (var i = 0; i < Math.Min(count, array.Length) && items.Count < take + (skip == 0 ? 1 : 0); i++)
+            var bound = Math.Clamp(count, 0, array.Length);
+            for (var i = 0; i < bound && items.Count < take + (skip == 0 ? 1 : 0); i++)
             {
                 if ((i & 255) == 0) token.ThrowIfCancellationRequested();
                 var entry = array.GetStructValue(i);
@@ -145,10 +157,11 @@ public sealed partial class ClrHeapSnapshot
             var modern = ReadObject(obj, "_entries");
             var slots = modern ?? ReadObject(obj, "m_slots");
             var count = modern is not null ? ReadInt(obj, "_count") ?? 0 : ReadInt(obj, "m_lastIndex") ?? 0;
-            var live = modern is not null ? count - (ReadInt(obj, "_freeCount") ?? 0) : ReadInt(obj, "m_count") ?? 0;
+            var live = Math.Max(0, modern is not null ? count - (ReadInt(obj, "_freeCount") ?? 0) : ReadInt(obj, "m_count") ?? 0);
             if (slots is not { IsArray: true } slotArray) return new(id, "Set", $"Count = {live:N0}", live, skip, items);
             var array = slotArray.AsArray(); var seen = 0;
-            for (var i = 0; i < Math.Min(count, array.Length) && items.Count < take + (skip == 0 ? 1 : 0); i++)
+            var bound = Math.Clamp(count, 0, array.Length);
+            for (var i = 0; i < bound && items.Count < take + (skip == 0 ? 1 : 0); i++)
             {
                 if ((i & 255) == 0) token.ThrowIfCancellationRequested();
                 var slot = array.GetStructValue(i);
@@ -175,13 +188,16 @@ public sealed partial class ClrHeapSnapshot
                 var head = backingName.StartsWith("System.Collections.Generic.Queue<", StringComparison.Ordinal) ? ReadInt(backing, "_head") ?? 0 : 0;
                 var stack = backingName.StartsWith("System.Collections.Generic.Stack<", StringComparison.Ordinal);
                 var elements = array.Value.AsArray(); var component = elements.Type.ComponentType;
-                for (var i = skip; i < length && items.Count < take + (skip == 0 ? 1 : 0); i++)
+                var capacity = elements.Length;
+                var clampedLength = Math.Clamp(length, 0, capacity);
+                var normalizedHead = capacity > 0 ? ((head % capacity) + capacity) % capacity : 0;
+                for (var i = skip; i < clampedLength && items.Count < take + (skip == 0 ? 1 : 0); i++)
                 {
                     if ((i & 255) == 0) token.ThrowIfCancellationRequested();
-                    var physical = stack ? length - 1 - i : (head + i) % Math.Max(1, elements.Length);
+                    var physical = stack ? clampedLength - 1 - i : (int)(((long)normalizedHead + i) % capacity);
                     items.Add(Element(elements, component, physical, $"[{i}]", "Element"));
                 }
-                return new(id, shape, $"Count = {length:N0}", length, skip, items);
+                return new(id, shape, $"Count = {clampedLength:N0}", clampedLength, skip, items);
             }
             // Collection<T>-style wrappers keep the real list in "items" or "list".
             var inner = ReadObject(backing, "items") ?? ReadObject(backing, "list") ?? ReadObject(backing, "_list");

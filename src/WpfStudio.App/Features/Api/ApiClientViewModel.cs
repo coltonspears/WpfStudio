@@ -121,6 +121,8 @@ public sealed partial class ApiClientViewModel : ObservableObject, IAsyncDisposa
         _disposed = true;
         _proxy.Changed -= ProxySettingsChanged;
         _sessionSave?.Cancel();
+        _sessionSave?.Dispose();
+        _sessionSave = null;
         if (_initialized)
         {
             try { await _initialization; await SaveSessionNowAsync(CancellationToken.None); await CodeGenerator.SaveOptionsAsync(); }
@@ -244,8 +246,16 @@ public sealed partial class ApiClientViewModel : ObservableObject, IAsyncDisposa
         if (SelectedTab?.Response?.Response is not { } response) return;
         var path = await _files.SaveFileAsync("Save the response body", "All files (*.*)|*.*", SelectedTab.Response.SuggestedFileName);
         if (path is null) return;
-        await File.WriteAllBytesAsync(path, response.Body, _lifetime.Token);
-        Status = "Saved the response to " + path;
+        try
+        {
+            await File.WriteAllBytesAsync(path, response.Body, _lifetime.Token);
+            Status = "Saved the response to " + path;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Status = "The response could not be saved: " + exception.Message;
+        }
+        catch (OperationCanceledException) { }
     }
 
     [RelayCommand]

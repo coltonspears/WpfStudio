@@ -12,6 +12,7 @@ namespace WpfStudio.PreviewHost;
 internal sealed class PreviewScene
 {
     private Window? _previewWindow;
+    private volatile bool _isClosed;
     public long Version { get; set; }
     public int Width { get; set; } = 960;
     public int Height { get; set; } = 640;
@@ -20,7 +21,7 @@ internal sealed class PreviewScene
     public PreviewScenarioActivation? ScenarioActivation { get; set; }
     public HwndSource? Surface { get; private set; }
     public FrameworkElement? Viewport { get; private set; }
-    public bool IsClosed { get; set; }
+    public bool IsClosed { get => _isClosed; set => _isClosed = value; }
 
     /// <summary>Uses the root's explicit Width/Height (including applied design-time sizes) for the artboard.</summary>
     public void ApplyRootSize()
@@ -87,20 +88,27 @@ internal sealed class PreviewScene
 
     public void Close()
     {
-        if (_previewWindow is not null)
+        try
         {
-            _previewWindow.Close();
-            _previewWindow = null;
+            if (_previewWindow is not null)
+            {
+                var window = _previewWindow;
+                _previewWindow = null;
+                window.Close();
+            }
         }
-        if (Surface is not null)
+        finally
         {
-            if (!Surface.IsDisposed) { Surface.RootVisual = null; Surface.Dispose(); }
-            Surface = null;
+            if (Surface is not null)
+            {
+                if (!Surface.IsDisposed) { Surface.RootVisual = null; Surface.Dispose(); }
+                Surface = null;
+            }
+            if (Viewport is Border border) border.Child = null;
+            Viewport = null;
+            Root = null;
+            Document = null;
+            ScenarioActivation = null;
         }
-        if (Viewport is Border border) border.Child = null;
-        Viewport = null;
-        Root = null;
-        Document = null;
-        ScenarioActivation = null;
     }
 }

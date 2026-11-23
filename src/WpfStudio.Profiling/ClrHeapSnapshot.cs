@@ -126,7 +126,11 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                     typeByMethodTable.Add(type.MethodTable, typeId);
                 }
                 var id = objects.Count;
-                addresses.Add(obj.Address, id);
+                if (!addresses.TryAdd(obj.Address, id))
+                {
+                    Incomplete("Duplicate object addresses were detected while enumerating the heap.");
+                    continue;
+                }
                 objects.Add(new(obj.Address, typeId, checked((long)obj.Size), segment is null ? HeapGeneration.Unknown : ToGeneration(segment.GetGeneration(obj.Address))));
                 if (!probes.TryGetValue(type.MethodTable, out var probe)) probes[type.MethodTable] = probe = TypeProbe.For(type, pointerSize);
                 try { Observe(obj, id, probe); }
@@ -240,7 +244,7 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                         try
                         {
                             foreach (var (address, offset) in type.GCDesc.WalkObject(buffer, (int)size))
-                                if (address != 0 && !Add(from, address, LabelFor(obj.Address, type, offset), false)) return true;
+                                if (address != 0 && !Add(from, address, LabelFor(obj, type, offset), false)) return true;
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException) { return false; }
                     }
@@ -248,11 +252,12 @@ public sealed partial class ClrHeapSnapshot : IDisposable
                     {
                         try
                         {
+                            var isOneDimRefArray = obj.IsArray && type.ComponentType?.IsObjectReference == true && obj.AsArray().Rank == 1;
                             foreach (var reference in obj.EnumerateReferencesWithFields(carefully: true, considerDependantHandles: false))
                             {
                                 if (reference.Object.Address == 0) continue;
                                 var label = reference.Offset >= 0 && staticNames.TryGetValue(obj.Address + (ulong)pointerSize + (ulong)reference.Offset, out var staticName)
-                                    ? Intern(staticName) : Intern(ReferenceLabel(reference, obj.IsArray, pointerSize));
+                                    ? Intern(staticName) : Intern(ReferenceLabel(reference, isOneDimRefArray, pointerSize));
                                 if (!Add(from, reference.Object.Address, label, false)) return true;
                             }
                         }
@@ -282,15 +287,19 @@ public sealed partial class ClrHeapSnapshot : IDisposable
             }
 
             // Labels match ReferenceLabel. GC-descriptor offsets include the method table; ClrMD reference offsets do not.
-            int LabelFor(ulong address, ClrType type, int offset)
+            int LabelFor(ClrObject obj, ClrType type, int offset)
             {
-                if (staticNames.Count != 0 && staticNames.TryGetValue(address + (ulong)offset, out var staticName)) return Intern(staticName);
+                if (staticNames.Count != 0 && staticNames.TryGetValue(obj.Address + (ulong)offset, out var staticName)) return Intern(staticName);
                 var dataOffset = offset - pointerSize;
                 if (type.IsArray)
-                    // Array slots carry their index instead of a string; elements start after the (pointer-sized) length.
-                    return dataOffset >= pointerSize && (dataOffset - pointerSize) % pointerSize == 0
-                        ? ~((dataOffset - pointerSize) / pointerSize)
-                        : Intern($"Array/reference slot +0x{dataOffset:X}");
+                {
+                    if (type.ComponentType?.IsObjectReference == true && obj.AsArray().Rank == 1)
+                        // Array slots carry their index instead of a string; elements start after the (pointer-sized) length.
+                        return dataOffset >= pointerSize && (dataOffset - pointerSize) % pointerSize == 0
+                            ? ~((dataOffset - pointerSize) / pointerSize)
+                            : Intern($"Array/reference slot +0x{dataOffset:X}");
+                    return Intern(ReferenceLabel(ClrReference.CreateFromFieldOrArray(default, type, dataOffset), false, pointerSize));
+                }
                 if (fieldLabels.TryGetValue((type.MethodTable, offset), out var cached)) return cached;
                 var label = Intern(ReferenceLabel(ClrReference.CreateFromFieldOrArray(default, type, dataOffset), false, pointerSize));
                 fieldLabels.Add((type.MethodTable, offset), label);

@@ -26,18 +26,22 @@ public static partial class StructuredText
         return ParseYaml(trimmed);
     }
 
+    public const int MaxYamlNodes = 250_000;
+
     private static JsonNode ParseYaml(string text)
     {
         var stream = new YamlStream();
         try { stream.Load(new StringReader(text)); }
         catch (YamlException exception) { throw new FormatException($"The YAML could not be read at line {exception.Start.Line}, column {exception.Start.Column}: {exception.Message}", exception); }
         if (stream.Documents.Count == 0) throw new FormatException("The document is empty.");
-        return Convert(stream.Documents[0].RootNode, 0) ?? throw new FormatException("The document is empty.");
+        var nodes = 0;
+        return Convert(stream.Documents[0].RootNode, 0, ref nodes) ?? throw new FormatException("The document is empty.");
     }
 
-    private static JsonNode? Convert(YamlNode node, int depth)
+    private static JsonNode? Convert(YamlNode node, int depth, ref int nodes)
     {
         if (depth > 256) throw new FormatException("The YAML nests too deeply, or refers to itself through an alias.");
+        if (++nodes > MaxYamlNodes) throw new FormatException($"The YAML expands to more than {MaxYamlNodes:N0} nodes.");
         switch (node)
         {
             case YamlMappingNode mapping:
@@ -46,17 +50,21 @@ public static partial class StructuredText
                 {
                     var name = key is YamlScalarNode scalarKey ? scalarKey.Value ?? "" : key.ToString();
                     // YAML merge keys (<<: *defaults) copy the referenced mapping's entries in.
-                    if (name == "<<" && key is YamlScalarNode { Style: YamlDotNet.Core.ScalarStyle.Plain } && Convert(value, depth + 1) is JsonObject merged)
+                    if (name == "<<" && key is YamlScalarNode { Style: YamlDotNet.Core.ScalarStyle.Plain } && Convert(value, depth + 1, ref nodes) is JsonObject merged)
                     {
-                        foreach (var (mergedName, mergedValue) in merged) if (!result.ContainsKey(mergedName)) result[mergedName] = mergedValue?.DeepClone();
+                        foreach (var (mergedName, mergedValue) in merged)
+                        {
+                            if (++nodes > MaxYamlNodes) throw new FormatException($"The YAML expands to more than {MaxYamlNodes:N0} nodes.");
+                            if (!result.ContainsKey(mergedName)) result[mergedName] = mergedValue?.DeepClone();
+                        }
                         continue;
                     }
-                    result[name] = Convert(value, depth + 1);
+                    result[name] = Convert(value, depth + 1, ref nodes);
                 }
                 return result;
             case YamlSequenceNode sequence:
                 var array = new JsonArray();
-                foreach (var item in sequence.Children) array.Add(Convert(item, depth + 1));
+                foreach (var item in sequence.Children) array.Add(Convert(item, depth + 1, ref nodes));
                 return array;
             case YamlScalarNode scalar:
                 return Scalar(scalar);

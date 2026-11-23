@@ -36,6 +36,7 @@ public sealed class AutoSaveCoordinator : IDisposable
     private readonly EditorPreferences _preferences;
     private readonly IUiDispatcher _dispatcher;
     private readonly IMessenger _messenger;
+    private readonly object _runLock = new();
     private CancellationTokenSource? _timer;
     private int _suspensions;
     private bool _stopped, _disposed;
@@ -57,15 +58,23 @@ public sealed class AutoSaveCoordinator : IDisposable
         if (args.PropertyName is nameof(EditorPreferences.AutoSave) or nameof(EditorPreferences.AutoSaveDelaySeconds)) Schedule();
     }
 
+    private void CancelTimer()
+    {
+        _timer?.Cancel();
+        _timer?.Dispose();
+        _timer = null;
+    }
+
     /// <summary>Restarts the pause; called on every edit.</summary>
     public void Schedule()
     {
-        _timer?.Cancel(); _timer?.Dispose(); _timer = null;
+        CancelTimer();
         if (!_preferences.AutoSave || !IsEnabled || IsHeld || _disposed) return;
         var pending = _timer = new();
-        Task.Delay(TimeSpan.FromSeconds(_preferences.AutoSaveDelaySeconds), pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
+        var token = pending.Token;
+        Task.Delay(TimeSpan.FromSeconds(_preferences.AutoSaveDelaySeconds), token).ContinueWith(_ => _dispatcher.Post(() =>
         {
-            if (!pending.IsCancellationRequested && !_disposed) _run = TimedSaveAsync();
+            if (!token.IsCancellationRequested && !_disposed) EnqueueSaveAsync(swallowExceptions: true).Forget();
         }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default).Forget();
     }
 
@@ -77,8 +86,10 @@ public sealed class AutoSaveCoordinator : IDisposable
     public async Task<IDisposable> SuspendAsync()
     {
         _suspensions++;
-        _timer?.Cancel();
-        try { await _run; }
+        CancelTimer();
+        Task active;
+        lock (_runLock) active = _run;
+        try { await active; }
         catch (Exception exception) { _host.AppendOutput("Automatic save: " + exception.Message); }
         return new Suspension(this);
     }
@@ -95,16 +106,40 @@ public sealed class AutoSaveCoordinator : IDisposable
     }
 
     /// <summary>Ends automatic saving for good: documents whose edits were discarded on close must never be saved afterwards.</summary>
-    public void Stop() => _stopped = true;
+    public void Stop()
+    {
+        _stopped = true;
+        CancelTimer();
+    }
 
     /// <summary>Runs the timed save now, as the timer would.</summary>
-    public Task RunNowAsync() => _run = SaveAsync();
+    public Task RunNowAsync() => EnqueueSaveAsync(swallowExceptions: false);
 
-    /// <summary>Nothing awaits a timed save unless a close happens to come along, so its failures are reported here.</summary>
-    private async Task TimedSaveAsync()
+    private Task EnqueueSaveAsync(bool swallowExceptions)
     {
-        try { await SaveAsync(); }
-        catch (Exception exception) { _host.AppendOutput("Automatic save: " + exception.Message); }
+        lock (_runLock)
+        {
+            var previous = _run;
+            var next = RunAfterAsync(previous, swallowExceptions);
+            _run = next;
+            return next;
+        }
+    }
+
+    /// <summary>Serializes save passes so timed and explicit runs never overlap and <see cref="SuspendAsync"/> always awaits the active pass.</summary>
+    private async Task RunAfterAsync(Task previous, bool swallowExceptions)
+    {
+        try { await previous; }
+        catch { /* Previous run's exception was already observed by its own caller or timer pass. */ }
+        if (swallowExceptions)
+        {
+            try { await SaveAsync(); }
+            catch (Exception exception) { _host.AppendOutput("Automatic save: " + exception.Message); }
+        }
+        else
+        {
+            await SaveAsync();
+        }
     }
 
     private async Task SaveAsync()

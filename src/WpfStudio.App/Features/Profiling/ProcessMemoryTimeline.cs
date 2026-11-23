@@ -32,6 +32,7 @@ public sealed partial class ProcessMemoryTimeline(IProcessMemorySampler sampler,
     /// <summary>Starts over for another process; its samples say nothing about this one.</summary>
     internal void Watch(ProfileProcess? process)
     {
+        Stop();
         Process = process;
         _samples.Clear(); LiveSamples = []; LiveMemoryText = "";
         samplesChanged(); UpdateMonitor();
@@ -42,25 +43,32 @@ public sealed partial class ProcessMemoryTimeline(IProcessMemorySampler sampler,
         var run = IsMonitorActive && MonitorMemory && Process is not null && !host.IsDisposed;
         if (!run) { Stop(); return; }
         if (_monitor is not null) return;
-        _monitor = CancellationTokenSource.CreateLinkedTokenSource(host.Lifetime);
-        MonitorAsync(_monitor.Token).Forget(host.ReportFault);
+        var monitor = CancellationTokenSource.CreateLinkedTokenSource(host.Lifetime);
+        _monitor = monitor;
+        MonitorAsync(monitor).Forget(host.ReportFault);
     }
 
-    private async Task MonitorAsync(CancellationToken token)
+    private async Task<bool> SampleOnceAsync(CancellationToken token)
     {
+        if (host.IsDisposed || Process is not { } process) return true;
+        // Off the UI thread: refreshing a process's counters asks the system about every process, once a second.
+        var sample = await Task.Run(() => sampler.Sample(process.Id, process.StartTimeUtcTicks), token);
+        if (host.IsDisposed || token.IsCancellationRequested || !ReferenceEquals(process, Process)) return true;
+        return Apply(sample);
+    }
+
+    private async Task MonitorAsync(CancellationTokenSource monitor)
+    {
+        var token = monitor.Token;
         try
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-            // The first sample is taken at once, so the title names the process as monitoring starts. The loop ends with the
-            // process: it used to go on asking for a process that was gone, for as long as the pane was open.
-            if (!TakeSample()) return;
+            // The first sample is taken at once (off the UI thread), so the title names the process as monitoring starts.
+            // The loop ends with the process: it used to go on asking for a process that was gone, for as long as the pane was open.
+            if (!await SampleOnceAsync(token)) return;
             while (await timer.WaitForNextTickAsync(token))
             {
-                if (host.IsDisposed || Process is not { } process) continue;
-                // Off the UI thread: refreshing a process's counters asks the system about every process, once a second.
-                var sample = await Task.Run(() => sampler.Sample(process.Id, process.StartTimeUtcTicks), token);
-                if (host.IsDisposed || !ReferenceEquals(process, Process)) continue;
-                if (!Apply(sample)) break;
+                if (!await SampleOnceAsync(token)) break;
             }
         }
         catch (OperationCanceledException) { }
@@ -68,7 +76,7 @@ public sealed partial class ProcessMemoryTimeline(IProcessMemorySampler sampler,
         finally
         {
             // A loop that ended for any reason must not leave its source registered, or monitoring could never restart.
-            if (_monitor is { } monitor && monitor.Token == token) { monitor.Dispose(); _monitor = null; }
+            if (ReferenceEquals(_monitor, monitor)) { monitor.Dispose(); _monitor = null; }
         }
     }
 

@@ -43,11 +43,36 @@ public static class HeapInsights
 
     private static int Rank(string severity) => severity switch { "High" => 0, "Medium" => 1, "Low" => 2, _ => 3 };
 
+    private static long RetainedBytesWithoutNested(HeapAnalysis analysis, IReadOnlyCollection<int> ids)
+    {
+        if (ids.Count == 0) return 0;
+        if (ids.Count == 1)
+        {
+            foreach (var only in ids) return analysis.RetainedBytes[only];
+        }
+        var set = ids is HashSet<int> existing ? existing : new HashSet<int>(ids);
+        var dominators = analysis.ImmediateDominators;
+        long total = 0;
+        foreach (var id in set)
+        {
+            var dominatedByMember = false;
+            var parent = dominators[id];
+            var steps = 0;
+            while (parent >= 0 && parent != id && steps++ < dominators.Length)
+            {
+                if (set.Contains(parent)) { dominatedByMember = true; break; }
+                parent = dominators[parent];
+            }
+            if (!dominatedByMember) total += analysis.RetainedBytes[id];
+        }
+        return total;
+    }
+
     private static void ClosedWindows(HeapGraph graph, HeapAnalysis analysis, HeapExtras extras, List<MemoryInsight> insights)
     {
         var alive = extras.ClosedWindows.Where(id => analysis.Reachable[id]).OrderByDescending(id => analysis.RetainedBytes[id]).ToArray();
         if (alive.Length == 0) return;
-        var bytes = alive.Sum(id => analysis.RetainedBytes[id]);
+        var bytes = RetainedBytesWithoutNested(analysis, alive);
         insights.Add(new("closed-windows", "Leak", "High", alive.Length == 1 ? "A closed window is still in memory" : $"{alive.Length} closed windows are still in memory",
             "These WPF windows have been closed, but something still references them, so the window and its whole visual tree stay alive.",
             "Open the window's retention path. Common causes are static events, DispatcherTimer or CompositionTarget handlers, " +
@@ -61,17 +86,22 @@ public static class HeapInsights
         if (alive.Length == 0) return;
         var byType = alive.GroupBy(id => graph.Objects[id].TypeId)
             .Where(g => !MemoryLabels.IsFrameworkModule(graph.Types[g.Key].Module))
-            .Select(g => (Type: graph.Types[g.Key], Ids: g.OrderByDescending(id => analysis.RetainedBytes[id]).ToArray()))
-            .OrderByDescending(g => g.Ids.Sum(id => analysis.RetainedBytes[id])).ToArray();
+            .Select(g =>
+            {
+                var ids = g.OrderByDescending(id => analysis.RetainedBytes[id]).ToArray();
+                return (Type: graph.Types[g.Key], Ids: ids, Bytes: RetainedBytesWithoutNested(analysis, ids));
+            })
+            .OrderByDescending(g => g.Bytes).ToArray();
         if (byType.Length == 0) return;
-        var count = byType.Sum(g => g.Ids.Length);
-        var bytes = byType.Sum(g => g.Ids.Sum(id => analysis.RetainedBytes[id]));
+        var allIds = byType.SelectMany(g => g.Ids).ToArray();
+        var count = allIds.Length;
+        var bytes = RetainedBytesWithoutNested(analysis, allIds);
         insights.Add(new("disposed-alive", "Leak", count >= 10 || bytes > 1 << 20 ? "High" : "Medium",
             count == 1 ? "A disposed object is still referenced" : $"{count:N0} disposed objects are still referenced",
             "Their disposed flag is set, so their owner is finished with them, yet a GC root still reaches them.",
             "Check who still holds each object after Dispose: caches, event subscriptions, and collections that are never cleared.",
             count, bytes, byType.Take(20).Select(g => new MemoryInsightItem(MemoryLabels.ShortType(g.Type.Name),
-                $"{g.Ids.Length:N0} disposed · {g.Type.Module}", g.Ids.Length, g.Ids.Sum(id => analysis.RetainedBytes[id]), g.Type.Key, g.Ids[0])).ToArray()));
+                $"{g.Ids.Length:N0} disposed · {g.Type.Module}", g.Ids.Length, g.Bytes, g.Type.Key, g.Ids[0])).ToArray()));
     }
 
     /// <summary>Objects whose immediate dominator is a delegate (or a delegate's invocation list): an event subscription
@@ -96,15 +126,19 @@ public static class HeapInsights
         }
         if (found.Count == 0) return;
         var byType = found.GroupBy(id => graph.Objects[id].TypeId)
-            .Select(g => (Type: graph.Types[g.Key], Ids: g.OrderByDescending(id => analysis.RetainedBytes[id]).ToArray()))
-            .OrderByDescending(g => g.Ids.Sum(id => analysis.RetainedBytes[id])).ToArray();
-        var bytes = found.Sum(id => analysis.RetainedBytes[id]);
+            .Select(g =>
+            {
+                var ids = g.OrderByDescending(id => analysis.RetainedBytes[id]).ToArray();
+                return (Type: graph.Types[g.Key], Ids: ids, Bytes: RetainedBytesWithoutNested(analysis, ids));
+            })
+            .OrderByDescending(g => g.Bytes).ToArray();
+        var bytes = RetainedBytesWithoutNested(analysis, found);
         insights.Add(new("event-handlers", "Leak", bytes > 1 << 20 || found.Count >= 20 ? "High" : "Medium",
             found.Count == 1 ? "An object is kept alive only by an event handler" : $"{found.Count:N0} objects are kept alive only by event handlers",
             "A delegate is the only owner of these objects. That usually means they subscribed to an event that outlives them and never unsubscribed.",
             "Open an instance and follow the path to the event's publisher. Unsubscribe when the subscriber's lifetime ends, or use a weak event pattern.",
             found.Count, bytes, byType.Take(20).Select(g => new MemoryInsightItem(MemoryLabels.ShortType(g.Type.Name),
-                $"{g.Ids.Length:N0} held by delegates · {g.Type.Module}", g.Ids.Length, g.Ids.Sum(id => analysis.RetainedBytes[id]), g.Type.Key, g.Ids[0])).ToArray()));
+                $"{g.Ids.Length:N0} held by delegates · {g.Type.Module}", g.Ids.Length, g.Bytes, g.Type.Key, g.Ids[0])).ToArray()));
     }
 
     private static void FinalizerOnly(HeapGraph graph, HeapAnalysis analysis, List<MemoryInsight> insights, CancellationToken token)
@@ -154,7 +188,7 @@ public static class HeapInsights
         {
             if (length < 32) continue;
             var used = graph.Outgoing.For(id).Length;
-            if (used * 4 > length) continue;
+            if (used * 4L > length) continue;
             sparse.Add((id, length, used, (long)(length - used) * extras.PointerSize));
         }
         var wasted = sparse.Sum(s => s.Wasted);

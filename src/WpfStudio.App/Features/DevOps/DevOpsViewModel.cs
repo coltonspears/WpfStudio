@@ -29,6 +29,7 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
     private readonly IDesktopService _desktop;
     private readonly IUserDialogService _dialogs;
     private readonly IClipboardService _clipboard;
+    private readonly IUiDispatcher _dispatcher;
     private readonly OperationGate _operations;
     private readonly LatestLoad _connection = new(), _branchPullRequest = new();
     private Task _activeTask = Task.CompletedTask;
@@ -36,7 +37,7 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
     private bool _activated, _disposed;
 
     public DevOpsViewModel(GitViewModel git, GitService gitService, IDevOpsCredentials credentials, DevOpsProviderFactory createProvider,
-        IDesktopService desktop, IUserDialogService dialogs, IClipboardService clipboard)
+        IDesktopService desktop, IUserDialogService dialogs, IClipboardService clipboard, IUiDispatcher? dispatcher = null)
     {
         Git = git;
         GitService = gitService;
@@ -45,6 +46,7 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
         _desktop = desktop;
         _dialogs = dialogs;
         _clipboard = clipboard;
+        _dispatcher = dispatcher ?? ResolveUiDispatcher();
         _operations = new(busy => IsBusy = busy);
         PullRequests = new(this);
         WorkItems = new(this);
@@ -55,6 +57,8 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
         git.CreatePullRequestInWorkbench = TryStartCreatePullRequest;
         git.BranchPullRequestRequested += ShowBranchPullRequest;
     }
+
+    internal IUiDispatcher Dispatcher => _dispatcher;
 
     public GitViewModel Git { get; }
     public GitService GitService { get; }
@@ -139,7 +143,7 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
         switch (e.PropertyName)
         {
             case nameof(GitViewModel.Remote) or nameof(GitViewModel.RepositoryRoot):
-                ConnectIfChangedAsync().Forget(ReportError);
+                ConnectIfChangedAsync().ForgetOnUi(_dispatcher, ReportError);
                 break;
             case nameof(GitViewModel.Branch):
                 RefreshBranchPullRequest();
@@ -517,7 +521,7 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
     public void StartCreatePullRequest()
     {
         SelectedTab = PullRequestsTab;
-        NewPullRequest.OpenAsync().Forget(ReportError);
+        NewPullRequest.OpenAsync().ForgetOnUi(_dispatcher, ReportError);
     }
 
     public void NotifyCommands()
@@ -547,5 +551,42 @@ public sealed partial class DevOpsViewModel : ObservableObject, IDisposable, IDe
         Pipelines.Dispose();
         Access.Dispose();
         NewPullRequest.Dispose();
+    }
+
+    internal static IUiDispatcher ResolveUiDispatcher()
+    {
+        if (SynchronizationContext.Current is { } context) return new SyncContextUiDispatcher(context);
+        if (System.Windows.Application.Current?.Dispatcher is { } appDispatcher) return new UiDispatcher(appDispatcher);
+        return InlineUiDispatcher.Instance;
+    }
+
+    private sealed class SyncContextUiDispatcher(SynchronizationContext context) : IUiDispatcher
+    {
+        public void Post(Action action) => context.Post(static state => ((Action)state!)(), action);
+
+        public Task InvokeAsync(Action action, CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested) return Task.FromCanceled(cancellationToken);
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            context.Post(_ =>
+            {
+                if (cancellationToken.IsCancellationRequested) { completion.TrySetCanceled(cancellationToken); return; }
+                try { action(); completion.TrySetResult(); }
+                catch (Exception ex) { completion.TrySetException(ex); }
+            }, null);
+            return completion.Task;
+        }
+    }
+
+    private sealed class InlineUiDispatcher : IUiDispatcher
+    {
+        public static InlineUiDispatcher Instance { get; } = new();
+        public void Post(Action action) => action();
+        public Task InvokeAsync(Action action, CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested) return Task.FromCanceled(cancellationToken);
+            action();
+            return Task.CompletedTask;
+        }
     }
 }

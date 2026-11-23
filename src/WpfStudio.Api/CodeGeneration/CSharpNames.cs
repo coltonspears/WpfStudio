@@ -96,7 +96,7 @@ public static class CSharpNames
                 case '\t': builder.Append("\\t"); break;
                 case '\0': builder.Append("\\0"); break;
                 default:
-                    if (char.IsControl(c)) builder.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
+                    if (char.IsControl(c) || c is '\u2028' or '\u2029') builder.Append("\\u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
                     else builder.Append(c);
                     break;
             }
