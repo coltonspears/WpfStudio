@@ -143,17 +143,38 @@ public sealed class XamlResourceEditorTests
 
         await UntilAsync(() => consumer.Diagnostics.Any(item => item.Id == "XAMLBIND001"));
         Assert.Equal(version, consumer.State.Version);
-        var completion = await consumer.CompleteAsync(Position(consumer.State.Content));
+        var (diagnostics, completion) = await SettledAsync(consumer, Position(consumer.State.Content));
+        Assert.Contains(diagnostics, item => item.Id == "XAMLBIND001");
         Assert.Contains(completion.Items, item => item.DisplayText == "Code");
         Assert.DoesNotContain(completion.Items, item => item.DisplayText == "Name");
         Assert.Null(test.Store.Find(files.Data));
         await File.WriteAllTextAsync(files.Data, Dictionary("Customer"));
         File.SetLastWriteTimeUtc(files.Data, timestamp);
+        // Clearing is immediate, and shows the change has reached the editor; the settled observation is the current one.
         await UntilAsync(() => consumer.Diagnostics.Count == 0);
-        // Clearing is immediate; wait for the current semantic observation too.
-        await consumer.RefreshAnalysisAsync();
-        Assert.Empty(consumer.Diagnostics);
-        Assert.Contains((await consumer.CompleteAsync(Position(consumer.State.Content))).Items, item => item.DisplayText == "Name");
+        (diagnostics, completion) = await SettledAsync(consumer, Position(consumer.State.Content));
+        Assert.Empty(diagnostics);
+        Assert.Contains(completion.Items, item => item.DisplayText == "Name");
+    }
+
+    /// <summary>
+    /// The diagnostics and completions of one refresh that no resource change overtook. A write can reach the watcher as several
+    /// notifications, delivered one at a time: on GitHub's runners Data.xaml's write and time stamp arrived as three, the second
+    /// cancelled the refresh after the first and the third invalidated the completion asked for next. An editor drops an answer for
+    /// superseded resources, as the case above checks, so the observation is repeated until nothing overtakes it.
+    /// </summary>
+    private static async Task<(WorkspaceDiagnostic[] Diagnostics, CompletionResult Completion)> SettledAsync(EditorViewModel editor, int position)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        while (true)
+        {
+            long revision = editor.XamlContextRevision;
+            await editor.RefreshAnalysisAsync(timeout.Token);
+            var diagnostics = editor.Diagnostics.ToArray();
+            var completion = await editor.CompleteAsync(position, timeout.Token);
+            if (editor.XamlContextRevision == revision) return (diagnostics, completion);
+            await Task.Delay(30, timeout.Token);
+        }
     }
 
     [Fact]
