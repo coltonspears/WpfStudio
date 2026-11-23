@@ -1,0 +1,47 @@
+diff --git a/src/WpfStudio.Runtime/Debugging/DapTransport.cs b/src/WpfStudio.Runtime/Debugging/DapTransport.cs
+index 7c1fce8..b739065 100644
+--- a/src/WpfStudio.Runtime/Debugging/DapTransport.cs
++++ b/src/WpfStudio.Runtime/Debugging/DapTransport.cs
+@@ -20,6 +20,12 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
+ 
+     public void Start() => reader ??= ReadLoopAsync();
+ 
++    private static readonly object TraceGate = new();
++    internal static void Trace(string line)
++    {
++        lock (TraceGate) File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "dap-trace.log"), $"{DateTime.UtcNow:HH:mm:ss.fff} [{Environment.CurrentManagedThreadId}] {line}{Environment.NewLine}");
++    }
++
+     public async Task<JsonElement> RequestAsync(string command, object? arguments = null, CancellationToken cancellationToken = default)
+     {
+         var id = Interlocked.Increment(ref sequence);
+@@ -31,6 +37,7 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
+         try
+         {
+             var payload = JsonSerializer.SerializeToUtf8Bytes(new { seq = id, type = "request", command, arguments = arguments ?? new { } });
++            Trace("-> " + Encoding.UTF8.GetString(payload));
+             await writer.WaitAsync(timeout.Token).ConfigureAwait(false);
+             try { await WriteFrameAsync(output, payload, timeout.Token).ConfigureAwait(false); }
+             finally { writer.Release(); }
+@@ -96,6 +103,8 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
+     private void Dispatch(JsonElement message)
+     {
+         if (message.ValueKind != JsonValueKind.Object) return;
++        var raw = message.GetRawText();
++        Trace("<- " + (raw.Length > 600 ? raw[..600] : raw));
+         switch (Text(message, "type"))
+         {
+             case "response" when message.TryGetProperty("request_seq", out var sequenceNumber) && sequenceNumber.ValueKind == JsonValueKind.Number
+diff --git a/src/WpfStudio.Runtime/Debugging/DebugSession.cs b/src/WpfStudio.Runtime/Debugging/DebugSession.cs
+index b0fbe4f..8ab8aa9 100644
+--- a/src/WpfStudio.Runtime/Debugging/DebugSession.cs
++++ b/src/WpfStudio.Runtime/Debugging/DebugSession.cs
+@@ -42,7 +42,7 @@ public sealed class DebugSession : IAsyncDisposable
+         if (!File.Exists(AdapterPath)) throw new FileNotFoundException("netcoredbg is not installed. Choose Install debugger in the Debugger pane, or run tools/Get-Debugger.ps1 and rebuild WpfStudio.", AdapterPath);
+         closeExpected = false;
+         initialized = NewCompletion();
+-        var start = ProcessLaunch.Create(AdapterPath, Path.GetDirectoryName(AdapterPath)!, ["--interpreter=vscode"]);
++        var start = ProcessLaunch.Create(AdapterPath, Path.GetDirectoryName(AdapterPath)!, ["--interpreter=vscode", "--log=file", "--engineLogging=" + Path.Combine(Path.GetDirectoryName(AdapterPath)!, "engine-" + Guid.NewGuid().ToString("N") + ".log")]);
+         start.RedirectStandardInput = true;
+         process = new Process { StartInfo = start };
+         if (isolateStartupHooks)
