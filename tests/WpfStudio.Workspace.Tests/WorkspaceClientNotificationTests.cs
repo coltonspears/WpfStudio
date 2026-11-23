@@ -29,6 +29,28 @@ public sealed class WorkspaceClientNotificationTests
         Assert.Equal(2, models);
     }
 
+    [Fact]
+    public async Task AXamlResendCancelledInTheWorkerChangesNoFieldsButACancelledEditStillDoes()
+    {
+        await using var client = new WorkspaceClient();
+        var worker = HeldWorker.Connect(client);
+        string path = Path.GetFullPath("MainWindow.xaml");
+        int fields = 0;
+        client.NameProjectionChanged += (_, _) => Interlocked.Increment(ref fields);
+
+        await client.UpdateDocumentAsync(new(path, "<Window x:Name=\"Root\" />", 1, Analyze: false));
+        Assert.Equal(1, fields);
+
+        // Each NameProjectionChanged makes every open C# editor drop its diagnostics and analyze again.
+        await worker.CancelInWorkerAsync(client, new(path, "<Window x:Name=\"Root\" />", 1, Analyze: false));
+        await client.UpdateDocumentAsync(new(path, "<Window x:Name=\"Root\" />", 1, Analyze: false));
+        Assert.Equal(1, fields);
+
+        await worker.CancelInWorkerAsync(client, new(path, "<Window x:Name=\"Other\" />", 2, Analyze: false));
+        await client.UpdateDocumentAsync(new(path, "<Window x:Name=\"Root\" />", 3, Analyze: false));
+        Assert.Equal(2, fields);
+    }
+
     /// <summary>Answers every update, or holds the next one, as the worker does while it computes, until its caller gives up.</summary>
     public class HeldWorker : DispatchProxy
     {
