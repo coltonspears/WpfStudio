@@ -131,7 +131,17 @@ public sealed partial class UpdatesViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(ShowInstall))]
     private async Task InstallAsync()
     {
-        if (IsReady) { await _host.RestartToUpdateAsync(Staged!, automatic: false); return; }
+        if (IsReady)
+        {
+            if (File.Exists(Staged!.Executable)) { await _host.RestartToUpdateAsync(Staged, automatic: false); return; }
+            // Removed since it was downloaded, by hand or by a cleanup: closing now would only fail to start it.
+            var version = Staged.Version;
+            Staged = null;
+            State = UpdateState.Available;
+            Message = $"WpfStudio {version} is available.";
+            Detail = "The downloaded update was removed before it was installed. Choose Update and restart to download it again.";
+            return;
+        }
         if (LastCheck is not { CanInstall: true, Release: { } release } check) return;
         var work = Begin();
         State = UpdateState.Downloading; Message = $"Downloading WpfStudio {release.Version}…"; Detail = ""; Progress = 0; IsProgressIndeterminate = true;

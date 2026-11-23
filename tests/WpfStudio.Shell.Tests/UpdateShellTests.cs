@@ -42,6 +42,14 @@ public sealed class UpdateShellTests
         services.AddSingleton<IUpdateLauncher>(launcher);
     });
 
+    /// <summary>A staged package as a download leaves it: its executable is all a restart looks for.</summary>
+    private static StagedUpdate Staged(string root)
+    {
+        var staged = new StagedUpdate(ReleaseVersion.Parse("0.2.0"), Directory.CreateDirectory(Path.Combine(root, "updates", "0.2.0", "package", "WpfStudio")).FullName);
+        File.WriteAllText(staged.Executable, "exe 0.2.0");
+        return staged;
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow.AddSeconds(30);
@@ -85,7 +93,7 @@ public sealed class UpdateShellTests
         await using var test = Create(launcher);
         var shell = test.Shell;
         IUpdateHost host = shell;
-        var staged = new StagedUpdate(ReleaseVersion.Parse("0.2.0"), Path.Combine(test.Root, "updates", "0.2.0", "package", "WpfStudio"));
+        var staged = Staged(test.Root);
         var shutdowns = 0;
         shell.ShutdownRequested += () => shutdowns++;
 
@@ -119,10 +127,29 @@ public sealed class UpdateShellTests
         var shutdowns = 0;
         test.Shell.ShutdownRequested += () => shutdowns++;
 
-        Assert.True(await ((IUpdateHost)test.Shell).RestartToUpdateAsync(new StagedUpdate(ReleaseVersion.Parse("0.2.0"), test.Root), automatic: false));
+        Assert.True(await ((IUpdateHost)test.Shell).RestartToUpdateAsync(Staged(test.Root), automatic: false));
 
         Assert.StartsWith("WpfStudio was not updated: The update could not start: No such file.", Assert.Single(test.Dialogs.Errors));
         Assert.Equal(1, shutdowns);
+    }
+
+    [Fact]
+    public async Task AStagedUpdateThatWasRemovedDoesNotEndTheSession()
+    {
+        var launcher = new Launcher();
+        await using var test = Create(launcher);
+        var shutdowns = 0;
+        test.Shell.ShutdownRequested += () => shutdowns++;
+        test.Shell.Database.Queries.SelectedDocument!.SqlText += "\nSELECT 42;";
+        var staged = Staged(test.Root);
+        File.Delete(staged.Executable);
+
+        Assert.False(await ((IUpdateHost)test.Shell).RestartToUpdateAsync(staged, automatic: false));
+
+        Assert.Contains("is gone", test.Shell.Status);
+        Assert.Empty(test.Dialogs.SaveQuestions); // Nothing was asked: the session was never closed.
+        Assert.Empty(launcher.Started);
+        Assert.Equal(0, shutdowns);
     }
 
     [Fact]

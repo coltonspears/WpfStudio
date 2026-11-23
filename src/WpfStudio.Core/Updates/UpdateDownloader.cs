@@ -18,8 +18,16 @@ public sealed record UpdateProgress(string Message, double? Fraction = null);
 /// hash matches the one GitHub lists for it (or the release's <c>SHA256SUMS.txt</c>), and extracts it there. Nothing in
 /// the running package changes: <see cref="UpdateApplier"/> does that once WpfStudio has closed.
 /// </summary>
-public sealed class UpdateDownloader(HttpClient http, string updatesDirectory)
+/// <remarks>
+/// Every WpfStudio window shares the folder. While a window downloads an update or holds one ready, it keeps
+/// <c>.in-use</c> in that update's folder open for itself alone, so no other window removes or replaces it. Windows
+/// releases the file when the process ends, however it ends.
+/// </remarks>
+public sealed class UpdateDownloader(HttpClient http, string updatesDirectory) : IDisposable
 {
+    public const string InUseFileName = ".in-use";
+    private FileStream? _hold;
+
     /// <summary>A package is a few hundred megabytes; anything far larger is not one.</summary>
     public const long MaximumPackageBytes = 2L * 1024 * 1024 * 1024;
     public const string ChecksumFileName = "SHA256SUMS.txt";
@@ -36,8 +44,11 @@ public sealed class UpdateDownloader(HttpClient http, string updatesDirectory)
             ?? throw new UpdateException($"The release lists no SHA-256 hash for {asset.Name}, so it cannot be checked and was not downloaded.");
 
         var folder = Path.Combine(UpdatesDirectory, release.Version.ToString());
+        Release(); // This window's earlier update, if any, is replaced by this one.
+        if (IsInUse(folder)) throw new UpdateException($"Another WpfStudio window is downloading WpfStudio {release.Version} or holds it ready to install. Install it from there, or close that window and try again.");
         DeleteDirectory(folder); // What an earlier, interrupted attempt left.
         Directory.CreateDirectory(folder);
+        _hold = Hold(folder) ?? throw new UpdateException($"Another WpfStudio window is downloading WpfStudio {release.Version}. Install it from there, or close that window and try again.");
         var archive = Path.Combine(folder, asset.Name + ".download");
         try
         {
@@ -56,9 +67,49 @@ public sealed class UpdateDownloader(HttpClient http, string updatesDirectory)
         }
         catch
         {
+            Release();
             DeleteDirectory(folder);
             throw;
         }
+    }
+
+    /// <summary>Lets other windows remove this window's staged update again.</summary>
+    public void Release()
+    {
+        _hold?.Dispose();
+        _hold = null;
+    }
+
+    public void Dispose() => Release();
+
+    /// <summary>Takes <c>.in-use</c> in an update's folder for this process alone; null when another process has it.</summary>
+    public static FileStream? Hold(string folder)
+    {
+        try { return new FileStream(Path.Combine(folder, InUseFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>The update's folder in <paramref name="updatesDirectory"/> that holds a staged package, or null when it is not in one.</summary>
+    public static string? UpdateFolderOf(string stagedDirectory, string updatesDirectory)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(updatesDirectory));
+        for (var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(stagedDirectory)); Path.GetDirectoryName(folder) is { } parent; folder = parent)
+            if (string.Equals(parent, root, StringComparison.OrdinalIgnoreCase)) return folder;
+        return null;
+    }
+
+    /// <summary>Whether another window holds the update in a folder: its <c>.in-use</c> is there and cannot be opened.</summary>
+    private static bool IsInUse(string folder)
+    {
+        var marker = Path.Combine(folder, InUseFileName);
+        if (!File.Exists(marker)) return false;
+        try
+        {
+            using var probe = new FileStream(marker, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            return false;
+        }
+        catch (FileNotFoundException) { return false; } // Released just now.
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return true; }
     }
 
     private async Task DownloadVerifiedAsync(ReleaseAsset asset, string expectedSha256, string path, IProgress<UpdateProgress>? progress, CancellationToken cancellationToken)
@@ -139,7 +190,7 @@ public sealed class UpdateDownloader(HttpClient http, string updatesDirectory)
         return candidates.Length == 1 ? candidates[0] : null;
     }
 
-    /// <summary>Removes every staged update except <paramref name="keep"/>. Ones still in use stay for the next time.</summary>
+    /// <summary>Removes every staged update except <paramref name="keep"/> and those another window holds. Ones still in use stay for the next time.</summary>
     public void RemoveStaleUpdates(string? keep = null)
     {
         if (!Directory.Exists(UpdatesDirectory)) return;
@@ -148,7 +199,7 @@ public sealed class UpdateDownloader(HttpClient http, string updatesDirectory)
         {
             var full = Path.GetFullPath(folder);
             var holdsKept = kept is not null && (kept.Equals(full, StringComparison.OrdinalIgnoreCase) || kept.StartsWith(full + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
-            if (!holdsKept) DeleteDirectory(folder);
+            if (!holdsKept && !IsInUse(folder)) DeleteDirectory(folder);
         }
     }
 

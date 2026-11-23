@@ -16,6 +16,8 @@ namespace WpfStudio.Core.Updates;
 public sealed class UpdateApplier(TimeSpan? lockTimeout = null)
 {
     public const string BackupFolderName = ".update-backup";
+    /// <summary>Written into a backup once its update is complete. A backup without it holds files an undo could not put back, and is kept.</summary>
+    public const string CompletedMarkerName = ".completed";
     private readonly TimeSpan _lockTimeout = lockTimeout ?? TimeSpan.FromSeconds(30);
 
     /// <summary>Waits for a process to end. True once it has, or when it had already; false after the timeout.</summary>
@@ -83,6 +85,13 @@ public sealed class UpdateApplier(TimeSpan? lockTimeout = null)
                 ? $"WpfStudio could not be updated, so the previous version was kept: {exception.Message}"
                 : $"WpfStudio could not be updated, and some files could not be put back. The previous files are in {backup}. {exception.Message}", exception);
         }
+        // The update is complete, so its backup may go. Without the mark it is only kept, which costs space and nothing else.
+        try
+        {
+            Directory.CreateDirectory(backup);
+            await File.WriteAllTextAsync(Path.Combine(backup, CompletedMarkerName), DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>Puts back what <see cref="ApplyAsync"/> changed, newest first. False when a file could not be restored.</summary>
@@ -146,8 +155,22 @@ public sealed class UpdateApplier(TimeSpan? lockTimeout = null)
         return count;
     }
 
-    /// <summary>Removes what earlier updates left in the package: run by the updated WpfStudio once it has started.</summary>
-    public static void RemoveBackups(string target) => UpdateDownloader.DeleteDirectory(Path.Combine(target, BackupFolderName));
+    /// <summary>
+    /// Removes the backups of completed updates from the package: run by WpfStudio once it has started. The backup of an
+    /// update that could not be undone completely is kept, since it holds the only copy of the files it names.
+    /// </summary>
+    public static void RemoveBackups(string target)
+    {
+        var root = Path.Combine(target, BackupFolderName);
+        try
+        {
+            if (!Directory.Exists(root)) return;
+            foreach (var backup in Directory.GetDirectories(root))
+                if (File.Exists(Path.Combine(backup, CompletedMarkerName))) UpdateDownloader.DeleteDirectory(backup);
+            if (!Directory.EnumerateFileSystemEntries(root).Any()) Directory.Delete(root);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The next start tries again. */ }
+    }
 
     private sealed class Change(string relative)
     {

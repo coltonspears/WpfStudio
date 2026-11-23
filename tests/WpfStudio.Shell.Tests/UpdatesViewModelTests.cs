@@ -17,9 +17,12 @@ public sealed class UpdatesViewModelTests : IDisposable
 {
     private const string Repository = "contoso/WpfStudio";
     private readonly string _root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "WpfStudio.UpdatesPage", Guid.NewGuid().ToString("N"))).FullName;
+    private readonly List<UpdateService> _services = [];
 
     public void Dispose()
     {
+        // A service holds the update it downloaded until it is disposed.
+        foreach (var service in _services) service.Dispose();
         try { Directory.Delete(_root, recursive: true); }
         catch (IOException) { }
     }
@@ -91,6 +94,7 @@ public sealed class UpdatesViewModelTests : IDisposable
         if (packaged) File.WriteAllText(Path.Combine(installed, InstalledPackage.MarkerFileName), $$"""{ "package": "win-x64", "repository": "{{Repository}}" }""");
         var github = new GitHub();
         var service = new UpdateService(new HttpClient(github), installed, Path.Combine(_root, "data", "updates"), version, Repository);
+        _services.Add(service);
         var host = new Host();
         return (new UpdatesViewModel(service, host, new Inline()), host, github, service);
     }
@@ -145,6 +149,27 @@ public sealed class UpdatesViewModelTests : IDisposable
         Assert.Equal(2, host.Restarts.Count);
         Assert.False(host.Restarts[1].Automatic);
         Assert.Same(staged, host.Restarts[1].Staged);
+    }
+
+    [Fact]
+    public async Task AReadyUpdateThatWasRemovedIsDownloadedAgainRatherThanRestartedInto()
+    {
+        var (page, host, github, service) = Create();
+        Serve(github, Package());
+        await page.CheckCommand.ExecuteAsync(null);
+        await page.InstallCommand.ExecuteAsync(null); // The host declines the automatic restart.
+        Assert.True(page.IsReady);
+        service.Dispose(); // As if this window let go of it and another one cleaned up.
+        Directory.Delete(Path.Combine(service.UpdatesDirectory, "0.2.0"), recursive: true);
+
+        await page.InstallCommand.ExecuteAsync(null);
+
+        Assert.Single(host.Restarts); // Only the automatic one.
+        Assert.Equal(UpdateState.Available, page.State);
+        Assert.Null(page.Staged);
+        Assert.Contains("download it again", page.Detail);
+        Assert.Equal("Update and restart", page.InstallLabel);
+        Assert.True(page.CanInstall);
     }
 
     [Fact]
@@ -243,6 +268,7 @@ public sealed class UpdatesViewModelTests : IDisposable
         var (page, _, _, service) = Create(version: "0.2.0");
         var backup = Directory.CreateDirectory(Path.Combine(service.ApplicationDirectory, UpdateApplier.BackupFolderName, "earlier")).FullName;
         File.WriteAllText(Path.Combine(backup, "WpfStudio.exe"), "exe 0.1.0");
+        File.WriteAllText(Path.Combine(backup, UpdateApplier.CompletedMarkerName), ""); // As a completed update leaves it.
         var staged = Directory.CreateDirectory(Path.Combine(service.UpdatesDirectory, "0.2.0", "package")).FullName;
 
         Assert.Equal("Updated WpfStudio from 0.1.0 to 0.2.0", page.Start([UpdateCommandLine.UpdatedFromOption, "0.1.0"]));

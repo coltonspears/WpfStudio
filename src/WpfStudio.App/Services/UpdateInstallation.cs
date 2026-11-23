@@ -45,6 +45,10 @@ internal static class UpdateInstallation
                 "WpfStudio was not updated", MessageBoxButton.OK, MessageBoxImage.Warning);
             return 1;
         }
+        // The closing WpfStudio's hold on this update ended with it. Taking it here keeps another window from removing
+        // the files while they are copied.
+        using var hold = UpdateDownloader.UpdateFolderOf(AppContext.BaseDirectory, Path.Combine(WpfStudio.Core.AppPaths.DataDirectory, "updates")) is { } folder
+            ? UpdateDownloader.Hold(folder) : null;
         try
         {
             var progress = new Progress<UpdateProgress>(report); // Created here, so reports arrive on this thread.

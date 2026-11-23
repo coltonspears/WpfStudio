@@ -50,6 +50,12 @@ public sealed partial class ShellViewModel : IUpdateHost
             Status = $"WpfStudio {staged.Version} is downloaded. Help > Check for updates installs it.";
             return false;
         }
+        // Checked before the session ends: once TryCloseAsync has run, WpfStudio closes whether the update starts or not.
+        if (!File.Exists(staged.Executable))
+        {
+            Status = $"The downloaded WpfStudio {staged.Version} is gone. Help > Check for updates downloads it again.";
+            return false;
+        }
         if (UpdateApplier.CountOtherInstances(Updates.ApplicationDirectory) is > 0 and var others)
         {
             Status = $"WpfStudio {staged.Version} is ready. Close the other WpfStudio windows, then choose Restart to update.";

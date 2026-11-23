@@ -58,9 +58,12 @@ public sealed class UpdateTests : IDisposable
 {
     private const string Repository = "contoso/WpfStudio";
     private readonly string _root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "WpfStudio.Updates", Guid.NewGuid().ToString("N"))).FullName;
+    private readonly List<UpdateService> _services = [];
 
     public void Dispose()
     {
+        // A service holds the update it downloaded until it is disposed.
+        foreach (var service in _services) service.Dispose();
         try { Directory.Delete(_root, recursive: true); }
         catch (IOException) { }
     }
@@ -131,8 +134,12 @@ public sealed class UpdateTests : IDisposable
         return folder;
     }
 
-    private UpdateService Service(GitHub github, string installed, string? current = "0.1.0") =>
-        new(new HttpClient(github), installed, Path.Combine(_root, "data", "updates"), current, defaultRepository: Repository);
+    private UpdateService Service(GitHub github, string installed, string? current = "0.1.0")
+    {
+        var service = new UpdateService(new HttpClient(github), installed, Path.Combine(_root, "data", "updates"), current, defaultRepository: Repository);
+        _services.Add(service);
+        return service;
+    }
 
     private sealed class Recorder : IProgress<UpdateProgress>
     {
@@ -310,7 +317,8 @@ public sealed class UpdateTests : IDisposable
         Assert.Equal(Path.Combine(service.UpdatesDirectory, "0.2.0", "package", "WpfStudio"), staged.Directory);
         Assert.Equal("exe 0.2.0", File.ReadAllText(staged.Executable));
         Assert.Equal("worker 0.2.0", File.ReadAllText(Path.Combine(staged.Directory, "WorkspaceHost", "WpfStudio.WorkspaceHost.dll")));
-        Assert.Empty(Directory.GetFiles(Path.Combine(service.UpdatesDirectory, "0.2.0"))); // The archive itself is not kept.
+        // The archive itself is not kept; .in-use is this window's hold on the update.
+        Assert.Equal([UpdateDownloader.InUseFileName], Directory.GetFiles(Path.Combine(service.UpdatesDirectory, "0.2.0")).Select(Path.GetFileName));
         Assert.False(Directory.Exists(stale));
         Assert.Contains(progress.Reports, report => report.Message.StartsWith("Downloading WpfStudio-0.2.0-win-x64.zip", StringComparison.Ordinal));
         Assert.Equal(1, progress.Reports[^1].Fraction);
@@ -412,6 +420,53 @@ public sealed class UpdateTests : IDisposable
 
         UpdateApplier.RemoveBackups(target);
         Assert.False(Directory.Exists(Path.Combine(target, UpdateApplier.BackupFolderName)));
+    }
+
+    [Fact]
+    public void OnlyTheBackupsOfCompletedUpdatesAreRemoved()
+    {
+        var target = Installed();
+        var root = Path.Combine(target, UpdateApplier.BackupFolderName);
+        var completed = Directory.CreateDirectory(Path.Combine(root, "completed")).FullName;
+        File.WriteAllText(Path.Combine(completed, "WpfStudio.exe"), "exe 0.0.9");
+        File.WriteAllText(Path.Combine(completed, UpdateApplier.CompletedMarkerName), "");
+        // An undo that could not put every file back: the message pointed here, so it holds the only copy.
+        var incomplete = Directory.CreateDirectory(Path.Combine(root, "incomplete")).FullName;
+        File.WriteAllText(Path.Combine(incomplete, "WpfStudio.dll"), "app 0.1.0");
+
+        UpdateApplier.RemoveBackups(target);
+
+        Assert.False(Directory.Exists(completed));
+        Assert.Equal("app 0.1.0", File.ReadAllText(Path.Combine(incomplete, "WpfStudio.dll")));
+        Directory.Delete(incomplete, recursive: true);
+        UpdateApplier.RemoveBackups(target);
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public async Task AnUpdateAnotherWindowHoldsIsNeitherRemovedNorReplaced()
+    {
+        var zip = PackageZip("win-x64", "0.2.0");
+        var github = new GitHub { Latest = () => Json(ReleaseJson("v0.2.0", ("WpfStudio-0.2.0-win-x64.zip", zip.Length, "sha256:" + Sha256(zip), "uploaded"))) };
+        github.Files[Download("v0.2.0", "WpfStudio-0.2.0-win-x64.zip")] = zip;
+        var installed = Installed();
+        using var first = Service(github, installed);
+        using var second = Service(github, installed); // Another window of the same WpfStudio: the same data folder.
+        var staged = await first.DownloadAsync(await first.CheckAsync(CancellationToken.None), null, CancellationToken.None);
+
+        second.RemoveLeftovers();
+        Assert.True(File.Exists(staged.Executable));
+        var refusal = await Assert.ThrowsAsync<UpdateException>(async () => await second.DownloadAsync(await second.CheckAsync(CancellationToken.None), null, CancellationToken.None));
+        Assert.Contains("Another WpfStudio window", refusal.Message);
+        Assert.True(File.Exists(staged.Executable));
+
+        first.Dispose(); // The window closed.
+        second.RemoveLeftovers();
+        Assert.False(Directory.Exists(Path.Combine(second.UpdatesDirectory, "0.2.0")));
+
+        var folder = Path.Combine(_root, "data", "updates", "0.2.0");
+        Assert.Equal(folder, UpdateDownloader.UpdateFolderOf(Path.Combine(folder, "package", "WpfStudio"), Path.Combine(_root, "data", "updates") + Path.DirectorySeparatorChar));
+        Assert.Null(UpdateDownloader.UpdateFolderOf(installed, Path.Combine(_root, "data", "updates")));
     }
 
     [Fact]

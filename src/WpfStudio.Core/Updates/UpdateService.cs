@@ -10,7 +10,7 @@ public sealed record UpdateCheck(ReleaseInfo? Release, bool IsNewer, ReleaseAsse
 }
 
 /// <summary>Checks GitHub for a newer release of the running package and stages it; see <see cref="UpdateApplier"/> for the rest.</summary>
-public sealed class UpdateService
+public sealed class UpdateService : IDisposable
 {
     /// <summary>Where a build without a package marker looks for releases.</summary>
     public const string DefaultRepository = "coltonspears/WpfStudio";
@@ -55,9 +55,13 @@ public sealed class UpdateService
     {
         if (!check.CanInstall || check.Release is null || check.Asset is null || Package is null)
             throw new InvalidOperationException(check.CannotInstall ?? "There is no newer release to install.");
+        _downloader.Release();
         _downloader.RemoveStaleUpdates();
         return _downloader.DownloadAsync(check.Release, check.Asset, Package.Kind, progress, cancellationToken);
     }
+
+    /// <summary>Lets other windows remove the update this one staged. Ending the process does the same.</summary>
+    public void Dispose() => _downloader.Dispose();
 
     /// <summary>What finished updates leave: the replaced files kept in the package and the unpacked download. Run at startup.</summary>
     public void RemoveLeftovers()
