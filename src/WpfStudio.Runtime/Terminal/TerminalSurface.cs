@@ -38,6 +38,12 @@ public sealed partial class TerminalSurface : ContentControl
             return current;
         }
     }
+    /// <summary>
+    /// The folder renderers take their browser from; null, as WpfStudio leaves it, takes the installed WebView2 Runtime. Tests set it
+    /// to start a renderer that cannot start. It goes to CreateAsync itself because the WEBVIEW2_BROWSER_EXECUTABLE_FOLDER variable is
+    /// not always honoured: on GitHub's runners the installed runtime was used with it set to an empty folder.
+    /// </summary>
+    internal static string? BrowserExecutableFolder { get; set; }
     public static readonly DependencyProperty SessionProperty = DependencyProperty.Register(nameof(Session), typeof(ConPtySession), typeof(TerminalSurface), new PropertyMetadata(null, Changed));
     public ConPtySession? Session { get => (ConPtySession?)GetValue(SessionProperty); set => SetValue(SessionProperty, value); }
     public TerminalSurface() { Loaded += (_, _) => Attach(); Unloaded += (_, _) => Content = null; }
@@ -97,7 +103,7 @@ public sealed partial class TerminalSurface : ContentControl
         private async Task InitializeCoreAsync()
         {
             var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WpfStudio", "WebView2");
-            var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: profile);
+            var environment = await CoreWebView2Environment.CreateAsync(browserExecutableFolder: BrowserExecutableFolder, userDataFolder: profile);
             await Browser.EnsureCoreWebView2Async(environment);
             var core = Browser.CoreWebView2;
             core.Settings.AreDevToolsEnabled = false; core.Settings.AreDefaultContextMenusEnabled = false; core.Settings.IsStatusBarEnabled = false;

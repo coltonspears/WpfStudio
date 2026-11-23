@@ -103,7 +103,6 @@ public sealed class TerminalRenderingTests
     [Fact]
     public async Task RendererInitializationFailureKeepsTheShellAndRetryAttachesANewRenderer()
     {
-        const string browserFolder = "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER";
         var noBrowser = Directory.CreateTempSubdirectory("WpfStudio.NoWebView2.");
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -119,13 +118,13 @@ public sealed class TerminalRenderingTests
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
                     session = new ConPtySession(Environment.GetEnvironmentVariable("COMSPEC")!, "/Q", Path.GetTempPath());
                     using var shell = Process.GetProcessById(session.ProcessId);
-                    Environment.SetEnvironmentVariable(browserFolder, noBrowser.FullName);
+                    TerminalSurface.BrowserExecutableFolder = noBrowser.FullName;
                     var surface = new TerminalSurface { Session = session }; window.Content = surface;
                     while (surface.Content is not StackPanel) await Task.Delay(50, timeout.Token);
                     var failure = (StackPanel)surface.Content;
                     Assert.Contains("still running", ((TextBlock)failure.Children[0]).Text);
                     Assert.False(shell.HasExited);
-                    Environment.SetEnvironmentVariable(browserFolder, null);
+                    TerminalSurface.BrowserExecutableFolder = null;
                     await session.WriteAsync("echo RETRY_READY\r", timeout.Token); // Output written with no renderer reaches the next one.
                     ((Button)failure.Children[1]).Command.Execute(null);
                     WebView2? browser = null;
@@ -143,7 +142,7 @@ public sealed class TerminalRenderingTests
                 catch (Exception ex) { completion.TrySetException(ex); }
                 finally
                 {
-                    Environment.SetEnvironmentVariable(browserFolder, null);
+                    TerminalSurface.BrowserExecutableFolder = null;
                     if (session is not null) await session.DisposeAsync();
                     window.Close(); dispatcher.BeginInvokeShutdown(DispatcherPriority.Background);
                 }
