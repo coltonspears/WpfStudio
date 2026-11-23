@@ -1,21 +1,23 @@
 diff --git a/src/WpfStudio.Runtime/Debugging/DapTransport.cs b/src/WpfStudio.Runtime/Debugging/DapTransport.cs
-index 7c1fce8..b739065 100644
+index 7c1fce8..43f1dcd 100644
 --- a/src/WpfStudio.Runtime/Debugging/DapTransport.cs
 +++ b/src/WpfStudio.Runtime/Debugging/DapTransport.cs
-@@ -20,6 +20,12 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
+@@ -20,6 +20,14 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
  
      public void Start() => reader ??= ReadLoopAsync();
  
 +    private static readonly object TraceGate = new();
-+    internal static void Trace(string line)
++    private static int traceCount;
++    private readonly int traceId = Interlocked.Increment(ref traceCount);
++    internal void Trace(string line)
 +    {
-+        lock (TraceGate) File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "dap-trace.log"), $"{DateTime.UtcNow:HH:mm:ss.fff} [{Environment.CurrentManagedThreadId}] {line}{Environment.NewLine}");
++        lock (TraceGate) File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "dap-trace.log"), $"{DateTime.UtcNow:HH:mm:ss.fff} #{traceId} {line}{Environment.NewLine}");
 +    }
 +
      public async Task<JsonElement> RequestAsync(string command, object? arguments = null, CancellationToken cancellationToken = default)
      {
          var id = Interlocked.Increment(ref sequence);
-@@ -31,6 +37,7 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
+@@ -31,6 +39,7 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
          try
          {
              var payload = JsonSerializer.SerializeToUtf8Bytes(new { seq = id, type = "request", command, arguments = arguments ?? new { } });
@@ -23,7 +25,7 @@ index 7c1fce8..b739065 100644
              await writer.WaitAsync(timeout.Token).ConfigureAwait(false);
              try { await WriteFrameAsync(output, payload, timeout.Token).ConfigureAwait(false); }
              finally { writer.Release(); }
-@@ -96,6 +103,8 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
+@@ -96,6 +105,8 @@ public sealed class DapTransport(Stream input, Stream output) : IAsyncDisposable
      private void Dispatch(JsonElement message)
      {
          if (message.ValueKind != JsonValueKind.Object) return;
@@ -33,7 +35,7 @@ index 7c1fce8..b739065 100644
          {
              case "response" when message.TryGetProperty("request_seq", out var sequenceNumber) && sequenceNumber.ValueKind == JsonValueKind.Number
 diff --git a/src/WpfStudio.Runtime/Debugging/DebugSession.cs b/src/WpfStudio.Runtime/Debugging/DebugSession.cs
-index b0fbe4f..8ab8aa9 100644
+index b0fbe4f..ba7980f 100644
 --- a/src/WpfStudio.Runtime/Debugging/DebugSession.cs
 +++ b/src/WpfStudio.Runtime/Debugging/DebugSession.cs
 @@ -42,7 +42,7 @@ public sealed class DebugSession : IAsyncDisposable
@@ -41,7 +43,7 @@ index b0fbe4f..8ab8aa9 100644
          closeExpected = false;
          initialized = NewCompletion();
 -        var start = ProcessLaunch.Create(AdapterPath, Path.GetDirectoryName(AdapterPath)!, ["--interpreter=vscode"]);
-+        var start = ProcessLaunch.Create(AdapterPath, Path.GetDirectoryName(AdapterPath)!, ["--interpreter=vscode", "--log=file", "--engineLogging=" + Path.Combine(Path.GetDirectoryName(AdapterPath)!, "engine-" + Guid.NewGuid().ToString("N") + ".log")]);
++        var start = ProcessLaunch.Create(AdapterPath, Path.GetDirectoryName(AdapterPath)!, ["--interpreter=vscode", "--log=" + Path.Combine(Path.GetDirectoryName(AdapterPath)!, "netcoredbg-" + DateTime.UtcNow.ToString("HHmmssfff") + "-" + Guid.NewGuid().ToString("N")[..6] + ".log"), "--engineLogging=" + Path.Combine(Path.GetDirectoryName(AdapterPath)!, "engine-" + DateTime.UtcNow.ToString("HHmmssfff") + "-" + Guid.NewGuid().ToString("N")[..6] + ".log")]);
          start.RedirectStandardInput = true;
          process = new Process { StartInfo = start };
          if (isolateStartupHooks)

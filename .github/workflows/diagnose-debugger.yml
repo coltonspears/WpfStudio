@@ -1,7 +1,7 @@
 name: Diagnose the debugger launch
 
-# Temporary: runs the Runtime suite with the DAP traffic traced and netcoredbg's own logs turned on, with and without the enlarged desktop, to see
-# why configurationDone fails with E_FAIL on some runs. Removed once that is understood.
+# Temporary: traces every DAP session and netcoredbg's own log, and samples the busiest processes, to see why
+# configurationDone fails with E_FAIL for the net8 and net9 fixtures on some runs. Removed once that is understood.
 on:
   push:
     branches: [claude/kind-thompson-dq7hnh]
@@ -18,7 +18,8 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  debugger:
+  runtime:
+    name: Runtime suite (${{ matrix.desktop }} desktop, ${{ matrix.attempt }})
     runs-on: windows-latest
     timeout-minutes: 40
     strategy:
@@ -28,75 +29,68 @@ jobs:
         attempt: [1, 2]
     steps:
       - uses: actions/checkout@v7
-
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-
       - name: Describe the CPU
         shell: pwsh
         run: (Get-CimInstance Win32_Processor).Name
-
       - name: Give the desktop the size the shell smoke test lays out
         if: matrix.desktop == 'large'
         shell: pwsh
         run: ./tools/Set-DesktopSize.ps1 -Width 1920 -Height 1080
-
       - name: Download the pinned debugger
         shell: pwsh
         run: ./tools/Get-Debugger.ps1
-
       - name: Trace the DAP traffic and turn on netcoredbg's logs
         run: git apply .github/diagnostics/debugger.patch
-
       - name: Build
         run: dotnet build tests/WpfStudio.Runtime.Tests --configuration Release -p:TreatWarningsAsErrors=false
-
-      # The whole suite, as CI runs it: the launch failed among the other Runtime classes, not yet alone.
-      - name: Runtime tests, three times
+      - name: Runtime tests, four times
         continue-on-error: true
         shell: pwsh
         run: |
-          foreach ($run in 1..3) {
+          Start-Process pwsh -ArgumentList '-NoProfile', '-File', '.github/diagnostics/sample-processes.ps1', '-Path', "$PWD/samples.log" -WindowStyle Hidden
+          foreach ($run in 1..4) {
             dotnet test tests/WpfStudio.Runtime.Tests --configuration Release --no-build --logger trx --results-directory "TestResults/runtime-$run"
           }
-
-      - name: What netcoredbg says
+      - name: What the debugger sessions did
         if: always()
         shell: pwsh
+        run: ./.github/diagnostics/report-debugger.ps1
+
+  # The same steps as ci.yml, traced: the launch failed in the whole run, after the other suites.
+  ci:
+    name: CI as it runs, traced
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Describe the CPU
+        shell: pwsh
+        run: (Get-CimInstance Win32_Processor).Name
+      - name: Give the desktop the size the shell smoke test lays out
+        shell: pwsh
+        run: ./tools/Set-DesktopSize.ps1 -Width 1920 -Height 1080
+      - name: Restore
+        run: dotnet restore WpfStudio.sln
+      - name: Download the pinned debugger
+        shell: pwsh
+        run: ./tools/Get-Debugger.ps1
+      - name: Trace the DAP traffic and turn on netcoredbg's logs
+        run: git apply .github/diagnostics/debugger.patch
+      - name: Build
+        run: dotnet build WpfStudio.sln --configuration Release --no-restore -p:TreatWarningsAsErrors=false
+      - name: Test
+        continue-on-error: true
+        shell: pwsh
         run: |
-          foreach ($trx in Get-ChildItem TestResults -Recurse -Filter *.trx | Sort-Object FullName) {
-            $xml = [xml](Get-Content $trx.FullName -Raw)
-            foreach ($result in $xml.TestRun.Results.UnitTestResult) {
-              "$($trx.Directory.Name) $($result.outcome) $($result.duration) $($result.startTime) $($result.testName)"
-              if ($result.outcome -ne 'Passed') { $result.Output.ErrorInfo.Message }
-            }
-          }
-          $bin = Get-ChildItem tests/WpfStudio.Runtime.Tests/bin -Recurse -Filter dap-trace.log | Select-Object -First 1
-          if ($bin) {
-            $trace = @(Get-Content $bin.FullName)
-            "DAP trace: $($trace.Count) lines"
-            # Each launch from its initialize request to the end of its configurationDone, and a failing one in full.
-            $launch = @()
-            foreach ($line in $trace) {
-              if ($line -match '"command":"initialize"' -and $line.Contains('-> ')) { $launch = @() }
-              $launch += $line
-              if ($line -match '"command":"configurationDone"' -and $line.Contains('<- ')) {
-                $sent = $launch | Where-Object { $_ -match '-> .*"command":"configurationDone"' } | Select-Object -First 1
-                "launch: initialize $($launch[0].Substring(0,12)), configurationDone sent $($sent.Substring(0,12)), answered $($line.Substring(0,12)): $($line.Substring(0, [Math]::Min(260, $line.Length)))"
-                if ($line -match '"success":false') { "---- failing launch"; $launch | ForEach-Object { $_.Substring(0, [Math]::Min(400, $_.Length)) }; "----" }
-                $launch = @()
-              }
-            }
-          }
-          $since = (Get-Date).AddHours(-2)
-          $logs = @(Get-ChildItem -Path tests/WpfStudio.Runtime.Tests/bin, $env:TEMP, $env:RUNNER_TEMP -Recurse -File -ErrorAction SilentlyContinue -Include *.log, netcoredbg* | Where-Object { $_.LastWriteTime -gt $since -and $_.Name -ne 'dap-trace.log' -and $_.Extension -ne '.exe' -and $_.Extension -ne '.dll' })
-          "Other logs: $($logs.Count)"
-          $logs | ForEach-Object { "  $($_.FullName) $($_.Length)" } | Select-Object -First 40
-          foreach ($log in $logs) {
-            $lines = @(Get-Content $log.FullName -ErrorAction SilentlyContinue)
-            if ($lines | Select-String -Pattern '80004005|E_FAIL|"success":false|[Tt]imeout|[Tt]imed out' -Quiet) {
-              "==== $($log.FullName): $($lines.Count) lines"
-              $lines | Select-String -Pattern '80004005|E_FAIL|success":false|[Ff]ail|[Tt]ime|[Ss]tartup|CreateProcess|Resume|RunProcess|configurationDone' | Select-Object -First 60 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(300, $_.Line.Length)) }
-            }
-          }
+          Start-Process pwsh -ArgumentList '-NoProfile', '-File', '.github/diagnostics/sample-processes.ps1', '-Path', "$PWD/samples.log" -WindowStyle Hidden
+          dotnet test WpfStudio.sln --configuration Release --no-build -m:1 --logger trx --results-directory TestResults
+      - name: What the debugger sessions did
+        if: always()
+        shell: pwsh
+        run: ./.github/diagnostics/report-debugger.ps1
