@@ -3,6 +3,10 @@
 Run it with the sandbox's interpreter whenever a model version or feature version is added:
 
     <sandbox>/.venv/Scripts/python.exe -X utf8 generate_golden.py <sandbox> <WpfStudio.CodeAssist/Models>
+
+Line model 4.0.0 ships as the sandbox's model.int8.onnx with its weights stored as uint8 (tools/unsign_int8_weights.py), because
+the int8 file scores lines differently on CPUs with and without VNNI. Its entries were last written from the C# port's output on
+that file, when the sandbox could not be run; this script should reproduce them, and a difference means the port has drifted.
 """
 import hashlib
 import json
@@ -12,9 +16,12 @@ import sys
 sandbox = Path(sys.argv[1]).resolve()
 models = Path(sys.argv[2]).resolve()
 sys.path.insert(0, str(sandbox))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
 
 import numpy as np  # noqa: E402
+import onnx  # noqa: E402
 from tokenizers import Tokenizer  # noqa: E402
+from unsign_int8_weights import unsign  # noqa: E402
 
 from sandbox.compact import CompactRunner  # noqa: E402
 from sandbox.evaluate_lines import Generator, editor_stops, offered_text  # noqa: E402
@@ -108,8 +115,12 @@ def gated_lines(folder, shipped):
 
 
 def transformer_lines(folder, shipped):
-    assert hashlib.sha256((folder / "model.int8.onnx").read_bytes()).digest() == hashlib.sha256((shipped / "model.onnx").read_bytes()).digest()
-    generator = OnnxGenerator(folder, "model.int8.onnx")
+    # Decode the file that ships, whose weights are uint8, and not the int8 one, whose scores depend on the CPU.
+    model = onnx.load(folder / "model.int8.onnx")
+    unsign(model)
+    onnx.save(model, folder / "model.uint8.onnx")
+    assert hashlib.sha256((folder / "model.uint8.onnx").read_bytes()).digest() == hashlib.sha256((shipped / "model.onnx").read_bytes()).digest()
+    generator = OnnxGenerator(folder, "model.uint8.onnx")
     gate = json.loads((shipped / "manifest.json").read_text(encoding="utf-8"))["lines"]["gate"]
     rows = load_sources(sandbox / ".sandbox-cache" / "corpus" / "multi-lines.jsonl")
     replay = [case["code"][-1600:] for case in line_cases(rows, "validation", 30)] + [case["code"][-1600:] for case in editor_stops(rows, "validation", 90)]

@@ -235,10 +235,7 @@ public sealed class XamlEventServiceTests
 
     private static MetadataReference[] CreateReferences()
     {
-        string dotnetRoot = Path.GetFullPath(Path.Combine(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
-        string packRoot = Path.Combine(dotnetRoot, "packs", "Microsoft.WindowsDesktop.App.Ref");
-        string pack = Directory.GetDirectories(packRoot).OrderByDescending(path => Version.TryParse(Path.GetFileName(path), out var version) ? version : new Version()).First();
-        string referenceDirectory = Directory.GetDirectories(Path.Combine(pack, "ref")).OrderByDescending(path => path, StringComparer.Ordinal).First();
+        string referenceDirectory = WindowsDesktopReferences.Directory();
         string[] wpf = Directory.GetFiles(referenceDirectory, "*.dll");
         var names = wpf.Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)

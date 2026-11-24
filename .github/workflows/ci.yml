@@ -1,0 +1,60 @@
+name: CI
+
+# Builds the solution and runs every test suite on Windows, for each pull request and each push to main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request or branch makes the running check pointless.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: windows-latest
+    # The suites took 37 minutes side by side; one at a time takes longer.
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install the .NET SDK from global.json
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore WpfStudio.sln
+
+      # The Runtime project copies the pinned debugger into its output, as it does from source (see README).
+      - name: Download the pinned debugger
+        shell: pwsh
+        run: ./tools/Get-Debugger.ps1
+
+      - name: Build
+        run: dotnet build WpfStudio.sln --configuration Release --no-restore
+
+      # One test assembly at a time (-m:1). Together, the twelve suites start preview hosts, language workers, LocalDB and
+      # inspected applications all at once, which a four-core runner cannot serve within the suites' time budgets.
+      - name: Test
+        run: dotnet test WpfStudio.sln --configuration Release --no-build -m:1 --logger trx --results-directory TestResults
+
+      - name: Keep the test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults
+          if-no-files-found: ignore
+          retention-days: 14

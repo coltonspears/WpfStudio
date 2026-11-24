@@ -60,6 +60,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         XamlAnalysis = new(this, store, _workspace, dispatcher, logger, _lifetime.Token, tools.WatchSources);
         _performance = tools.Performance;
         Network = tools.Network;
+        _updateLauncher = tools.UpdateLauncher; Updates = new(tools.Updates, this, dispatcher);
         Explorer = new(this, Projects, _desktop, _clipboard); WpfExplorer = new(); AutoSave = new(this, store, Editor, dispatcher, messenger); Breakpoints = new(this, Debugger, messenger);
         // The group picker and the breakpoint settings are overlays as well, which the designer's native preview must not cover.
         FileGroups.Picker.PropertyChanged += OverlayFormChanged; Breakpoints.Settings.PropertyChanged += OverlayFormChanged;
@@ -119,7 +120,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] public partial string SearchQuery { get; set; } = "";
     [ObservableProperty] public partial bool IsScaffoldOpen { get; set; }
     partial void OnIsScaffoldOpenChanged(bool value) => UpdateDesignerOverlay();
-    private void UpdateDesignerOverlay() => Designer.IsOverlayOpen = Palette.IsOpen || IsScaffoldOpen || IsPreviewOpen || IsSettingsOpen || FileGroups.Picker.IsOpen || Breakpoints.Settings.IsOpen;
+    private void UpdateDesignerOverlay() => Designer.IsOverlayOpen = Palette.IsOpen || IsScaffoldOpen || IsPreviewOpen || IsSettingsOpen || IsAboutOpen || FileGroups.Picker.IsOpen || Breakpoints.Settings.IsOpen;
     private void OverlayFormChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName == nameof(FileGroupPickerViewModel.IsOpen)) UpdateDesignerOverlay(); }
     [ObservableProperty] public partial ScaffoldKind SelectedScaffoldKind { get; set; } = ScaffoldKind.ViewAndViewModel;
     [ObservableProperty] public partial string ScaffoldName { get; set; } = "CustomerView";
@@ -158,6 +159,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
 
     public async Task InitializeAsync(string[] arguments)
     {
+        var updated = Updates.Start(arguments);
         var assistant = Features.Assistant.InitializeAsync();
         var settings = await _settings.LoadAsync();
         await assistant;
@@ -194,6 +196,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         await DocumentSessions.RecoverPreviousSessionAsync();
         LayoutRestoreRequested?.Invoke();
         DocumentSessions.StartRecoveryLoop(_lifetime.Token);
+        // Last, so that loading the workspace does not replace it.
+        if (updated != null) { Status = updated; AppendOutput(updated + "."); }
     }
     [RelayCommand] private Task OpenWorkspaceAsync() => GuardAsync(async () => { var path = await _files.OpenFileAsync("Open solution or project", "Solutions and projects|*.sln;*.slnx;*.csproj"); if (path != null) await LoadWorkspaceAsync(path); });
     [RelayCommand] private Task OpenRecentAsync(string? path) => path == null ? Task.CompletedTask : GuardAsync(() => LoadWorkspaceAsync(path));
@@ -591,6 +595,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         FileGroups.Picker.PropertyChanged -= OverlayFormChanged; Breakpoints.Settings.PropertyChanged -= OverlayFormChanged;
         Breakpoints.Dispose();
         Features.Dispose();
+        Updates.Dispose();
         WorkspaceLifecycle.Cancel(); _lifetime.Cancel(); await DocumentSessions.StopRecoveryLoopAsync();
         DocumentSessions.DisposeAllDocuments();
         // Dispose UI-bound commands while the shell still owns its dispatcher

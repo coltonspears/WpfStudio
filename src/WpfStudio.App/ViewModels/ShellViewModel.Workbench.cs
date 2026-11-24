@@ -32,9 +32,13 @@ public sealed partial class ShellViewModel
     /// <summary>Closes tabs one at a time; Cancel on a save prompt keeps that tab and the ones after it open.</summary>
     private Task CloseDocumentsAsync(IReadOnlyList<EditorViewModel> documents) => DocumentSessions.CloseDocumentsAsync(documents);
 
-    // ------------------------------------------------------------------ Help > About / What's new
+    // ------------------------------------------------------------------ Help > About / What's new / Check for updates
     [ObservableProperty] public partial bool IsAboutOpen { get; set; }
-    [ObservableProperty] public partial bool IsWhatsNewPage { get; set; }
+    partial void OnIsAboutOpenChanged(bool value) => UpdateDesignerOverlay();
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsAboutPage))] public partial bool IsWhatsNewPage { get; set; }
+    /// <summary>The overlay's Updates page; see ShellViewModel.Updates.cs.</summary>
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsAboutPage))] public partial bool IsUpdatesPage { get; set; }
+    public bool IsAboutPage => !IsWhatsNewPage && !IsUpdatesPage;
     public string ProductVersion { get; } = typeof(ShellViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
         ?? typeof(ShellViewModel).Assembly.GetName().Version?.ToString() ?? "development build";
     public string BuildCommit { get; } = typeof(ShellViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+') is [_, var commit, ..] ? commit[..Math.Min(commit.Length, 10)] : "";
@@ -44,8 +48,8 @@ public sealed partial class ShellViewModel
     public IReadOnlyList<ReleaseNote> ReleaseNotes => ReleaseNoteCatalog.All;
     /// <summary>Version, runtime and OS in one block for bug reports.</summary>
     public string AboutText => $"WpfStudio {ProductVersion}{(BuildCommit.Length > 0 ? " (" + BuildCommit + ")" : "")}\n{RuntimeDescription}\n{OperatingSystemDescription}\nSDK: {Workspace?.SdkVersion ?? "no workspace open"}";
-    [RelayCommand] private void ShowAbout() { IsWhatsNewPage = false; OnPropertyChanged(nameof(AboutText)); IsAboutOpen = true; }
-    [RelayCommand] private void ShowWhatsNew() { IsWhatsNewPage = true; IsAboutOpen = true; }
+    [RelayCommand] private void ShowAbout() { IsWhatsNewPage = false; IsUpdatesPage = false; OnPropertyChanged(nameof(AboutText)); IsAboutOpen = true; }
+    [RelayCommand] private void ShowWhatsNew() { IsUpdatesPage = false; IsWhatsNewPage = true; IsAboutOpen = true; }
     [RelayCommand] private void CloseAbout() => IsAboutOpen = false;
     /// <summary>
     /// Shows what the IDE and the language worker measured since the last report, and starts counting again: reproduce
@@ -74,5 +78,6 @@ public sealed partial class ShellViewModel
         yield return Command("Help", "Performance report", ShowPerformanceReportCommand, icon: "Output", detail: "Where the time went since the last report: UI thread, language worker, preview");
         yield return Command("Help", "About WpfStudio", ShowAboutCommand, icon: "Info", detail: "Version, runtime and data folder");
         yield return Command("Help", "What's new", ShowWhatsNewCommand, icon: "Bulb", detail: "Recent features and fixes");
+        yield return Command("Help", "Check for updates", CheckForUpdatesCommand, icon: "Refresh", detail: "Install the newest WpfStudio release and restart");
     }
 }

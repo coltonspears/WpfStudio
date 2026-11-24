@@ -8,6 +8,13 @@ public static class ReleaseNoteCatalog
 {
     public static IReadOnlyList<ReleaseNote> All { get; } =
     [
+        new("Unreleased", "Check for updates",
+        [
+            "Help > Check for updates asks GitHub for the newest WpfStudio release and shows its notes. Nothing is sent until you ask.",
+            "Update and restart downloads the release, checks its SHA-256 hash, closes WpfStudio after asking about unsaved work, replaces it and starts it again with the same workspace and files.",
+            "If a file cannot be replaced, the update is undone and the previous version starts again. A build from source, or a folder you cannot write to, is pointed at the release page instead.",
+            "WpfStudio now has a version number, shown in Help > About: it rises with each merged pull request, and each release is published on GitHub with both packages.",
+        ]),
         new("Unreleased", "DevOps workbench for Azure DevOps and GitHub",
         [
             "Tools > DevOps works with the pull requests, work items and pipelines of the Git pane's repository on Azure DevOps Services and Server, and on GitHub and GitHub Enterprise Server as pull requests, issues and Actions.",

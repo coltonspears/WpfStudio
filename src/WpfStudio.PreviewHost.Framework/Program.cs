@@ -73,14 +73,21 @@ public static class Program
         return 0;
     }
 
-    /// <summary>The equivalent of PipeOptions.CurrentUserOnly, which .NET Framework lacks. The client refuses a pipe owned by anyone else.</summary>
+    /// <summary>
+    /// The equivalent of PipeOptions.CurrentUserOnly, which .NET Framework lacks. The client refuses a pipe owned by anyone
+    /// else. "Owned" means the token's default owner, as .NET sets and checks it, not its user: the two differ for an
+    /// administrator running elevated, whose objects belong to the Administrators group, so a pipe owned by the user is
+    /// refused there.
+    /// </summary>
     private static NamedPipeServerStream CreatePipe(string name)
     {
         using var identity = WindowsIdentity.GetCurrent();
         var user = identity.User ?? throw new InvalidOperationException("The current user has no security identifier.");
+        var owner = identity.Owner ?? user;
         var security = new PipeSecurity();
-        security.SetOwner(user);
-        security.AddAccessRule(new PipeAccessRule(user, PipeAccessRights.FullControl, AccessControlType.Allow));
+        security.SetOwner(owner);
+        security.AddAccessRule(new PipeAccessRule(owner, PipeAccessRights.FullControl, AccessControlType.Allow));
+        if (owner != user) security.AddAccessRule(new PipeAccessRule(user, PipeAccessRights.FullControl, AccessControlType.Allow));
         return new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, security);
     }
 

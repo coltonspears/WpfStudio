@@ -25,6 +25,8 @@ public partial class App : Application
 #pragma warning restore VSTHRD100
     {
         base.OnStartup(e);
+        // Started by Help > Check for updates from a staged package: install it over the closing WpfStudio instead of running the IDE.
+        if (WpfStudio.Core.Updates.UpdateCommandLine.TryParseApply(e.Args, out var update)) { Shutdown(await UpdateInstallation.RunAsync(update)); return; }
         var faults = new UnhandledFaultReporter(Dispatcher, AppPaths.DataDirectory, () => _host?.Services.GetService<ILogger<App>>(), (status, details) =>
         {
             if (MainWindow?.DataContext is not ShellViewModel shell) return;

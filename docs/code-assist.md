@@ -93,6 +93,8 @@ Line model 3.0.0 has the same tuning and test repositories. It read those 8 publ
 
 Line model 4.0.0 read exactly what 3.0.0 read, the same dataset by hash, with short files padded rather than dropped. It is a 6-layer transformer, 384 wide, with a copy head, trained and fine-tuned the same way (`sandbox/train_lines_v3.py`, `line_nets.py`), exported by hand with memory passed between tokens (`export_transformer.py`), and quantized to 8-bit weights. Its gate is fitted on stops decoded from that quantized file (`decode_stops.py`, `tune_gate.py`), on the 2 public tuning repositories only. The private repositories only scored it, as totals.
 
+The shipped file stores those 8-bit weights as uint8, each 128 above its int8 value, with a zero point of 128 (`tools/unsign_int8_weights.py`), which leaves every product the same. Stored as int8, ONNX Runtime added each pair of products into 16 bits with VPMADDUBSW on x64 CPUs without VNNI, which saturates, and exactly on CPUs with AVX-VNNI, AVX512-VNNI or AMX. So one file wrote different lines on different CPUs: of the 129 lines `GoldenParityTests` replays, 2 were shown differently, 11 differed in whether they finished within 48 tokens, and 107 gave the gate different inputs. ONNX Runtime adds uint8 by uint8 products exactly on every CPU. `golden.json` had been written on a CPU without VNNI, so the gate and the scores above may come from saturated sums.
+
 **Only public repositories whose terms allow it may be trained on**, because these weights ship from a public repository and a line model can memorize text. Private ones are test data, reported as totals only.
 
 **Microsoft's IntelliCode bundles must not be added here.** The sandbox also holds `all_line-completion2`, `csharp_intellisense-members-lstm2` and others for comparison. Their metadata limits them to the "Visual Studio IntelliCode Extension" and "Visual Studio Code IntelliCode Extension", and this repository is public.
@@ -109,7 +111,7 @@ The Experimental page is a template, built the first time it is shown, so with t
 
 Version 4.0.0 decodes one candidate line. Keeping four cost four times the work and gained nothing once gated. The gate is logistic regression, stored in the manifest, with separate weights for long lines and short ones, because one gate across all lengths learns that only short lines are safe. Accessors and bare punctuation count as short however long they run. A line the model cannot finish within 48 tokens is not shown at all, since that usually means it is repeating itself.
 
-It is slower than the GRUs and larger: through the shipped C# on one thread, with 8 KB of context, the median request takes 114 ms and the slowest about 300 ms, against 19 ms and 28 ms for 3.0.0. The file is 18 MB against 10 MB. Requests run off the UI thread, after a pause, and typing cancels them between tokens.
+It is slower than the GRUs and larger: through the shipped C# on one thread, with 8 KB of context, the median request takes 114 ms and the slowest about 300 ms, against 19 ms and 28 ms for 3.0.0. Those times are from the int8 file. Through ONNX Runtime on one thread of a Xeon with AMX, the uint8 file reads a 400-token context in about 100 ms instead of 55 ms, and each later token takes 3 to 4 ms either way. The file is 18 MB against 10 MB. Requests run off the UI thread, after a pause, and typing cancels them between tokens.
 
 Only Windows x64's `onnxruntime.dll` is copied. The package's other platforms would add about 220 MB to every build output.
 

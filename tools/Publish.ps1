@@ -4,7 +4,10 @@ param(
     [switch]$SelfContained,
     [switch]$SkipTests,
     [switch]$SkipDebuggerDownload,
-    [switch]$Zip
+    [switch]$Zip,
+    # Where Help > Check for updates looks for newer releases of this package, as owner/name on GitHub.
+    # Not -Repository: PowerShell names are case-insensitive, and $repository below is the source folder.
+    [ValidatePattern('^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$')][string]$ReleaseRepository = 'coltonspears/WpfStudio'
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -18,6 +21,24 @@ function Assert-ArtifactPath([string]$Path) {
     if (-not $absolute.StartsWith($allowedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to change a path outside the repository artifacts directory: $absolute"
     }
+}
+
+# The copy lists below are hand-written, so check that every relative link in the
+# packaged Markdown opens a file inside the portable folder.
+function Assert-PackageLinks([string[]]$Documents) {
+    $packageRoot = $staging.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $broken = foreach ($document in $Documents) {
+        foreach ($match in [regex]::Matches([IO.File]::ReadAllText($document), '\]\(<?([^)\s>]+)')) {
+            $link = $match.Groups[1].Value
+            if ($link -match '^(#|[a-z][a-z0-9+.-]*:)') { continue }
+            $relative = [Uri]::UnescapeDataString(($link -split '[#?]', 2)[0])
+            $target = [IO.Path]::GetFullPath((Join-Path (Split-Path $document -Parent) $relative))
+            if (-not $target.StartsWith($packageRoot, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $target)) {
+                "$([IO.Path]::GetRelativePath($staging, $document)) -> $link"
+            }
+        }
+    }
+    if ($broken) { throw "Published package has links to files it does not contain. Copy them in tools/Publish.ps1:`n$($broken -join "`n")" }
 }
 
 function Invoke-DotNet([string[]]$Arguments) {
@@ -170,6 +191,9 @@ try {
     $benchmarkDocumentation = Join-Path $staging 'tools/XamlLanguageBench'
     New-Item -ItemType Directory -Path $benchmarkDocumentation -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'tools/XamlLanguageBench/README.md') -Destination $benchmarkDocumentation
+    $packageDocuments = @('README.md', 'VALIDATION.md', 'THIRD-PARTY-NOTICES.md', 'DEBUGGER-NOTICES.md', 'tools/XamlLanguageBench/README.md' | ForEach-Object { Join-Path $staging $_ })
+    $packageDocuments += @(Get-ChildItem -LiteralPath $documentationDirectory -Filter '*.md' -File -Recurse | ForEach-Object FullName)
+    Assert-PackageLinks $packageDocuments
     $sampleRoot = Join-Path $repository 'samples/CounterApp'
     foreach ($sampleFile in Get-ChildItem -LiteralPath $sampleRoot -Recurse -File | Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' }) {
         $sampleTarget = Join-Path $staging ('samples/CounterApp/' + [IO.Path]::GetRelativePath($sampleRoot, $sampleFile.FullName))
@@ -184,6 +208,15 @@ try {
         Get-ChildItem -LiteralPath $measurements -Filter '*.json' -File | Copy-Item -Destination $validationDirectory
     }
     Export-PackageNotices
+    # Marks a published package, which Help > Check for updates may replace in place, and names the release asset that
+    # matches it. A build from source has no marker: the IDE then only links to the release.
+    $package = [ordered]@{
+        schema = 1
+        package = if ($SelfContained) { 'win-x64-self-contained' } else { 'win-x64' }
+        repository = $ReleaseRepository
+    }
+    # Without a byte order mark whichever PowerShell runs this: Windows PowerShell's -Encoding utf8 writes one.
+    [IO.File]::WriteAllText((Join-Path $staging 'WpfStudio.package.json'), ($package | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
     Assert-ArtifactPath $destination
     Assert-ArtifactPath $staging
     if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }

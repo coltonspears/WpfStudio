@@ -1,3 +1,4 @@
+using System.Reflection;
 using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -35,7 +36,7 @@ public static class StudioServices
     private static string DataDirectory(IServiceProvider services) => services.GetRequiredService<IOptions<StudioPaths>>().Value.DataDirectory;
 
     public static IServiceCollection AddWpfStudio(this IServiceCollection services, IUiDispatcher dispatcher) => services
-        .AddStudioCore(dispatcher).AddNetwork().AddWorkspaceServices().AddCodeAssist().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddDevOps().AddPackages().AddAssistant().AddApiClient().AddProfiling().AddShell();
+        .AddStudioCore(dispatcher).AddNetwork().AddWorkspaceServices().AddCodeAssist().AddDesigner().AddDebugging().AddTerminal().AddDatabaseFeature().AddGit().AddDevOps().AddPackages().AddAssistant().AddApiClient().AddProfiling().AddUpdates().AddShell();
 
     public static IServiceCollection AddStudioCore(this IServiceCollection services, IUiDispatcher dispatcher)
     {
@@ -155,6 +156,22 @@ public static class StudioServices
         services.AddSingleton<AssistantViewModel>();
         return services;
     }
+
+    /// <summary>
+    /// Help > Check for updates: GitHub's release feed through the proxy in Settings › Network, and the downloads staged
+    /// under the data folder. The running package's own folder is the one an update replaces.
+    /// </summary>
+    public static IServiceCollection AddUpdates(this IServiceCollection services)
+    {
+        services.AddHttpClient(UpdatesClientName, client => client.Timeout = TimeSpan.FromMinutes(30)).ConfigurePrimaryHttpMessageHandler(ProxiedHandler);
+        services.AddSingleton(sp => new WpfStudio.Core.Updates.UpdateService(sp.GetRequiredService<System.Net.Http.IHttpClientFactory>().CreateClient(UpdatesClientName),
+            AppContext.BaseDirectory, System.IO.Path.Combine(DataDirectory(sp), "updates"), ProductVersion));
+        services.AddSingleton<IUpdateLauncher, ProcessUpdateLauncher>();
+        return services;
+    }
+
+    private const string UpdatesClientName = "updates";
+    private static string? ProductVersion => typeof(StudioServices).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
     public static IServiceCollection AddProfiling(this IServiceCollection services)
     {

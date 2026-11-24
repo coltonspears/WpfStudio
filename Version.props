@@ -1,0 +1,10 @@
+<Project>
+  <!--
+    The product version, for every project under src/. Merging a pull request into main raises it (.github/workflows/version.yml):
+    the patch number by default, the minor or major number with the version:minor or version:major label, nothing with version:skip.
+    tools/Bump-Version.ps1 does the same by hand. A release is published from the version here; see docs/releasing.md.
+  -->
+  <PropertyGroup>
+    <VersionPrefix>0.1.3</VersionPrefix>
+  </PropertyGroup>
+</Project>

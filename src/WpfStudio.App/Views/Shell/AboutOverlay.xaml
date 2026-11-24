@@ -14,10 +14,11 @@
           <StackPanel Orientation="Horizontal">
             <Button Style="{StaticResource QuietButton}" Content="About" Command="{Binding ShowAboutCommand}" FontWeight="SemiBold" />
             <Button Style="{StaticResource QuietButton}" Content="What's new" Command="{Binding ShowWhatsNewCommand}" FontWeight="SemiBold" Margin="4,0,0,0" />
+            <Button Style="{StaticResource QuietButton}" Content="Updates" Command="{Binding ShowUpdatesCommand}" FontWeight="SemiBold" Margin="4,0,0,0" />
           </StackPanel>
         </DockPanel>
         <!-- About -->
-        <StackPanel Visibility="{Binding IsWhatsNewPage, Converter={StaticResource Presence}, ConverterParameter=Invert}">
+        <StackPanel Visibility="{Binding IsAboutPage, Converter={StaticResource BooleanToVisibility}}">
           <TextBlock Text="WpfStudio" FontSize="22" FontWeight="SemiBold" TextOptions.TextFormattingMode="Ideal" />
           <TextBlock Text="A native IDE for WPF, C#, CommunityToolkit.Mvvm and SQL Server." Style="{StaticResource Caption}" FontSize="12" Margin="0,2,0,18" />
           <TextBlock Text="VERSION" Style="{StaticResource SectionLabel}" />
@@ -32,6 +33,38 @@
             <Button Content="Copy version info" c:Ui.Icon="Copy" Command="{Binding CopyAboutTextCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" />
           </StackPanel>
         </StackPanel>
+        <!-- Updates: Help > Check for updates -->
+        <DockPanel DataContext="{Binding Updates}" Visibility="{Binding DataContext.IsUpdatesPage, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BooleanToVisibility}}">
+          <StackPanel DockPanel.Dock="Top">
+            <TextBlock Text="UPDATES" Style="{StaticResource SectionLabel}" />
+            <TextBlock Text="{Binding Message}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding Detail, Converter={StaticResource Presence}}" />
+            <ProgressBar Style="{StaticResource ActivityBar}" Margin="0,12,0,0" Visibility="{Binding ShowActivity, Converter={StaticResource BooleanToVisibility}}" />
+            <ProgressBar Height="4" Minimum="0" Maximum="1" Value="{Binding Progress, Mode=OneWay}" Margin="0,12,0,0" Visibility="{Binding ShowProgress, Converter={StaticResource BooleanToVisibility}}">
+              <ProgressBar.Template>
+                <ControlTemplate TargetType="ProgressBar">
+                  <Border Background="{DynamicResource BorderBrush}" CornerRadius="2">
+                    <Grid x:Name="PART_Track">
+                      <Border x:Name="PART_Indicator" HorizontalAlignment="Left" Background="{DynamicResource AccentBrush}" CornerRadius="2" />
+                    </Grid>
+                  </Border>
+                </ControlTemplate>
+              </ProgressBar.Template>
+            </ProgressBar>
+          </StackPanel>
+          <DockPanel DockPanel.Dock="Bottom" Margin="0,18,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Left" Style="{StaticResource QuietButton}" Content="Release page" c:Ui.Icon="Globe" Command="{Binding OpenReleasePageCommand}" ToolTip="Open the release on GitHub" />
+            <Button DockPanel.Dock="Right" Content="{Binding InstallLabel}" c:Ui.Icon="Restart" Command="{Binding InstallCommand}" Style="{StaticResource AccentButton}" Margin="8,2,0,2" Visibility="{Binding ShowInstall, Converter={StaticResource BooleanToVisibility}}" />
+            <Button DockPanel.Dock="Right" Content="Cancel" c:Ui.Icon="Close" Command="{Binding CancelCommand}" Margin="8,2,0,2" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibility}}" />
+            <Button DockPanel.Dock="Right" Content="Check again" c:Ui.Icon="Refresh" Command="{Binding CheckCommand}" Margin="8,2,0,2" Visibility="{Binding IsBusy, Converter={StaticResource Presence}, ConverterParameter=Invert}" />
+          </DockPanel>
+          <StackPanel Margin="0,18,0,0" Visibility="{Binding HasRelease, Converter={StaticResource BooleanToVisibility}}">
+            <TextBlock Text="{Binding ReleaseHeading}" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto">
+              <TextBlock Text="{Binding ReleaseNotes}" TextWrapping="Wrap" />
+            </ScrollViewer>
+          </StackPanel>
+        </DockPanel>
         <!-- What's new -->
         <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsWhatsNewPage, Converter={StaticResource BooleanToVisibility}}">
           <ItemsControl ItemsSource="{Binding ReleaseNotes}">

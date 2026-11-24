@@ -277,6 +277,7 @@
         <MenuItem Header="_Help">
           <MenuItem Header="All commands and shortcuts…" c:Ui.Icon="Keyboard" Command="{Binding ShowShortcutsCommand}" />
           <MenuItem Header="What's new" c:Ui.Icon="Bulb" Command="{Binding ShowWhatsNewCommand}" />
+          <MenuItem Header="Check for updates…" c:Ui.Icon="Refresh" Command="{Binding CheckForUpdatesCommand}" ToolTip="Install the newest WpfStudio release from GitHub and restart" />
           <Separator />
           <MenuItem Header="Performance report" c:Ui.Icon="Output" Command="{Binding ShowPerformanceReportCommand}" />
           <MenuItem Header="Open data folder" c:Ui.Icon="FolderOpen" Command="{Binding OpenDataFolderCommand}" />

@@ -11,6 +11,8 @@
     <!-- The separators are normalized so a compile-only build on Linux or macOS (EnableWindowsTargeting) leaves the fixtures out too. -->
     <IsTestCode Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)tests')) And !$(MSBuildProjectDirectory.Replace('/', '\').Contains('\Fixtures\'))">true</IsTestCode>
   </PropertyGroup>
+  <!-- Product code only: samples and fixtures stand in for user projects and keep the SDK's default version. -->
+  <Import Project="$(MSBuildThisFileDirectory)Version.props" Condition="'$(IsProductCode)' == 'true'" />
   <PropertyGroup Condition="'$(IsProductCode)' == 'true' Or '$(IsTestCode)' == 'true'">
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- Vulnerability advisories stay visible warnings. As errors, a newly published advisory, or the advisory feed being unreachable (NU1900), would break every restore with no code change. -->

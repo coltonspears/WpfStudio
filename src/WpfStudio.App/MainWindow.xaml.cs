@@ -15,6 +15,19 @@ public partial class MainWindow : Window
         RegisterName(nameof(TitleBar.MaximizeButton), TitleBar.MaximizeButton);
         RegisterName(nameof(SolutionExplorer.ExplorerTree), SolutionExplorer.ExplorerTree);
         RegisterName(nameof(WorkspaceSearch.SearchBox), WorkspaceSearch.SearchBox);
-        DataContextChanged += (_, _) => { if (DataContext is ShellViewModel shell) shell.Theme.Track(this); };
+        DataContextChanged += (_, args) =>
+        {
+            if (args.OldValue is ShellViewModel previous) previous.ShutdownRequested -= CloseWithoutAsking;
+            if (args.NewValue is not ShellViewModel shell) return;
+            shell.Theme.Track(this);
+            shell.ShutdownRequested += CloseWithoutAsking;
+        };
+    }
+
+    /// <summary>For an update: the shell has already asked about unsaved work, so the close guard must not ask again.</summary>
+    private void CloseWithoutAsking()
+    {
+        Behaviors.Interaction.SetCloseGuard(this, null);
+        Close();
     }
 }
