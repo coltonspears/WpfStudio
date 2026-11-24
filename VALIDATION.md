@@ -18,7 +18,7 @@ One deadline grew, the rejected attach's, from 1 s to 30 s, and the test gained 
 - a 1024x768 desktop at 96 DPI and 4 logical processors;
 - either an AMD EPYC 7763 (AVX2 only) or an AVX-512 CPU: AMD EPYC 9V45 or 9V74, or Intel Xeon 6973P-C, Platinum 8370C or Platinum 8573C.
 
-Temporary workflows did the tracing. They applied instrumentation from a patch at build time, so no committed product file carried it. They repeated the affected suites and printed each failure's trace, and they are removed again.
+Temporary workflows did the tracing. They applied instrumentation from a patch at build time, so no committed product file carried it. They repeated the affected suites and printed each failure's trace, and they are removed again. The Release workflow now runs the tests as CI does, on the larger desktop and one suite at a time, before it packages.
 
 | Case | Failed | Cause, as traced | Fix |
 | --- | --- | --- | --- |
@@ -46,7 +46,7 @@ Temporary workflows did the tracing. They applied instrumentation from a patch a
 
 Not validated:
 - Two causes are inferred from code and timings, not caught in a trace. One is the cancelled resend behind both `XamlLiveFieldShellTests` failures: the new WorkspaceClient cases reproduce the mechanism, not the Shell runs. The other is the cold runtime start behind the debugger launch. The commit that first fixed the C# half (80182cb) cites PR #65 for these failures; they were CI runs 5 (PR #53) and 6 (main).
-- WpfStudio keeps netcoredbg's 5-second limit. A user's first debug launch on a runtime that has not run since the machine started can still fail with "Failed command 'configurationDone' : 0x80004005", which does not say why. A failed launch also leaves the program running without the debugger, since only the adapter process is ended.
+- WpfStudio keeps netcoredbg's 5-second limit. A user's first debug launch on a runtime that has not run since the machine started can still fail with "Failed command 'configurationDone' : 0x80004005", which does not say why. (PR #67, merged afterwards, ends the adapter's whole process tree when a launch fails, so the program no longer keeps running without the debugger.)
 - `TerminalRenderingTests.BundledXtermRendersRealConPtyOutputAndSurvivesReparenting` ran out of its 25 s for the `FLOW_1000` render once (CI run 14) and not in the later runs. It was not looked into.
 - `DebuggerWatchTests.OverlappingRefreshesOfOneFrame…` still waits a fixed 150 ms before checking the refreshed values. It never failed, but it could fail the way `DebuggerOutputTests` did.
 - `XamlLiveFieldShellTests` and the ConPTY teardown were not run on a workstation. No case was run outside GitHub's runners except the CodeAssist suite and the two WorkspaceClient cases.

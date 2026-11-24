@@ -62,15 +62,27 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
 
+      # The tests run as CI runs them (ci.yml): the shell smoke test lays out a 1480x940 window, which the runner's 1024x768
+      # desktop caps, and the twelve suites at once are more than a four-core runner serves within their time budgets.
+      - name: Give the desktop the size the shell smoke test lays out
+        if: inputs.run-tests
+        shell: pwsh
+        run: ./tools/Set-DesktopSize.ps1 -Width 1920 -Height 1080
+
+      - name: Download the pinned debugger
+        shell: pwsh
+        run: ./tools/Get-Debugger.ps1
+
+      - name: Test
+        if: inputs.run-tests
+        run: dotnet test WpfStudio.sln --configuration Release -m:1
+
       - name: Publish for the installed .NET runtime
         shell: pwsh
         env:
-          RUN_TESTS: ${{ inputs.run-tests }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $options = @{ Zip = $true; ReleaseRepository = $env:GITHUB_REPOSITORY }
-          if ($env:RUN_TESTS -ne 'true') { $options.SkipTests = $true }
-          ./tools/Publish.ps1 @options
+          ./tools/Publish.ps1 -Zip -SkipTests -ReleaseRepository $env:GITHUB_REPOSITORY
           New-Item -ItemType Directory -Path release -Force | Out-Null
           Move-Item -LiteralPath artifacts/WpfStudio-win-x64.zip -Destination "release/WpfStudio-$env:VERSION-win-x64.zip"
 
