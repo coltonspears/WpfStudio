@@ -102,8 +102,11 @@ public sealed class MemoryLeakAndSamplerTests
     public async Task ShellViewModelUnsubscribesDocumentAndSettingsEventsAndDisposesProjectRefresh()
     {
         await using var test = new ShellTestContext();
-        // The project refresh is created when a loaded workspace's project files change, so this loads one and announces a
-        // change, as the source watcher does. Without a workspace there is nothing for DisposeAsync to dispose.
+        // The project refresh is created when a loaded workspace's project files change and automatic refresh is on, so this
+        // turns it on (ShellTestContext turns it off), loads a workspace and announces a change, as the source watcher does.
+        // The long pause keeps the refresh from running; only its disposal is checked.
+        test.Shell.Editor.AutoRefreshProject = true;
+        test.Shell.ProjectRefreshPause = TimeSpan.FromHours(1);
         var project = await test.CreateFileAsync("LeakCheck/LeakCheck.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
         string path = await test.CreateFileAsync("LeakCheck/LeakCheck.cs", "class LeakCheck { }");
         Assert.Equal(0, (await new BuildService().RunAsync(new BuildRequest(project, BuildOperation.Restore))).ExitCode);
