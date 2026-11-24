@@ -42,6 +42,8 @@ public sealed class ShellLifecycleHardeningTests
         await using var test = new ShellTestContext();
         string path = await test.CreateFileAsync("Program.cs", "class Program { }");
         await test.Shell.OpenDocumentAsync(path);
+        // Modify both disk and buffer so SaveAllDocumentsAsync hits ExternalFileChangedException and prompts via ConfirmAsync.
+        await File.WriteAllTextAsync(path, "class Program { int external; }");
         test.Shell.ActiveDocument!.State.Content = "class Program { int x; }";
         test.Shell.StartupProject = new WorkspaceProject(
             "app",
@@ -51,12 +53,12 @@ public sealed class ShellLifecycleHardeningTests
             null,
             true,
             []);
-        test.Dialogs.WhileAsking = () =>
+        test.Dialogs.WhileConfirming = _ =>
         {
             test.Shell.StartupProject = null;
             return Task.CompletedTask;
         };
-        test.Dialogs.SaveDecisions.Enqueue(SaveDecision.Discard);
+        test.Dialogs.Confirmations.Enqueue(true);
 
         // Should return cleanly without NullReferenceException when StartupProject becomes null across awaits.
         await test.Shell.DebugCommand.ExecuteAsync(null);

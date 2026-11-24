@@ -30,7 +30,8 @@ public sealed class PreviewHostHardeningTests(PreviewFixture fixture)
         var application = Application.Current!;
         application.Resources = new ResourceDictionary { ["StaleKey"] = "StaleValue" };
         var request = new PreviewRequest("View.xaml", "<Grid/>", Version: 1, Width: 400, Height: 300, ApplicationResourcePath: null);
-        bool loaded = CompiledPreview.PrepareApplication(request, typeof(PreviewHostHardeningTests).Assembly);
+        var assembly = Application.ResourceAssembly ?? typeof(PreviewHostHardeningTests).Assembly;
+        bool loaded = CompiledPreview.PrepareApplication(request, assembly);
         Assert.False(loaded);
         Assert.False(application.Resources.Contains("StaleKey"));
         return true;

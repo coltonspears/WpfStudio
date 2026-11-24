@@ -23,57 +23,58 @@ public sealed class MemoryLeakAndSamplerTests
     public Task EditorSurfaceUnsubscribesWindowDeactivatedEvenAfterDetachment() => OnDispatcherAsync(() =>
     {
         var window = new Window { Width = 200, Height = 150, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = -32000, Top = -32000 };
-        var weakSurface = AttachDetachAndUnloadEditorSurface(window);
-
-        CollectGarbage();
-        Assert.False(weakSurface.TryGetTarget(out _));
-        GC.KeepAlive(window);
-        return Task.CompletedTask;
-    });
-
-    private static WeakReference<EditorSurface> AttachDetachAndUnloadEditorSurface(Window window)
-    {
         var surface = new EditorSurface();
         window.Content = surface;
         surface.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+
+        var windowField = typeof(EditorSurface).GetField("_window", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        Assert.Same(window, windowField.GetValue(surface));
+
         // Detach from visual tree before Unloaded fires, so Window.GetWindow(surface) returns null during Unloaded.
         window.Content = null;
+        Assert.Null(Window.GetWindow(surface));
         surface.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
-        return new WeakReference<EditorSurface>(surface);
-    }
+
+        Assert.Null(windowField.GetValue(surface));
+        return Task.CompletedTask;
+    });
 
     [Fact]
     public Task MemoryProfilerPaneUnloadedDetachesModelAndResetsMonitorActive() => OnDispatcherAsync(async () =>
     {
+        EnsureThemeResources();
         await using var model = new MemoryProfilerViewModel(new FakeMemoryProfiler(), new FakeFileDialogs(), new FakeDesktop(), new FakeMemorySampler());
-        var weakPane = AttachAndUnloadMemoryProfilerPane(model);
-
-        Assert.False(model.Timeline.IsMonitorActive);
-        CollectGarbage();
-        Assert.False(weakPane.TryGetTarget(out _));
-        GC.KeepAlive(model);
-    });
-
-    private static WeakReference<MemoryProfilerPane> AttachAndUnloadMemoryProfilerPane(MemoryProfilerViewModel model)
-    {
         var pane = new MemoryProfilerPane { DataContext = model };
+        var modelField = typeof(MemoryProfilerPane).GetField("_model", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
         pane.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+        Assert.Same(model, modelField.GetValue(pane));
+
         pane.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
-        return new WeakReference<MemoryProfilerPane>(pane);
-    }
+
+        Assert.Null(modelField.GetValue(pane));
+        Assert.False(model.Timeline.IsMonitorActive);
+        Assert.False(HasSubscriber(model, "PropertyChanged", pane));
+    });
 
     [Fact]
     public Task DiffViewUnloadedCancelsAndDisposesPendingCompute() => OnDispatcherAsync(() =>
     {
+        EnsureThemeResources();
         var view = new DiffView();
         var computeField = typeof(DiffView).GetField("_compute", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var interruptedField = typeof(DiffView).GetField("_computeInterrupted", BindingFlags.Instance | BindingFlags.NonPublic)!;
         var cts = new CancellationTokenSource();
         computeField.SetValue(view, cts);
 
         view.RaiseEvent(new RoutedEventArgs(FrameworkElement.UnloadedEvent));
 
         Assert.Null(computeField.GetValue(view));
+        Assert.True((bool)interruptedField.GetValue(view)!);
         Assert.Throws<ObjectDisposedException>(() => _ = cts.Token);
+
+        view.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+        Assert.False((bool)interruptedField.GetValue(view)!);
         return Task.CompletedTask;
     });
 
@@ -113,24 +114,26 @@ public sealed class MemoryLeakAndSamplerTests
         var afterClose = (Delegate?)contentChangedField.GetValue(state);
         Assert.Null(afterClose);
 
-        // Seed a pending _projectRefreshDelay CTS and verify DisposeAsync cancels and clears it.
         var projectRefreshField = typeof(ShellViewModel).GetField("_projectRefreshDelay", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var refreshCts = new CancellationTokenSource();
-        projectRefreshField.SetValue(test.Shell, refreshCts);
+        var settingsSaveField = typeof(ShellViewModel).GetField("_settingsSave", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var projectRefreshWork = (WpfStudio.Core.Threading.SerialDebouncedWork)projectRefreshField.GetValue(test.Shell)!;
+        var settingsSaveWork = (WpfStudio.Core.Threading.SerialDebouncedWork)settingsSaveField.GetValue(test.Shell)!;
+        Assert.False(projectRefreshWork.IsDisposed);
+        Assert.False(settingsSaveWork.IsDisposed);
 
         await test.Shell.DisposeAsync();
 
-        Assert.Null(projectRefreshField.GetValue(test.Shell));
-        Assert.Throws<ObjectDisposedException>(() => _ = refreshCts.Token);
+        Assert.True(projectRefreshWork.IsDisposed);
+        Assert.True(settingsSaveWork.IsDisposed);
 
-        // Mutating preferences after DisposeAsync must not throw or allocate a new _settingsSave CTS.
+        // Mutating preferences after DisposeAsync must not throw or schedule pending work.
         test.Shell.CodeAssist.Enabled = !test.Shell.CodeAssist.Enabled;
         test.Shell.Debugger.JustMyCode = !test.Shell.Debugger.JustMyCode;
         test.Shell.Network.Load(new());
         test.Shell.Editor.FontSize = 15;
 
-        var settingsSaveField = typeof(ShellViewModel).GetField("_settingsSave", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        Assert.Null(settingsSaveField.GetValue(test.Shell));
+        var pendingField = typeof(WpfStudio.Core.Threading.SerialDebouncedWork).GetField("_pending", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        Assert.Null(pendingField.GetValue(settingsSaveWork));
     }
 
     [Fact]
@@ -149,19 +152,14 @@ public sealed class MemoryLeakAndSamplerTests
         var change = new ExternalChange(editor);
         vm.Changes.Add(change);
         Assert.Single(vm.Changes);
+        Assert.True(HasSubscriber(editor.State, "PropertyChanged", change));
 
         vm.Dispose();
 
         Assert.Equal(0, host.DocumentsChangedSubscriberCount);
         Assert.Empty(vm.Changes);
         Assert.True(watcher.Disposed);
-
-        // Detach must have unsubscribed ExternalChange from DocumentState.PropertyChanged.
-        var weakChange = new WeakReference<ExternalChange>(change);
-        change = null;
-        CollectGarbage();
-        Assert.False(weakChange.TryGetTarget(out _));
-        GC.KeepAlive(editor);
+        Assert.False(HasSubscriber(editor.State, "PropertyChanged", change));
     }
 
     [Fact]
@@ -238,30 +236,56 @@ public sealed class MemoryLeakAndSamplerTests
         Assert.False(asyncHost.SyncDisposed);
     }
 
-    private static void CollectGarbage()
+    private static readonly Lazy<Dispatcher> SharedDispatcher = new(() =>
     {
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
+        var ready = new ManualResetEventSlim(false);
+        Dispatcher? dispatcher = null;
+        var thread = new Thread(() =>
+        {
+            dispatcher = Dispatcher.CurrentDispatcher;
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+            ready.Set();
+            Dispatcher.Run();
+        }) { IsBackground = true, Name = "MemoryLeakAndSamplerTests STA" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        ready.Wait();
+        return dispatcher!;
+    });
+
+    private static bool _themeLoaded;
+
+    private static void EnsureThemeResources()
+    {
+        if (_themeLoaded) return;
+        var app = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        var themeUri = new Uri("pack://application:,,,/WpfStudio;component/Resources/StudioTheme.xaml", UriKind.Absolute);
+        if (!app.Resources.MergedDictionaries.Any(d => d.Source == themeUri))
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = themeUri });
+        _themeLoaded = true;
+    }
+
+    private static bool HasSubscriber(object source, string eventName, object target)
+    {
+        for (Type? type = source.GetType(); type is not null; type = type.BaseType)
+        {
+            if (type.GetField(eventName, BindingFlags.Instance | BindingFlags.NonPublic) is { } field
+                && field.GetValue(source) is Delegate multicast)
+            {
+                return multicast.GetInvocationList().Any(d => ReferenceEquals(d.Target, target));
+            }
+        }
+        return false;
     }
 
     private static Task OnDispatcherAsync(Func<Task> action)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() =>
+        _ = SharedDispatcher.Value.BeginInvoke(async () =>
         {
-            var dispatcher = Dispatcher.CurrentDispatcher;
-            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
-            _ = dispatcher.BeginInvoke(async () =>
-            {
-                try { await action(); completion.SetResult(); }
-                catch (Exception exception) { completion.SetException(exception); }
-                finally { dispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
-            });
-            Dispatcher.Run();
+            try { await action(); completion.SetResult(); }
+            catch (Exception exception) { completion.SetException(exception); }
         });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
         return completion.Task;
     }
 

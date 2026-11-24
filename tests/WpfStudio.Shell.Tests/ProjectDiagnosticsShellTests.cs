@@ -57,7 +57,7 @@ public sealed class ProjectDiagnosticsShellTests
         // Settled, with lenses current. A push must leave those lenses and every revision alone, and must not loop.
         await WaitForAsync(() => editor.CodeLensVersion == editor.State.Version);
         var diagnostics = editor.Diagnostics.ToArray();
-        var lensRequest = Field(editor, "_codeLens");
+        var lensRequest = Field(Field(editor, "_codeLensWork")!, "_pending");
         var lensChanges = 0;
         editor.CodeLensChanged += () => Interlocked.Increment(ref lensChanges);
         var decorated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -76,7 +76,7 @@ public sealed class ProjectDiagnosticsShellTests
         Assert.Equal(symbolRevision, Field(test.Shell, "_symbolSemanticRevision"));
         Assert.Equal(sourceEpoch, test.Shell.XamlAnalysis.SourceEpoch);
         Assert.True(heldContext());
-        Assert.Same(lensRequest, Field(editor, "_codeLens"));
+        Assert.Same(lensRequest, Field(Field(editor, "_codeLensWork")!, "_pending"));
         Assert.Equal(0, Volatile.Read(ref lensChanges));
         Assert.Equal(editor.State.Version, editor.CodeLensVersion);
         Assert.Equal(pushesBefore + 1, Volatile.Read(ref pushes));
