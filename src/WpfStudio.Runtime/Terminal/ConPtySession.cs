@@ -219,9 +219,12 @@ public sealed class ConPtySession : IAsyncDisposable
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } catch (Win32Exception) { }
         var console = Interlocked.Exchange(ref pseudoConsole, null);
         if (console is not null) await Task.Run(console.Dispose).ConfigureAwait(false);
+        // Closing the pseudoconsole ends the reader at the end of its output and the writer at its broken pipe. The streams are
+        // closed only after both: a FileStream closed while another thread is inside Read checks closed, then readable, and a
+        // close between the two fails the read with NotSupportedException, which neither thread expects.
+        await Task.WhenAll(reader, writer).ConfigureAwait(false);
         inputStream.Dispose();
         outputStream.Dispose();
-        await Task.WhenAll(reader, writer).ConfigureAwait(false);
         if (!exited.Task.IsCompleted)
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));

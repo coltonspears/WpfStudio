@@ -31,7 +31,14 @@ public sealed class ThemeService(IMessenger messenger) : IThemeService
     public void Apply(string name)
     {
         Palette = Palette.For(name);
-        if (Application.Current is { } app) ApplyResources(app);
+        // The Application belongs to the thread that created it, WpfStudio's UI thread, and its resources and windows can only be
+        // reached there. From any other thread (in tests, where another class created the process's one Application) the palette
+        // is posted to that thread rather than waited for, which could deadlock (A9).
+        if (Application.Current is { } app)
+        {
+            if (app.Dispatcher.CheckAccess()) ApplyResources(app);
+            else _ = app.Dispatcher.BeginInvoke(() => ApplyResources(app));
+        }
         messenger.Send(new ThemeChangedMessage(Palette));
     }
 

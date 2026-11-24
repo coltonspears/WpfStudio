@@ -286,6 +286,8 @@ public sealed class MemoryProfilerViewModelTests
         var sampler = new Sampler();
         await using var model = new MemoryProfilerViewModel(new Profiler(), new Files(), new FakeDesktop(), sampler);
         var timeline = model.Timeline;
+        // This counts the one sample each start takes. A periodic one, a second later, would race the counts on a busy runner.
+        timeline.SampleInterval = TimeSpan.FromHours(1);
         timeline.IsMonitorActive = true;
         Assert.Empty(timeline.LiveSamples);
         Assert.Equal("Managed heap across snapshots", timeline.Title);

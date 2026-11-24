@@ -52,8 +52,11 @@ internal sealed class EditingFixture(string directory, PrimaryWindow primary, Bu
         if (command == "edit-culture-french") CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
         if (command == "edit-block-main")
         {
+            // Holds the dispatcher until the agent has let go of its connection (edit-observe-agent first), so an edit queued
+            // behind this block is still queued when the inspector disconnects. A fixed 1.5 s ran out first on a slow CI runner.
             File.WriteAllText(Path.Combine(directory, "edit-block-started"), "started");
-            Thread.Sleep(1500);
+            var blocked = System.Diagnostics.Stopwatch.StartNew();
+            while (Volatile.Read(ref _agentUnloading) == 0 && blocked.Elapsed < TimeSpan.FromSeconds(20)) Thread.Sleep(10);
         }
         WriteState();
     }

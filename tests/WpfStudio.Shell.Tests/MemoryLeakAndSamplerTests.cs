@@ -14,6 +14,7 @@ using WpfStudio.Contracts;
 using WpfStudio.Contracts.Profiling;
 using WpfStudio.Core.Documents;
 using WpfStudio.Runtime.Design;
+using WpfStudio.Workspace;
 
 namespace WpfStudio.Shell.Tests;
 
@@ -101,7 +102,17 @@ public sealed class MemoryLeakAndSamplerTests
     public async Task ShellViewModelUnsubscribesDocumentAndSettingsEventsAndDisposesProjectRefresh()
     {
         await using var test = new ShellTestContext();
-        string path = await test.CreateFileAsync("LeakCheck.cs", "class LeakCheck { }");
+        // The project refresh is created when a loaded workspace's project files change and automatic refresh is on, so this
+        // turns it on (ShellTestContext turns it off), loads a workspace and announces a change, as the source watcher does.
+        // The long pause keeps the refresh from running; only its disposal is checked.
+        test.Shell.Editor.AutoRefreshProject = true;
+        test.Shell.ProjectRefreshPause = TimeSpan.FromHours(1);
+        var project = await test.CreateFileAsync("LeakCheck/LeakCheck.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        string path = await test.CreateFileAsync("LeakCheck/LeakCheck.cs", "class LeakCheck { }");
+        Assert.Equal(0, (await new BuildService().RunAsync(new BuildRequest(project, BuildOperation.Restore))).ExitCode);
+        await test.Shell.LoadWorkspaceAsync(project);
+        Assert.NotNull(test.Shell.Workspace);
+        ((WpfStudio.App.Features.XamlAnalysis.IProjectXamlAnalysisHost)test.Shell).ProjectFilesChanged();
         await test.Shell.OpenDocumentAsync(path);
         var editor = test.Shell.ActiveDocument!;
         var state = editor.State;

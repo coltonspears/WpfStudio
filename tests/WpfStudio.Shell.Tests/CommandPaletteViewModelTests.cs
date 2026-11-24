@@ -59,7 +59,10 @@ public sealed class CommandPaletteViewModelTests
         palette.OpenSymbols();
         Assert.Empty(palette.Results);
         palette.Query = "#cust";
-        await Task.Delay(400);
+        // The palette waits 150 ms for more typing on a thread-pool timer, which on a four-core runner starting every test class
+        // at once ran later than the 400 ms this used to allow.
+        using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+            while (palette.Results.Count == 0) await Task.Delay(10, deadline.Token);
         var entry = Assert.Single(palette.Results);
         Assert.Equal("Customer", entry.Label);
         Assert.Contains("Customer.cs:7", entry.Detail);

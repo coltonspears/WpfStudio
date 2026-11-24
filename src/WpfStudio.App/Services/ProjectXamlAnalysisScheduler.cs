@@ -11,27 +11,35 @@ public sealed class ProjectXamlAnalysisScheduler(Func<long, CancellationToken, T
     private int _runs;
     private bool _disposed;
     public Task Completion { get; private set; } = Task.CompletedTask;
+    /// <summary><see cref="Completion"/> and the generation it was scheduled for, read together.</summary>
+    public (Task Completion, long Generation) Latest { get { lock (_gate) return (Completion, _completionGeneration); } }
     public bool IsCurrent(long generation) { lock (_gate) return !_disposed && generation == _generation; }
     public long Invalidate()
     {
+        CancellationTokenSource? superseded;
+        long generation;
         lock (_gate)
         {
-            _pending?.Cancel();
-            return ++_generation;
+            superseded = _pending;
+            generation = ++_generation;
         }
+        Cancel(superseded);
+        return generation;
     }
     public Task Schedule(bool immediate = false)
     {
         CancellationTokenSource pending;
+        CancellationTokenSource? superseded;
         long generation;
         lock (_gate)
         {
             if (_disposed) return Task.CompletedTask;
-            _pending?.Cancel();
+            superseded = _pending;
             pending = _pending = new CancellationTokenSource();
             generation = ++_generation;
             _runs++;
         }
+        Cancel(superseded);
         // An immediate scan runs on this thread up to its first await, which must not happen under the lock.
         var run = RunAsync(generation, pending, immediate);
         lock (_gate)
@@ -39,6 +47,14 @@ public sealed class ProjectXamlAnalysisScheduler(Func<long, CancellationToken, T
             if (generation > _completionGeneration) { _completionGeneration = generation; Completion = run; }
         }
         return run;
+    }
+    // Cancelling runs the superseded scan's continuations on this thread, so it happens once the generation has moved on, or
+    // they would take the old one as current, and outside the lock, as an immediate scan they start must. The scan may have
+    // ended and disposed its source meanwhile.
+    private static void Cancel(CancellationTokenSource? superseded)
+    {
+        try { superseded?.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
     private async Task RunAsync(long generation, CancellationTokenSource pending, bool immediate)
     {

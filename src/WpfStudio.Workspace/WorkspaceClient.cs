@@ -189,7 +189,11 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
             // The worker can commit authored text before cancellable projection
             // work completes. A failed reply therefore invalidates our last
             // acknowledged identity, even if the next edit restores that text.
-            ForgetAcceptedDocument(request.Path);
+            // The accepted text sent again is the exception: the worker holds that text whichever way the request went, and
+            // its fields were projected when it was accepted. Analyses and XAML scans resend unchanged text and are cancelled
+            // whenever they are superseded. Forgetting it made the next update announce a model or field change no edit
+            // had made, and every C# editor then dropped its diagnostics and analyzed again.
+            if (!IsAcceptedText(request)) ForgetAcceptedDocument(request.Path);
             if (semanticChange) SemanticStateChanged?.Invoke(this, EventArgs.Empty);
             throw;
         }
@@ -238,6 +242,11 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private bool HasAcceptedDocument(string path)
     {
         lock (_bufferGate) return _acceptedDocumentTexts.ContainsKey(Path.GetFullPath(path));
+    }
+
+    private bool IsAcceptedText(UpdateDocumentRequest request)
+    {
+        lock (_bufferGate) return _acceptedDocumentTexts.TryGetValue(Path.GetFullPath(request.Path), out var accepted) && accepted == request.Text;
     }
 
     private void ForgetAcceptedDocument(string path)

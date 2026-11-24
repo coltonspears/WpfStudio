@@ -1,3 +1,4 @@
+using System.Runtime.Intrinsics.X86;
 using System.Text.Json;
 
 namespace WpfStudio.CodeAssist.Tests;
@@ -95,8 +96,12 @@ public sealed class GoldenParityTests
     public void TransformerLinesAndTheirGateMatchTraining()
     {
         using var generator = TransformerLineGenerator.Load(Model(AssistModelKind.Lines, "4.0.0"));
+        // ONNX Runtime runs AVX-512 float kernels where the CPU has AVX-512 and AVX2 ones elsewhere. 4.0.0 quantizes activations
+        // as it runs, so a last-bit difference can move a value to the next step and change the decoding from there: at these
+        // 129 places the two show the same suggestions, but 2 hidden lines differ and gate inputs differ by up to 0.25. So
+        // golden.json keeps a record for each, and this compares with the one for the kernels this CPU gets.
         int whole = 0, parts = 0;
-        foreach (var expected in Golden.GetProperty("lines").GetProperty("4.0.0").EnumerateArray())
+        foreach (var expected in Golden.GetProperty(Avx512F.IsSupported ? "lines" : "lines_avx2").GetProperty("4.0.0").EnumerateArray())
         {
             string code = expected.GetProperty("code").GetString()!;
             // One pass of the network gives both the line and the gate's inputs; running it again for each took a third of the test's time.

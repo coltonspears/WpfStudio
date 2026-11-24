@@ -34,6 +34,27 @@ jobs:
         with:
           global-json-file: global.json
 
+      # windows-latest is not always the same machine, and some results depend on it: which integer kernels ONNX Runtime picks
+      # (AVX2 against VNNI or AMX), the desktop's size, and running elevated. Recorded so a failure can be matched to its runner.
+      - name: Describe the runner
+        shell: pwsh
+        run: |
+          $cpu = Get-CimInstance Win32_Processor
+          $leaf7 = [System.Runtime.Intrinsics.X86.X86Base]::CpuId(7, 0)
+          $vnni = ($leaf7.Item3 -band 0x800) -ne 0
+          $amx = ($leaf7.Item4 -band 0x1000000) -ne 0
+          "CPU: $($cpu.Name), $($cpu.NumberOfLogicalProcessors) logical processors; AVX2 $([System.Runtime.Intrinsics.X86.Avx2]::IsSupported), AVX-VNNI $([System.Runtime.Intrinsics.X86.AvxVnni]::IsSupported), AVX512-VNNI $vnni, AMX $amx"
+          Add-Type -AssemblyName System.Windows.Forms
+          "Desktop: $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Size)"
+          $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+          "Elevated: $($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+
+      # The shell smoke test checks the layout of the default 1480x940 window, and the runner's 1024x768 desktop capped it at
+      # 1044x788, where the Packages page cannot show its buttons.
+      - name: Give the desktop the size the shell smoke test lays out
+        shell: pwsh
+        run: ./tools/Set-DesktopSize.ps1 -Width 1920 -Height 1080
+
       - name: Restore
         run: dotnet restore WpfStudio.sln
 

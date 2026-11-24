@@ -94,6 +94,9 @@ public sealed partial class ShellSmokeTests(ITestOutputHelper output)
             var startup = clock.Elapsed;
             output.WriteLine($"Shell construction to rendered idle: {startup.TotalMilliseconds:N0} ms");
             Assert.True(startup < TimeSpan.FromSeconds(5), "Shell render exceeded 5-second regression budget");
+            // Windows caps a window at the desktop's size, and the checks below are about the default layout's.
+            Assert.True(window.ActualWidth >= window.Width - 0.5 && window.ActualHeight >= window.Height - 0.5,
+                $"The shell is laid out at {window.Width}x{window.Height}, but a {SystemParameters.PrimaryScreenWidth}x{SystemParameters.PrimaryScreenHeight} desktop capped it at {window.ActualWidth}x{window.ActualHeight}. CI sets a larger one with tools/Set-DesktopSize.ps1.");
             Assert.Equal(12, manager.Layout.Descendents().OfType<LayoutAnchorable>().Count());
             Assert.Contains(manager.Layout.Descendents().OfType<LayoutDocument>(), d => d.ContentId == "Welcome");
             Screenshot((FrameworkElement)window.Content, Path.Combine(root, "artifacts/screenshots/welcome.png"));

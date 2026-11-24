@@ -17,6 +17,8 @@ public sealed class DebuggerOutputTests
         var output = new OutputBuffer(dispatcher, text => shown = text);
         for (var i = 0; i < 20_000; i++) output.Append(new string('x', 255) + "\n");
         output.Append("LAST OUTPUT");
+        await dispatcher.UntilPostedAsync();
+        // A second batch would have been posted by now; under load this can only miss one, never invent one.
         await Task.Delay(150);
         Assert.Single(dispatcher.Pending);
         dispatcher.Drain();
@@ -24,7 +26,7 @@ public sealed class DebuggerOutputTests
         Assert.EndsWith("LAST OUTPUT", shown);
         output.Append("This should be discarded");
         output.Clear();
-        await Task.Delay(150); dispatcher.Drain();
+        await dispatcher.UntilPostedAsync(); dispatcher.Drain();
         Assert.Empty(shown);
     }
 
@@ -37,11 +39,11 @@ public sealed class DebuggerOutputTests
         for (var batch = 0; batch < 3; batch++)
         {
             output.Append(new string('x', 100_000));
-            await Task.Delay(150); dispatcher.Drain();
+            await dispatcher.UntilPostedAsync(); dispatcher.Drain();
         }
         Assert.Equal(200_000, shown.Length);
         output.Append("END");
-        await Task.Delay(150); dispatcher.Drain();
+        await dispatcher.UntilPostedAsync(); dispatcher.Drain();
         Assert.Equal(200_003, shown.Length);
         Assert.EndsWith("END", shown);
     }
@@ -53,7 +55,7 @@ public sealed class DebuggerOutputTests
         var shown = "";
         var output = new OutputBuffer(dispatcher, text => shown = text);
         output.Append(new string('x', 300_000) + "END");
-        await Task.Delay(150); dispatcher.Drain();
+        await dispatcher.UntilPostedAsync(); dispatcher.Drain();
         Assert.Equal(250_000, shown.Length);
         Assert.EndsWith("END", shown);
     }
@@ -108,8 +110,17 @@ public sealed class DebuggerOutputTests
 
     private sealed class QueuedDispatcher : IUiDispatcher
     {
+        private readonly SemaphoreSlim _posted = new(0);
         public ConcurrentQueue<Action> Pending { get; } = new();
-        public void Post(Action action) => Pending.Enqueue(action);
+        public void Post(Action action) { Pending.Enqueue(action); _posted.Release(); }
+        /// <summary>
+        /// Waits for the next post. OutputBuffer posts from a thread-pool timer 50 ms after an append; with every test class
+        /// starting at once on a four-core runner, that took longer than the fixed 150 ms these tests used to wait.
+        /// </summary>
+        public async Task UntilPostedAsync()
+        {
+            if (!await _posted.WaitAsync(TimeSpan.FromSeconds(30))) throw new TimeoutException("The output buffer posted nothing within 30 seconds.");
+        }
         public Task InvokeAsync(Action action, CancellationToken cancellationToken = default) { Post(action); return Task.CompletedTask; }
         public void Drain() { while (Pending.TryDequeue(out var action)) action(); }
     }

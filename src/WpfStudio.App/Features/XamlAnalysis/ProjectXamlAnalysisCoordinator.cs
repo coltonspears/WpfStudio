@@ -294,9 +294,13 @@ public sealed partial class ProjectXamlAnalysisCoordinator : ObservableObject, I
         // the worker. Await the newest request instead of reporting a stale idle.
         while (!_disposed)
         {
-            var completion = _scheduler.Completion;
+            var (completion, generation) = _scheduler.Latest;
             await completion;
-            if (ReferenceEquals(completion, _scheduler.Completion)) break;
+            if (!ReferenceEquals(completion, _scheduler.Completion)) continue;
+            if (_scheduler.IsCurrent(generation)) break;
+            // A watcher invalidates on its own thread and requests the next scan through the dispatcher, so the scan can end
+            // before that request is scheduled. One write often arrives as several notifications; scan for the later ones too.
+            await _scheduler.Schedule(immediate: true);
         }
     }
 

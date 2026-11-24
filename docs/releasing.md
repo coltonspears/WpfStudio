@@ -49,10 +49,11 @@ gh workflow run release.yml --ref main
 
 The workflow reads the version from `Version.props` and refuses to run when the tag `v<version>` or a release of that name exists already; merge a pull request, or raise the version by hand, first. Then it:
 
-1. runs `tools/Publish.ps1 -Zip`, which runs every test suite, publishes the portable package for the installed .NET 10 Desktop runtime and checks it is complete;
-2. runs it again with `-SelfContained`, without repeating the tests;
-3. writes `SHA256SUMS.txt` with the hash of each zip;
-4. creates the tag `v<version>` on the commit it built and the release **WpfStudio &lt;version&gt;**, with notes GitHub generates from the pull requests merged since the previous release, and attaches:
+1. runs every test suite as CI does, one at a time on a 1920x1080 desktop (unless **run-tests** is off);
+2. runs `tools/Publish.ps1 -Zip -SkipTests`, which publishes the portable package for the installed .NET 10 Desktop runtime and checks it is complete;
+3. runs it again with `-SelfContained`;
+4. writes `SHA256SUMS.txt` with the hash of each zip;
+5. creates the tag `v<version>` on the commit it built and the release **WpfStudio &lt;version&gt;**, with notes GitHub generates from the pull requests merged since the previous release, and attaches:
    - `WpfStudio-<version>-win-x64.zip`
    - `WpfStudio-<version>-win-x64-self-contained.zip`
    - `SHA256SUMS.txt`

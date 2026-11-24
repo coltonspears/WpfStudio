@@ -106,11 +106,24 @@ internal class Program
         var buildOutput = build.StandardOutput.ReadToEndAsync(); var buildError = build.StandardError.ReadToEndAsync();
         await build.WaitForExitAsync();
         Assert.True(build.ExitCode == 0, await buildOutput + await buildError);
+        var program = Path.Combine(directory, "bin", "Debug", framework, "Fixture.dll");
+        // netcoredbg fails configurationDone with E_FAIL when a launched program has not started its runtime within 5 seconds
+        // (startupWaitTimeout in its manageddebugger.cpp), which nothing WpfStudio sends can change. The test host runs on
+        // .NET 10, so for net8 and net9 the launch can also be that runtime's first start in the job, its slowest: traced on
+        // windows-latest, about 1 to 1.4 seconds to configurationDone's answer, against 0.1 to 0.3 once the runtime had run.
+        // Running the fixture once first leaves the debugger, not a cold runtime, to decide this case.
+        using (var first = Process.Start(new ProcessStartInfo("dotnet") { ArgumentList = { program }, WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true })!)
+        {
+            var firstOutput = first.StandardOutput.ReadToEndAsync(); var firstError = first.StandardError.ReadToEndAsync();
+            using var started = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            try { await first.WaitForExitAsync(started.Token); }
+            catch (OperationCanceledException) { first.Kill(entireProcessTree: true); throw; }
+            Assert.True(first.ExitCode == 0, await firstOutput + await firstError);
+        }
         await using var session = new DebugSession();
         var events = Channel.CreateUnbounded<DebugEvent>();
         session.EventReceived += value => events.Writer.TryWrite(value);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-        var program = Path.Combine(directory, "bin", "Debug", framework, "Fixture.dll");
         using var testHost = Process.GetCurrentProcess();
         testHost.Refresh();
         var testHostWorkingSetBeforeLaunch = testHost.WorkingSet64;
