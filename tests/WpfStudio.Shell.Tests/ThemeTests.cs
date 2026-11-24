@@ -75,14 +75,23 @@ public sealed class ThemeTests
         Assert.Same(Palette.Dark, theme.Palette);
         Palette? applied = null;
         messenger.Register<ThemeChangedMessage>(this, (_, message) => applied = message.Palette);
-        theme.Apply("Light");
+        OnApplicationThread(() => theme.Apply("Light"));
         Assert.Same(Palette.Light, theme.Palette);
         Assert.Same(Palette.Light, applied);
 
         messenger.UnregisterAll(this);
         applied = null;
-        theme.Apply("Dark");
+        OnApplicationThread(() => theme.Apply("Dark"));
         Assert.Null(applied);
+    }
+
+    // There is one Application per process, and it belongs to the thread that made it. When another test class has made one
+    // (MemoryLeakAndSamplerTests does, on its own STA thread, to give a pane the theme), ThemeService has to run on that
+    // thread, as it does on WpfStudio's UI thread: from any other it cannot reach the Application's windows.
+    private static void OnApplicationThread(Action action)
+    {
+        if (Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess()) dispatcher.Invoke(action);
+        else action();
     }
 
     [Fact]

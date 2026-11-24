@@ -19,6 +19,8 @@ public sealed partial class ProcessMemoryTimeline(IProcessMemorySampler sampler,
     /// <summary>Set by the pane while it is visible; sampling stops when nobody is looking.</summary>
     [ObservableProperty] public partial bool IsMonitorActive { get; set; }
     [ObservableProperty] public partial bool MonitorMemory { get; set; } = true;
+    /// <summary>Time between samples after the first. Tests that count the samples each start takes set it long.</summary>
+    internal TimeSpan SampleInterval { get; set; } = TimeSpan.FromSeconds(1);
     public double WindowSeconds => Window switch { "1 min" => 60, "15 min" => 900, "1 hour" => 3600, _ => 300 };
     public bool HasLiveSamples => LiveSamples.Count > 0;
     public string Title => HasLiveSamples ? $"Process memory · {Process?.Name} (PID {Process?.Id})" : "Managed heap across snapshots";
@@ -62,10 +64,12 @@ public sealed partial class ProcessMemoryTimeline(IProcessMemorySampler sampler,
         var token = monitor.Token;
         try
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
             // The first sample is taken at once (off the UI thread), so the title names the process as monitoring starts.
             // The loop ends with the process: it used to go on asking for a process that was gone, for as long as the pane was open.
             if (!await SampleOnceAsync(token)) return;
+            // The interval counts from the first sample. A timer started before it had already ticked whenever that sample was
+            // slow to come back, as the thread pool is at busy moments, and a second sample followed at once.
+            using var timer = new PeriodicTimer(SampleInterval);
             while (await timer.WaitForNextTickAsync(token))
             {
                 if (!await SampleOnceAsync(token)) break;
