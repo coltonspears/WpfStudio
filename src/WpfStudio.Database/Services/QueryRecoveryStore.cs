@@ -36,7 +36,7 @@ public sealed class QueryRecoveryStore : IQueryRecoveryStore
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (documents.Count == 0) { File.Delete(_path); return; }
+            if (documents.Count == 0) { if (File.Exists(_path)) File.Delete(_path); return; }
             await AtomicFile.WriteAsync(_path, JsonSerializer.SerializeToUtf8Bytes(documents), cancellationToken, writeThrough: true).ConfigureAwait(false);
         }
         finally { _gate.Release(); }

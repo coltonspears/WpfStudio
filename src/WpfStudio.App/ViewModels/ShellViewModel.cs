@@ -41,20 +41,12 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     private readonly PerfLog _performance;
     private readonly StudioPaths _paths;
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly OperationGate _operations;
-    private readonly List<WorkspaceDiagnostic> _buildDiagnostics = [];
     private string[] _allFiles = [];
     private bool _initialized;
     private bool _disposed;
-    private bool _loading;
-    private bool _contextReloadPending;
-    private bool _updatingChoices;
-    private int _launchChoicesGeneration;
-    private Task? _recoveryLoop;
 
     public ShellViewModel(DocumentStore store, SettingsStore settings, ShellLanguageServices language, ShellDesktopServices desktop, ShellPanes panes, StudioFeatures features, EditorPreferences editor, ShellToolServices tools, IUiDispatcher dispatcher, IMessenger messenger, ILogger<ShellViewModel> logger, IOptions<StudioPaths> paths)
     {
-        _operations = new(busy => IsBusy = busy, _lifetime.Token);
         _store = store; _settings = settings; _workspace = language.Workspace; _build = language.Build; _indexer = language.Indexer; _scaffolding = language.Scaffolding; _edits = language.Edits; _xaml = language.Xaml; _xamlFormatter = language.XamlFormatter;
         _files = desktop.Files; _dialogs = desktop.Dialogs; _desktop = desktop.Desktop; _clipboard = desktop.Clipboard; Theme = desktop.Theme;
         _dispatcher = dispatcher; Messenger = messenger; _logger = logger; _paths = paths.Value;
@@ -75,6 +67,9 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         InspectionSources = new(this, store); DesignerContext = new(Designer, this);
         LiveInspection = new(dispatcher);
         LiveInspection.AttachHost(this);
+        WorkspaceLifecycle = new(this, busy => IsBusy = busy);
+        DocumentSessions = new(this);
+        BuildAndLaunch = new(this, WorkspaceLifecycle, DocumentSessions);
         features.Attach(this);
         InitializeExperience();
         InitializeWorkbench();
@@ -94,7 +89,8 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     public ObservableCollection<string> RecentWorkspaces { get; } = [];
     /// <summary>Replaced in one notification: the Search pane groups by file, and grouping re-sorts on every single add.</summary>
     public BulkObservableCollection<NavigationResult> SearchResults { get; } = [];
-    public ObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
+    /// <summary>Replaced in one notification so rapid editor/build diagnostic updates do not emit N+1 collection changes.</summary>
+    public BulkObservableCollection<WorkspaceDiagnostic> Diagnostics { get; } = [];
     public IReadOnlyList<ScaffoldKind> ScaffoldKinds { get; } = [ScaffoldKind.ViewAndViewModel, ScaffoldKind.UserControl, ScaffoldKind.ViewModel, ScaffoldKind.ResourceDictionary, ScaffoldKind.Converter];
     public ObservableCollection<string> Configurations { get; } = ["Debug", "Release"];
     public string[] BuildActions { get; } = ["Resource", "Content", "None", "Page"];
@@ -152,29 +148,14 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     partial void OnStartupProjectChanged(WorkspaceProject? value) { if (value != null) _ = GuardAsync(RefreshLaunchChoicesAsync); }
     partial void OnConfigurationChanged(string value) { if (!string.IsNullOrWhiteSpace(value)) ScheduleContextReload(); }
     partial void OnTargetFrameworkChanged(string? value) { if (value != null) ScheduleContextReload(); }
-    private void ScheduleContextReload()
-    {
-        if (!_initialized || Workspace == null || _updatingChoices) return;
-        ReloadWhenFreeAsync().Forget(ReportBackgroundFault);
-    }
+    private void ScheduleContextReload() => WorkspaceLifecycle.ScheduleContextReload();
     /// <summary>Reloads now, or when the operation holding the gate ends.</summary>
-    private Task ReloadWhenFreeAsync()
-    {
-        if (Workspace == null || _disposed) return Task.CompletedTask;
-        _contextReloadPending = true;
-        return ExecuteWhenAvailableAsync(ReloadWorkspaceCommand);
-    }
+    private Task ReloadWhenFreeAsync() => WorkspaceLifecycle.ReloadWhenFreeAsync();
     /// <summary>For internal callers: ExecuteAsync skips CanExecute, and on a running cancellable command it cancels that execution.</summary>
-    private static Task ExecuteWhenAvailableAsync(IAsyncRelayCommand command) => command.CanExecute(null) ? command.ExecuteAsync(null) : Task.CompletedTask;
+    private static Task ExecuteWhenAvailableAsync(IAsyncRelayCommand command) => WorkspaceLifecycleCoordinator.ExecuteWhenAvailableAsync(command);
     /// <summary>Takes down a progress status this operation set, unless something newer has replaced it already. An operation that
     /// ends without a result of its own must not leave "…" in the status bar, where it reads as work still under way.</summary>
     private void EndProgressStatus(string progress) { if (Status == progress) Status = "Ready"; }
-    /// <summary>Frees the gate, then runs the reload that was requested while it was held.</summary>
-    private void EndOperation(OperationGate.Lease lease)
-    {
-        lease.Dispose();
-        if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault);
-    }
 
     public async Task InitializeAsync(string[] arguments)
     {
@@ -201,7 +182,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         var requested = arguments.FirstOrDefault(a => File.Exists(a) && Path.GetExtension(a).ToLowerInvariant() is ".sln" or ".slnx" or ".csproj");
         var restoring = requested == null && settings.WorkspacePath != null && File.Exists(settings.WorkspacePath);
         // Read the previous session's files while the language worker loads; tabs still open in their saved order afterwards.
-        var prefetched = restoring ? settings.OpenDocuments.Where(File.Exists).Select(PrefetchDocumentAsync).ToArray() : [];
+        var prefetched = restoring ? settings.OpenDocuments.Where(File.Exists).Select(path => DocumentSessions.PrefetchDocumentAsync(path, _lifetime.Token)).ToArray() : [];
         // Guarded: a workspace that cannot load, for example for a missing SDK, must not skip the recovery prompt, the saved layout and the recovery loop below.
         if (requested != null) await GuardAsync(() => LoadWorkspaceAsync(requested));
         else if (restoring) await GuardAsync(() => LoadWorkspaceAsync(settings.WorkspacePath!));
@@ -212,105 +193,16 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
         foreach (var state in await Task.WhenAll(prefetched))
             if (state != null && !Documents.Any(d => ReferenceEquals(d.State, state))) _store.Close(state);
-        var recovered = await _store.ReadRecoveryAsync();
-        if (recovered.Count > 0 && await _dialogs.ConfirmAsync("Recover unsaved work", $"Recover {recovered.Count} unsaved document(s) from the previous session?"))
-        {
-            foreach (var item in recovered)
-                await GuardAsync(async () => { var state = File.Exists(item.Path) ? await _store.OpenAsync(item.Path) : _store.Create(item.Path); state.Content = item.Content; AddDocument(state); });
-        }
-        else foreach (var item in recovered) await _store.DeleteRecoveryAsync(item.Path);
+        await DocumentSessions.RecoverPreviousSessionAsync();
         LayoutRestoreRequested?.Invoke();
-        _recoveryLoop = RecoveryLoopAsync(_lifetime.Token);
+        DocumentSessions.StartRecoveryLoop(_lifetime.Token);
         // Last, so that loading the workspace does not replace it.
         if (updated != null) { Status = updated; AppendOutput(updated + "."); }
-    }
-    private async Task<DocumentState?> PrefetchDocumentAsync(string path)
-    {
-        // Failures are reported when the tab itself is opened.
-        try { return await Task.Run(() => _store.OpenAsync(path, _lifetime.Token)); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException) { return null; }
-    }
-    private async Task RecoveryLoopAsync(CancellationToken token)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
-        // A failed tick must not end the loop: one locked record or a full disk would otherwise leave every later edit without a recovery copy.
-        // The failure is reported once, and again only after a tick has succeeded in between.
-        var failing = false;
-        try
-        {
-            while (await timer.WaitForNextTickAsync(token))
-            {
-                try { await _store.WriteRecoveryAsync(token); failing = false; }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    if (failing) continue;
-                    failing = true;
-                    _logger.LogError(ex, "Recovery persistence failed");
-                    _dispatcher.Post(() => AppendOutput("Recovery: " + ex.Message));
-                }
-            }
-        }
-        catch (OperationCanceledException) { }
     }
     [RelayCommand] private Task OpenWorkspaceAsync() => GuardAsync(async () => { var path = await _files.OpenFileAsync("Open solution or project", "Solutions and projects|*.sln;*.slnx;*.csproj"); if (path != null) await LoadWorkspaceAsync(path); });
     [RelayCommand] private Task OpenRecentAsync(string? path) => path == null ? Task.CompletedTask : GuardAsync(() => LoadWorkspaceAsync(path));
     [RelayCommand] private Task OpenFileAsync() => GuardAsync(async () => { var path = await _files.OpenFileAsync("Open file", "Source files|*.cs;*.xaml;*.sql;*.json;*.xml;*.props;*.targets;*.csproj;*.md;*.txt|All files|*.*"); if (path != null) await OpenDocumentAsync(path); });
-    public async Task LoadWorkspaceAsync(string path)
-    {
-        // The language worker starts in the solution's folder and resolves the path again there, so a relative command-line argument
-        // would name a different file in the worker, and would be saved as a relative recent entry.
-        path = Path.GetFullPath(path);
-        if (IsBusy) { Status = "Wait for the current workspace operation to finish"; return; }
-        if (IsPreviewOpen) { Status = "Finish or cancel the change preview before switching workspaces"; return; }
-        if (!await CloseAllDocumentsForWorkspaceAsync()) return;
-        if (Debugger.IsActive) await Debugger.StopCommand.ExecuteAsync(null);
-        if (_gitToolOpened) await Features.Git.SetWorkspaceAsync(null);
-        // The awaits above let another operation start.
-        if (_operations.TryEnter() is not { } lease) { Status = "Wait for the current workspace operation to finish"; return; }
-        _loading = true;
-        var token = lease.Token;
-        var loaded = false;
-        try
-        {
-            Status = "Loading " + Path.GetFileName(path) + "…";
-            _history.Clear();
-            Explorer.Clear();
-            var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
-            Terminal.WorkingDirectory = directory;
-            TargetFramework = null;
-            // Start the worker first: listing files overlaps its process start and SDK resolution, and the tree appears before language services finish.
-            // The project model saved by the last session answers at once; MSBuild refreshes it in the background below.
-            var loading = _workspace.LoadAsync(new(path, Configuration, UseCache: true), token);
-            try { _allFiles = await Task.Run(() => EnumerateSourceFiles(directory).ToArray(), token); }
-            catch (IOException ex) { _allFiles = []; AppendOutput("File listing: " + ex.Message); }
-            Explorer.ShowFiles(directory, _allFiles);
-            Status = "Loading language services for " + Path.GetFileName(path) + "…";
-            Workspace = await loading; loaded = true;
-            RefreshConfigurations();
-            Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
-            StartupProject = Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
-            _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-            Explorer.Rebuild(keepState: false);
-            if (Explorer.Nodes.Count == 0 && !Explorer.IsFiltered) Explorer.ShowFiles(directory, _allFiles);
-            foreach (var issue in Workspace.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
-            RecentWorkspaces.Remove(path); RecentWorkspaces.Insert(0, path); while (RecentWorkspaces.Count > 10) RecentWorkspaces.RemoveAt(10);
-            // The language service is up: say so now rather than after the steps below, which the status used to wait for.
-            ShowWorkspaceStatus(Workspace, refreshingModel: Workspace.Cached);
-            // Independent of one another, so they run together instead of one after another.
-            await Task.WhenAll(Debugger.SetWorkspaceAsync(path), _gitToolOpened ? Features.Git.SetWorkspaceAsync(path) : Task.CompletedTask,
-                RefreshWpfAsync(), TaskList.LoadUserTasksAsync(), FileGroups.LoadAsync());
-            TaskList.RefreshCommand.ExecuteAsync(null).Forget(ReportBackgroundFault);
-            await SaveSettingsAsync();
-        }
-        catch when (!loaded)
-        {
-            // The previous workspace's tabs are closed and its worker is stopped by now, so it must not stay the target of Build, Run and the title.
-            Projects.Clear(); StartupProject = null; Workspace = null;
-            throw;
-        }
-        finally { _loading = false; lease.Dispose(); XamlAnalysis.Request(); if (_contextReloadPending) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); CheckRuntimes(path); }
-        if (Workspace is { Cached: true } cached && !_contextReloadPending) RefreshSavedProjectModelAsync(cached.Path, Configuration).Forget(ReportBackgroundFault);
-    }
+    public Task LoadWorkspaceAsync(string path) => WorkspaceLifecycle.LoadWorkspaceAsync(path);
     // Any other status written meanwhile is newer than the refresh's result and stays.
     private bool _statusShowsModelRefresh;
     partial void OnStatusChanged(string value) => _statusShowsModelRefresh = false;
@@ -318,34 +210,6 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
     {
         Status = $"{Projects.Count} projects · SDK {snapshot.SdkVersion}" + (refreshingModel ? " · refreshing project model…" : "");
         _statusShowsModelRefresh = refreshingModel;
-    }
-    /// <summary>
-    /// Closes every tab before the workspace changes, asking about each unsaved document first. Nothing is closed when any
-    /// answer is Cancel or a save fails.
-    /// </summary>
-    private async Task<bool> CloseAllDocumentsForWorkspaceAsync()
-    {
-        if (Documents.Count == 0) return true;
-        // Until every tab is closed, automatic saving must not write edits that are about to be discarded.
-        using var holdAutoSave = await AutoSave.SuspendAsync();
-        var closing = Documents.ToArray();
-        var discard = new List<EditorViewModel>();
-        foreach (var doc in closing.Where(d => d.State.IsDirty))
-        {
-            var decision = await _dialogs.AskSaveAsync(doc.State.Name);
-            if (decision == SaveDecision.Cancel) return false;
-            if (decision == SaveDecision.Save && !await SaveDocumentAsync(doc)) return false;
-            if (decision == SaveDecision.Discard) discard.Add(doc);
-        }
-        // Do not discard anything until all close decisions have succeeded.
-        foreach (var doc in closing)
-        {
-            if (discard.Contains(doc)) await _store.DeleteRecoveryAsync(doc.State.Path);
-            if (Designer.SourcePath == doc.State.Path) await Designer.CloseAsync();
-            doc.Dispose(); Documents.Remove(doc); _store.Close(doc.State); XamlAnalysis.UntrackDocument(doc.State);
-        }
-        ActiveDocument = null; OnPropertyChanged(nameof(IsWelcomeVisible));
-        return true;
     }
     // A cached start is replaced by a full MSBuild load while the editor stays usable.
     private async Task RefreshSavedProjectModelAsync(string path, string configuration)
@@ -356,7 +220,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             var snapshot = await _workspace.RefreshAsync(new(path, configuration), _lifetime.Token);
             // A workspace opened or reloaded meanwhile restarted the worker and supersedes this result.
-            if (_loading || Workspace?.Path != snapshot.Path || Configuration != configuration) return;
+            if (WorkspaceLifecycle.IsLoading || Workspace?.Path != snapshot.Path || Configuration != configuration) return;
             Workspace = snapshot;
             ApplyWorkspaceProjects(StartupProject?.ProjectPath);
             foreach (var issue in snapshot.Issues) AppendOutput(issue.Severity + ": " + issue.Message);
@@ -379,87 +243,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             if (_projectRefreshAgain) { _projectRefreshAgain = false; ScheduleProjectModelRefresh(); }
         }
     }
-    private void ApplyWorkspaceProjects(string? startupPath)
-    {
-        if (Workspace is null) return;
-        RefreshConfigurations();
-        Projects.Clear(); foreach (var project in Workspace.Projects) Projects.Add(project);
-        StartupProject = Projects.FirstOrDefault(p => p.ProjectPath == startupPath) ?? Projects.FirstOrDefault(p => p.IsExecutable) ?? Projects.FirstOrDefault();
-        _allFiles = _allFiles.Concat(Workspace.Projects.SelectMany(p => p.Files).Where(f => !f.IsGenerated).Select(f => f.Path)).Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        Explorer.Rebuild(keepState: true);
-    }
-    private static IEnumerable<string> EnumerateSourceFiles(string root)
-    {
-        var pending = new Stack<string>(); pending.Push(root);
-        while (pending.TryPop(out var directory))
-        {
-            string[] files; string[] directories;
-            try { files = Directory.GetFiles(directory); directories = Directory.GetDirectories(directory); } catch (UnauthorizedAccessException) { continue; }
-            foreach (var file in files) yield return file;
-            foreach (var child in directories)
-                if (Path.GetFileName(child) is not ("bin" or "obj" or ".git" or ".vs" or "node_modules" or "artifacts") && (File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) pending.Push(child);
-        }
-    }
+    private void ApplyWorkspaceProjects(string? startupPath) => WorkspaceLifecycle.ApplyWorkspaceProjects(startupPath);
     [RelayCommand] private Task RestartWorkspaceAsync() => GuardAsync(async () => { Workspace = await _workspace.RestartAsync(_lifetime.Token); Status = "Language service restarted"; });
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task ReloadWorkspaceAsync(CancellationToken cancel) => GuardAsync(async () =>
-    {
-        if (Workspace == null) return;
-        _contextReloadPending = true;
-        // The operation holding the gate reloads when it ends.
-        if (_operations.TryEnter(cancel) is not { } lease) return;
-        try { await ReloadProjectModelAsync(lease.Token); }
-        finally { lease.Dispose(); }
-    });
-    /// <summary>The caller holds the gate. Only the load can be cancelled: the steps after it are short and leave the editors consistent with the new model.</summary>
-    private async Task ReloadProjectModelAsync(CancellationToken token)
-    {
-        _loading = true;
-        try
-        {
-          do
-          {
-            _contextReloadPending = false;
-            var requestedConfiguration = Configuration;
-            var requestedFramework = TargetFramework;
-            Status = "Updating project context…";
-            var startupPath = StartupProject?.ProjectPath;
-            Workspace = await _workspace.LoadAsync(new(Workspace!.Path, requestedConfiguration, Path.GetExtension(Workspace.Path).Equals(".csproj", StringComparison.OrdinalIgnoreCase) ? requestedFramework : null), token);
-            ApplyWorkspaceProjects(startupPath);
-            foreach (var doc in Documents) await doc.SyncAsync(_lifetime.Token);
-            await RefreshWpfAsync(); Status = "Workspace refreshed";
-            if (requestedConfiguration != Configuration || requestedFramework != TargetFramework) _contextReloadPending = true;
-          } while (_contextReloadPending && !token.IsCancellationRequested);
-        }
-        // A load stops the old worker before starting the new one, so nothing keeps serving the previous model.
-        catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested) { Status = "Reload cancelled. Language services are off until you reload the workspace."; }
-        finally { _loading = false; XamlAnalysis.Request(); }
-    }
-    private async Task RefreshLaunchChoicesAsync()
-    {
-        if (StartupProject == null) return;
-        var path = StartupProject.ProjectPath;
-        var configuration = Configuration;
-        var generation = ++_launchChoicesGeneration;
-        var targets = await _build.DiscoverLaunchTargetsAsync(path, configuration: configuration);
-        if (generation != _launchChoicesGeneration || StartupProject?.ProjectPath != path || Configuration != configuration) return;
-        var previousFramework = TargetFramework; var previousProfile = LaunchProfile;
-        _updatingChoices = true;
-        TargetFrameworks.Clear(); LaunchProfiles.Clear();
-        var target = targets.FirstOrDefault();
-        if (target != null) { foreach (var framework in target.TargetFrameworks) TargetFrameworks.Add(framework); foreach (var profile in target.Profiles) LaunchProfiles.Add(profile.Name); }
-        TargetFramework = previousFramework != null && TargetFrameworks.Contains(previousFramework) ? previousFramework : TargetFrameworks.FirstOrDefault() ?? StartupProject.TargetFramework;
-        LaunchProfile = previousProfile != null && LaunchProfiles.Contains(previousProfile) ? previousProfile : LaunchProfiles.FirstOrDefault();
-        _updatingChoices = false;
-    }
-    private void RefreshConfigurations()
-    {
-        var current = Configuration;
-        var configurations = (Workspace?.Configurations ?? ["Debug", "Release"]).Append(current).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        _updatingChoices = true;
-        Configurations.Clear(); foreach (var configuration in configurations) Configurations.Add(configuration);
-        Configuration = current;
-        _updatingChoices = false;
-    }
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task ReloadWorkspaceAsync(CancellationToken cancel) => GuardAsync(() => WorkspaceLifecycle.ReloadWorkspaceAsync(cancel));
+    private Task RefreshLaunchChoicesAsync() => BuildAndLaunch.RefreshLaunchChoicesAsync();
     [RelayCommand] private Task OpenNodeAsync(ExplorerNode? node) => node switch
     {
         { Kind: ExplorerNodeKind.Dependency } => GuardAsync(() => OpenDependencyAsync(node)),
@@ -473,227 +260,34 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         else if (node.Dependency?.Kind == "Project" && File.Exists(node.Path)) await OpenDocumentAsync(node.Path);
         else Status = node.ToolTip;
     }
-    public async Task OpenDocumentAsync(string path)
-    {
-        if (Path.GetExtension(path).ToLowerInvariant() is ".dll" or ".exe" or ".pdb" or ".png" or ".jpg" or ".jpeg" or ".ico" or ".ttf" or ".otf" or ".zip")
-        { Status = "Manage binary assets through WPF Explorer; this file is not editable source text"; return; }
-        var doc = _store.Find(path) ?? await _store.OpenAsync(path);
-        AddDocument(doc);
-    }
-    private void AddDocument(DocumentState state)
-    {
-        var existing = Documents.FirstOrDefault(d => d.State.Path.Equals(state.Path, StringComparison.OrdinalIgnoreCase));
-        if (existing != null) { ActiveDocument = existing; return; }
-        var vm = new EditorViewModel(state, _workspace, _xaml, _dispatcher, AppendOutput, _xamlResources)
-        {
-            Preferences = Editor,
-            Performance = _performance.Monitor,
-            CodeAssist = CodeAssist.Engine,
-            DataTipEvaluator = (expression, token) => Debugger.IsStopped ? Debugger.EvaluateDataTipAsync(expression, token) : Task.FromResult<string?>(null),
-            XamlCodeActionApplier = ApplyXamlCodeActionAsync,
-            CSharpCodeActionApplier = (editor, action) => GuardAsync(() => ApplyCSharpCodeActionAsync(editor, action)),
-            ShowInlayHints = ShowInlayHints,
-            ShowInlineBlame = ShowInlineBlame,
-            ShowCodeLens = ShowCodeLens,
-            ShowQuickInfo = ShowQuickInfo
-        };
-        state.ContentChanged += (_, _) => AutoSave.Schedule();
-        vm.CodeLensRequested += (entry, position) => _ = GuardAsync(async () =>
-        {
-            ActiveDocument = vm;
-            vm.Navigate(Math.Min(position, vm.State.Content.Length));
-            await FindReferencesCommand.ExecuteAsync(null);
-        });
-        vm.RefreshGitAsync(Features.GitService, _lifetime.Token).Forget(vm.ReportFault);
-        vm.BlameCommitRequested += line => _ = GuardAsync(async () => { await OpenGitCommand.ExecuteAsync(null); Features.Git.ShowCommit(line, vm.GitBase?.RelativePath); });
-        ConfigureXamlContext(vm);
-        vm.BreakpointRequested += line => _ = GuardAsync(() => Debugger.ToggleBreakpointAsync(state.Path, line));
-        vm.ActionRequested += action => _ = GuardAsync(() => HandleEditorActionAsync(vm, action));
-        vm.ContextChanged += () =>
-        {
-            if (ReferenceEquals(vm, ActiveDocument))
-            {
-                UpdateAssistantContext();
-                if (!_navigatingBindingSource && !_revealingDesignerSelection) Designer.SelectSource(vm.State.Path, vm.State.CaretOffset);
-            }
-        };
-        vm.Diagnostics.CollectionChanged += (_, _) => RefreshEditorDiagnostics();
-        vm.OpenRequested += path => _ = GuardAsync(() => OpenDocumentAsync(path));
-        RefreshRelated(vm);
-        Documents.Add(vm); ActiveDocument = vm; Breakpoints.RefreshMarkers();
-        XamlAnalysis.TrackDocument(state);
-        OnPropertyChanged(nameof(IsWelcomeVisible));
-    }
-    public async Task<bool> CloseDocumentAsync(EditorViewModel document, bool discardChanges = false)
-    {
-        using var holdAutoSave = await AutoSave.SuspendAsync();
-        if (discardChanges) await _store.DeleteRecoveryAsync(document.State.Path);
-        else if (document.State.IsDirty)
-        {
-            var decision = await _dialogs.AskSaveAsync(document.State.Name);
-            if (decision == SaveDecision.Cancel) return false;
-            if (decision == SaveDecision.Save && !await SaveDocumentAsync(document)) return false;
-            if (decision == SaveDecision.Discard) await _store.DeleteRecoveryAsync(document.State.Path);
-        }
-        if (Designer.SourcePath == document.State.Path) await Designer.CloseAsync();
-        document.Dispose(); Documents.Remove(document); _store.Close(document.State);
-        // Reconcile saved/discarded text before exposing closed-file index issues again. The watcher may not have reported the save yet.
-        bool indexIsBehind = document.State.Extension == ".xaml" && WpfExplorer.Index?.Texts.TryGetValue(document.State.Path, out var indexedText) == true && indexedText != document.State.Content;
-        if (indexIsBehind) XamlAnalysis.MarkIndexStale(document.State.Path);
-        XamlAnalysis.UntrackDocument(document.State);
-        // Queue the worker close before awaiting index refresh. A reopened
-        // editor must synchronize after this old buffer has been retired.
-        if (document.IsCSharp || document.IsXaml)
-            try { await _workspace.CloseDocumentAsync(document.State.Path); } catch (Exception ex) { AppendOutput("Language document close: " + ex.Message); }
-        if (indexIsBehind) await RefreshWpfAsync();
-        else RefreshEditorDiagnostics();
-        if (ReferenceEquals(ActiveDocument, document)) ActiveDocument = Documents.LastOrDefault();
-        UpdateAssistantContext(); OnPropertyChanged(nameof(IsWelcomeVisible));
-        return true;
-    }
+    public Task OpenDocumentAsync(string path) => DocumentSessions.OpenDocumentAsync(path);
+    private void AddDocument(DocumentState state) => DocumentSessions.AddDocument(state);
+    public Task<bool> CloseDocumentAsync(EditorViewModel document, bool discardChanges = false) => DocumentSessions.CloseDocumentAsync(document, discardChanges);
     [RelayCommand] private Task CloseActiveAsync() => GuardAsync(async () => { if (ActiveWorkbench is { } workbench) WorkbenchCloseRequested?.Invoke(workbench); else if (ActiveDocument != null) await CloseDocumentAsync(ActiveDocument); });
     private bool CanSaveActiveDocument() => ActiveDocument != null;
     [RelayCommand(CanExecute = nameof(CanSaveActiveDocument))] private Task SaveAsync() => GuardAsync(async () => { if (ActiveDocument != null) await SaveDocumentAsync(ActiveDocument); });
     [RelayCommand] private Task SaveAllAsync() => GuardAsync(async () => await SaveAllDocumentsAsync());
-    private async Task<bool> SaveDocumentAsync(EditorViewModel doc)
-    {
-        if (doc.IsReadOnly) { Status = "Generated source snapshots are read-only"; return !doc.State.IsDirty; }
-        try
-        {
-            TidyBeforeSave(doc);
-            await _store.SaveAsync(doc.State);
-            Messenger.Send(new DocumentSavedMessage(doc.State));
-            XamlAnalysis.RequestKeepingResults();
-            Status = doc.State.IsDirty ? "The document changed while saving. Save again to include the latest edits." : "Saved " + doc.State.Name;
-            return !doc.State.IsDirty;
-        }
-        catch (ExternalFileChangedException)
-        {
-            if (!await _dialogs.ConfirmAsync("File changed outside WpfStudio", $"Overwrite the external changes to {doc.State.Name} with the editor content?")) return false;
-            await _store.SaveAsync(doc.State, true);
-            Messenger.Send(new DocumentSavedMessage(doc.State));
-            XamlAnalysis.RequestKeepingResults();
-            if (doc.State.IsDirty) Status = "The document changed while saving. Save again to include the latest edits.";
-            return !doc.State.IsDirty;
-        }
-        catch (Exception ex) { await _dialogs.ShowErrorAsync("Save failed", ex.Message); return false; }
-    }
-    private async Task<bool> SaveAllDocumentsAsync()
-    {
-        foreach (var doc in Documents.Where(d => d.State.IsDirty || d.State.DiskHash == null).ToArray()) if (!await SaveDocumentAsync(doc)) return false;
-        if (Documents.Any(d => d.State.IsDirty)) { Status = "Documents changed while saving. Save again before building or debugging."; return false; }
-        return true;
-    }
-    [RelayCommand] private Task ReloadDocumentAsync() => GuardAsync(async () => { if (ActiveDocument == null) return; if (ActiveDocument.State.IsDirty && !await _dialogs.ConfirmAsync("Reload document", "Discard editor changes and reload this file from disk?")) return; await _store.ReloadAsync(ActiveDocument.State); ExternalChanges.Forget(ActiveDocument); });
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task BuildAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Build, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RestoreAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Restore, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RebuildAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Rebuild, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task CleanAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Clean, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RunAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Run, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task TestAsync(CancellationToken cancel) => RunBuildAsync(BuildOperation.Test, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task BuildSelectedAsync(CancellationToken cancel) => RunSelectedBuildAsync(BuildOperation.Build, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RebuildSelectedAsync(CancellationToken cancel) => RunSelectedBuildAsync(BuildOperation.Rebuild, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task CleanSelectedAsync(CancellationToken cancel) => RunSelectedBuildAsync(BuildOperation.Clean, cancel);
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RestoreSelectedAsync(CancellationToken cancel) => RunSelectedBuildAsync(BuildOperation.Restore, cancel);
+    private Task<bool> SaveDocumentAsync(EditorViewModel doc) => DocumentSessions.SaveDocumentAsync(doc);
+    private Task<bool> SaveAllDocumentsAsync() => DocumentSessions.SaveAllDocumentsAsync();
+    [RelayCommand] private Task ReloadDocumentAsync() => GuardAsync(() => DocumentSessions.ReloadActiveDocumentAsync());
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task BuildAsync(CancellationToken cancel) => BuildAndLaunch.RunBuildAsync(BuildOperation.Build, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RestoreAsync(CancellationToken cancel) => BuildAndLaunch.RunBuildAsync(BuildOperation.Restore, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RebuildAsync(CancellationToken cancel) => BuildAndLaunch.RunBuildAsync(BuildOperation.Rebuild, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task CleanAsync(CancellationToken cancel) => BuildAndLaunch.RunBuildAsync(BuildOperation.Clean, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RunAsync(CancellationToken cancel) => BuildAndLaunch.RunBuildAsync(BuildOperation.Run, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task TestAsync(CancellationToken cancel) => BuildAndLaunch.RunBuildAsync(BuildOperation.Test, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task BuildSelectedAsync(CancellationToken cancel) => BuildAndLaunch.RunSelectedBuildAsync(BuildOperation.Build, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RebuildSelectedAsync(CancellationToken cancel) => BuildAndLaunch.RunSelectedBuildAsync(BuildOperation.Rebuild, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task CleanSelectedAsync(CancellationToken cancel) => BuildAndLaunch.RunSelectedBuildAsync(BuildOperation.Clean, cancel);
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanRunWorkspaceOperation))] private Task RestoreSelectedAsync(CancellationToken cancel) => BuildAndLaunch.RunSelectedBuildAsync(BuildOperation.Restore, cancel);
     /// <summary>The toolbar's one Stop button: it cancels whichever operation holds the gate, including a workspace load, which no command started.</summary>
-    [RelayCommand(CanExecute = nameof(IsBusy))] private void CancelOperation() { _operations.Cancel(); Status = "Cancelling…"; }
-    /// <summary>Builds the solution or project chosen in Solution Explorer instead of the whole workspace.</summary>
-    private Task RunSelectedBuildAsync(BuildOperation operation, CancellationToken cancel)
-    {
-        if (Explorer.SelectedNode is { CanBuild: true } node) return RunBuildAsync(operation, cancel, node.Path);
-        Status = "Select a solution or project in Solution Explorer";
-        return Task.CompletedTask;
-    }
-    /// <summary>The opened solution, for a project built from it.</summary>
-    private string? SolutionPathFor(string path) => Workspace is { } workspace && path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-        && !workspace.Path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ? workspace.Path : null;
-    private Task RunBuildAsync(BuildOperation operation, CancellationToken cancel, string? target = null) => GuardAsync(async () =>
-    {
-        if (Workspace == null || _operations.TryEnter(cancel) is not { } lease) return;
-        ToolRequested?.Invoke(Workbenches.Output); Output = "";
-        var refreshModel = false;
-        try
-        {
-            if (!await SaveAllDocumentsAsync()) return;
-            var path = target ?? (operation == BuildOperation.Run ? StartupProject?.ProjectPath ?? Workspace.Path : Workspace.Path);
-            var label = target == null ? operation.ToString() : $"{operation} {Path.GetFileNameWithoutExtension(path)}";
-            Status = label + "…";
-            // The selected framework belongs to the startup project; another project builds each of its frameworks.
-            var framework = Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase)
-                && (target == null || path.Equals(StartupProject?.ProjectPath, StringComparison.OrdinalIgnoreCase)) ? TargetFramework : null;
-            using var progress = CreateBuildProgress();
-            var result = await _build.RunAsync(new(path, operation, Configuration, framework, LaunchProfile, SolutionPath: SolutionPathFor(path)), progress, lease.Token);
-            progress.Flush();
-            Status = result.Cancelled ? "Cancelled" : result.ExitCode == 0 ? label + " succeeded" : label + $" failed (exit {result.ExitCode})";
-            refreshModel = result.ExitCode == 0 && operation is BuildOperation.Build or BuildOperation.Rebuild or BuildOperation.Restore;
-        }
-        finally { EndOperation(lease); }
-        // Restore and build write the assets and generated sources the project model reads. The model refreshes in place, as for
-        // an edited project file: the language service keeps answering, the gate is free at once, and the build's result stays shown.
-        // Reloading inside the gate restarted the worker and kept the whole shell busy for a full MSBuild load after every build.
-        if (refreshModel) RefreshProjectModelAsync(status: null).Forget(ReportBackgroundFault);
-    });
+    [RelayCommand(CanExecute = nameof(IsBusy))] private void CancelOperation() { WorkspaceLifecycle.Cancel(); Status = "Cancelling…"; }
     // Continue is not a workspace operation, so F5 keeps working while, say, a build runs beside a paused session.
     private bool CanDebug() => !IsBusy || Debugger.IsStopped;
-    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanDebug))] private Task DebugAsync(CancellationToken cancel) => GuardAsync(async () =>
-    {
-        if (Debugger.IsStopped) { await Debugger.ContinueCommand.ExecuteAsync(null); return; }
-        if (Debugger.IsActive) { Status = "The debugger is already running"; return; }
-        if (IsBusy || StartupProject == null) return;
-        if (ProjectDiscovery.TargetsNetFramework(StartupProject, TargetFramework))
-        {
-            // netcoredbg debugs .NET (Core) processes only; the .NET Framework runtime needs Visual Studio's debugger.
-            if (await _dialogs.ConfirmAsync("Run without debugging", $"{StartupProject.Name} targets .NET Framework. The bundled debugger supports .NET 5 and later only. Run it without debugging instead?"))
-                await ExecuteWhenAvailableAsync(RunCommand);
-            else Status = "Debugging .NET Framework applications isn't supported. Use Run without debugging (Ctrl+F5).";
-            return;
-        }
-        if (!await EnsureDebuggerAsync()) return;
-        // The install prompt keeps the dispatcher running, so a build may have started behind it.
-        if (_operations.TryEnter(cancel) is not { } lease) { Status = "Wait for the current workspace operation to finish"; return; }
-        ToolRequested?.Invoke(Workbenches.Debugger);
-        try
-        {
-            if (!await SaveAllDocumentsAsync()) return;
-            var project = StartupProject;
-            var configuration = Configuration;
-            var framework = TargetFramework;
-            var profile = LaunchProfile;
-            Status = "Building for debug…";
-            using var progress = CreateBuildProgress();
-            var result = await _build.RunAsync(new(project.ProjectPath, BuildOperation.Build, configuration, framework, SolutionPath: SolutionPathFor(project.ProjectPath)), progress, lease.Token);
-            progress.Flush();
-            if (result.ExitCode != 0 || result.Cancelled) { Status = "Debug launch cancelled: build did not succeed"; return; }
-            var launch = await _build.ResolveLaunchAsync(project.ProjectPath, configuration, framework, profile, lease.Token);
-            await Debugger.LaunchAsync(new DebugLaunchConfiguration(launch.Program, launch.WorkingDirectory, launch.Arguments, launch.Environment), lease.Token);
-            Status = "Debugging " + project.Name;
-        }
-        finally { EndOperation(lease); }
-    });
-    /// <summary>Offers to install the debug adapter when it is missing; false when debugging cannot start.</summary>
-    private async Task<bool> EnsureDebuggerAsync()
-    {
-        if (!Debugger.IsAdapterMissing) return true;
-        ToolRequested?.Invoke(Workbenches.Debugger);
-        Status = "Installing the debugger…";
-        var ready = await Debugger.EnsureAdapterAsync(() => _dialogs.ConfirmAsync("Install the debugger",
-            $"Debugging needs {Debugger.AdapterDescription}, which isn't installed. Download it now (about 5 MB from GitHub), verify its checksum and install it in your WpfStudio profile?"));
-        Status = ready ? "Debugger installed" : "Debugging needs the debugger. Choose Install debugger in the Debugger pane.";
-        return ready;
-    }
-    private BufferedBuildProgress CreateBuildProgress()
-    {
-        _buildDiagnostics.Clear(); RefreshEditorDiagnostics();
-        return new(_dispatcher, batch =>
-        {
-            AppendOutput(string.Join(Environment.NewLine, batch.Select(e => e.Text)));
-            foreach (var entry in batch.Where(e => e.Diagnostic != null)) { if (_buildDiagnostics.Count >= 2000) _buildDiagnostics.RemoveAt(0); _buildDiagnostics.Add(entry.Diagnostic!); }
-            RefreshEditorDiagnostics();
-        });
-    }
+    [RelayCommand(IncludeCancelCommand = true, CanExecute = nameof(CanDebug))] private Task DebugAsync(CancellationToken cancel) => BuildAndLaunch.DebugAsync(cancel);
     private void RefreshEditorDiagnostics()
     {
-        Diagnostics.Clear(); foreach (var item in CurrentEditorDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(_buildDiagnostics).Concat(Tasks.Diagnostics).Distinct()) Diagnostics.Add(item);
+        Diagnostics.ReplaceAll(CurrentEditorDiagnostics().Concat(XamlAnalysis.CurrentProjectDiagnostics()).Concat(CurrentWpfIndexDiagnostics()).Concat(BuildAndLaunch.BuildDiagnostics).Concat(Tasks.Diagnostics).Distinct());
         Problems.Refresh();
         RefreshWpfIssues();
     }
@@ -719,11 +313,7 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         {
             var document = Documents.FirstOrDefault(d => d.State.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
             // The same bookkeeping as closing the tab: otherwise the designer stays on a file that no longer exists and XAML analysis keeps its text as an overlay.
-            if (document != null)
-            {
-                if (Designer.SourcePath == document.State.Path) await Designer.CloseAsync();
-                document.Dispose(); Documents.Remove(document); XamlAnalysis.UntrackDocument(document.State);
-            }
+            if (document != null) await DocumentSessions.UntrackAndDisposeDocumentAsync(document);
             await _workspace.CloseDocumentAsync(path);
         }
         if (ActiveDocument != null && !Documents.Contains(ActiveDocument)) ActiveDocument = Documents.LastOrDefault();
@@ -770,6 +360,17 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         doc.Navigate(Math.Min(text.Length, offset + Math.Max(0, column - 1)));
         if (execution) { foreach (var other in Documents) other.ExecutionLine = -1; doc.ExecutionLine = line; }
     }
+    private bool _wpfRefreshScheduled;
+    private void ScheduleWpfRefresh(WorkspaceSnapshot workspace)
+    {
+        if (_wpfRefreshScheduled || _disposed) return;
+        _wpfRefreshScheduled = true;
+        Task.Delay(150, _lifetime.Token).ContinueWith(_ => _dispatcher.Post(() =>
+        {
+            _wpfRefreshScheduled = false;
+            if (!_disposed && ReferenceEquals(workspace, Workspace)) RefreshWpfAsync().Forget(ReportBackgroundFault);
+        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default).Forget();
+    }
     [RelayCommand] private Task RefreshWpfAsync() => GuardAsync(async () =>
     {
         if (Workspace == null) return;
@@ -791,13 +392,17 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
             XamlAnalysis.Schedule();
             return;
         }
+        // Revisions kept changing across all three attempts; reschedule once after a brief settle instead of dropping the refresh.
+        ScheduleWpfRefresh(workspace);
     });
     [RelayCommand] private Task RenameResourceAsync() => GuardAsync(async () =>
     {
-        if (WpfExplorer.Index == null || WpfExplorer.SelectedItem?.Key == null) { Status = "Select a keyed resource in WPF Explorer"; return; }
-        var item = WpfExplorer.SelectedItem; var declaration = WpfExplorer.Index.Resources.First(r => r.Path == item.Path && r.Key == item.Key && r.Line == item.Line);
+        if (WpfExplorer.Index is not { } index || WpfExplorer.SelectedItem is not { Key: not null } item) { Status = "Select a keyed resource in WPF Explorer"; return; }
+        var declaration = index.Resources.FirstOrDefault(r => r.Path == item.Path && r.Key == item.Key && r.Line == item.Line);
+        if (declaration == null) { Status = "The selected resource is no longer in the WPF index. Refresh the index and try again."; return; }
         var name = await _dialogs.PromptAsync("Rename resource", "New resource key:", declaration.Key); if (name == null) return;
-        var changes = _indexer.RenameResource(WpfExplorer.Index, declaration, name);
+        if (!ReferenceEquals(index, WpfExplorer.Index)) { Status = "The WPF index changed while prompting. Retry the rename."; return; }
+        var changes = _indexer.RenameResource(index, declaration, name);
         if (await PreviewAsync("Rename resource", changes, "Only references resolved to this declaration are changed. Code-generated keys and unresolved runtime references require review.")) { await ApplyChangesAsync(changes); await RefreshWpfAsync(); }
     });
     [RelayCommand] private Task SwitchRelatedAsync() => GuardAsync(async () =>
@@ -961,10 +566,10 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         }
         // Closing for good: documents whose edits were discarded must never be saved afterwards.
         AutoSave.Stop();
-        _operations.Cancel();
+        WorkspaceLifecycle.Cancel();
         LayoutSaveRequested?.Invoke(); await SaveSettingsAsync();
         await Database.CompleteCloseAsync();
-        _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
+        _lifetime.Cancel(); await DocumentSessions.StopRecoveryLoopAsync();
         foreach (var doc in Documents) await _store.DeleteRecoveryAsync(doc.State.Path);
         return true;
     }
@@ -986,14 +591,13 @@ public sealed partial class ShellViewModel : ObservableObject, IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
         Messenger.UnregisterAll(this); _workspace.WorkerExited -= WorkerExited;
-        XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); Editor.PropertyChanged -= EditorPreferenceChanged; TaskList.Dispose(); Tasks.Dispose(); Palette.Dispose();
-        _settingsSave?.Cancel(); _settingsSave?.Dispose(); _settingsSave = null;
+        XamlAnalysis.Dispose(); ExternalChanges.Dispose(); AutoSave.Dispose(); DisposeSettings(); DisposeProjectRefresh(); TaskList.Dispose(); Tasks.Dispose(); Palette.Dispose();
         FileGroups.Picker.PropertyChanged -= OverlayFormChanged; Breakpoints.Settings.PropertyChanged -= OverlayFormChanged;
         Breakpoints.Dispose();
         Features.Dispose();
         Updates.Dispose();
-        _operations.Cancel(); _lifetime.Cancel(); if (_recoveryLoop != null) await _recoveryLoop;
-        foreach (var document in Documents) document.Dispose();
+        WorkspaceLifecycle.Cancel(); _lifetime.Cancel(); await DocumentSessions.StopRecoveryLoopAsync();
+        DocumentSessions.DisposeAllDocuments();
         // Dispose UI-bound commands while the shell still owns its dispatcher
         // context; DI may continue its remaining asynchronous disposal off-thread.
         await Database.DisposeAsync();

@@ -23,8 +23,9 @@ public static class CSharpRefactorings
             var unused = semantic.GetDiagnostics(cancellationToken: token).Where(d => d.Id == "CS8019").Select(d => d.Location.SourceSpan).ToArray();
             var kept = root.Usings.Where(u => !unused.Any(span => u.Span.Contains(span))).OrderByDescending(u => !u.GlobalKeyword.IsKind(SyntaxKind.None))
                 .ThenBy(u => u.Alias != null).ThenBy(u => u.StaticKeyword.IsKind(SyntaxKind.StaticKeyword))
-                .ThenBy(u => u.Name?.ToString().StartsWith("System", StringComparison.Ordinal) != true)
-                .ThenBy(u => u.Name?.ToString(), StringComparer.Ordinal).ToArray();
+                .ThenBy(u => u.Name?.ToString() is not { } name || (name != "System" && !name.StartsWith("System.", StringComparison.Ordinal)))
+                .ThenBy(u => u.Name?.ToString(), StringComparer.Ordinal)
+                .Select(u => u.WithAdditionalAnnotations(Formatter.Annotation)).ToArray();
             changed = root.WithUsings(SyntaxFactory.List(kept));
         }
         else if (action is "UseVar" or "UseExplicitType")
@@ -74,7 +75,7 @@ public static class CSharpRefactorings
                 throw new InvalidOperationException("This edit would change the local's type or require a target type. Keep the current declaration.");
         }
         else throw new ArgumentException("Unknown C# refactoring.", nameof(action));
-        return await Formatter.FormatAsync(document.WithSyntaxRoot(changed), cancellationToken: token).ConfigureAwait(false);
+        return await Formatter.FormatAsync(document.WithSyntaxRoot(changed), Formatter.Annotation, cancellationToken: token).ConfigureAwait(false);
     }
 
     private static bool ContainsAnonymousType(ITypeSymbol type) => type.IsAnonymousType || (type switch

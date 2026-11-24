@@ -19,6 +19,7 @@ public sealed record PipelineViewChoice(PipelineView View, string Label);
 public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObject, IDisposable
 {
     private const int ListSize = 50;
+    private readonly IUiDispatcher _dispatcher = (host as DevOpsViewModel)?.Dispatcher ?? DevOpsViewModel.ResolveUiDispatcher();
     private readonly LatestLoad _list = new(), _run = new(), _log = new();
     private CancellationTokenSource? _poll;
     private int _loadedVersion = -1;
@@ -56,6 +57,7 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
 
     partial void OnSelectedViewChanged(PipelineViewChoice? value)
     {
+        RunPipelineCommand.NotifyCanExecuteChanged();
         if (_quiet) return;
         PipelineFilter = null;
         LoadList();
@@ -74,7 +76,9 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
     internal static string Displayed(string log)
     {
         if (log.Length <= LogDisplayLimit) return log;
-        var start = log.IndexOf('\n', log.Length - LogDisplayLimit) + 1;
+        var cutoff = log.Length - LogDisplayLimit;
+        var newline = log.IndexOf('\n', cutoff);
+        var start = newline >= 0 ? newline + 1 : cutoff;
         return $"… the first {start:N0} characters are left out; open the run on the web for the whole log.\n" + log[start..];
     }
     partial void OnIsLoadingChanged(bool value) => OnPropertyChanged(nameof(EmptyText));
@@ -268,7 +272,7 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
         var seconds = host.Settings.RefreshSeconds;
         if (seconds <= 0) return;
         var poll = _poll = new CancellationTokenSource();
-        PollAsync(provider, run, TimeSpan.FromSeconds(Math.Max(5, seconds)), poll.Token).Forget(host.ReportError);
+        PollAsync(provider, run, TimeSpan.FromSeconds(Math.Max(5, seconds)), poll.Token).ForgetOnUi(_dispatcher, host.ReportError);
     }
 
     private void StopPolling()
@@ -441,7 +445,6 @@ public sealed partial class PipelinesViewModel(IDevOpsHost host) : ObservableObj
     }
 
     partial void OnSelectedDefinitionChanged(DevOpsPipeline? value) => RunPipelineCommand.NotifyCanExecuteChanged();
-    partial void OnSelectedViewChanging(PipelineViewChoice? value) => RunPipelineCommand.NotifyCanExecuteChanged();
     partial void OnPipelineFilterChanged(DevOpsPipeline? value) => RunPipelineCommand.NotifyCanExecuteChanged();
 
     private void Quietly(Action action)

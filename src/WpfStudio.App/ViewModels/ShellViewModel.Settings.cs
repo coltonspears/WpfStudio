@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
+using WpfStudio.Core.Threading;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -13,7 +14,7 @@ public sealed partial class ShellViewModel
 {
     public const string AppearancePage = "Appearance", EditorPage = "Editor", IntelligencePage = "Intelligence",
         FilesPage = "Files", DebuggingPage = "Debugging", NetworkPage = "Network", AssistantPage = "Assistant", ExperimentalPage = "Experimental", ShortcutsPage = "Shortcuts";
-    private CancellationTokenSource? _settingsSave;
+    private SerialDebouncedWork? _settingsSave;
 
     public EditorPreferences Editor { get; }
     public CodeAssistPreferences CodeAssist { get; }
@@ -65,13 +66,27 @@ public sealed partial class ShellViewModel
 
     private void InitializeSettings()
     {
+        _settingsSave = new(_lifetime.Token);
         Editor.PropertyChanged += EditorPreferenceChanged;
-        CodeAssist.PropertyChanged += (_, args) => { if (args.PropertyName != nameof(CodeAssistPreferences.Status)) ScheduleSettingsSave(); };
+        CodeAssist.PropertyChanged += CodeAssistPreferenceChanged;
         Network.Changed += ScheduleSettingsSave;
-        Debugger.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName is nameof(Debugger.JustMyCode) or nameof(Debugger.StepFiltering) or nameof(Debugger.StopAtEntry)) ScheduleSettingsSave();
-        };
+        Debugger.PropertyChanged += DebuggerPreferenceChanged;
+    }
+    private void DisposeSettings()
+    {
+        Editor.PropertyChanged -= EditorPreferenceChanged;
+        CodeAssist.PropertyChanged -= CodeAssistPreferenceChanged;
+        Network.Changed -= ScheduleSettingsSave;
+        Debugger.PropertyChanged -= DebuggerPreferenceChanged;
+        _settingsSave?.Dispose(); _settingsSave = null;
+    }
+    private void CodeAssistPreferenceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName != nameof(CodeAssistPreferences.Status)) ScheduleSettingsSave();
+    }
+    private void DebuggerPreferenceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is nameof(Debugger.JustMyCode) or nameof(Debugger.StepFiltering) or nameof(Debugger.StopAtEntry)) ScheduleSettingsSave();
     }
     private void LoadDebuggingSettings(WpfStudio.Core.DebuggingSettings settings)
     {
@@ -94,14 +109,12 @@ public sealed partial class ShellViewModel
     // Settings are written after a short pause, so dragging through font sizes writes once.
     private void ScheduleSettingsSave()
     {
-        if (!_initialized) return;
-        _settingsSave?.Cancel(); _settingsSave?.Dispose();
-        var pending = _settingsSave = new();
-        Task.Delay(600, pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
+        if (!_initialized || _disposed) return;
+        (_settingsSave ??= new(_lifetime.Token)).ScheduleAsync(TimeSpan.FromMilliseconds(600), token => _dispatcher.Post(() =>
         {
-            if (pending.IsCancellationRequested || _disposed) return;
+            if (token.IsCancellationRequested || _disposed) return;
             _ = GuardAsync(SaveSettingsAsync);
-        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default).Forget();
+        })).Forget();
     }
 
     /// <summary>Applies the whitespace settings to a document before an explicit save.</summary>

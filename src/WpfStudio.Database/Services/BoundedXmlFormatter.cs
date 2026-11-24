@@ -3,7 +3,7 @@ using System.Xml;
 
 namespace WpfStudio.Database.Services;
 
-internal static class BoundedXmlFormatter
+public static class BoundedXmlFormatter
 {
     public static (string Text, bool Truncated) Read(XmlReader reader, int maximumCharacters)
     {
@@ -36,17 +36,27 @@ internal static class BoundedXmlFormatter
                     case XmlNodeType.CDATA:
                     case XmlNodeType.Whitespace:
                     case XmlNodeType.SignificantWhitespace: CopyValue(); break;
-                    case XmlNodeType.Comment: writer.WriteRaw("<!--"); CopyValue(); writer.WriteRaw("-->"); break;
+                    case XmlNodeType.Comment: writer.WriteRaw("<!--"); CopyValue(raw: true); writer.WriteRaw("-->"); break;
                 }
                 writer.Flush();
             }
             return (output.ToString(), false);
 
-            void CopyValue()
+            void CopyValue(bool raw = false)
             {
-                if (!reader.CanReadValueChunk) { writer.WriteString(reader.Value); return; }
+                if (!reader.CanReadValueChunk)
+                {
+                    if (raw) writer.WriteRaw(reader.Value);
+                    else writer.WriteString(reader.Value);
+                    return;
+                }
                 int count;
-                while ((count = reader.ReadValueChunk(chunk, 0, chunk.Length)) > 0) { writer.WriteChars(chunk, 0, count); writer.Flush(); }
+                while ((count = reader.ReadValueChunk(chunk, 0, chunk.Length)) > 0)
+                {
+                    if (raw) writer.WriteRaw(chunk, 0, count);
+                    else writer.WriteChars(chunk, 0, count);
+                    writer.Flush();
+                }
             }
         }
         catch (DisplayLimitException) { return (output.ToString(), true); }

@@ -52,13 +52,14 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
         }
         var directories = allDirectories.Where(directory => !Nested(directory)).ToArray();
         _roots = directories.Take(MaximumDirectories).ToArray();
-        _rootPrefixes = _roots.Select(root => root + Path.DirectorySeparatorChar).ToArray();
+        _rootPrefixes = _roots.Select(DirectoryPrefix).ToArray();
         bool partial = candidates.Length > MaximumFiles || directories.Length > MaximumDirectories;
         foreach (var directory in directories.Take(MaximumDirectories))
         {
+            FileSystemWatcher? watcher = null;
             try
             {
-                var watcher = new FileSystemWatcher(directory)
+                watcher = new FileSystemWatcher(directory)
                 {
                     IncludeSubdirectories = true,
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
@@ -68,9 +69,11 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
                 watcher.Renamed += Renamed; watcher.Error += Error;
                 watcher.EnableRaisingEvents = true;
                 _watchers.Add(watcher);
+                watcher = null;
             }
             catch (Exception exception) when (exception is IOException or ArgumentException or UnauthorizedAccessException)
             { partial = true; }
+            finally { watcher?.Dispose(); }
         }
         // Ancestor build configuration is watched at its exact directory only;
         // never turn an ancestor (potentially a drive root) into a recursive watch.
@@ -80,16 +83,19 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
         foreach (var group in contexts.Take(32))
         {
             var exact = group.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            FileSystemWatcher? watcher = null;
             try
             {
-                var watcher = new FileSystemWatcher(group.Key) { IncludeSubdirectories = false,
+                watcher = new FileSystemWatcher(group.Key) { IncludeSubdirectories = false,
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size };
                 FileSystemEventHandler change = (_, args) => { if (exact.Contains(args.FullPath)) Notify(args.FullPath, true); };
                 watcher.Changed += change; watcher.Created += change; watcher.Deleted += change;
                 watcher.Renamed += (_, args) => { if (exact.Contains(args.OldFullPath) || exact.Contains(args.FullPath)) Notify(args.FullPath, true); };
                 watcher.Error += Error; watcher.EnableRaisingEvents = true; _watchers.Add(watcher);
+                watcher = null;
             }
             catch (Exception exception) when (exception is IOException or ArgumentException or UnauthorizedAccessException) { partial = true; }
+            finally { watcher?.Dispose(); }
         }
         if (partial) Status = "Some source directories could not be watched; periodic reconciliation remains active.";
         // Reconciliation also covers dropped notifications and newly recreated
@@ -141,14 +147,15 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
         }
     }
     private static bool IsSource(string path) => Path.GetExtension(path).ToLowerInvariant() is ".cs" or ".xaml";
+    internal static string DirectoryPrefix(string directory) => Path.EndsInDirectorySeparator(directory) ? directory : directory + Path.DirectorySeparatorChar;
     private bool IsKnownSourceDirectory(string path)
     {
         // Built once, not once per known file: this runs for every file created or deleted anywhere under the watched folders.
-        var prefix = path + Path.DirectorySeparatorChar;
+        var prefix = DirectoryPrefix(path);
         return _paths.Any(source => source.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
     private static bool IsProjectShape(string path) => Path.GetExtension(path).ToLowerInvariant() is ".csproj" or ".props" or ".targets" or ".sln" or ".slnx";
-    private bool Ignored(string path)
+    internal bool Ignored(string path)
     {
         if (_paths.Contains(path)) return false;
         var root = Array.FindIndex(_rootPrefixes, prefix => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
@@ -164,7 +171,7 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
 
     private const int MembershipScanEntries = 60_000;
     private readonly DateTime _startedUtc = DateTime.UtcNow;
-    private DateTime _shapeCheckedUtc = DateTime.UtcNow;
+    private long _shapeCheckedUtcTicks = DateTime.UtcNow.Ticks;
 
     /// <summary>
     /// True when a known file is gone, a source file was created since watching began, or a project file was written since
@@ -172,8 +179,7 @@ public sealed class KnownSourceFileWatcher : IKnownSourceWatcher
     /// </summary>
     internal bool MembershipChanged()
     {
-        var since = _shapeCheckedUtc;
-        _shapeCheckedUtc = DateTime.UtcNow;
+        var since = new DateTime(Interlocked.Exchange(ref _shapeCheckedUtcTicks, DateTime.UtcNow.Ticks), DateTimeKind.Utc);
         try
         {
             if (_paths.Any(path => !File.Exists(path))) return true;

@@ -46,11 +46,16 @@ public sealed partial class TerminalSurface : ContentControl
     private void Attach() => AttachAsync().Forget(fault => _ = Dispatcher.BeginInvoke(() => Content = new TextBlock { Text = "Terminal renderer stopped: " + fault.Message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) }));
     private async Task AttachAsync()
     {
-        if (Session is not { } session) return;
+        if (Session is not { } session || session.IsClosed) return;
         Renderer? renderer = null;
         try
         {
             renderer = RendererFor(session, Dispatcher);
+            if (session.IsClosed)
+            {
+                ForgetRenderer(session, renderer)?.Dispose();
+                return;
+            }
             if (renderer.Owner is { } previous && previous != this) previous.Content = null;
             renderer.Owner = this;
             Content = renderer.Browser;
@@ -91,8 +96,18 @@ public sealed partial class TerminalSurface : ContentControl
         private int disposed;
         public TerminalSurface? Owner { get; set; }
         public WebView2 Browser { get; } = new();
-        public Renderer(ConPtySession session, System.Windows.Threading.Dispatcher dispatcher) { this.session = session; this.dispatcher = dispatcher; session.Closed += OnSessionClosed; }
-        private void OnSessionClosed() => _ = dispatcher.BeginInvoke(() => ForgetRenderer(session)?.Dispose());
+        public Renderer(ConPtySession session, System.Windows.Threading.Dispatcher dispatcher)
+        {
+            this.session = session;
+            this.dispatcher = dispatcher;
+            session.Closed += OnSessionClosed;
+            if (session.IsClosed) OnSessionClosed();
+        }
+        private void OnSessionClosed() => _ = dispatcher.BeginInvoke(() =>
+        {
+            ForgetRenderer(session, this);
+            Dispose();
+        });
         public Task InitializeAsync() => initialization ??= InitializeCoreAsync();
         private async Task InitializeCoreAsync()
         {
@@ -132,6 +147,7 @@ public sealed partial class TerminalSurface : ContentControl
         private async Task SendInputAsync(string value) { try { await session.WriteAsync(value, lifetime.Token); } catch (Exception ex) when (ex is OperationCanceledException or System.Threading.Channels.ChannelClosedException) { } }
         private async Task PumpAsync()
         {
+            var completedNormally = false;
             try
             {
                 await foreach (var chunk in session.Output.ReadAllAsync(lifetime.Token))
@@ -142,10 +158,20 @@ public sealed partial class TerminalSurface : ContentControl
                     await acknowledgement.Task.WaitAsync(TimeSpan.FromSeconds(30), lifetime.Token); // xterm acknowledges after parsing; pipe backpressure is bounded.
                 }
                 await dispatcher.InvokeAsync(() => Browser.CoreWebView2?.PostWebMessageAsJson("{\"type\":\"ended\"}"));
+                completedNormally = true;
             }
             catch (Exception) when (lifetime.IsCancellationRequested) { }
             catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or TimeoutException or System.Runtime.InteropServices.COMException)
             { await FailAsync("Terminal renderer stopped responding. " + ex.Message); }
+            finally
+            {
+                if (!completedNormally || session.IsClosed || Volatile.Read(ref disposed) != 0)
+                {
+                    var forgotten = ForgetRenderer(session, this);
+                    if (forgotten is not null || session.IsClosed)
+                        _ = dispatcher.BeginInvoke(Dispose);
+                }
+            }
         }
         private void ProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs args)
         {
@@ -164,7 +190,8 @@ public sealed partial class TerminalSurface : ContentControl
             {
                 await dispatcher.InvokeAsync(() =>
                 {
-                    ForgetRenderer(session)?.Dispose();
+                    ForgetRenderer(session, this);
+                    Dispose();
                     if (owner is not null && ReferenceEquals(owner.Session, session))
                         owner.Content = new TextBlock { Text = message + "\nClose this terminal and create a new session.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(16) };
                 });

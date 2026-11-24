@@ -13,6 +13,7 @@ public sealed partial class AzureDevOpsProvider : IDevOpsProvider
     private readonly DevOpsRestClient _rest;
     private readonly AzureDevOpsOrganization _organization;
     private readonly string _apiVersion;
+    private readonly Lock _cacheGate = new();
     private (DateTimeOffset At, Task<bool> Valid)? _tokenCheck;
     private Task<DevOpsIdentity>? _me;
     private Task<JsonElement>? _repository;
@@ -43,9 +44,15 @@ public sealed partial class AzureDevOpsProvider : IDevOpsProvider
 
     public Task<DevOpsIdentity> GetCurrentUserAsync(CancellationToken cancellationToken)
     {
-        // Shared while it runs and once it succeeded; a failed read (a refused token) is asked again next time.
-        if (_me is { IsFaulted: false, IsCanceled: false } known) return known;
-        return _me = ReadCurrentUserAsync(cancellationToken);
+        if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<DevOpsIdentity>(cancellationToken);
+        // Shared while it runs and once it succeeded; a failed or cancelled read is asked again next time.
+        Task<DevOpsIdentity> task;
+        lock (_cacheGate)
+        {
+            if (_me is { IsFaulted: false, IsCanceled: false } known) task = known;
+            else task = _me = ReadCurrentUserAsync(CancellationToken.None);
+        }
+        return task.WaitAsync(cancellationToken);
     }
 
     private async Task<DevOpsIdentity> ReadCurrentUserAsync(CancellationToken cancellationToken)
@@ -129,10 +136,24 @@ public sealed partial class AzureDevOpsProvider : IDevOpsProvider
     /// <summary>After a 401, tells a dead token from one that lacks a scope. Remembered for a minute.</summary>
     private Task<bool> IsTokenValidAsync(CancellationToken cancellationToken)
     {
-        if (_tokenCheck is { } check && DateTimeOffset.UtcNow - check.At < TimeSpan.FromMinutes(1)) return check.Valid;
-        var valid = CheckTokenAsync(cancellationToken);
-        _tokenCheck = (DateTimeOffset.UtcNow, valid);
-        return valid;
+        if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<bool>(cancellationToken);
+        Task<bool> valid;
+        lock (_cacheGate)
+        {
+            if (_tokenCheck is { } check
+                && !check.Valid.IsFaulted
+                && !check.Valid.IsCanceled
+                && DateTimeOffset.UtcNow - check.At < TimeSpan.FromMinutes(1))
+            {
+                valid = check.Valid;
+            }
+            else
+            {
+                valid = CheckTokenAsync(CancellationToken.None);
+                _tokenCheck = (DateTimeOffset.UtcNow, valid);
+            }
+        }
+        return valid.WaitAsync(cancellationToken);
     }
 
     private async Task<bool> CheckTokenAsync(CancellationToken cancellationToken)

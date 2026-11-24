@@ -53,7 +53,16 @@ function Export-PackageNotices {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot "licenses/$license") -Destination $noticeDirectory
     }
     $inventory = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($project in @('WpfStudio.App', 'WpfStudio.WorkspaceHost', 'WpfStudio.PreviewHost', 'WpfStudio.PreviewHost.Framework', 'WpfStudio.ProfilingHost')) {
+    foreach ($project in @(
+        'WpfStudio.App',
+        'WpfStudio.WorkspaceHost',
+        'WpfStudio.PreviewHost',
+        'WpfStudio.PreviewHost.Framework',
+        'WpfStudio.PreviewHost.Framework32',
+        'WpfStudio.ProfilingHost',
+        'WpfStudio.Inspection.StartupHook',
+        'WpfStudio.Inspection.Agent'
+    )) {
         $assetsPath = Join-Path $repository "src/$project/obj/project.assets.json"
         $assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
         foreach ($library in $assets.libraries.PSObject.Properties) {
@@ -91,7 +100,8 @@ function Export-PackageNotices {
             })
         }
     }
-    @($inventory.Values | Sort-Object { $_.package }) | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $staging 'THIRD-PARTY-PACKAGES.json') -Encoding utf8
+    $packagesJson = @($inventory.Values | Sort-Object { $_.package }) | ConvertTo-Json -Depth 5
+    [IO.File]::WriteAllText((Join-Path $staging 'THIRD-PARTY-PACKAGES.json'), $packagesJson, [Text.UTF8Encoding]::new($false))
 }
 
 Push-Location $repository
@@ -177,16 +187,7 @@ try {
         '(src/WpfStudio.Runtime/Assets/Terminal/THIRD-PARTY-NOTICES.md)', '(Assets/Terminal/THIRD-PARTY-NOTICES.md)')
     [IO.File]::WriteAllText((Join-Path $staging 'THIRD-PARTY-NOTICES.md'), $packageNoticesText)
     $documentationDirectory = Join-Path $staging 'docs'
-    New-Item -ItemType Directory -Path $documentationDirectory -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repository 'docs/xaml-devtools-design.md'), (Join-Path $repository 'docs/xaml-runtime-bootstrap.md'), (Join-Path $repository 'docs/xaml-preview-scenarios.md'), (Join-Path $repository 'docs/xaml-appearance.md'), (Join-Path $repository 'docs/xaml-binding-navigation.md'), (Join-Path $repository 'docs/xaml-binding-diagnostics.md'), (Join-Path $repository 'docs/xaml-named-elements.md'), (Join-Path $repository 'docs/xaml-preview-interaction.md'), (Join-Path $repository 'docs/xaml-resource-resolution-plan.md'), (Join-Path $repository 'docs/xaml-feature-tour.md'), (Join-Path $repository 'docs/xaml-language-performance.md') -Destination $documentationDirectory
-    Copy-Item -LiteralPath (Join-Path $repository 'docs/memory-profiler.md'), (Join-Path $repository 'docs/profiling-suite-design.md'), (Join-Path $repository 'docs/releasing.md') -Destination $documentationDirectory
-    Copy-Item -LiteralPath (Join-Path $repository 'docs/code-assist.md'), (Join-Path $repository 'docs/devops.md'), (Join-Path $repository 'docs/performance-tracing.md'), (Join-Path $repository 'docs/xaml-preview-dependencies.md') -Destination $documentationDirectory
-    $imageDirectory = Join-Path $documentationDirectory 'images'
-    New-Item -ItemType Directory -Path $imageDirectory -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repository 'docs/images/xaml'), (Join-Path $repository 'docs/images/devops') -Destination $imageDirectory -Recurse
-    $performanceDocumentation = Join-Path $documentationDirectory 'performance'
-    New-Item -ItemType Directory -Path $performanceDocumentation -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repository 'docs/performance/xaml-resource-scale.json') -Destination $performanceDocumentation
+    Copy-Item -LiteralPath (Join-Path $repository 'docs') -Destination $documentationDirectory -Recurse -Force
     $benchmarkDocumentation = Join-Path $staging 'tools/XamlLanguageBench'
     New-Item -ItemType Directory -Path $benchmarkDocumentation -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repository 'tools/XamlLanguageBench/README.md') -Destination $benchmarkDocumentation

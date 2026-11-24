@@ -49,6 +49,9 @@ public sealed partial class ShellViewModel
             Regex pattern;
             try { pattern = SearchPattern(query, SearchMatchCase, SearchWholeWord, SearchUseRegex); }
             catch (ArgumentException exception) { Status = "The search pattern is not a valid regular expression: " + exception.Message; return; }
+            var workspace = Workspace;
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
+            var searchToken = linked.Token;
             SearchResults.Clear(); SearchResultsTitle = $"Searching for “{query}”…";
             ToolRequested?.Invoke(Workbenches.Search);
             var files = _allFiles.Where(path => SearchedExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)).ToArray();
@@ -58,15 +61,16 @@ public sealed partial class ShellViewModel
                 var found = new List<NavigationResult>();
                 foreach (var path in files)
                 {
-                    token.ThrowIfCancellationRequested();
+                    searchToken.ThrowIfCancellationRequested();
                     string text;
-                    try { text = buffers.GetValueOrDefault(path) ?? await File.ReadAllTextAsync(path, token); }
+                    try { text = buffers.GetValueOrDefault(path) ?? await File.ReadAllTextAsync(path, searchToken); }
                     catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { continue; }
                     FindIn(path, text, pattern, found);
                     if (found.Count >= SearchResultLimit) break;
                 }
                 return found;
-            }, token);
+            }, searchToken);
+            if (_disposed || !ReferenceEquals(workspace, Workspace)) return;
             ShowResults(Count(results.Count, "match", "matches") + $" for “{query}”" + (results.Count >= SearchResultLimit ? " (the first " + SearchResultLimit + ")" : ""), results);
             Status = results.Count == 0 ? $"No match for “{query}” in {files.Length} files" : SearchResultsTitle;
         });

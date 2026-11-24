@@ -37,7 +37,13 @@ internal static class ProcessRunner
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             return (process.ExitCode, await output.ConfigureAwait(false), await error.ConfigureAwait(false));
         }
-        catch { Kill(process); throw; }
+        catch
+        {
+            Kill(process);
+            WpfStudio.Contracts.TaskObservation.Forget(output);
+            WpfStudio.Contracts.TaskObservation.Forget(error);
+            throw;
+        }
     }
 
     internal static void Kill(Process process) => WpfStudio.Hosting.ProcessLaunch.TryKill(process, entireProcessTree: true);

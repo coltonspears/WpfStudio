@@ -323,10 +323,12 @@ public static class CSharpCodeGenerator
                         .AppendLine("        Converters = { new IsoDateTimeConverter { DateTimeStyles = DateTimeStyles.AssumeUniversal } },")
                         .AppendLine("    };");
                 }
+                var rendered = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var root in _graph.Roots.Distinct())
                 {
                     if (root is not (NamedRef or ArrayRef { Item: NamedRef }) || root is NamedRef { } named && _graph.Class(named.Key) is null && _graph.Enum(named.Key) is null) continue;
                     var type = TypeName(root, false, usings);
+                    if (!rendered.Add(type)) continue;
                     builder.AppendLine().Append("    public static string ToJson(this ").Append(type).Append(" self) => ")
                         .Append(_stj ? "JsonSerializer.Serialize(self, Settings);" : "JsonConvert.SerializeObject(self, Settings);").AppendLine();
                 }

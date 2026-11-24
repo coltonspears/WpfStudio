@@ -15,30 +15,43 @@ public interface IProcessMemorySampler
 
 public sealed class ProcessMemorySampler : IProcessMemorySampler, IDisposable
 {
+    private readonly Lock _gate = new();
     private Process? _process;
     private long _startTicks;
+    private bool _disposed;
 
     public ProcessMemorySample? Sample(int processId, long startTimeUtcTicks)
     {
-        try
+        lock (_gate)
         {
-            if (_process is null || _process.Id != processId || _startTicks != startTimeUtcTicks)
+            if (_disposed) return null;
+            try
             {
-                _process?.Dispose();
-                _process = Process.GetProcessById(processId);
-                _startTicks = startTimeUtcTicks;
-                if (_process.StartTime.ToUniversalTime().Ticks != startTimeUtcTicks) { Reset(); return null; }
+                if (_process is null || _process.Id != processId || _startTicks != startTimeUtcTicks)
+                {
+                    ResetCore();
+                    _process = Process.GetProcessById(processId);
+                    _startTicks = startTimeUtcTicks;
+                    if (_process.StartTime.ToUniversalTime().Ticks != startTimeUtcTicks) { ResetCore(); return null; }
+                }
+                _process.Refresh();
+                if (_process.HasExited) { ResetCore(); return null; }
+                return new(DateTimeOffset.Now, _process.PrivateMemorySize64, _process.WorkingSet64);
             }
-            _process.Refresh();
-            if (_process.HasExited) { Reset(); return null; }
-            return new(DateTimeOffset.Now, _process.PrivateMemorySize64, _process.WorkingSet64);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
-        {
-            Reset(); return null;
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+            {
+                ResetCore(); return null;
+            }
         }
     }
 
-    private void Reset() { _process?.Dispose(); _process = null; _startTicks = 0; }
-    public void Dispose() => Reset();
+    private void ResetCore() { _process?.Dispose(); _process = null; _startTicks = 0; }
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            _disposed = true;
+            ResetCore();
+        }
+    }
 }

@@ -72,6 +72,7 @@ public partial class DiffView : UserControl
     private int _current = -1;
     private int _computeVersion;
     private CancellationTokenSource? _compute;
+    private bool _computeInterrupted;
     private bool _syncing;
     private bool _recomputeQueued;
     private bool _compact;
@@ -107,7 +108,16 @@ public partial class DiffView : UserControl
         _inline.TextArea.TextView.VisualLinesChanged += (_, _) => UpdateRulerViewport();
         _splitRuler.Navigate += fraction => ScrollToFraction(_right, fraction);
         _inlineRuler.Navigate += fraction => ScrollToFraction(_inline, fraction);
-        Loaded += (_, _) => ApplyHighlighting();
+        Loaded += (_, _) =>
+        {
+            ApplyHighlighting();
+            if (_computeInterrupted) { _computeInterrupted = false; Recompute(); }
+        };
+        Unloaded += (_, _) =>
+        {
+            if (_compute is not null) _computeInterrupted = true;
+            CancelCompute();
+        };
         SetResourceReference(ThemePaletteProperty, Palette.ResourceKey);
         UpdateLabels();
         ModeChanged();
@@ -174,11 +184,18 @@ public partial class DiffView : UserControl
         });
     }
 
+    private void CancelCompute()
+    {
+        _computeVersion++;
+        _compute?.Cancel(); _compute?.Dispose(); _compute = null;
+    }
+
     /// <summary>Computes the diff; large inputs are diffed off the UI thread.</summary>
     private void Recompute()
     {
-        var version = ++_computeVersion;
-        _compute?.Cancel(); _compute?.Dispose(); _compute = null;
+        _computeInterrupted = false;
+        CancelCompute();
+        var version = _computeVersion;
         _expanded.Clear();
         _current = -1;
         if (!string.IsNullOrEmpty(Message)) { Clear(); ShowMessage(Message!, "Info"); return; }
@@ -200,6 +217,10 @@ public partial class DiffView : UserControl
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         // A failure while laying out the result lands here too; without a message the view would stay as it was.
         catch (Exception exception) when (version == _computeVersion) { Clear(); ShowMessage(exception.Message, "Warning"); }
+        finally
+        {
+            if (version == _computeVersion) { _compute?.Dispose(); _compute = null; }
+        }
     }
 
     private void Apply(TextDiff diff)

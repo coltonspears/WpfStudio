@@ -63,8 +63,14 @@ public sealed partial class ClrHeapSnapshot
             var array = obj.AsArray();
             var bytes = (long)array.Length * Math.Max(1, type.ComponentSize);
             if (bytes > MaxHashedArrayBytes) return ($"len:{array.Length}", $"Length {array.Length:N0} (contents not compared)");
-            var hash = HashMemory(address + (ulong)(2 * _target.DataReader.PointerSize), bytes, buffer);
-            return ($"arr:{array.Length}:{hash:X16}", array.Length == 0 ? "Empty" : $"Length {array.Length:N0} · same contents");
+            var shape = array.Rank == 1
+                ? array.Length.ToString(CultureInfo.InvariantCulture)
+                : string.Join('x', Enumerable.Range(0, array.Rank).Select(array.GetLength));
+            if (array.Length == 0) return ($"arr:{array.Rank}:{shape}:0", "Empty");
+            var dataAddress = type.GetArrayElementAddress(address, 0);
+            if (dataAddress == 0) return ("unreadable", "Unreadable in this capture");
+            var hash = HashMemory(dataAddress, bytes, buffer);
+            return ($"arr:{array.Rank}:{shape}:{hash:X16}", $"Length {array.Length:N0} · same contents");
         }
         var key = new System.Text.StringBuilder();
         var shown = new List<string>();

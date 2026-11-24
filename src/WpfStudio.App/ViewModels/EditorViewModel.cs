@@ -6,6 +6,7 @@ using WpfStudio.CodeAssist;
 using WpfStudio.Contracts;
 using WpfStudio.Contracts.Diagnostics;
 using WpfStudio.Core.Documents;
+using WpfStudio.Core.Threading;
 using WpfStudio.App.Services;
 using WpfStudio.Workspace;
 
@@ -34,7 +35,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private readonly XamlCompletionService _xaml;
     private readonly IUiDispatcher _dispatcher;
     private readonly XamlResourceContext? _resources;
-    private CancellationTokenSource? _analysis;
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly SerialDebouncedWork _analysisWork;
+    private readonly SerialDebouncedWork _codeLensWork;
     private CancellationTokenSource? _quickFixRequest;
     private long _quickFixRevision;
     private long _quickFixResourceGeneration;
@@ -47,6 +50,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         XamlResourceContext? resources = null)
     {
         State = state; _workspace = workspace; _xaml = xaml; _dispatcher = dispatcher; _report = report; _resources = resources;
+        _analysisWork = new(_lifetime.Token);
+        _codeLensWork = new(_lifetime.Token);
+        _gitChanges = new(_lifetime.Token);
+        _gitBlame = new(_lifetime.Token);
         state.ContentChanged += ContentChanged;
         state.PropertyChanged += StatePropertyChanged;
         if (State.Extension == ".xaml")
@@ -154,10 +161,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private void UpdateLensRows()
     {
         if (ShowCodeLens || ShowInlineBlame) { if (CodeLensVersion != State.Version) ScheduleCodeLens(State.Version); }
-        else { _codeLens?.Cancel(); CodeLenses = []; CodeLensVersion = -1; }
+        else { _codeLensWork.Cancel(); CodeLenses = []; CodeLensVersion = -1; }
         CodeLensChanged?.Invoke();
     }
-    private CancellationTokenSource? _codeLens;
     // Set by an analysis that may change the counts and cleared by the first to finish, so one cancelled by a diagnostics-only analysis still counts.
     private bool _codeLensDue;
     // Another file's method bodies changed since these counts, and they can use this file's symbols.
@@ -165,14 +171,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private const int CodeLensRetries = 2;
     private void ScheduleCodeLens(long version, int attempt = 0)
     {
-        _codeLens?.Cancel(); _codeLens?.Dispose(); _codeLens = null;
+        _codeLensWork.Cancel();
         if (!IsCSharp || IsReadOnly || !(ShowCodeLens || ShowInlineBlame) || _disposed || !_workspace.IsConnected) return;
-        _codeLens = new();
-        var token = _codeLens.Token;
-        Task.Run(async () =>
+        // Counting scans every XAML file, so wait for a pause in typing.
+        _codeLensWork.ScheduleBackgroundAsync(TimeSpan.FromMilliseconds(CodeLensVersion < 0 ? 300 : 1500), async token =>
         {
-            // Counting scans every XAML file, so wait for a pause in typing.
-            await Task.Delay(CodeLensVersion < 0 ? 300 : 1500, token);
             CodeLensResult result;
             try { result = await _workspace.GetCodeLensAsync(new(State.Path, version), token); }
             // The worker turns requests away while it synchronizes buffers and XAML fields, and nothing else will ask again until the next edit.
@@ -187,7 +190,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 CodeLenses = result.Entries; CodeLensVersion = version;
                 CodeLensChanged?.Invoke();
             }, token);
-        }, token).Forget(); // Optional: a failure leaves the previous lenses.
+        }).Forget(); // Optional: a failure leaves the previous lenses.
     }
     /// <summary>Asks the editor to collapse (true) or expand (false) every folding.</summary>
     public event Action<bool>? FoldingRequested;
@@ -281,11 +284,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return Task.CompletedTask;
         if (countsChanged) _codeLensDue = true;
-        _analysis?.Cancel();
-        _analysis?.Dispose();
-        _analysis = CancellationTokenSource.CreateLinkedTokenSource(token);
         if (State.Extension == ".xaml")
         {
+            _analysisWork.Cancel();
             ClearQuickFixes();
             // Clearing an empty list still announces a change, and the shell rebuilds the whole Problems list on each one. Every open XAML
             // editor comes here on every keystroke in any of them, most with nothing to clear.
@@ -293,17 +294,21 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             LanguageStatus = _xamlContextUnavailable ?? (_workspace.IsConnected ? "" : "XAML binding analysis unavailable: open a workspace");
             if (_xamlContextUnavailable is not null) return Task.CompletedTask;
         }
-        return AnalyzeAsync(State.Content, State.Version, Volatile.Read(ref _semanticRevision), CaptureResources(), debounce, _analysis.Token);
+        var text = State.Content;
+        var version = State.Version;
+        var semanticRevision = Volatile.Read(ref _semanticRevision);
+        var resources = CaptureResources();
+        return _analysisWork.RunAsync(debounce ? TimeSpan.FromMilliseconds(350) : TimeSpan.Zero,
+            ct => AnalyzeAsync(text, version, semanticRevision, resources, ct), token);
     }
     private XamlResourceSnapshot CaptureResources() => _resources?.Capture() ?? new(0, []);
     private bool IsCurrentAnalysis(long version, long semanticRevision, long resourceGeneration, CancellationToken token) =>
         !_disposed && !token.IsCancellationRequested && version == State.Version && semanticRevision == Volatile.Read(ref _semanticRevision)
         && (!IsXaml || _resources?.IsCurrent(resourceGeneration) != false);
-    private async Task AnalyzeAsync(string text, long version, long semanticRevision, XamlResourceSnapshot resources, bool debounce, CancellationToken token)
+    private async Task AnalyzeAsync(string text, long version, long semanticRevision, XamlResourceSnapshot resources, CancellationToken token)
     {
         try
         {
-            if (debounce) await Task.Delay(350, token);
             if (!_workspace.IsConnected || !IsCurrentAnalysis(version, semanticRevision, resources.Generation, token)) return;
             IReadOnlyList<WorkspaceDiagnostic> diagnostics;
             EditorDecorationsResult? decorations = null;
@@ -571,10 +576,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _workspace.CSharpBodyChanged -= CSharpBodyChanged;
         _workspace.ProjectDiagnosticsChanged -= ProjectDiagnosticsChanged;
         if (_resources is not null) _resources.Changed -= SemanticStateChanged;
+        _lifetime.Cancel();
         ClearQuickFixes();
         DisposeGit();
-        _codeLens?.Cancel(); _codeLens?.Dispose(); _codeLens = null;
-        _analysis?.Cancel();
-        _analysis?.Dispose();
+        _codeLensWork.Dispose();
+        _analysisWork.Dispose();
+        _lifetime.Dispose();
     }
 }

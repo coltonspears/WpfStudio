@@ -39,7 +39,7 @@ public sealed partial class NativePreviewSurface : HwndHost
     {
         Focusable = true;
         Visibility = Visibility.Hidden;
-        Loaded += (_, _) => QueueUpdate();
+        Loaded += (_, _) => { if (!_destroyed) SubscribeSession(); QueueUpdate(); };
         Unloaded += (_, _) => ReleaseForRemoval();
         IsVisibleChanged += (_, _) => { if (!IsVisible) RevokeFocus(); QueueUpdate(); };
     }
@@ -50,10 +50,10 @@ public sealed partial class NativePreviewSurface : HwndHost
         RevokeFocus();
         _lease.ResetAttachment();
         _stateGeneration++;
-        if (_session is not null) _session.Changed -= SessionChanged;
+        UnsubscribeSession();
         _session = session;
         _navigationSequence = 0;
-        if (_session is not null) _session.Changed += SessionChanged;
+        SubscribeSession();
         SetState(false, _bridge != 0 && !_dpiCompatible ? DpiStatus : "");
         UpdateVisibility();
         QueueUpdate();
@@ -65,6 +65,7 @@ public sealed partial class NativePreviewSurface : HwndHost
         RevokeFocus();
         _stateGeneration++;
         _active = active;
+        if (active && !_destroyed) SubscribeSession();
         UpdateVisibility();
         QueueUpdate();
     }
@@ -77,6 +78,18 @@ public sealed partial class NativePreviewSurface : HwndHost
         QueueUpdate();
     }
 
+    private void SubscribeSession()
+    {
+        if (_session is null) return;
+        _session.Changed -= SessionChanged;
+        _session.Changed += SessionChanged;
+    }
+
+    private void UnsubscribeSession()
+    {
+        if (_session is not null) _session.Changed -= SessionChanged;
+    }
+
     private void UpdateVisibility() => Visibility = _active && _session?.IsAvailable == true
         ? Visibility.Visible : Visibility.Hidden;
 
@@ -87,7 +100,7 @@ public sealed partial class NativePreviewSurface : HwndHost
         _destroyed = false;
         _bridgeGeneration++;
         _bridgeToken = Guid.NewGuid().ToString("N");
-        if (_session is not null) { _session.Changed -= SessionChanged; _session.Changed += SessionChanged; }
+        SubscribeSession();
         nint parentContext = Native.GetWindowDpiAwarenessContext(hwndParent.Handle);
         _dpiCompatible = Native.AreDpiAwarenessContextsEqual(parentContext, Native.PerMonitorV2)
             && Native.AreDpiAwarenessContextsEqual(parentContext, Native.GetThreadDpiAwarenessContext());
@@ -113,7 +126,7 @@ public sealed partial class NativePreviewSurface : HwndHost
         _destroyed = true;
         _bridgeGeneration++;
         _pending = false;
-        if (_session is not null) _session.Changed -= SessionChanged;
+        UnsubscribeSession();
         if (!ReleaseForRemoval()) return;
         if (Native.IsWindow(hwnd.Handle))
         {
@@ -132,6 +145,7 @@ public sealed partial class NativePreviewSurface : HwndHost
         _lease.ResetAttachment();
         _stateGeneration++;
         _active = false; _pending = false;
+        UnsubscribeSession();
         if (hide) Visibility = Visibility.Hidden;
         // Abort bypasses ordinary RPC gates and confirms that no remote child can
         // remain attached. If that cannot be proven, do not destroy its parent.
@@ -171,7 +185,7 @@ public sealed partial class NativePreviewSurface : HwndHost
             RevokeFocus();
             _lease.ResetAttachment();
             _destroyed = true; _bridgeGeneration++; _pending = false; _bridge = 0;
-            if (_session is not null) _session.Changed -= SessionChanged;
+            UnsubscribeSession();
             SetState(false, "");
         }
         // DPI may change without a DIP-size change when moving a floating pane.

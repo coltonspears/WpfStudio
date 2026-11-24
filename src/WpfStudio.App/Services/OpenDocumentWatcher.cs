@@ -42,9 +42,10 @@ public sealed class OpenDocumentWatcher(Action changed) : IOpenDocumentWatcher
             }
             foreach (var directory in directories.Where(directory => !_watchers.ContainsKey(directory)))
             {
+                FileSystemWatcher? watcher = null;
                 try
                 {
-                    var watcher = new FileSystemWatcher(directory)
+                    watcher = new FileSystemWatcher(directory)
                     {
                         IncludeSubdirectories = false,
                         NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
@@ -54,8 +55,10 @@ public sealed class OpenDocumentWatcher(Action changed) : IOpenDocumentWatcher
                     watcher.Error += (_, _) => Schedule();
                     watcher.EnableRaisingEvents = true;
                     _watchers[directory] = watcher;
+                    watcher = null;
                 }
                 catch (Exception exception) when (exception is IOException or ArgumentException or UnauthorizedAccessException) { }
+                finally { watcher?.Dispose(); }
             }
         }
     }
@@ -69,7 +72,12 @@ public sealed class OpenDocumentWatcher(Action changed) : IOpenDocumentWatcher
         lock (_gate)
         {
             if (_disposed) return;
-            _timer ??= new Timer(_ => { if (!Volatile.Read(ref _disposed)) changed(); });
+            _timer ??= new Timer(_ =>
+            {
+                if (Volatile.Read(ref _disposed)) return;
+                try { changed(); }
+                catch (Exception exception) when (exception is not OutOfMemoryException) { }
+            });
             _timer.Change(Quiet, Timeout.InfiniteTimeSpan);
         }
     }

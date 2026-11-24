@@ -48,7 +48,7 @@ public sealed class ApiSender : IDisposable
     private const int MaxHandlers = 12;
     private static readonly JsonWriterOptions IndentedJson = new() { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private readonly Func<ProxyConfiguration> _applicationProxy;
-    private readonly Dictionary<HandlerKey, HttpClient> _clients = [];
+    private readonly Dictionary<HandlerKey, PooledClient> _clients = [];
     private readonly Lock _gate = new();
     private bool _disposed;
 
@@ -59,13 +59,14 @@ public sealed class ApiSender : IDisposable
 
     public void ClearCookies()
     {
+        List<HttpClient>? toDispose;
         lock (_gate)
         {
-            // Handlers hold the container they were given, so they go too.
-            foreach (var client in _clients.Values) client.Dispose();
-            _clients.Clear();
+            // Handlers hold the container they were given, so they go too; any in-flight send disposes its client on completion.
+            toDispose = EvictAllLocked();
             Cookies = new();
         }
+        DisposeClients(toDispose);
     }
 
     public EffectiveProxy ProxyFor(ApiRequest request, ApiCollection? collection) => ProxyResolution.Resolve(_applicationProxy(), collection?.Proxy, request.Proxy);
@@ -77,58 +78,70 @@ public sealed class ApiSender : IDisposable
         var proxy = ProxyFor(request, collection);
         if (proxy.Configuration.Validate() is { } proxyError) throw new ApiRequestException(proxyError + " (" + proxy.Source + ")");
         using var prepared = ApiRequestBuilder.Build(request, collection, variables);
-        var client = ClientFor(new HandlerKey(proxy.Configuration, request.Settings.VerifyCertificates, request.Settings.FollowRedirects, request.Settings.UseCookies));
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (request.Settings.TimeoutSeconds > 0) timeout.CancelAfter(TimeSpan.FromSeconds(request.Settings.TimeoutSeconds));
-        var clock = Stopwatch.StartNew();
-        HttpResponseMessage response;
-        try { response = await client.SendAsync(prepared.Message, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { throw new ApiRequestException($"No response within {request.Settings.TimeoutSeconds} seconds. Raise the timeout under Settings, or check the address and proxy ({proxy.Describe()})."); }
-        catch (HttpRequestException exception) { throw new ApiRequestException(Explain(exception, prepared.Address, proxy), exception); }
-        using (response)
+        var lease = AcquireClient(new HandlerKey(proxy.Configuration, request.Settings.VerifyCertificates, request.Settings.FollowRedirects, request.Settings.UseCookies));
+        try
         {
-            var headersAt = clock.ElapsedMilliseconds;
-            var (body, truncated) = await ReadBodyAsync(response.Content, timeout.Token).ConfigureAwait(false);
-            clock.Stop();
-            var mediaType = response.Content.Headers.ContentType?.MediaType;
-            var text = Decode(body, response.Content.Headers.ContentType);
-            var (pretty, isJson) = Prettify(text, mediaType, body.Length);
-            var warnings = prepared.Warnings.ToList();
-            if (truncated) warnings.Add($"Only the first {MaxBodyBytes / (1024 * 1024)} MB of the body were kept.");
-            return new ApiResponse
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            if (request.Settings.TimeoutSeconds > 0) timeout.CancelAfter(TimeSpan.FromSeconds(request.Settings.TimeoutSeconds));
+            var clock = Stopwatch.StartNew();
+            HttpResponseMessage response;
+            try { response = await lease.Client.SendAsync(prepared.Message, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            { throw new ApiRequestException($"No response within {request.Settings.TimeoutSeconds} seconds. Raise the timeout under Settings, or check the address and proxy ({proxy.Describe()})."); }
+            catch (HttpRequestException exception) { throw new ApiRequestException(Explain(exception, prepared.Address, proxy), exception); }
+            using (response)
             {
-                StatusCode = (int)response.StatusCode,
-                ReasonPhrase = response.ReasonPhrase ?? response.StatusCode.ToString(),
-                HttpVersion = "HTTP/" + response.Version,
-                Headers = response.Headers.Concat(response.Content.Headers).SelectMany(header => header.Value.Select(value => new KeyValue(header.Key, value))).ToList(),
-                Cookies = request.Settings.UseCookies ? Cookies.GetCookies(prepared.Address).Select(cookie => new KeyValue(cookie.Name, cookie.Value) { Description = $"{cookie.Domain}{cookie.Path}" + (cookie.Expires == DateTime.MinValue ? "" : " · expires " + cookie.Expires.ToString("g", System.Globalization.CultureInfo.CurrentCulture)) }).ToList() : [],
-                Body = body,
-                Truncated = truncated,
-                ElapsedMilliseconds = clock.ElapsedMilliseconds,
-                HeadersMilliseconds = headersAt,
-                MediaType = mediaType,
-                Text = text,
-                Pretty = pretty,
-                IsJson = isJson,
-                Address = response.RequestMessage?.RequestUri ?? prepared.Address,
-                Proxy = proxy.Describe(),
-                Warnings = warnings,
-            };
+                var headersAt = clock.ElapsedMilliseconds;
+                var (body, truncated) = await ReadBodyAsync(response.Content, timeout.Token).ConfigureAwait(false);
+                clock.Stop();
+                var mediaType = response.Content.Headers.ContentType?.MediaType;
+                var text = Decode(body, response.Content.Headers.ContentType);
+                var (pretty, isJson) = Prettify(text, mediaType, body.Length);
+                var warnings = prepared.Warnings.ToList();
+                if (truncated) warnings.Add($"Only the first {MaxBodyBytes / (1024 * 1024)} MB of the body were kept.");
+                var finalAddress = response.RequestMessage?.RequestUri ?? prepared.Address;
+                return new ApiResponse
+                {
+                    StatusCode = (int)response.StatusCode,
+                    ReasonPhrase = response.ReasonPhrase ?? response.StatusCode.ToString(),
+                    HttpVersion = "HTTP/" + response.Version,
+                    Headers = response.Headers.Concat(response.Content.Headers).SelectMany(header => header.Value.Select(value => new KeyValue(header.Key, value))).ToList(),
+                    Cookies = request.Settings.UseCookies ? lease.Cookies.GetCookies(finalAddress).Select(cookie => new KeyValue(cookie.Name, cookie.Value) { Description = $"{cookie.Domain}{cookie.Path}" + (cookie.Expires == DateTime.MinValue ? "" : " · expires " + cookie.Expires.ToString("g", System.Globalization.CultureInfo.CurrentCulture)) }).ToList() : [],
+                    Body = body,
+                    Truncated = truncated,
+                    ElapsedMilliseconds = clock.ElapsedMilliseconds,
+                    HeadersMilliseconds = headersAt,
+                    MediaType = mediaType,
+                    Text = text,
+                    Pretty = pretty,
+                    IsJson = isJson,
+                    Address = finalAddress,
+                    Proxy = proxy.Describe(),
+                    Warnings = warnings,
+                };
+            }
+        }
+        finally
+        {
+            ReleaseClient(lease);
         }
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5359", Justification = "Only for a request whose sender turned certificate verification off, which is on by default, to reach a development server with a self-signed certificate.")]
-    private HttpClient ClientFor(HandlerKey key)
+    private PooledClient AcquireClient(HandlerKey key)
     {
+        List<HttpClient>? toDispose = null;
+        PooledClient entry;
         lock (_gate)
         {
-            if (_clients.TryGetValue(key, out var existing)) return existing;
-            if (_clients.Count >= MaxHandlers)
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_clients.TryGetValue(key, out var existing))
             {
-                foreach (var client in _clients.Values) client.Dispose();
-                _clients.Clear();
+                existing.Active++;
+                return existing;
             }
+            if (_clients.Count >= MaxHandlers) toDispose = EvictAllLocked();
+            var cookies = Cookies;
             var handler = new SocketsHttpHandler
             {
                 Proxy = key.Proxy.CreateProxy(),
@@ -140,12 +153,44 @@ public sealed class ApiSender : IDisposable
                 ConnectTimeout = TimeSpan.FromSeconds(30),
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             };
-            if (key.UseCookies) handler.CookieContainer = Cookies;
+            if (key.UseCookies) handler.CookieContainer = cookies;
             if (!key.VerifyCertificates) handler.SslOptions = new SslClientAuthenticationOptions { RemoteCertificateValidationCallback = static (_, _, _, _) => true };
             var created = new HttpClient(handler, disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan };
-            _clients[key] = created;
-            return created;
+            entry = new PooledClient(created, cookies) { Active = 1 };
+            _clients[key] = entry;
         }
+        DisposeClients(toDispose);
+        return entry;
+    }
+
+    private void ReleaseClient(PooledClient entry)
+    {
+        HttpClient? toDispose = null;
+        lock (_gate)
+        {
+            entry.Active--;
+            if (entry.Evicted && entry.Active == 0) toDispose = entry.Client;
+        }
+        toDispose?.Dispose();
+    }
+
+    private List<HttpClient>? EvictAllLocked()
+    {
+        if (_clients.Count == 0) return null;
+        List<HttpClient>? toDispose = null;
+        foreach (var entry in _clients.Values)
+        {
+            entry.Evicted = true;
+            if (entry.Active == 0) (toDispose ??= []).Add(entry.Client);
+        }
+        _clients.Clear();
+        return toDispose;
+    }
+
+    private static void DisposeClients(List<HttpClient>? clients)
+    {
+        if (clients is null) return;
+        foreach (var client in clients) client.Dispose();
     }
 
     private static async Task<(byte[] Body, bool Truncated)> ReadBodyAsync(HttpContent content, CancellationToken cancellationToken)
@@ -216,14 +261,23 @@ public sealed class ApiSender : IDisposable
 
     public void Dispose()
     {
+        List<HttpClient>? toDispose;
         lock (_gate)
         {
             if (_disposed) return;
             _disposed = true;
-            foreach (var client in _clients.Values) client.Dispose();
-            _clients.Clear();
+            toDispose = EvictAllLocked();
         }
+        DisposeClients(toDispose);
     }
 
     private sealed record HandlerKey(ProxyConfiguration Proxy, bool VerifyCertificates, bool FollowRedirects, bool UseCookies);
+
+    private sealed class PooledClient(HttpClient client, CookieContainer cookies)
+    {
+        public HttpClient Client { get; } = client;
+        public CookieContainer Cookies { get; } = cookies;
+        public int Active { get; set; }
+        public bool Evicted { get; set; }
+    }
 }

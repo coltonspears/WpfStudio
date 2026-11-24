@@ -174,7 +174,9 @@ public sealed class NuGetPackageService : INuGetPackageService, IDisposable
     {
         var document = await LoadXmlAsync(projectPath, cancellationToken).ConfigureAwait(false);
         var central = centralPath is null ? null : await LoadXmlAsync(centralPath, cancellationToken).ConfigureAwait(false);
-        var properties = document.Descendants().Where(x => x.Parent?.Name.LocalName == "PropertyGroup").GroupBy(x => x.Name.LocalName).ToDictionary(x => x.Key, x => x.Last().Value);
+        var properties = document.Descendants().Where(x => x.Parent?.Name.LocalName == "PropertyGroup")
+            .GroupBy(x => x.Name.LocalName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.Last().Value, StringComparer.OrdinalIgnoreCase);
         if (central is not null)
             foreach (var property in central.Descendants().Where(x => x.Parent?.Name.LocalName == "PropertyGroup")) properties.TryAdd(property.Name.LocalName, property.Value);
         string Resolve(string text) => Regex.Replace(text, @"\$\(([^)]+)\)", m => properties.GetValueOrDefault(m.Groups[1].Value, m.Value));

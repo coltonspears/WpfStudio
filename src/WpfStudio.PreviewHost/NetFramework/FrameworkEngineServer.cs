@@ -56,6 +56,7 @@ public sealed class FrameworkEngineServer : MarshalByRefObject
     });
     private Application? _application;
     private PreviewEngine? _engine;
+    private Thread? _thread;
 
     public override object? InitializeLifetimeService() => null;
 
@@ -91,6 +92,7 @@ public sealed class FrameworkEngineServer : MarshalByRefObject
             _engine.Dispose();
         })
         { IsBackground = true, Name = "WPF preview" };
+        _thread = thread;
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         ready.Wait();
@@ -128,13 +130,22 @@ public sealed class FrameworkEngineServer : MarshalByRefObject
             else completion.Succeed(result!);
         }
         // An object with no lease stays registered with remoting, and so alive, until it is disconnected or its domain unloads. One per call would otherwise accumulate.
-        finally { System.Runtime.Remoting.RemotingServices.Disconnect(cancellation); }
+        finally
+        {
+            System.Runtime.Remoting.RemotingServices.Disconnect(cancellation);
+            cancellation.Source.Dispose();
+        }
     }
 
     /// <summary>Ends the WPF thread. The caller bounds this, because a control can block its dispatcher.</summary>
     public void Shutdown()
     {
-        if (_application is { } application) _ = application.Dispatcher.InvokeAsync(application.Shutdown);
+        if (_application is { } application)
+        {
+            application.Dispatcher.InvokeAsync(application.Shutdown, System.Windows.Threading.DispatcherPriority.Send).Wait();
+            if (_thread is { } thread && Thread.CurrentThread != thread)
+                thread.Join();
+        }
     }
 
     internal static XamlNamespaceLibrary? ReadLibrary(string path) =>

@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WpfStudio.App.Features.Git;
 using WpfStudio.Core.DevOps;
+using WpfStudio.Core.IO;
 
 namespace WpfStudio.App.Features.DevOps;
 
@@ -448,8 +448,13 @@ public sealed partial class PullRequestsViewModel(IDevOpsHost host) : Observable
     [RelayCommand]
     private void OpenFile(DevOpsPullRequestFile? file)
     {
-        if ((file ?? SelectedFile) is { } target && host.Git.RepositoryRoot is { } root)
-            host.OpenFile(Path.GetFullPath(Path.Combine(root, target.Path)));
+        if ((file ?? SelectedFile) is not { } target || host.Git.RepositoryRoot is not { } root) return;
+        if (!RepositoryPath.TryResolveContained(root, target.Path, out var fullPath))
+        {
+            host.ReportStatus("Cannot open a file outside the repository.");
+            return;
+        }
+        host.OpenFile(fullPath);
     }
 
     [RelayCommand]

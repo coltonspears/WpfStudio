@@ -59,14 +59,14 @@ public static partial class RequestUrl
     /// <summary>Fills path parameters with their encoded values; a parameter without a row stays as written.</summary>
     public static string FillPathParameters(string address, IReadOnlyList<KeyValue> parameters, Func<string, string> resolve)
     {
-        var (prefix, path) = SplitAuthority(address);
+        var (authority, path, query, fragment) = SplitParts(address);
         var filled = PathParameter().Replace(path, match =>
         {
             var name = match.Groups["brace"].Success ? match.Groups["brace"].Value : match.Groups["colon"].Value;
             var row = parameters.FirstOrDefault(parameter => parameter.Enabled && parameter.Key == name);
             return row is null ? match.Value : VariableResolver.EncodeUrlComponent(resolve(row.Value), pathSegment: true);
         });
-        return prefix + filled;
+        return authority + filled + query + fragment;
     }
 
     /// <summary>
@@ -79,17 +79,24 @@ public static partial class RequestUrl
         return names.Select(name => existing.FirstOrDefault(row => row.Key == name) ?? new KeyValue(name, "")).ToList();
     }
 
-    // The scheme and host are not part of the path: "http://localhost:5000" has no parameter named 5000.
-    private static string PathPart(string address) => SplitAuthority(address).Path;
+    // The scheme, host, query and fragment are not part of the path: "http://localhost:5000?a={x}#b" has no path parameters.
+    private static string PathPart(string address) => SplitParts(address).Path;
 
-    private static (string Prefix, string Path) SplitAuthority(string address)
+    internal static (string Authority, string Path, string Query, string Fragment) SplitParts(string address)
     {
-        var scheme = address.IndexOf("://", StringComparison.Ordinal);
+        var fragmentStart = FragmentStart(address);
+        var fragment = fragmentStart >= 0 ? address[fragmentStart..] : "";
+        var beforeFragment = fragmentStart >= 0 ? address[..fragmentStart] : address;
+        var queryStart = beforeFragment.IndexOf('?', StringComparison.Ordinal);
+        var query = queryStart >= 0 ? beforeFragment[queryStart..] : "";
+        var beforeQuery = queryStart >= 0 ? beforeFragment[..queryStart] : beforeFragment;
+
+        var scheme = beforeQuery.IndexOf("://", StringComparison.Ordinal);
         var start = scheme >= 0 ? scheme + 3 : 0;
         // {{baseUrl}}/pets: the variable is the authority.
-        if (scheme < 0 && address.StartsWith("{{", StringComparison.Ordinal)) start = address.IndexOf("}}", StringComparison.Ordinal) is var end and >= 0 ? end + 2 : 0;
-        var slash = address.IndexOf('/', start);
-        return slash < 0 ? (address, "") : (address[..slash], address[slash..]);
+        if (scheme < 0 && beforeQuery.StartsWith("{{", StringComparison.Ordinal)) start = beforeQuery.IndexOf("}}", StringComparison.Ordinal) is var end and >= 0 ? end + 2 : 0;
+        var slash = beforeQuery.IndexOf('/', start);
+        return slash < 0 ? (beforeQuery, "", query, fragment) : (beforeQuery[..slash], beforeQuery[slash..], query, fragment);
     }
 
     private static int FragmentStart(string text)

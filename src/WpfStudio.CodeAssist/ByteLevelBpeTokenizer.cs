@@ -13,7 +13,7 @@ internal sealed partial class ByteLevelBpeTokenizer
 {
     private static readonly (char[] ToChar, Dictionary<char, byte> ToByte) ByteAlphabet = BuildByteAlphabet();
     private readonly Dictionary<string, int> _vocabulary;
-    private readonly string[] _tokens;
+    private readonly string?[] _tokens;
     private readonly Dictionary<(string Left, string Right), int> _merges;
     private readonly Dictionary<string, int> _special = new(StringComparer.Ordinal);
     private readonly Regex? _specialSplit;
@@ -21,13 +21,30 @@ internal sealed partial class ByteLevelBpeTokenizer
     [GeneratedRegex(@"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+", RegexOptions.None, 1000)]
     private static partial Regex Pieces();
 
-    private ByteLevelBpeTokenizer(Dictionary<string, int> vocabulary, Dictionary<(string, string), int> merges, IEnumerable<string> special)
+    internal ByteLevelBpeTokenizer(Dictionary<string, int> vocabulary, Dictionary<(string, string), int> merges, IEnumerable<(string Content, int Id)> special)
     {
         _vocabulary = vocabulary; _merges = merges;
-        _tokens = new string[vocabulary.Count == 0 ? 0 : vocabulary.Values.Max() + 1];
+        var specialList = special.ToList();
+        var maxId = -1;
+        foreach (var id in vocabulary.Values)
+        {
+            if (id < 0) throw new InvalidDataException($"Tokenizer contains negative token id {id}.");
+            if (id > maxId) maxId = id;
+        }
+        foreach (var (_, id) in specialList)
+        {
+            if (id < 0) throw new InvalidDataException($"Tokenizer contains negative special token id {id}.");
+            if (id > maxId) maxId = id;
+        }
+        _tokens = new string?[maxId + 1];
         foreach (var (token, id) in vocabulary) _tokens[id] = token;
-        foreach (string token in special) _special[token] = vocabulary[token];
-        if (_special.Count > 0) _specialSplit = new Regex("(" + string.Join('|', _special.Keys.Select(Regex.Escape)) + ")", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        foreach (var (token, id) in specialList)
+        {
+            _special[token] = id;
+            _tokens[id] ??= token;
+        }
+        if (_special.Count > 0)
+            _specialSplit = new Regex("(" + string.Join('|', _special.Keys.OrderByDescending(static key => key.Length).Select(Regex.Escape)) + ")", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     }
 
     public static ByteLevelBpeTokenizer Load(string path)
@@ -43,7 +60,9 @@ internal sealed partial class ByteLevelBpeTokenizer
         var merges = new Dictionary<(string, string), int>();
         foreach (var merge in model.GetProperty("merges").EnumerateArray())
             merges[(merge[0].GetString()!, merge[1].GetString()!)] = merges.Count;
-        var special = root.GetProperty("added_tokens").EnumerateArray().Where(token => token.GetProperty("special").GetBoolean()).Select(token => token.GetProperty("content").GetString()!);
+        var special = root.GetProperty("added_tokens").EnumerateArray()
+            .Where(token => token.GetProperty("special").GetBoolean())
+            .Select(token => (token.GetProperty("content").GetString()!, token.GetProperty("id").GetInt32()));
         return new ByteLevelBpeTokenizer(vocabulary, merges, special);
     }
 
@@ -65,11 +84,14 @@ internal sealed partial class ByteLevelBpeTokenizer
     {
         var bytes = new List<byte>();
         foreach (int id in ids)
-            foreach (char symbol in _tokens[id])
+        {
+            if ((uint)id >= (uint)_tokens.Length || _tokens[id] is not { } token) continue;
+            foreach (char symbol in token)
             {
                 if (ByteAlphabet.ToByte.TryGetValue(symbol, out byte value)) bytes.Add(value);
                 else bytes.AddRange(Encoding.UTF8.GetBytes(symbol.ToString()));
             }
+        }
         return Encoding.UTF8.GetString(bytes.ToArray());
     }
 

@@ -41,6 +41,7 @@ public sealed partial class EditorSurface : TextEditor
     private readonly SearchPanel _search;
     private readonly EditorLineSuggestion _lineSuggestion;
     private TextDocument? _trackedDocument;
+    private Window? _window;
     public EditorSurface()
     {
         FontFamily = new FontFamily("Cascadia Code, Consolas"); FontSize = 13; ShowLineNumbers = true;
@@ -92,9 +93,9 @@ public sealed partial class EditorSurface : TextEditor
             ObservePreferences(true);
             Attach();
             // An owned popup stays above other applications unless it is closed with its window.
-            if (Window.GetWindow(this) is { } window) { window.Deactivated -= OnWindowDeactivated; window.Deactivated += OnWindowDeactivated; }
+            AttachWindow();
         };
-        Unloaded += (_, _) => { Detach(); ObservePreferences(false); if (Window.GetWindow(this) is { } window) window.Deactivated -= OnWindowDeactivated; };
+        Unloaded += (_, _) => { Detach(); ObservePreferences(false); DetachWindow(); };
         MouseHover += _hover.OnMouseHover;
         MouseHoverStopped += _hover.OnMouseHoverStopped;
         PreviewMouseWheel += (_, _) => _hover.Cancel();
@@ -257,6 +258,19 @@ public sealed partial class EditorSurface : TextEditor
             ContextMenu.PlacementTarget = this; ContextMenu.IsOpen = true; e.Handled = true;
         }
         else if (e.Key == Key.Escape) { _completion.CloseWindow(); _hover.Cancel(); _lineSuggestion.Cancel(); _signature.Close(); }
+    }
+    private void AttachWindow()
+    {
+        var window = Window.GetWindow(this);
+        if (ReferenceEquals(window, _window)) return;
+        DetachWindow();
+        _window = window;
+        if (_window is not null) _window.Deactivated += OnWindowDeactivated;
+    }
+    private void DetachWindow()
+    {
+        if (_window is not null) _window.Deactivated -= OnWindowDeactivated;
+        _window = null;
     }
     private void OnWindowDeactivated(object? sender, EventArgs e) { _hover.Cancel(); _signature.Close(); }
     /// <summary>Takes the view model's decorations when they describe the current text; later edits shift them.</summary>

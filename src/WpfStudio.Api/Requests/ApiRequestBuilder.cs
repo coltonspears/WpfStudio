@@ -33,7 +33,12 @@ public static class ApiRequestBuilder
         var auth = EffectiveAuth(request, collection);
         if (auth.Kind == AuthKind.ApiKey && auth.KeyLocation == ApiKeyLocation.Query && auth.KeyName.Length > 0)
             AppendQuery(query, variables.Resolve(auth.KeyName), variables.Resolve(auth.KeyValue));
-        if (query.Length > 0) address += (address.Contains('?', StringComparison.Ordinal) ? "&" : "?") + query;
+        if (query.Length > 0)
+        {
+            var (authority, path, existingQuery, fragment) = RequestUrl.SplitParts(address);
+            var separator = existingQuery.Length == 0 ? "?" : existingQuery is "?" || existingQuery.EndsWith('&') ? "" : "&";
+            address = authority + path + existingQuery + separator + query + fragment;
+        }
         if (!Uri.TryCreate(address, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
         {
             var missing = variables.Unresolved(request.Url);
@@ -106,24 +111,48 @@ public static class ApiRequestBuilder
                     .Select(row => new KeyValuePair<string, string>(variables.Resolve(row.Key), variables.Resolve(row.Value))).ToList());
             case BodyMode.Multipart:
                 var multipart = new MultipartFormDataContent();
-                foreach (var row in request.Form.Where(row => row.Enabled && row.Key.Length > 0))
+                try
                 {
-                    var name = variables.Resolve(row.Key);
-                    if (!row.IsFile) { multipart.Add(new StringContent(variables.Resolve(row.Value)), name); continue; }
-                    var path = variables.Resolve(row.Value).Trim('"');
-                    if (!File.Exists(path)) { multipart.Dispose(); throw new ApiRequestException($"The file for form field '{name}' does not exist: {path}"); }
-                    var file = new StreamContent(File.OpenRead(path));
-                    file.Headers.ContentType = new MediaTypeHeaderValue(MediaTypes.ForFile(path));
-                    multipart.Add(file, name, Path.GetFileName(path));
+                    foreach (var row in request.Form.Where(row => row.Enabled && row.Key.Length > 0))
+                    {
+                        var name = variables.Resolve(row.Key);
+                        if (!row.IsFile) { multipart.Add(new StringContent(variables.Resolve(row.Value)), name); continue; }
+                        var path = variables.Resolve(row.Value).Trim('"');
+                        if (!File.Exists(path)) throw new ApiRequestException($"The file for form field '{name}' does not exist: {path}");
+                        var file = new StreamContent(File.OpenRead(path));
+                        try
+                        {
+                            file.Headers.ContentType = new MediaTypeHeaderValue(MediaTypes.ForFile(path));
+                            multipart.Add(file, name, Path.GetFileName(path));
+                        }
+                        catch
+                        {
+                            file.Dispose();
+                            throw;
+                        }
+                    }
+                    return multipart;
                 }
-                return multipart;
+                catch
+                {
+                    multipart.Dispose();
+                    throw;
+                }
             case BodyMode.File:
                 var bodyPath = variables.Resolve(request.BodyFilePath).Trim('"');
                 if (bodyPath.Length == 0) { warnings.Add("No file was chosen, so the body is empty."); return null; }
                 if (!File.Exists(bodyPath)) throw new ApiRequestException("The body file does not exist: " + bodyPath);
                 var content = new StreamContent(File.OpenRead(bodyPath));
-                content.Headers.ContentType = new MediaTypeHeaderValue(MediaTypes.ForFile(bodyPath));
-                return content;
+                try
+                {
+                    content.Headers.ContentType = new MediaTypeHeaderValue(MediaTypes.ForFile(bodyPath));
+                    return content;
+                }
+                catch
+                {
+                    content.Dispose();
+                    throw;
+                }
             default:
                 return null;
         }

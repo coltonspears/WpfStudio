@@ -24,14 +24,14 @@ public static partial class SqlBatchParser
         {
             int end = script.IndexOf('\n', position);
             if (end < 0) end = script.Length;
-            string code = ReadCode(script.AsSpan(position, end - position), ref state, ref commentDepth).Trim();
+            string code = ReadCode(script.AsSpan(position, end - position), ref state, ref commentDepth, out int priorCommentEnd).Trim();
             if (code.StartsWith(':') || code.StartsWith("!!", StringComparison.Ordinal) || SqlCmdVariable().IsMatch(code))
                 throw new SqlScriptException("SQLCMD directives and variables are not supported. Run plain Transact-SQL.", line);
             if (GoPrefix().IsMatch(code))
             {
                 if (!code.Equals("GO", StringComparison.OrdinalIgnoreCase))
                     throw new SqlScriptException("Only GO on its own line is supported; GO repeat counts and arguments are not supported.", line);
-                AddBatch(position);
+                AddBatch(position + priorCommentEnd);
                 batchStart = Math.Min(end + 1, script.Length);
                 batchLine = line + 1;
             }
@@ -48,9 +48,11 @@ public static partial class SqlBatchParser
         }
     }
 
-    private static string ReadCode(ReadOnlySpan<char> line, ref LexState state, ref int depth)
+    private static string ReadCode(ReadOnlySpan<char> line, ref LexState state, ref int depth, out int priorCommentEnd)
     {
         var code = new StringBuilder();
+        var startedInBlockComment = state == LexState.BlockComment;
+        priorCommentEnd = 0;
         if (state is LexState.String or LexState.Identifier or LexState.QuotedIdentifier) code.Append('~');
         for (int i = 0; i < line.Length; i++)
         {
@@ -58,7 +60,15 @@ public static partial class SqlBatchParser
             if (state == LexState.BlockComment)
             {
                 if (c == '/' && next == '*') { depth++; i++; }
-                else if (c == '*' && next == '/') { i++; if (--depth == 0) state = LexState.Normal; }
+                else if (c == '*' && next == '/')
+                {
+                    i++;
+                    if (--depth == 0)
+                    {
+                        state = LexState.Normal;
+                        if (startedInBlockComment) { priorCommentEnd = i + 1; startedInBlockComment = false; }
+                    }
+                }
                 continue;
             }
             if (state is LexState.String or LexState.Identifier or LexState.QuotedIdentifier)
