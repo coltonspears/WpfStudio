@@ -275,7 +275,14 @@ internal sealed partial class PreviewDocument
         {
             string[] parts = namespaceName[14..].Split(';');
             string? assemblyName = parts.FirstOrDefault(p => p.StartsWith("assembly=", StringComparison.Ordinal))?[9..];
-            Assembly? assembly = assemblyName is null ? projectAssembly : Assembly.Load(new AssemblyName(assemblyName));
+            Assembly? assembly;
+            if (assemblyName is null)
+                assembly = projectAssembly;
+            else
+            {
+                try { assembly = Assembly.Load(new AssemblyName(assemblyName)); }
+                catch (Exception ex) when (ex is FileNotFoundException or FileLoadException or BadImageFormatException) { return null; }
+            }
             return assembly?.GetType(parts[0] + "." + localName);
         }
         else if (!localName.Contains('.'))

@@ -52,6 +52,7 @@ internal sealed class LineGenerator : ILineGenerator
     {
         var spec = model.Manifest.Lines!;
         if (spec.FeatureVersion != 1) throw new InvalidDataException($"{model.Name} needs line features version {spec.FeatureVersion}, which this WpfStudio does not have.");
+        if (spec.VocabSize <= 0 || spec.VocabSize > 65536) throw new InvalidDataException($"{model.Name} has an unsupported vocabulary size {spec.VocabSize}.");
         model.VerifyFiles();
         var tokenizer = ByteLevelBpeTokenizer.Load(model.PathOf("tokenizer.json"));
         if (tokenizer.VocabularySize != spec.VocabSize) throw new InvalidDataException($"{model.Name}: the tokenizer has {tokenizer.VocabularySize} tokens; the manifest says {spec.VocabSize}.");
@@ -93,9 +94,9 @@ internal sealed class LineGenerator : ILineGenerator
             token.ThrowIfCancellationRequested();
             var probabilities = NextProbabilities(feed, hidden, options);
             MixLocalContinuations(probabilities, history, seen);
-            int next = 0;
-            for (int i = 1; i < probabilities.Length; i++) if (probabilities[i] > probabilities[next]) next = i;
-            if (probabilities[next] < _spec.TokenConfidence) return new LineCompletion(WithoutUnfinishedWord(text, next), false);
+            int next = SelectNextToken(probabilities, _spec.BosId, _spec.PadId, _spec.EosId);
+            double nextConfidence = (uint)next < (uint)probabilities.Length && double.IsFinite(probabilities[next]) ? probabilities[next] : 0d;
+            if (nextConfidence < _spec.TokenConfidence) return new LineCompletion(WithoutUnfinishedWord(text, next), false);
             if (next == _spec.EosId) return new LineCompletion(text, true);
             generated.Add(next); history.Add(next);
             string decoded = _tokenizer.Decode(generated);
@@ -105,6 +106,20 @@ internal sealed class LineGenerator : ILineGenerator
             feed = [next];
         }
         return new LineCompletion(text, false);
+    }
+
+    internal static int SelectNextToken(ReadOnlySpan<double> probabilities, int bosId, int padId, int eosId)
+    {
+        int next = -1;
+        double best = double.NegativeInfinity;
+        for (int i = 0; i < probabilities.Length; i++)
+        {
+            if (i == bosId || i == padId) continue;
+            double value = probabilities[i];
+            if (!double.IsFinite(value)) continue;
+            if (value > best) { best = value; next = i; }
+        }
+        return next >= 0 ? next : eosId;
     }
 
     // Stopping where the next token would have continued a word leaves half a name, so the whole word goes.
@@ -127,15 +142,28 @@ internal sealed class LineGenerator : ILineGenerator
         using var outputs = _session.Run(options, Inputs, [ids, state], Outputs);
         outputs[1].GetTensorDataAsSpan<float>().CopyTo(hidden);
         var logits = outputs[0].GetTensorDataAsSpan<float>();
+        return SoftmaxLogits(logits, _spec.VocabSize, _spec.BosId, _spec.PadId);
+    }
+
+    internal static double[] SoftmaxLogits(ReadOnlySpan<float> logits, int vocabSize, int bosId, int padId)
+    {
+        if (logits.Length != vocabSize)
+            throw new InvalidDataException($"Model output has {logits.Length} logits; expected {vocabSize}.");
         var values = new double[logits.Length];
         double best = double.NegativeInfinity;
         for (int i = 0; i < logits.Length; i++)
         {
-            values[i] = i == _spec.BosId || i == _spec.PadId ? double.NegativeInfinity : logits[i];
-            best = Math.Max(best, values[i]);
+            double logit = i == bosId || i == padId || !float.IsFinite(logits[i]) ? double.NegativeInfinity : logits[i];
+            values[i] = logit;
+            if (logit > best) best = logit;
         }
+        if (!double.IsFinite(best))
+            return new double[logits.Length];
         double total = 0;
-        for (int i = 0; i < values.Length; i++) total += values[i] = Math.Exp(values[i] - best);
+        for (int i = 0; i < values.Length; i++)
+            total += values[i] = double.IsNegativeInfinity(values[i]) ? 0d : Math.Exp(values[i] - best);
+        if (!double.IsFinite(total) || total <= 0)
+            return new double[logits.Length];
         for (int i = 0; i < values.Length; i++) values[i] /= total;
         return values;
     }
@@ -160,7 +188,7 @@ internal sealed class LineGenerator : ILineGenerator
         foreach (int length in HistoryLengths)
         {
             if (history.Count < length || !seen.TryGetValue(Key(history, history.Count - length, length), out var counts)) continue;
-            var usable = counts.Where(entry => entry.Key != _spec.BosId && entry.Key != _spec.PadId).ToList();
+            var usable = counts.Where(entry => entry.Key != _spec.BosId && entry.Key != _spec.PadId && (uint)entry.Key < (uint)probabilities.Length).ToList();
             if (usable.Count == 0) continue;
             for (int i = 0; i < probabilities.Length; i++) probabilities[i] *= 1 - _spec.ContextCacheWeight;
             double total = usable.Sum(entry => entry.Value);

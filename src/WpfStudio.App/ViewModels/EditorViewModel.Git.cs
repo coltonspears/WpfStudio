@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using WpfStudio.App.Features.Git;
 using WpfStudio.Contracts;
 using WpfStudio.Core.Git;
+using WpfStudio.Core.Threading;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -9,7 +10,7 @@ namespace WpfStudio.App.ViewModels;
 public sealed partial class EditorViewModel
 {
     private GitService? _git;
-    private CancellationTokenSource? _gitChanges, _gitBlame;
+    private readonly SerialDebouncedWork _gitChanges, _gitBlame;
     private long _gitBaseRevision;
 
     /// <summary>The committed version of this file; null outside a repository or before it is read.</summary>
@@ -66,14 +67,10 @@ public sealed partial class EditorViewModel
 
     private void ScheduleGitChanges(bool immediate)
     {
-        _gitChanges?.Cancel(); _gitChanges?.Dispose();
-        _gitChanges = new();
-        var token = _gitChanges.Token;
         var gitBase = GitBase;
         var text = State.Content;
-        Task.Run(async () =>
+        _gitChanges.ScheduleBackgroundAsync(immediate ? TimeSpan.Zero : TimeSpan.FromMilliseconds(250), async token =>
         {
-            if (!immediate) await Task.Delay(250, token);
             var changes = gitBase is null ? [] : gitBase.IsTracked && gitBase.HeadText is null && gitBase.HeadCommit is not null
                 ? [] // Binary or oversized committed file: no comparison.
                 : WpfStudio.Core.Git.LineChanges.Compute(gitBase.IsTracked ? gitBase.HeadText ?? "" : null, text);
@@ -83,21 +80,27 @@ public sealed partial class EditorViewModel
                 LineChanges = changes;
                 GitChanged?.Invoke();
             }, token);
-        }, token).Forget();
+        }).Forget();
     }
 
     private void ScheduleBlame()
     {
-        _gitBlame?.Cancel(); _gitBlame?.Dispose(); _gitBlame = null;
+        _gitBlame.Cancel();
         // Blame is shown above C# declarations only.
-        if (!ShowInlineBlame || !IsCSharp || _git is not { } git || GitBase is not { IsTracked: true, HeadCommit: not null } gitBase) return;
-        _gitBlame = new();
-        var token = _gitBlame.Token;
+        if (!ShowInlineBlame || !IsCSharp || _git is not { } git || GitBase is not { IsTracked: true, HeadCommit: not null } gitBase)
+        {
+            if (Blame.Count > 0 || BlameVersion >= 0)
+            {
+                Blame = [];
+                BlameVersion = -1;
+                GitChanged?.Invoke();
+            }
+            return;
+        }
         var text = State.Content;
         var version = State.Version;
-        Task.Run(async () =>
+        _gitBlame.ScheduleBackgroundAsync(BlameVersion < 0 ? TimeSpan.Zero : TimeSpan.FromMilliseconds(1200), async token =>
         {
-            await Task.Delay(BlameVersion < 0 ? 0 : 1200, token); // Blame the first time at once, then after typing pauses.
             var blame = await git.BlameAsync(gitBase.Root, gitBase.RelativePath, text, token, State.Encoding);
             await _dispatcher.InvokeAsync(() =>
             {
@@ -105,12 +108,12 @@ public sealed partial class EditorViewModel
                 Blame = blame; BlameVersion = version;
                 GitChanged?.Invoke();
             }, token);
-        }, token).Forget();
+        }).Forget();
     }
 
     private void DisposeGit()
     {
-        _gitChanges?.Cancel(); _gitChanges?.Dispose(); _gitChanges = null;
-        _gitBlame?.Cancel(); _gitBlame?.Dispose(); _gitBlame = null;
+        _gitChanges.Dispose();
+        _gitBlame.Dispose();
     }
 }

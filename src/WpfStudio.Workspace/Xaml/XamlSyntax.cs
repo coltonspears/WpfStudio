@@ -64,9 +64,10 @@ internal static class XamlSyntax
             for (var i = 0; i < raw.Length;)
             {
                 var end = raw[i] == '&' ? raw.IndexOf(';', i + 1) : -1;
-                var encoded = end >= 0 ? raw[i..(end + 1)] : "";
-                var decoded = end >= 0 ? WebUtility.HtmlDecode(encoded) : "";
-                if (end >= 0 && decoded != encoded)
+                var candidate = end > i + 1 && IsEntityBody(raw.AsSpan(i + 1, end - i - 1));
+                var encoded = candidate ? raw[i..(end + 1)] : "";
+                var decoded = candidate ? WebUtility.HtmlDecode(encoded) : "";
+                if (candidate && decoded != encoded)
                 {
                     foreach (var c in decoded) { text.Append(c); starts.Add(sourceStart + i); ends.Add(sourceStart + end + 1); }
                     i = end + 1;
@@ -74,6 +75,12 @@ internal static class XamlSyntax
                 else { text.Append(raw[i]); starts.Add(sourceStart + i); ends.Add(sourceStart + i + 1); i++; }
             }
             Text = text.ToString(); _starts = starts.ToArray(); _ends = ends.ToArray();
+        }
+        private static bool IsEntityBody(ReadOnlySpan<char> body)
+        {
+            foreach (var c in body)
+                if (c == '&' || char.IsWhiteSpace(c)) return false;
+            return true;
         }
         public int PositionAt(int sourcePosition)
         {
@@ -83,8 +90,11 @@ internal static class XamlSyntax
         }
         public (int Start, int Length) Span(int start, int length)
         {
+            start = Math.Max(0, start);
             var sourceStart = start < _starts.Length ? _starts[start] : _ends.Length > 0 ? _ends[^1] : _sourceStart;
-            return (sourceStart, length == 0 ? 0 : _ends[start + length - 1] - sourceStart);
+            if (length <= 0 || _ends.Length == 0 || start >= _ends.Length) return (sourceStart, 0);
+            var endIndex = Math.Min(start + length - 1, _ends.Length - 1);
+            return (sourceStart, Math.Max(0, _ends[endIndex] - sourceStart));
         }
     }
 
@@ -200,6 +210,7 @@ internal static class XamlSyntax
         for (; i < text.Length; i++)
         {
             var c = text[i];
+            if (c == '\\' && i + 1 < text.Length) { i++; continue; }
             if (quote != '\0') { if (c == quote) quote = '\0'; continue; }
             if (c is '\'' or '"') { quote = c; continue; }
             if (c == '{') { depth++; continue; }
@@ -222,6 +233,7 @@ internal static class XamlSyntax
         var equals = -1;
         for (var i = start; i < end; i++)
         {
+            if (text[i] == '\\' && i + 1 < end) { i++; continue; }
             if (text[i] is '{' or '\'' or '"') break;
             if (text[i] == '=') { equals = i; break; }
         }

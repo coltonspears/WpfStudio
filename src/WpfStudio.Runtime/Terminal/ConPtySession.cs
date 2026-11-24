@@ -38,9 +38,10 @@ public sealed class ConPtySession : IAsyncDisposable
     private readonly Task reader;
     private readonly Task writer;
     private readonly Process process;
-    private nint pseudoConsole;
+    private SafePseudoConsoleHandle? pseudoConsole;
     private int disposed;
     public int ProcessId => process.Id;
+    public bool IsClosed => Volatile.Read(ref disposed) != 0;
     /// <summary>The program's exit code once it has ended; -1 when it could not be read, as after the session is disposed first.</summary>
     public Task<int> Exited => exited.Task;
     public ChannelReader<byte[]> Output => output.Reader;
@@ -61,18 +62,23 @@ public sealed class ConPtySession : IAsyncDisposable
         if (!Directory.Exists(workingDirectory)) throw new DirectoryNotFoundException(workingDirectory);
         Check(Native.CreatePipe(out var readInput, out var writeInput, 0, 0));
         SafeFileHandle? readOutput = null, writeOutput = null;
+        SafePseudoConsoleHandle? createdConsole = null;
+        Process? startedProcess = null;
+        FileStream? createdInput = null, createdOutput = null;
         nint attributes = 0;
         bool attributesInitialized = false;
         try
         {
             Check(Native.CreatePipe(out readOutput, out writeOutput, 0, 0));
-            Marshal.ThrowExceptionForHR(Native.CreatePseudoConsole(new Coord(columns, rows), readInput, writeOutput, 0, out pseudoConsole));
+            Marshal.ThrowExceptionForHR(Native.CreatePseudoConsole(new Coord(columns, rows), readInput, writeOutput, 0, out var rawConsole));
+            createdConsole = new SafePseudoConsoleHandle(rawConsole);
+            pseudoConsole = createdConsole;
             nuint size = 0;
             Native.InitializeProcThreadAttributeList(0, 1, 0, ref size);
             attributes = Marshal.AllocHGlobal(checked((int)size));
             Check(Native.InitializeProcThreadAttributeList(attributes, 1, 0, ref size));
             attributesInitialized = true;
-            Check(Native.UpdateProcThreadAttribute(attributes, 0, 0x00020016, pseudoConsole, (nuint)nint.Size, 0, 0));
+            Check(Native.UpdateProcThreadAttribute(attributes, 0, 0x00020016, createdConsole.DangerousGetHandle(), (nuint)nint.Size, 0, 0));
             // Explicit null standard handles prevent a redirected IDE/test-host console from being inherited instead of ConPTY.
             var startup = new StartupInfoEx { StartupInfo = new StartupInfo { cb = Marshal.SizeOf<StartupInfoEx>(), dwFlags = 0x00000100 }, AttributeList = attributes };
             var command = new StringBuilder('"' + executable + '"' + (string.IsNullOrWhiteSpace(arguments) ? "" : " " + arguments));
@@ -82,21 +88,50 @@ public sealed class ConPtySession : IAsyncDisposable
             finally { if (block != 0) Marshal.FreeHGlobal(block); }
             // Opening Handle while the creation handle is still open retains the OS process object, so the id cannot be
             // reused by an unrelated process before Kill(entireProcessTree) looks it up on close.
-            try { process = Process.GetProcessById(information.ProcessId); _ = process.Handle; }
-            finally { Native.CloseHandle(information.Process); Native.CloseHandle(information.Thread); }
+            try
+            {
+                startedProcess = Process.GetProcessById(information.ProcessId);
+                _ = startedProcess.Handle;
+                process = startedProcess;
+            }
+            catch
+            {
+                if (information.Process != 0) _ = Native.TerminateProcess(information.Process, 1);
+                throw;
+            }
+            finally
+            {
+                if (information.Process != 0) _ = Native.CloseHandle(information.Process);
+                if (information.Thread != 0) _ = Native.CloseHandle(information.Thread);
+            }
             process.EnableRaisingEvents = true;
             process.Exited += OnProcessExited;
             if (process.HasExited) OnProcessExited(null, EventArgs.Empty);
-            inputStream = new FileStream(writeInput, FileAccess.Write, 4096, false);
-            outputStream = new FileStream(readOutput, FileAccess.Read, 16384, false);
+            createdInput = new FileStream(writeInput, FileAccess.Write, 4096, false);
+            createdOutput = new FileStream(readOutput, FileAccess.Read, 16384, false);
+            inputStream = createdInput;
+            outputStream = createdOutput;
             // The pipe only offers blocking reads, and this one lasts as long as the session, so it gets its own thread rather than holding a pool thread.
             reader = Task.Factory.StartNew(ReadOutput, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             writer = Task.Run(WriteInputAsync);
         }
         catch
         {
-            writeInput.Dispose(); readOutput?.Dispose();
-            if (pseudoConsole != 0) { Native.ClosePseudoConsole(pseudoConsole); pseudoConsole = 0; }
+            if (startedProcess is not null)
+            {
+                startedProcess.Exited -= OnProcessExited;
+                try { if (!startedProcess.HasExited) startedProcess.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+                catch (Win32Exception) { }
+                startedProcess.Dispose();
+            }
+            createdInput?.Dispose();
+            createdOutput?.Dispose();
+            writeInput.Dispose();
+            readOutput?.Dispose();
+            createdConsole?.Dispose();
+            pseudoConsole = null;
+            lifetime.Dispose();
             throw;
         }
         finally
@@ -130,8 +165,19 @@ public sealed class ConPtySession : IAsyncDisposable
     public ValueTask WriteAsync(string text, CancellationToken cancellationToken = default) => input.Writer.WriteAsync(Encoding.UTF8.GetBytes(text), cancellationToken);
     public void Resize(int columns, int rows)
     {
-        if (Volatile.Read(ref disposed) != 0 || pseudoConsole == 0) return;
-        Marshal.ThrowExceptionForHR(Native.ResizePseudoConsole(pseudoConsole, new Coord((short)Math.Clamp(columns, 1, 500), (short)Math.Clamp(rows, 1, 300))));
+        if (Volatile.Read(ref disposed) != 0 || Volatile.Read(ref pseudoConsole) is not { IsInvalid: false } handle) return;
+        bool addedRef = false;
+        try
+        {
+            handle.DangerousAddRef(ref addedRef);
+            if (Volatile.Read(ref disposed) != 0 || handle.IsClosed) return;
+            Marshal.ThrowExceptionForHR(Native.ResizePseudoConsole(handle.DangerousGetHandle(), new Coord((short)Math.Clamp(columns, 1, 500), (short)Math.Clamp(rows, 1, 300))));
+        }
+        catch (ObjectDisposedException) { }
+        finally
+        {
+            if (addedRef) handle.DangerousRelease();
+        }
     }
     private void ReadOutput()
     {
@@ -168,11 +214,11 @@ public sealed class ConPtySession : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         Closed?.Invoke();
-        await lifetime.CancelAsync();
+        await lifetime.CancelAsync().ConfigureAwait(false);
         input.Writer.TryComplete();
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } catch (Win32Exception) { }
-        var console = Interlocked.Exchange(ref pseudoConsole, 0);
-        if (console != 0) await Task.Run(() => Native.ClosePseudoConsole(console)).ConfigureAwait(false);
+        var console = Interlocked.Exchange(ref pseudoConsole, null);
+        if (console is not null) await Task.Run(console.Dispose).ConfigureAwait(false);
         // Closing the pseudoconsole ends the reader at the end of its output and the writer at its broken pipe. The streams are
         // closed only after both: a FileStream closed while another thread is inside Read checks closed, then readable, and a
         // close between the two fails the read with NotSupportedException, which neither thread expects.
@@ -190,6 +236,15 @@ public sealed class ConPtySession : IAsyncDisposable
         process.Dispose(); lifetime.Dispose();
     }
     private static void Check(bool success) { if (!success) throw new Win32Exception(Marshal.GetLastWin32Error()); }
+    private sealed class SafePseudoConsoleHandle() : SafeHandleZeroOrMinusOneIsInvalid(ownsHandle: true)
+    {
+        internal SafePseudoConsoleHandle(nint handle) : this() => SetHandle(handle);
+        protected override bool ReleaseHandle()
+        {
+            Native.ClosePseudoConsole(handle);
+            return true;
+        }
+    }
     [StructLayout(LayoutKind.Sequential)] private readonly record struct Coord(short X, short Y);
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct StartupInfo
     {
@@ -208,6 +263,7 @@ public sealed class ConPtySession : IAsyncDisposable
         [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool UpdateProcThreadAttribute(nint list, uint flags, nuint attribute, nint value, nuint size, nint previous, nint returnSize);
         [DllImport("kernel32.dll")] internal static extern void DeleteProcThreadAttributeList(nint list);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateProcessW")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool CreateProcess(string? application, StringBuilder command, nint processAttributes, nint threadAttributes, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint flags, nint environment, string directory, ref StartupInfoEx startup, out ProcessInformation process);
+        [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool TerminateProcess(nint process, uint exitCode);
         [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool CloseHandle(nint handle);
     }
 }

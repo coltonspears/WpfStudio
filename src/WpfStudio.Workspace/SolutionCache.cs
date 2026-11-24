@@ -230,20 +230,93 @@ internal static class SolutionCache
     }
 
     /// <summary>
-    /// Loads analyzers and source generators for a cached solution: one context per folder, with the compiler and
-    /// runtime shared from the host, read from memory so package and project outputs are never locked.
+    /// Loads analyzers and source generators for a cached solution: one collectible context per folder,
+    /// bounded by an LRU cache so contexts from closed workspaces are unloaded instead of growing unboundedly,
+    /// with the compiler and runtime shared from the host and assemblies read from memory so outputs are never locked.
     /// </summary>
-    private sealed class AnalyzerLoader : IAnalyzerAssemblyLoader
+    internal sealed class AnalyzerLoader : IAnalyzerAssemblyLoader
     {
+        internal const int DefaultMaxContexts = 32;
         public static readonly AnalyzerLoader Instance = new();
-        private readonly ConcurrentDictionary<string, FolderContext> _contexts = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Lock _gate = new();
+        private readonly int _maxContexts;
+        private readonly Dictionary<string, LinkedListNode<CacheEntry>> _contexts = new(StringComparer.OrdinalIgnoreCase);
+        private readonly LinkedList<CacheEntry> _lru = new();
+
+        internal AnalyzerLoader(int maxContexts = DefaultMaxContexts)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(maxContexts, 1);
+            _maxContexts = maxContexts;
+        }
+
+        internal int ContextCount
+        {
+            get
+            {
+                lock (_gate) return _contexts.Count;
+            }
+        }
+
+        internal bool ContainsDirectory(string directory)
+        {
+            var normalized = Path.GetFullPath(directory);
+            lock (_gate) return _contexts.ContainsKey(normalized);
+        }
+
+        internal void Clear()
+        {
+            List<FolderContext> evicted;
+            lock (_gate)
+            {
+                evicted = new List<FolderContext>(_contexts.Count);
+                foreach (var entry in _lru) evicted.Add(entry.Context);
+                _contexts.Clear();
+                _lru.Clear();
+            }
+            foreach (var context in evicted) context.Unload();
+        }
 
         public void AddDependencyLocation(string fullPath) { }
 
-        public Assembly LoadFromPath(string fullPath) =>
-            _contexts.GetOrAdd(Path.GetDirectoryName(fullPath)!, directory => new FolderContext(directory)).LoadFile(fullPath);
+        public Assembly LoadFromPath(string fullPath)
+        {
+            var directory = Path.GetFullPath(Path.GetDirectoryName(fullPath)!);
+            FolderContext context;
+            List<FolderContext>? evicted = null;
+            lock (_gate)
+            {
+                if (_contexts.TryGetValue(directory, out var existing))
+                {
+                    if (!ReferenceEquals(existing, _lru.First))
+                    {
+                        _lru.Remove(existing);
+                        _lru.AddFirst(existing);
+                    }
+                    context = existing.Value.Context;
+                }
+                else
+                {
+                    context = new FolderContext(directory);
+                    var node = new LinkedListNode<CacheEntry>(new CacheEntry(directory, context));
+                    _lru.AddFirst(node);
+                    _contexts[directory] = node;
+                    while (_contexts.Count > _maxContexts && _lru.Last is { } oldest)
+                    {
+                        _lru.RemoveLast();
+                        _contexts.Remove(oldest.Value.Directory);
+                        evicted ??= [];
+                        evicted.Add(oldest.Value.Context);
+                    }
+                }
+            }
+            if (evicted is not null)
+                foreach (var oldContext in evicted) oldContext.Unload();
+            return context.LoadFile(fullPath);
+        }
 
-        private sealed class FolderContext(string directory) : AssemblyLoadContext("WpfStudio analyzers " + directory)
+        private readonly record struct CacheEntry(string Directory, FolderContext Context);
+
+        private sealed class FolderContext(string directory) : AssemblyLoadContext("WpfStudio analyzers " + directory, isCollectible: true)
         {
             private readonly ConcurrentDictionary<string, Assembly> _loaded = new(StringComparer.OrdinalIgnoreCase);
 

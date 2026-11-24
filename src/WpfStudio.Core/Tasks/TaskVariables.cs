@@ -145,15 +145,41 @@ public static class TaskCommandLine
         return findExecutable(program);
     }
 
+    private static readonly System.Buffers.SearchValues<char> ShellMetacharacters =
+        System.Buffers.SearchValues.Create("\"'`&|;<>()[]{}%$!^*?~#,@");
+
     // With arguments, the command is one word of the line; on its own it is the whole line, as Visual Studio Code reads it.
-    private static string QuoteCommand(string command, ShellStyle style) => !NeedsQuotes(command) ? command : style == ShellStyle.PowerShell ? "& " + Quote(command, style) : Quote(command, style);
-    private static string Quote(string value, ShellStyle style) => !NeedsQuotes(value) ? value : style switch
+    private static string QuoteCommand(string command, ShellStyle style) => !NeedsQuotes(command, style) ? command : style == ShellStyle.PowerShell ? "& " + Quote(command, style) : Quote(command, style);
+    private static string Quote(string value, ShellStyle style) => !NeedsQuotes(value, style) ? value : style switch
     {
         ShellStyle.PowerShell => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'",
         ShellStyle.Posix => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'",
-        _ => "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""
+        _ => QuoteForCmd(value)
     };
-    private static bool NeedsQuotes(string value) => value.Length == 0 || value.Any(char.IsWhiteSpace);
+    private static bool NeedsQuotes(string value, ShellStyle style) =>
+        value.Length == 0
+        || value.AsSpan().IndexOfAny(ShellMetacharacters) >= 0
+        || (style == ShellStyle.Posix && value.Contains('\\', StringComparison.Ordinal))
+        || value.Any(c => char.IsWhiteSpace(c) || char.IsControl(c));
+
+    private static string QuoteForCmd(string value)
+    {
+        if (value.Contains('\r', StringComparison.Ordinal) || value.Contains('\n', StringComparison.Ordinal) || value.Contains('\0', StringComparison.Ordinal))
+            throw new TaskConfigurationException("A cmd.exe task argument cannot contain line breaks or null characters.");
+        var text = new StringBuilder(value.Length + 2).Append('"');
+        foreach (var c in value)
+        {
+            switch (c)
+            {
+                // Close the quoted span, emit a caret-escaped metacharacter outside quotes, then reopen quotes so quote parity never breaks.
+                case '"': text.Append("\"^\"\""); break;
+                case '%': text.Append("\"^%\""); break;
+                case '!': text.Append("\"^!\""); break;
+                default: text.Append(c); break;
+            }
+        }
+        return text.Append('"').ToString();
+    }
 
     /// <summary>Quotes one argument so CommandLineToArgvW, which .NET programs and most others use, reads it back unchanged.</summary>
     public static string QuoteForWindows(string value)

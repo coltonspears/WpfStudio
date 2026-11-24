@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.Messaging;
+using Microsoft.Extensions.Logging;
 using WpfStudio.App.Features.Debugging;
 using WpfStudio.App.Features.Designer;
 using WpfStudio.App.Features.Documents;
@@ -12,11 +13,12 @@ using WpfStudio.App.Features.XamlAnalysis;
 using WpfStudio.App.Services;
 using WpfStudio.Contracts;
 using WpfStudio.Runtime.Debugging;
+using WpfStudio.Workspace;
 
 namespace WpfStudio.App.ViewModels;
 
 /// <summary>The shell as seen by the tools that were split out of it: Task List, file groups, Problems and the external-changes review.</summary>
-public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewHost, IVerifiedEditHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost
+public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewHost, IVerifiedEditHost, IExternalChangesHost, IProjectXamlAnalysisHost, IAutoSaveHost, IBreakpointEditingHost, ISolutionExplorerHost, IStudioToolsHost, IInspectionSourceHost, IDesignerSourceHost, IInspectionRequestHost, IWorkspaceLifecycleHost, IDocumentSessionHost, IBuildAndLaunchHost
 {
     public TaskListViewModel TaskList { get; }
     public FileGroupsViewModel FileGroups { get; }
@@ -31,6 +33,9 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
     public BreakpointEditingViewModel Breakpoints { get; }
     public InspectionSourceVerifier InspectionSources { get; }
     public DesignerSourceTracker DesignerContext { get; }
+    internal WorkspaceLifecycleCoordinator WorkspaceLifecycle { get; }
+    internal DocumentSessionManager DocumentSessions { get; }
+    internal BuildAndLaunchCoordinator BuildAndLaunch { get; }
     /// <summary>True while a change review is open; workspace operations wait for the decision.</summary>
     public bool IsPreviewOpen => ChangeReview.IsOpen;
     private Action? _openDocumentsChanged, _documentsChanged;
@@ -114,14 +119,14 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
 
     // ------------------------------------------------------------------ IProjectXamlAnalysisHost
     WorkspaceSnapshot? IProjectXamlAnalysisHost.Workspace => Workspace;
-    bool IProjectXamlAnalysisHost.IsLoading => _loading;
+    bool IProjectXamlAnalysisHost.IsLoading => WorkspaceLifecycle.IsLoading;
     IReadOnlyList<EditorViewModel> IProjectXamlAnalysisHost.Documents => Documents;
     IReadOnlyDictionary<string, string>? IProjectXamlAnalysisHost.IndexTexts => WpfExplorer.Index?.Texts;
     void IProjectXamlAnalysisHost.DiagnosticsChanged() => RefreshEditorDiagnostics();
     void IProjectXamlAnalysisHost.XamlContextsChanged() => RefreshXamlContexts();
     void IProjectXamlAnalysisHost.InvalidateXamlResources() => _xamlResources.Invalidate();
     void IProjectXamlAnalysisHost.OpenXamlDocumentsChanged() => _xamlResources.SetOpenDocuments(Documents.Select(editor => editor.State));
-    void IProjectXamlAnalysisHost.ForgetIndexedState() { _buildDiagnostics.Clear(); WpfExplorer.SetIndex(null); _xaml.Index = null; }
+    void IProjectXamlAnalysisHost.ForgetIndexedState() { BuildAndLaunch.ClearBuildDiagnostics(); WpfExplorer.SetIndex(null); _xaml.Index = null; }
     void IProjectXamlAnalysisHost.SemanticStateChanged() => Interlocked.Increment(ref _symbolSemanticRevision);
     void IProjectXamlAnalysisHost.AppendOutput(string line) => AppendOutput(line);
 
@@ -206,4 +211,55 @@ public sealed partial class ShellViewModel : ICommandPaletteHost, IChangeReviewH
             yield return new PaletteEntry("Switch to file group: " + group.Name, "Close other tabs, then open " + group.Summary, () => FileGroups.SwitchToGroupCommand.ExecuteAsync(group), "File groups", Icon: "Pin");
         }
     }
+
+    // ------------------------------------------------------------------ IWorkspaceLifecycleHost
+    bool IWorkspaceLifecycleHost.IsInitialized => _initialized;
+    bool IWorkspaceLifecycleHost.IsDisposed => _disposed;
+    bool IWorkspaceLifecycleHost.IsGitToolOpened => _gitToolOpened;
+    string[] IWorkspaceLifecycleHost.AllFiles { get => _allFiles; set => _allFiles = value; }
+    CancellationToken IWorkspaceLifecycleHost.Lifetime => _lifetime.Token;
+    WorkspaceClient IWorkspaceLifecycleHost.WorkspaceClient => _workspace;
+    Task<bool> IWorkspaceLifecycleHost.CloseAllDocumentsForWorkspaceAsync() => DocumentSessions.CloseAllDocumentsForWorkspaceAsync();
+    void IWorkspaceLifecycleHost.ClearHistory() => _history.Clear();
+    void IWorkspaceLifecycleHost.ShowWorkspaceStatus(WorkspaceSnapshot snapshot, bool refreshingModel) => ShowWorkspaceStatus(snapshot, refreshingModel);
+    void IWorkspaceLifecycleHost.RefreshEditorDiagnostics() => RefreshEditorDiagnostics();
+    Task IWorkspaceLifecycleHost.RefreshWpfAsync() => RefreshWpfAsync();
+    Task IWorkspaceLifecycleHost.SaveSettingsAsync() => SaveSettingsAsync();
+    void IWorkspaceLifecycleHost.CheckRuntimes(string path) => CheckRuntimes(path);
+    Task IWorkspaceLifecycleHost.RefreshSavedProjectModelAsync(string path, string configuration) => RefreshSavedProjectModelAsync(path, configuration);
+    void IWorkspaceLifecycleHost.ReportBackgroundFault(Exception fault) => ReportBackgroundFault(fault);
+
+    // ------------------------------------------------------------------ IDocumentSessionHost
+    bool IDocumentSessionHost.IsNavigatingBindingSource => _navigatingBindingSource;
+    bool IDocumentSessionHost.IsRevealingDesignerSelection => _revealingDesignerSelection;
+    CancellationToken IDocumentSessionHost.Lifetime => _lifetime.Token;
+    DocumentStore IDocumentSessionHost.Store => _store;
+    WorkspaceClient IDocumentSessionHost.WorkspaceClient => _workspace;
+    XamlCompletionService IDocumentSessionHost.XamlCompletion => _xaml;
+    XamlResourceContext IDocumentSessionHost.XamlResources => _xamlResources;
+    IUiDispatcher IDocumentSessionHost.Dispatcher => _dispatcher;
+    IUserDialogService IDocumentSessionHost.Dialogs => _dialogs;
+    ILogger IDocumentSessionHost.Logger => _logger;
+    PerfLog IDocumentSessionHost.Performance => _performance;
+    Task IDocumentSessionHost.GuardAsync(Func<Task> action) => GuardAsync(action);
+    Task IDocumentSessionHost.ApplyXamlCodeActionAsync(EditorViewModel editor, XamlCodeAction action) => ApplyXamlCodeActionAsync(editor, action);
+    Task IDocumentSessionHost.ApplyCSharpCodeActionAsync(EditorViewModel editor, CodeActionEntry action) => ApplyCSharpCodeActionAsync(editor, action);
+    void IDocumentSessionHost.ConfigureXamlContext(EditorViewModel editor) => ConfigureXamlContext(editor);
+    Task IDocumentSessionHost.HandleEditorActionAsync(EditorViewModel editor, EditorAction action) => HandleEditorActionAsync(editor, action);
+    void IDocumentSessionHost.UpdateAssistantContext() => UpdateAssistantContext();
+    void IDocumentSessionHost.RefreshEditorDiagnostics() => RefreshEditorDiagnostics();
+    void IDocumentSessionHost.RefreshRelated(EditorViewModel editor) => RefreshRelated(editor);
+    void IDocumentSessionHost.NotifyWelcomeVisibleChanged() => OnPropertyChanged(nameof(IsWelcomeVisible));
+    Task IDocumentSessionHost.RefreshWpfAsync() => RefreshWpfAsync();
+    void IDocumentSessionHost.TidyBeforeSave(EditorViewModel document) => TidyBeforeSave(document);
+
+    // ------------------------------------------------------------------ IBuildAndLaunchHost
+    BuildService IBuildAndLaunchHost.Build => _build;
+    IUiDispatcher IBuildAndLaunchHost.Dispatcher => _dispatcher;
+    IUserDialogService IBuildAndLaunchHost.Dialogs => _dialogs;
+    Task IBuildAndLaunchHost.GuardAsync(Func<Task> action) => GuardAsync(action);
+    void IBuildAndLaunchHost.RequestTool(string name) => ToolRequested?.Invoke(name);
+    void IBuildAndLaunchHost.RefreshEditorDiagnostics() => RefreshEditorDiagnostics();
+    Task IBuildAndLaunchHost.RefreshProjectModelAfterBuildAsync() => RefreshProjectModelAsync(status: null);
+    void IBuildAndLaunchHost.ReportBackgroundFault(Exception fault) => ReportBackgroundFault(fault);
 }

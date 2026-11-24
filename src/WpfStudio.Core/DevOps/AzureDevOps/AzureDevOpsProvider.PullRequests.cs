@@ -204,8 +204,14 @@ public sealed partial class AzureDevOpsProvider
     /// <summary>The repository's record (its id, project and default branch), read once.</summary>
     private Task<JsonElement> RepositoryAsync(CancellationToken cancellationToken)
     {
-        if (_repository is { IsFaulted: false, IsCanceled: false } known) return known;
-        return _repository = GetAsync(ProjectUrl(RepositoryPath), AzureDevOpsScopes.Code, cancellationToken);
+        if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<JsonElement>(cancellationToken);
+        Task<JsonElement> task;
+        lock (_cacheGate)
+        {
+            if (_repository is { IsFaulted: false, IsCanceled: false } known) task = known;
+            else task = _repository = GetAsync(ProjectUrl(RepositoryPath), AzureDevOpsScopes.Code, CancellationToken.None);
+        }
+        return task.WaitAsync(cancellationToken);
     }
 
     private async Task<DevOpsPullRequest> PatchAsync(DevOpsPullRequest pullRequest, object body, CancellationToken cancellationToken) =>

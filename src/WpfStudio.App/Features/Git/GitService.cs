@@ -505,13 +505,8 @@ public sealed class GitService
 
     private static string[] ValidatePaths(string root, string[] paths)
     {
-        var fullRoot = System.IO.Path.GetFullPath(root).TrimEnd(System.IO.Path.DirectorySeparatorChar) + System.IO.Path.DirectorySeparatorChar;
         foreach (var path in paths)
-        {
-            var full = System.IO.Path.GetFullPath(System.IO.Path.Combine(root, path));
-            if (System.IO.Path.IsPathRooted(path) || !full.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("The selected file is outside this Git repository.");
-        }
+            _ = WpfStudio.Core.IO.RepositoryPath.ResolveContained(root, path);
         return paths;
     }
 

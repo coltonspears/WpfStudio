@@ -224,12 +224,14 @@ public sealed class SchemaTypeBuilder
         return node as JsonObject;
     }
 
-    private bool IsClassLike(JsonNode? schema)
+    private bool IsClassLike(JsonNode? schema) => IsClassLike(schema, new HashSet<JsonNode>(ReferenceEqualityComparer.Instance));
+
+    private bool IsClassLike(JsonNode? schema, HashSet<JsonNode> visited)
     {
         var obj = Resolve(schema);
-        if (obj is null) return false;
+        if (obj is null || !visited.Add(obj)) return false;
         if (obj.Object("properties") is { Count: > 0 }) return true;
-        return obj.Array("allOf") is { Count: > 0 } parts && (parts.Count > 1 || parts.Any(IsClassLike));
+        return obj.Array("allOf") is { Count: > 0 } parts && (parts.Count > 1 || parts.Any(part => IsClassLike(part, visited)));
     }
 
     private static bool IsStringEnum(JsonNode schema) =>

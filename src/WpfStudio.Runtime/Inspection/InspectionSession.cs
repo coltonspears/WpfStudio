@@ -229,13 +229,14 @@ public sealed class InspectionSession : IInspectionSession
     public void SetDebuggerPaused(bool paused)
     {
         CancellationTokenSource? cancel = null;
+        CancellationTokenSource? dispose = null;
         PauseAwareDeadline? connectionDeadline;
         lock (_stateGate)
         {
             if (_closed || _paused == paused) return;
             _paused = paused;
             if (paused) cancel = _running;
-            else _running = new CancellationTokenSource();
+            else { dispose = _running; _running = new CancellationTokenSource(); }
             _status = paused ? "Inspection paused while the debugger has stopped managed threads."
                 : _connected ? "Connected to application process " + _hello!.ProcessId + "."
                 : "Waiting for the application's inspection agent…";
@@ -244,6 +245,7 @@ public sealed class InspectionSession : IInspectionSession
         // Cancel an in-flight read-only request, but retain the pipe and ignore its eventual
         // response. Managed agents cannot respond while their debugger has stopped them.
         cancel?.Cancel();
+        dispose?.Dispose();
         connectionDeadline?.SetPaused(paused);
         NotifyStateChanged();
     }
@@ -397,7 +399,8 @@ public sealed class InspectionSession : IInspectionSession
         finally
         {
             if (id != 0) _pending.TryRemove(id, out _);
-            _requests.Release();
+            try { _requests.Release(); }
+            catch (ObjectDisposedException) { }
         }
     }
 
@@ -415,8 +418,15 @@ public sealed class InspectionSession : IInspectionSession
                 if (IsConnected)
                     await InspectionWire.WriteAsync(_pipe, InspectionMessage.Create("detach", Interlocked.Increment(ref _sequence), new { }), deadline.Token).ConfigureAwait(false);
             }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or OperationCanceledException or InvalidOperationException) { }
-            finally { if (acquired) _requests.Release(); }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or OperationCanceledException or InvalidOperationException or ObjectDisposedException) { }
+            finally
+            {
+                if (acquired)
+                {
+                    try { _requests.Release(); }
+                    catch (ObjectDisposedException) { }
+                }
+            }
         }
         Close("Inspector disconnected. The application's lifetime is unchanged.", new OperationCanceledException("The inspector disconnected."));
         await _listener.ConfigureAwait(false);
@@ -435,7 +445,8 @@ public sealed class InspectionSession : IInspectionSession
         _connection.TrySetException(failure);
         foreach (var pending in _pending.Values) pending.Completion.TrySetException(failure);
         _pending.Clear();
-        _lifetime.Cancel();
+        try { _lifetime.Cancel(); }
+        catch (ObjectDisposedException) { }
         _pipe.Dispose();
         NotifyStateChanged();
     }
@@ -447,7 +458,24 @@ public sealed class InspectionSession : IInspectionSession
             try { handler(); } catch { /* UI listeners cannot interrupt transport cleanup. */ }
     }
 
-    public async ValueTask DisposeAsync() => await DisconnectAsync().ConfigureAwait(false);
+    private int _disposed;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        await DisconnectAsync().ConfigureAwait(false);
+        try
+        {
+            if (await _requests.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false))
+                _requests.Release();
+        }
+        catch (ObjectDisposedException) { }
+        CancellationTokenSource running;
+        lock (_stateGate) running = _running;
+        running.Dispose();
+        _lifetime.Dispose();
+        _requests.Dispose();
+    }
 
     private static TimeSpan ValidateTimeout(TimeSpan timeout, string name) => timeout > TimeSpan.Zero && timeout <= TimeSpan.FromMinutes(10)
         ? timeout : throw new ArgumentOutOfRangeException(name, "Use a positive timeout no longer than ten minutes.");

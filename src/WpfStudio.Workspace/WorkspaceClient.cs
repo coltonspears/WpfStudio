@@ -25,7 +25,7 @@ public sealed class WorkspaceClient : IWorkspaceRpc, IAsyncDisposable
     private IWorkerDiagnosticsRpc? _diagnostics;
     private string _lifecycleHolder = "";
     private LoadWorkspaceRequest? _lastLoad;
-    private bool _disposed;
+    private volatile bool _disposed;
     // The worker listens before resolving the SDK, so this only has to cover its start.
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
     private string _stoppedWorkerError = "";

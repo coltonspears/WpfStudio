@@ -34,10 +34,11 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog, PerfMonitor? pe
     private readonly ModelSlot<MemberRanker> _members = new("member ranking", MemberRanker.Load);
     private readonly ModelSlot<ILineGenerator> _lines = new("line", LoadLines);
     private volatile CodeAssistOptions _options = CodeAssistOptions.Off;
+    private int _disposed;
 
     public AssistModelCatalog Catalog { get; } = catalog;
-    public bool RanksMembers => _options.Enabled;
-    public bool SuggestsLines => _options is { Enabled: true, LineSuggestions: true };
+    public bool RanksMembers => Volatile.Read(ref _disposed) == 0 && _options.Enabled;
+    public bool SuggestsLines => Volatile.Read(ref _disposed) == 0 && _options is { Enabled: true, LineSuggestions: true };
     /// <summary>Raised on whichever thread loaded or failed to load a model.</summary>
     public event EventHandler? StatusChanged;
 
@@ -45,7 +46,7 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog, PerfMonitor? pe
     {
         get
         {
-            if (!_options.Enabled) return "Off. No model is loaded.";
+            if (!RanksMembers) return "Off. No model is loaded.";
             var parts = new List<string> { _members.Describe(Member()) };
             if (SuggestsLines) parts.Add(_lines.Describe(Line()));
             return string.Join(" ", parts);
@@ -55,13 +56,15 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog, PerfMonitor? pe
     /// <summary>Applies a change of setting. Models no longer needed are released, and the ones that are load in the background.</summary>
     public async Task ConfigureAsync(CodeAssistOptions options)
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
         _options = options;
         StatusChanged?.Invoke(this, EventArgs.Empty);
         await Task.Run(() =>
         {
+            if (Volatile.Read(ref _disposed) != 0) return;
             bool changed = _members.Prepare(WantedMember);
             changed |= _lines.Prepare(WantedLine);
-            if (changed) StatusChanged?.Invoke(this, EventArgs.Empty);
+            if (changed && Volatile.Read(ref _disposed) == 0) StatusChanged?.Invoke(this, EventArgs.Empty);
         }).ConfigureAwait(false);
     }
 
@@ -97,29 +100,35 @@ public sealed class CodeAssistEngine(AssistModelCatalog catalog, PerfMonitor? pe
 
     // A failure stops here, so a request abandoned at the ranking budget cannot leave a fault nobody observes.
     // A model runs on a pool thread for as long as it takes, also after a caller stopped waiting at its budget, so the run is timed here and not at the call.
-    private Task<TResult?> RunAsync<T, TResult>(ModelSlot<T> slot, Func<AssistModel?> model, Func<T, TResult?> run, CancellationToken token, [CallerMemberName] string operation = "") where T : class, IDisposable where TResult : class => Task.Run(() =>
+    private Task<TResult?> RunAsync<T, TResult>(ModelSlot<T> slot, Func<AssistModel?> model, Func<T, TResult?> run, CancellationToken token, [CallerMemberName] string operation = "") where T : class, IDisposable where TResult : class
     {
-        long started = PerfMonitor.Now;
-        try
+        if (Volatile.Read(ref _disposed) != 0) return Task.FromResult<TResult?>(null);
+        return Task.Run(() =>
         {
-            var result = slot.Use(model, run, out bool changed);
-            if (changed) StatusChanged?.Invoke(this, EventArgs.Empty);
-            return result;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            slot.ReportFailure(exception);
-            StatusChanged?.Invoke(this, EventArgs.Empty);
-            return null;
-        }
-        finally { _perf.RecordSince(PerfAreas.Assist, operation, started); }
-    }, token);
+            if (Volatile.Read(ref _disposed) != 0) return null;
+            long started = PerfMonitor.Now;
+            try
+            {
+                var result = slot.Use(model, run, out bool changed);
+                if (changed && Volatile.Read(ref _disposed) == 0) StatusChanged?.Invoke(this, EventArgs.Empty);
+                return result;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                slot.ReportFailure(exception);
+                if (Volatile.Read(ref _disposed) == 0) StatusChanged?.Invoke(this, EventArgs.Empty);
+                return null;
+            }
+            finally { _perf.RecordSince(PerfAreas.Assist, operation, started); }
+        }, token);
+    }
 
     // A lone ";" costs more attention than it saves, and it is not counted as an offer when models are scored.
     private static bool WorthOffering(string text) => text.Count(character => !char.IsWhiteSpace(character)) >= 2;
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _options = CodeAssistOptions.Off;
         _members.Unload();
         _lines.Unload();

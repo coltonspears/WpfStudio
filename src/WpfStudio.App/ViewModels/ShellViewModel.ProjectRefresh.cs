@@ -1,5 +1,6 @@
 using System.IO;
 using WpfStudio.Contracts;
+using WpfStudio.Core.Threading;
 
 namespace WpfStudio.App.ViewModels;
 
@@ -10,7 +11,7 @@ namespace WpfStudio.App.ViewModels;
 /// </summary>
 public sealed partial class ShellViewModel
 {
-    private CancellationTokenSource? _projectRefreshDelay;
+    private SerialDebouncedWork? _projectRefreshDelay;
     private bool _projectRefreshRunning;
     private bool _projectRefreshAgain;
     // A build finished while a refresh was already reading the projects, so that refresh may have missed what the build wrote.
@@ -29,13 +30,16 @@ public sealed partial class ShellViewModel
         if (!Editor.AutoRefreshProject || _disposed || Workspace is null) return;
         // The files changed again while they were being loaded, so what is being loaded is already behind.
         if (_projectRefreshRunning) { _projectRefreshAgain = true; return; }
-        _projectRefreshDelay?.Cancel(); _projectRefreshDelay?.Dispose();
-        var pending = _projectRefreshDelay = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        Task.Delay(ProjectRefreshPause, pending.Token).ContinueWith(_ => _dispatcher.Post(() =>
+        (_projectRefreshDelay ??= new(_lifetime.Token)).ScheduleAsync(ProjectRefreshPause, token => _dispatcher.Post(() =>
         {
-            if (pending.IsCancellationRequested || _disposed) return;
+            if (token.IsCancellationRequested || _disposed) return;
             RefreshChangedProjectModelAsync().Forget(ReportBackgroundFault);
-        }), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default).Forget();
+        })).Forget();
+    }
+
+    private void DisposeProjectRefresh()
+    {
+        _projectRefreshDelay?.Dispose(); _projectRefreshDelay = null;
     }
 
     private Task RefreshChangedProjectModelAsync() => XamlAnalysis.ProjectReloadRequired
@@ -50,7 +54,7 @@ public sealed partial class ShellViewModel
         // Without a worker there is nothing to refresh in place. A build used to bring one back by reloading, and still does.
         if (!_workspace.IsConnected) { if (afterBuild) ReloadWhenFreeAsync().Forget(ReportBackgroundFault); return; }
         // A load or a reload holds the gate and reads the projects itself; a change seen meanwhile is looked at again once it is done.
-        if (_loading || IsBusy) { if (!afterBuild) ScheduleProjectModelRefresh(); return; }
+        if (WorkspaceLifecycle.IsLoading || IsBusy) { if (!afterBuild) ScheduleProjectModelRefresh(); return; }
         _projectRefreshRunning = true;
         _projectRefreshAgain = false;
         var configuration = Configuration;
@@ -60,7 +64,7 @@ public sealed partial class ShellViewModel
         {
             var snapshot = await _workspace.RefreshAsync(new(workspace.Path, configuration, framework), _lifetime.Token);
             // A workspace opened or reloaded meanwhile restarted the worker and supersedes this result.
-            if (_loading || !ReferenceEquals(Workspace, workspace) || Configuration != configuration) return;
+            if (WorkspaceLifecycle.IsLoading || !ReferenceEquals(Workspace, workspace) || Configuration != configuration) return;
             var startup = StartupProject?.ProjectPath;
             Workspace = snapshot;
             ApplyWorkspaceProjects(startup);

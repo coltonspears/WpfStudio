@@ -100,7 +100,11 @@ public sealed class TemporaryPropertyEdits
     {
         target.VerifyAccess();
         if (!_targets.TryGetValue(target, out var bag) || !bag.Properties.TryGetValue(property, out var edit)) return new(true);
-        if (!Owns(target, property, edit)) return Conflict();
+        if (!Owns(target, property, edit))
+        {
+            ReleaseSlot(bag, edit);
+            return Conflict();
+        }
         try
         {
             // Style/template/inherited values must regain their original
@@ -108,7 +112,11 @@ public sealed class TemporaryPropertyEdits
             if (ReferenceEquals(edit.OriginalLocalValue, DependencyProperty.UnsetValue)) target.ClearValue(property);
             else if (edit.OriginalBinding is not null) BindingOperations.SetBinding(target, property, edit.OriginalBinding);
             else target.SetValue(property, edit.OriginalLocalValue);
-            if (!OriginalStillPresent(target, property, edit)) return Conflict();
+            if (!OriginalStillPresent(target, property, edit))
+            {
+                ReleaseSlot(bag, edit);
+                return Conflict();
+            }
             Remove(bag, property, edit);
             return new(true);
         }
@@ -188,17 +196,24 @@ public sealed class TemporaryPropertyEdits
         }
     }
 
+    private void ReleaseSlot(TargetEdits bag, OriginalValue edit)
+    {
+        if (edit.SlotReleased) return;
+        edit.SlotReleased = true;
+        lock (_indexGate)
+        {
+            _count--;
+            if (--bag.Index.Count == 0) _index.Remove(bag.Index);
+        }
+    }
+
     private void Remove(TargetEdits bag, DependencyProperty property, OriginalValue edit)
     {
         // An application callback may pump its dispatcher and permit cleanup or
         // another operation to run before an outer property operation returns.
         if (!bag.Properties.TryGetValue(property, out var current) || !ReferenceEquals(current, edit)) return;
         bag.Properties.Remove(property);
-        lock (_indexGate)
-        {
-            _count--;
-            if (--bag.Index.Count == 0) _index.Remove(bag.Index);
-        }
+        ReleaseSlot(bag, edit);
     }
 
     private void Prune()
@@ -222,6 +237,7 @@ public sealed class TemporaryPropertyEdits
         public object OriginalLocalValue { get; } = localValue;
         public BindingBase? OriginalBinding { get; } = binding;
         public Binding? Marker { get; set; }
+        public bool SlotReleased { get; set; }
     }
     private sealed class ConstantValue(object? value)
     {

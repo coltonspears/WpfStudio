@@ -16,6 +16,7 @@ public partial class MemoryProfilerPane : UserControl
         InitializeComponent();
         DataContextChanged += (_, e) => Attach(e.NewValue as MemoryProfilerViewModel);
         Loaded += (_, _) => { Attach(DataContext as MemoryProfilerViewModel); UpdateBrowserColumn(); };
+        Unloaded += (_, _) => Attach(null);
         // Live memory sampling runs only while the profiler is on screen.
         IsVisibleChanged += (_, _) => { if (_model is not null) _model.Timeline.IsMonitorActive = IsVisible; };
         PreviewKeyDown += (_, e) =>

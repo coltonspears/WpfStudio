@@ -78,6 +78,7 @@ public static class ApiImporter
             if (!IsReference(auth.KeyValue)) auth.KeyValue = "";
         }
         static void ScrubProxy(ProxyOverride proxy) { if (!IsReference(proxy.Password)) proxy.Password = ""; }
-        static bool IsReference(string value) => value.Trim() is var trimmed && (trimmed.Length == 0 || trimmed.StartsWith("{{", StringComparison.Ordinal) && trimmed.EndsWith("}}", StringComparison.Ordinal));
+        static bool IsReference(string value) => value.Trim() is var trimmed
+            && (trimmed.Length == 0 || trimmed.StartsWith("{{", StringComparison.Ordinal) && trimmed.EndsWith("}}", StringComparison.Ordinal) && trimmed.IndexOf("}}", StringComparison.Ordinal) == trimmed.Length - 2);
     }
 }

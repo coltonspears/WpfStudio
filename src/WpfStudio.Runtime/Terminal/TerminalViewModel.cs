@@ -137,5 +137,19 @@ public sealed partial class TerminalViewModel : ObservableObject, IAsyncDisposab
         await Task.WhenAll(pendingOperations).ConfigureAwait(false);
         foreach (var session in sessions) await session.Session.DisposeAsync().ConfigureAwait(false);
     }
-    private static string? FindExecutable(string name) => (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).Select(directory => Path.Combine(directory.Trim('"'), name)).FirstOrDefault(File.Exists);
+    private static string? FindExecutable(string name) => FindExecutableInPath(name, Environment.GetEnvironmentVariable("PATH"));
+
+    internal static string? FindExecutableInPath(string name, string? pathValue)
+    {
+        foreach (var segment in (pathValue ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var directory = segment.Trim('"').Trim();
+            if (directory.Length == 0) continue;
+            string candidate;
+            try { candidate = Path.Combine(directory, name); }
+            catch (ArgumentException) { continue; }
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
 }

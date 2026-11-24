@@ -81,7 +81,7 @@ public sealed class DebugSession : IAsyncDisposable
             var launch = RequestAsync("launch", new { program = Path.GetFullPath(configuration.Program), cwd = configuration.WorkingDirectory, args = configuration.Arguments ?? [], env = environment, stopAtEntry = options.StopAtEntry, justMyCode = options.JustMyCode, enableStepFiltering = options.StepFiltering }, cancellationToken);
             await ConfigureWhileStartingAsync(launch, breakpoints, breakOnThrown, cancellationToken).ConfigureAwait(false);
         }
-        catch { await TearDownAsync(); throw; }
+        catch { await TearDownAsync(killProcessTree: true).ConfigureAwait(false); throw; }
     }
 
     public async Task AttachAsync(int processId, IEnumerable<SourceBreakpoint> breakpoints, bool breakOnThrown = false, CancellationToken cancellationToken = default)
@@ -132,6 +132,8 @@ public sealed class DebugSession : IAsyncDisposable
         if (command is not ("next" or "stepIn" or "stepOut")) throw new ArgumentException("Unknown step command.", nameof(command));
         return RequestAsync(command, new { threadId }, cancellationToken);
     }
+    private static readonly TimeSpan TeardownWait = TimeSpan.FromSeconds(3);
+
     public async Task StopAsync(bool? terminate = null, CancellationToken cancellationToken = default)
     {
         // The bundled netcoredbg rejects DisconnectDetach for StartLaunch but its DAP
@@ -139,8 +141,16 @@ public sealed class DebugSession : IAsyncDisposable
         // Refuse before sending anything or entering teardown so both remain usable.
         if (terminate is false && IsActive && ownsDebuggee)
             throw new NotSupportedException("The bundled debugger cannot detach from an application it launched. The application and debugger remain active. Detach is available for attached processes; Stop ends a launched application.");
-        try { if (IsActive) await RequestAsync("disconnect", new { terminateDebuggee = terminate ?? ownsDebuggee }, cancellationToken).ConfigureAwait(false); }
-        finally { await TearDownAsync(); }
+        var disconnectSucceeded = false;
+        try
+        {
+            if (IsActive)
+            {
+                await RequestAsync("disconnect", new { terminateDebuggee = terminate ?? ownsDebuggee }, cancellationToken).ConfigureAwait(false);
+                disconnectSucceeded = true;
+            }
+        }
+        finally { await TearDownAsync(killProcessTree: ownsDebuggee && !disconnectSucceeded).ConfigureAwait(false); }
     }
 
     private void OnEvent(string name, JsonElement body)
@@ -148,39 +158,55 @@ public sealed class DebugSession : IAsyncDisposable
         if (name == "initialized") initialized.TrySetResult();
         // Set here, on the reader, because the adapter's stdout closes right after this while the UI's dispose is still queued.
         if (name is "terminated" or "exited") closeExpected = true;
-        if (name == "output" && body.TryGetProperty("output", out var output)) Output?.Invoke(output.GetString() ?? "");
+        if (name == "output" && body.ValueKind == JsonValueKind.Object && body.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.String)
+            Output?.Invoke(output.GetString() ?? "");
         EventReceived?.Invoke(new DebugEvent(name, body));
     }
 
     public async ValueTask DisposeAsync()
     {
+        var disconnectSucceeded = false;
         try
         {
             if (transport is not null)
             {
                 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                 await RequestAsync("disconnect", new { terminateDebuggee = ownsDebuggee }, deadline.Token).ConfigureAwait(false);
+                disconnectSucceeded = true;
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { } // The adapter is ended below whatever its last request did.
-        finally { await TearDownAsync(); }
+        finally { await TearDownAsync(killProcessTree: ownsDebuggee && !disconnectSucceeded).ConfigureAwait(false); }
     }
 
-    private async ValueTask TearDownAsync()
+    private async ValueTask TearDownAsync(bool killProcessTree = false)
     {
         closeExpected = true;
         var activeTransport = transport;
         transport = null;
-        if (activeTransport is not null) await activeTransport.DisposeAsync();
+        if (activeTransport is not null) await activeTransport.DisposeAsync().ConfigureAwait(false);
         var adapter = process;
         process = null;
         if (adapter is not null)
         {
-            try { if (!adapter.HasExited) { adapter.Kill(entireProcessTree: false); await adapter.WaitForExitAsync(); } }
-            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception) { }
+            try
+            {
+                if (!adapter.HasExited)
+                {
+                    adapter.Kill(entireProcessTree: killProcessTree);
+                    using var exitDeadline = new CancellationTokenSource(TeardownWait);
+                    await adapter.WaitForExitAsync(exitDeadline.Token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or OperationCanceledException) { }
             adapter.Dispose();
         }
-        if (stderr is not null) { try { await stderr; } catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException) { } }
+        var stderrTask = stderr;
         stderr = null;
+        if (stderrTask is not null)
+        {
+            try { await stderrTask.WaitAsync(TeardownWait).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException or TimeoutException) { stderrTask.Forget(); }
+        }
     }
 }

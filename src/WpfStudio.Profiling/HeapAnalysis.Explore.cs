@@ -234,7 +234,7 @@ public sealed partial class HeapAnalysis
                 continue;
             }
             // The largest instances get every distinct root; the long tail keeps its shortest path only.
-            var paths = multiPathBudget-- > 0 ? InstancePaths(instance, hidden, maxPaths: 3, search, token) : [];
+            var paths = multiPathBudget-- > 0 ? InstancePaths(instance, hidden, reachable, maxPaths: 3, search, token) : [];
             if (paths.Count == 0) paths.Add(ShortestPath(instance, parents));
             foreach (var path in paths) AddPath(instance, bytes, path);
         }
@@ -338,7 +338,7 @@ public sealed partial class HeapAnalysis
 
     /// <summary>Breadth-first search upward from one instance, collecting the shortest path to each distinct root (by
     /// display name), longest-lived first. Bounded per instance.</summary>
-    private List<FlowPath> InstancePaths(int instance, HashSet<string>? hidden, int maxPaths, PathSearch search, CancellationToken token)
+    private List<FlowPath> InstancePaths(int instance, HashSet<string>? hidden, bool[] reachable, int maxPaths, PathSearch search, CancellationToken token)
     {
         // The collections are reused across the instances of one request.
         var (via, queue, labels) = (search.Via, search.Queue, search.Labels);
@@ -357,7 +357,7 @@ public sealed partial class HeapAnalysis
             foreach (var edgeId in _graph.Incoming.For(node))
             {
                 var edge = _graph.Edges[edgeId];
-                if (!Reachable[edge.From]) continue;
+                if (!reachable[edge.From]) continue;
                 if (IsStaticEdge(edge))
                 {
                     var label = _graph.Labels[edge.LabelId];
@@ -398,7 +398,7 @@ public sealed partial class HeapAnalysis
 
     private sealed class FlowNodeBuilder(string key, int level, string label, string detail, string kind, string? typeKey)
     {
-        private readonly HashSet<int> _instances = [];
+        private readonly Dictionary<int, long> _instances = [];
         private long _sampleBytes = -1;
         public string Key => key; public int Level => level; public string Label => label; public string Detail => detail;
         public string Kind => kind; public string? TypeKey => typeKey;
@@ -407,13 +407,13 @@ public sealed partial class HeapAnalysis
         public int? Sample { get; private set; }
         public void Add(int instance, long bytes, int sample)
         {
-            if (_instances.Add(instance)) Bytes += bytes;
+            if (_instances.TryAdd(instance, bytes)) Bytes += bytes;
             if (bytes > _sampleBytes) { _sampleBytes = bytes; Sample = sample; }
         }
         public void Merge(FlowNodeBuilder other)
         {
-            foreach (var instance in other._instances) _instances.Add(instance);
-            Bytes += other.Bytes;
+            foreach (var (instance, bytes) in other._instances)
+                if (_instances.TryAdd(instance, bytes)) Bytes += bytes;
             if (other._sampleBytes > _sampleBytes) { _sampleBytes = other._sampleBytes; Sample = other.Sample; }
         }
     }

@@ -84,7 +84,7 @@ public sealed partial class VariableResolver
             if (char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_' or '~' or '!' or '$' or '\'' or '(' or ')' or '*' or ',' or ';' or ':' or '@') { builder.Append(c); continue; }
             if (c is '/' or '?' && !pathSegment) { builder.Append(c); continue; }
             if (c == ' ' && spaceAsPlus) { builder.Append('+'); continue; }
-            var length = char.IsHighSurrogate(c) && i + 1 < value.Length
+            var length = char.IsHighSurrogate(c) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1])
                 ? Encoding.UTF8.GetBytes(value.AsSpan(i++, 2), bytes)
                 : Encoding.UTF8.GetBytes(value.AsSpan(i, 1), bytes);
             for (var b = 0; b < length; b++) builder.Append('%').Append(bytes[b].ToString("X2", CultureInfo.InvariantCulture));

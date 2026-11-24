@@ -74,24 +74,33 @@ public sealed class WorkspaceEditTransaction
     public async Task<IReadOnlyList<string>> UndoAsync(CancellationToken cancellationToken = default)
     {
         if (!_undo.TryPeek(out var changes)) return [];
-        foreach (var applied in changes)
-            if (_store.Find(applied.Change.Path)?.Content != applied.Change.After ||
-                (applied.Created && !ReferenceEquals(_store.Find(applied.Change.Path), applied.Document)))
-                throw new InvalidOperationException("A changed document has newer edits. Undo those edits before undoing the workspace operation.");
-        var removed = new List<string>();
+        var resolved = new List<(AppliedChange Applied, DocumentState Document)>(changes.Count);
         foreach (var applied in changes)
         {
-            var document = _store.Find(applied.Change.Path)!;
+            var document = _store.Find(applied.Change.Path);
+            if (document?.Content != applied.Change.After ||
+                (applied.Created && !ReferenceEquals(document, applied.Document)))
+                throw new InvalidOperationException("A changed document has newer edits. Undo those edits before undoing the workspace operation.");
+            resolved.Add((applied, document));
+        }
+        // Perform every in-memory restoration, close, and stack pop synchronously before any await so
+        // cancellation or disk I/O errors during recovery cleanup cannot leave a partial undo.
+        var removed = new List<string>();
+        foreach (var (applied, document) in resolved)
+        {
             if (applied.Created && document.DiskHash == null && !File.Exists(document.Path))
             {
                 _store.Close(document);
-                // Stay on the caller's thread: the next change may write a document the UI is bound to.
-                await _store.DeleteRecoveryAsync(document.Path, cancellationToken);
                 removed.Add(document.Path);
             }
             else document.Content = applied.Change.Before;
         }
         _undo.Pop();
+        foreach (var path in removed)
+        {
+            try { await _store.DeleteRecoveryAsync(path, cancellationToken); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or OperationCanceledException) { }
+        }
         return removed;
     }
     public static string ApplyTextEdits(string text, IReadOnlyList<TextEdit> edits)

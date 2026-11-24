@@ -22,6 +22,7 @@ public sealed partial class GitHubProvider : IDevOpsProvider
     private readonly DevOpsRestClient _rest;
     private readonly Uri _api;
     private readonly string _web;
+    private readonly Lock _cacheGate = new();
     private Task<DevOpsIdentity>? _me;
     private Task<JsonElement>? _repository;
 
@@ -51,9 +52,15 @@ public sealed partial class GitHubProvider : IDevOpsProvider
 
     public Task<DevOpsIdentity> GetCurrentUserAsync(CancellationToken cancellationToken)
     {
-        // Shared while it runs and once it succeeded; a failed read (a refused token) is asked again next time.
-        if (_me is { IsFaulted: false, IsCanceled: false } known) return known;
-        return _me = ReadCurrentUserAsync(cancellationToken);
+        if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<DevOpsIdentity>(cancellationToken);
+        // Shared while it runs and once it succeeded; a failed or cancelled read is asked again next time.
+        Task<DevOpsIdentity> task;
+        lock (_cacheGate)
+        {
+            if (_me is { IsFaulted: false, IsCanceled: false } known) task = known;
+            else task = _me = ReadCurrentUserAsync(CancellationToken.None);
+        }
+        return task.WaitAsync(cancellationToken);
     }
 
     private async Task<DevOpsIdentity> ReadCurrentUserAsync(CancellationToken cancellationToken)
@@ -168,8 +175,14 @@ public sealed partial class GitHubProvider : IDevOpsProvider
     /// <summary>The repository's record (its default branch and visibility), read once.</summary>
     private Task<JsonElement> RepositoryAsync(CancellationToken cancellationToken)
     {
-        if (_repository is { IsFaulted: false, IsCanceled: false } known) return known;
-        return _repository = GetAsync(RepoUrl(""), cancellationToken);
+        if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<JsonElement>(cancellationToken);
+        Task<JsonElement> task;
+        lock (_cacheGate)
+        {
+            if (_repository is { IsFaulted: false, IsCanceled: false } known) task = known;
+            else task = _repository = GetAsync(RepoUrl(""), CancellationToken.None);
+        }
+        return task.WaitAsync(cancellationToken);
     }
 
     /// <summary>What a refused request means, in the words of the action a person can take.</summary>

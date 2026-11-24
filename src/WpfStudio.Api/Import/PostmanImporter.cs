@@ -85,7 +85,9 @@ public static class PostmanImporter
         if (url.Array("query") is { } rows)
             query = rows.OfType<JsonObject>().Select(row => new KeyValue(row.Text("key") ?? "", row.Text("value") ?? "", !row.Flag("disabled")) { Description = Description(row["description"]) }).ToList();
         request.Query = query;
-        var values = (url.Array("variable") ?? []).OfType<JsonObject>().ToDictionary(row => row.Text("key") ?? "", row => row["value"].AsParameterText(), StringComparer.Ordinal);
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var row in (url.Array("variable") ?? []).OfType<JsonObject>())
+            if (row.Text("key") is { Length: > 0 } key) values[key] = row["value"].AsParameterText();
         request.PathParameters = RequestUrl.PathParameterNames(address).Select(name => new KeyValue(name, values.GetValueOrDefault(name, ""))).ToList();
         return request;
     }
